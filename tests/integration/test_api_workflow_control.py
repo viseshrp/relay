@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import select
 
+from relay.artifacts.manager import save_artifact
 from relay.models import WorkflowRun
 
 
@@ -26,3 +27,25 @@ async def test_advance_cancel_and_rerun(client, app, project_dir) -> None:
     rerun = await client.post(f"/api/v1/runs/{run['id']}/rerun", json={"from_phase_type": "planning"})
     assert rerun.status_code == 200
     assert rerun.json()["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_review_fix_prompt_preview_endpoint(client, app, project_dir) -> None:
+    project = (await client.post("/api/v1/projects", json={"path": str(project_dir)})).json()
+    run = (await client.post("/api/v1/runs", json={"project_id": project["id"], "name": "Review"})).json()
+
+    save_artifact(str(project_dir), run["id"], "planning", "SPEC.md", "# Spec")
+    save_artifact(str(project_dir), run["id"], "plan_correction", "IMPLEMENTATION_PLAN.md", "# Plan")
+    save_artifact(
+        str(project_dir),
+        run["id"],
+        "review",
+        "REVIEW_SUMMARY.md",
+        "## Summary\nLooks good.\n\n## Verdict\nFAIL\n",
+    )
+    save_artifact(str(project_dir), run["id"], "review", "REVIEW_COMMENTS.json", "[]")
+
+    preview = await client.get(f"/api/v1/runs/{run['id']}/review/fix-prompt")
+
+    assert preview.status_code == 200
+    assert "REVIEW_SUMMARY.md" in preview.json()["prompt"]

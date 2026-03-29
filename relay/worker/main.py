@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from relay.config import get_settings
 from relay.db import DatabaseManager
-from relay.models import UserSetting, WorkflowRun
+from relay.models import Phase, UserSetting, WorkflowRun
 from relay.worker.orchestrator import TERMINAL_WORKFLOW_STATES, WorkflowRuntime, advance_workflow
 from relay.worker.process_monitor import ProcessMonitor
 from relay.worker.scheduler import Scheduler
@@ -54,16 +55,23 @@ async def _handle_passive_cancellations(db: DatabaseManager) -> None:
 
 async def _pick_next_run_id(db: DatabaseManager, active_ids: set[str]) -> str | None:
     async with db.session() as session:
-        rows = (
+        runs = (
             await session.execute(
-                select(WorkflowRun.id)
+                select(WorkflowRun)
+                .options(selectinload(WorkflowRun.phases))
                 .where(WorkflowRun.status.in_(["queued", "running"]))
                 .order_by(WorkflowRun.created_at.asc())
             )
         ).scalars().all()
-        for run_id in rows:
-            if run_id not in active_ids:
-                return run_id
+        for run in runs:
+            if run.id in active_ids:
+                continue
+            # Re-adopted subprocesses continue to own the phase until the
+            # process monitor marks them lost. Starting the run again here would
+            # spawn a duplicate subprocess for the same phase.
+            if any(phase.status in {"starting", "running"} for phase in run.phases):
+                continue
+            return run.id
     return None
 
 
@@ -74,6 +82,7 @@ async def run_worker() -> None:
     monitor = ProcessMonitor(db)
     runtimes: dict[str, WorkflowRuntime] = {}
     active_tasks: dict[str, asyncio.Task[str]] = {}
+    last_health_check = 0.0
 
     await _set_worker_metadata(db, "worker_status", "running")
     await _set_worker_metadata(db, "worker_concurrency_limit", scheduler.concurrency_limit)
@@ -109,7 +118,10 @@ async def run_worker() -> None:
                 if run_id is not None:
                     active_tasks[run_id] = asyncio.create_task(run_workflow(run_id))
 
-            await monitor.check_health()
+            now = time.monotonic()
+            if now - last_health_check >= settings.process_monitor_interval_seconds:
+                await monitor.check_health()
+                last_health_check = now
             await asyncio.sleep(settings.poll_interval_seconds)
     finally:
         await _set_worker_metadata(db, "worker_status", "stopped")

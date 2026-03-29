@@ -19,11 +19,11 @@ def _utc_now() -> str:
 
 def _loads_mapping(raw: str | None) -> dict[str, str]:
     if not raw:
-        return default_phase_model_mapping()
+        return {}
     value = json.loads(raw)
-    merged = default_phase_model_mapping()
-    merged.update({str(key): str(item) for key, item in value.items()})
-    return merged
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
 
 
 def _dumps(value: object) -> str:
@@ -95,7 +95,7 @@ class SettingsService:
         if row is None:
             return ProjectSettingsResponse(
                 project_id=project_id,
-                phase_model_mapping=default_phase_model_mapping(),
+                phase_model_mapping={},
                 retry_count=None,
                 review_fix_loop_limit=None,
                 autopilot_default=None,
@@ -127,7 +127,7 @@ class SettingsService:
             row = ProjectSetting(
                 id=f"{project_id}-settings",
                 project_id=project_id,
-                phase_model_mapping=_dumps(phase_model_mapping or default_phase_model_mapping()),
+                phase_model_mapping=_dumps(phase_model_mapping or {}),
                 retry_count=retry_count,
                 review_fix_loop_limit=review_fix_loop_limit,
                 autopilot_default=autopilot_default,
@@ -156,6 +156,8 @@ class SettingsService:
         project_settings = await self.get_project_settings(session, project_id)
         resolved_mapping = default_phase_model_mapping()
         resolved_mapping.update(global_settings.phase_model_mapping)
+        # Project and run mappings are sparse override layers. Empty-string
+        # values are preserved as intentional "use Copilot default" overrides.
         resolved_mapping.update(project_settings.phase_model_mapping)
         if phase_model_mapping is not None:
             resolved_mapping.update(phase_model_mapping)

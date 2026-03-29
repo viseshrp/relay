@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from relay.schemas.run import RunCreateRequest, RunDetailResponse, RunListQuery, RunListResponse, WorkflowStatus
 
@@ -11,12 +11,24 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 async def list_runs(
     request: Request,
     project_id: str | None = None,
-    status: list[WorkflowStatus] | None = Query(default=None),
+    status: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> RunListResponse:
     async with request.app.state.db.session() as session:
-        query = RunListQuery(project_id=project_id, status=status or [], limit=limit, offset=offset)
+        status_filters: list[WorkflowStatus] = []
+        if status:
+            # The UI sends a comma-separated list so a single query parameter can
+            # represent multi-select state without repeated keys.
+            for raw_value in status.split(","):
+                normalized = raw_value.strip()
+                if not normalized:
+                    continue
+                try:
+                    status_filters.append(WorkflowStatus(normalized))
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=f"Invalid workflow status: {normalized}") from exc
+        query = RunListQuery(project_id=project_id, status=status_filters, limit=limit, offset=offset)
         return await request.app.state.run_service.list_runs(session, query)
 
 

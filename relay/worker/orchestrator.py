@@ -49,7 +49,7 @@ PHASE_TRANSITIONS: dict[str, set[str]] = {
     "retrying": {"starting", "queued", "cancelled"},
     "succeeded": {"stale", "waiting_for_user", "queued"},
     "failed": {"queued", "cancelled"},
-    "cancelled": {"queued"},
+    "cancelled": {"queued", "running"},
     "stale": {"queued"},
     "waiting_for_user": {"succeeded", "queued", "cancelled"},
 }
@@ -83,6 +83,16 @@ def _loads(value: str) -> list[str]:
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _retry_backoff_elapsed(phase: Phase) -> bool:
+    # The retry timer is derived from the phase's last status update so retries
+    # remain recoverable across worker restarts without extra persistence fields.
+    if phase.updated_at is None:
+        return True
+    updated_at = datetime.fromisoformat(phase.updated_at.replace("Z", "+00:00"))
+    elapsed_seconds = (datetime.now(UTC) - updated_at).total_seconds()
+    return elapsed_seconds >= backoff_seconds(phase.current_attempt)
 
 
 async def _load_run(session: AsyncSession, run_id: str) -> WorkflowRun:
@@ -172,6 +182,10 @@ async def _mark_phase_succeeded(db: DatabaseManager, run_id: str, phase_id: str)
     await _update_statuses(db, run_id, phase_id, phase_status="succeeded")
 
 
+async def _mark_run_cancelled(db: DatabaseManager, run_id: str, phase_id: str) -> None:
+    await _update_statuses(db, run_id, phase_id, workflow_status="cancelled", phase_status="cancelled")
+
+
 async def _handle_failure(
     db: DatabaseManager,
     settings: Settings,
@@ -179,22 +193,24 @@ async def _handle_failure(
     phase_id: str,
     result: PhaseExecutionResult,
 ) -> Literal["retrying", "failed"]:
+    _ = settings
     async with db.session() as session:
         run = await _load_run(session, run_id)
         phase = next(item for item in run.phases if item.id == phase_id)
+        timestamp = _utc_now()
         if can_retry(result.attempt_number, run.retry_limit):
             _assert_transition(phase.status, "retrying", PHASE_TRANSITIONS, "phase")
             phase.status = "retrying"
-            await session.commit()
-            await asyncio.sleep(backoff_seconds(result.attempt_number))
-            _assert_transition(phase.status, "queued", PHASE_TRANSITIONS, "phase")
-            phase.status = "queued"
+            phase.updated_at = timestamp
+            run.updated_at = timestamp
             await session.commit()
             return "retrying"
         _assert_transition(phase.status, "failed", PHASE_TRANSITIONS, "phase")
         phase.status = "failed"
         _assert_transition(run.status, "failed", WORKFLOW_TRANSITIONS, "workflow")
         run.status = "failed"
+        phase.updated_at = timestamp
+        run.updated_at = timestamp
         await session.commit()
         return "failed"
 
@@ -220,6 +236,16 @@ async def advance_workflow(
         if phase is None:
             return "idle"
         phase_type = phase.phase_type
+        if phase.status in {"starting", "running"}:
+            # A worker restart can re-adopt a live subprocess without a live
+            # in-memory runtime task. In that case the database is the source of
+            # truth and the worker must not launch a duplicate subprocess.
+            return "idle"
+        if phase.status == "retrying":
+            if not _retry_backoff_elapsed(phase):
+                return "idle"
+            await _update_statuses(db, run_id, phase.id, phase_status="queued")
+            return "running"
 
     if phase_type == "exploration":
         result, runtime.exploration_session = await run_exploration_phase(
@@ -230,8 +256,11 @@ async def advance_workflow(
             session_handle=runtime.exploration_session,
         )
         if not result.success:
-            await _handle_failure(db, settings, run_id, phase.id, result)
-            return "failed"
+            if result.error_message == "cancelled":
+                await _mark_run_cancelled(db, run_id, phase.id)
+                return "cancelled"
+            outcome = await _handle_failure(db, settings, run_id, phase.id, result)
+            return "failed" if outcome == "failed" else "idle"
         await _mark_phase_succeeded(db, run_id, phase.id)
         if runtime.exploration_session is not None and runtime.exploration_session.is_alive():
             await runtime.exploration_session.kill()
@@ -268,8 +297,11 @@ async def advance_workflow(
         runtime.execution_session = returned_session
 
     if not result.success:
+        if result.error_message == "cancelled":
+            await _mark_run_cancelled(db, run_id, phase.id)
+            return "cancelled"
         outcome = await _handle_failure(db, settings, run_id, phase.id, result)
-        return "failed" if outcome == "failed" else "running"
+        return "failed" if outcome == "failed" else "idle"
 
     await _mark_phase_succeeded(db, run_id, phase.id)
 
@@ -297,12 +329,22 @@ async def advance_workflow(
         verdict = result.review_verdict or "FAIL"
         async with db.session() as session:
             run = await _load_run(session, run_id)
-            if verdict == "PASS":
-                _assert_transition(run.status, "completed", WORKFLOW_TRANSITIONS, "workflow")
-                run.status = "completed"
-                await session.commit()
-                return "completed"
             if run.autopilot:
+                if verdict == "PASS":
+                    _assert_transition(run.status, "completed", WORKFLOW_TRANSITIONS, "workflow")
+                    run.status = "completed"
+                    await session.commit()
+                    return "completed"
+                if verdict == "PASS_WITH_WARNINGS":
+                    _assert_transition(
+                        run.status,
+                        "completed_with_unresolved_findings",
+                        WORKFLOW_TRANSITIONS,
+                        "workflow",
+                    )
+                    run.status = "completed_with_unresolved_findings"
+                    await session.commit()
+                    return "completed_with_unresolved_findings"
                 if run.review_fix_loop_count >= run.review_fix_loop_limit:
                     _assert_transition(
                         run.status,
@@ -312,7 +354,7 @@ async def advance_workflow(
                     )
                     run.status = "completed_with_unresolved_findings"
                     await session.commit()
-                    return "completed"
+                    return "completed_with_unresolved_findings"
                 run.review_fix_loop_count += 1
                 run.pending_fix_prompt = build_fix_prompt(
                     result.review_comments or [],

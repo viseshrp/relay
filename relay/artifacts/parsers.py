@@ -15,6 +15,13 @@ VERDICT_PATTERN = re.compile(
 )
 
 
+def _is_valid_review_comment(comment: object) -> bool:
+    if not isinstance(comment, dict):
+        return False
+    required_keys = {"file", "line", "severity", "comment"}
+    return required_keys.issubset(comment)
+
+
 def extract_review_comments(raw_output: str) -> tuple[list[dict[str, object]], bool]:
     match = REVIEW_COMMENTS_PATTERN.search(raw_output)
     if match is None:
@@ -24,6 +31,8 @@ def extract_review_comments(raw_output: str) -> tuple[list[dict[str, object]], b
     except json.JSONDecodeError:
         return [], False
     if not isinstance(comments, list):
+        return [], False
+    if not all(_is_valid_review_comment(comment) for comment in comments):
         return [], False
     return comments, True
 

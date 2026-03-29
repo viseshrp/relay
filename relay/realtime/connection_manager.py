@@ -37,6 +37,10 @@ class ConnectionManager:
         async with self._lock:
             self._subscribe_all.add(id(websocket))
 
+    async def unsubscribe_all(self, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._subscribe_all.discard(id(websocket))
+
     async def is_subscribed(self, websocket: WebSocket, run_id: str) -> bool:
         async with self._lock:
             connection_id = id(websocket)

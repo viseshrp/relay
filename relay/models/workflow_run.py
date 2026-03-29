@@ -22,8 +22,8 @@ class WorkflowRun(Base):
     phase_model_mapping: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     context_paths: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     finalize_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    pending_fix_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # Worker signaling: API sets True, worker polls.
+    pending_fix_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)  # Worker signaling: stores fix prompt for review-fix loop.
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 

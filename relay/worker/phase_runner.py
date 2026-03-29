@@ -111,13 +111,14 @@ async def _start_attempt(
     phase_id: str,
     phase_type: str,
     rendered_prompt: str,
-    pid: int | None,
 ) -> tuple[int, str]:
     async with db.session() as session:
         run, phase, _project = await _load_run_context(session, run_id, phase_id)
         phase.current_attempt += 1
         now = _utc_now()
-        phase.status = "running"
+        # Relay models process creation explicitly so the UI can distinguish
+        # "worker picked the phase" from "subprocess is confirmed alive".
+        phase.status = "starting"
         phase.updated_at = now
         run.status = "running"
         run.updated_at = now
@@ -126,8 +127,8 @@ async def _start_attempt(
             id=str(uuid.uuid4()),
             phase_id=phase.id,
             attempt_number=phase.current_attempt,
-            status="running",
-            pid=pid,
+            status="starting",
+            pid=None,
             exit_code=None,
             started_at=now,
             ended_at=None,
@@ -138,6 +139,36 @@ async def _start_attempt(
         session.add(attempt)
         await session.commit()
         return phase.current_attempt, log_file_path
+
+
+async def _mark_attempt_running(
+    db: DatabaseManager,
+    *,
+    run_id: str,
+    phase_id: str,
+    attempt_number: int,
+    pid: int | None,
+) -> None:
+    async with db.session() as session:
+        attempt = (
+            await session.execute(
+                select(PhaseAttempt)
+                .join(Phase)
+                .where(
+                    Phase.workflow_run_id == run_id,
+                    Phase.id == phase_id,
+                    PhaseAttempt.attempt_number == attempt_number,
+                )
+            )
+        ).scalar_one()
+        phase = await session.get(Phase, phase_id)
+        if phase is None:
+            raise RuntimeError(f"Phase {phase_id} is missing while marking an attempt as running.")
+        phase.status = "running"
+        phase.updated_at = _utc_now()
+        attempt.status = "running"
+        attempt.pid = pid
+        await session.commit()
 
 
 async def _finish_attempt(
@@ -278,8 +309,6 @@ async def run_standard_phase(
         rendered_prompt = _build_phase_prompt(run, project.path, phase_type)
         model = _phase_model(run, phase_type)
         session_handle = reusable_session or create_session()
-        if not session_handle.is_alive():
-            await session_handle.start(build_agent_command(settings.copilot_cli_path, model), project.path)
         attempt_number, log_file_path = await _start_attempt(
             db,
             settings,
@@ -287,6 +316,26 @@ async def run_standard_phase(
             phase_id=phase.id,
             phase_type=phase_type,
             rendered_prompt=rendered_prompt,
+        )
+        if not session_handle.is_alive():
+            try:
+                await session_handle.start(build_agent_command(settings.copilot_cli_path, model), project.path)
+            except Exception as exc:
+                await _finish_attempt(
+                    db,
+                    run_id=run.id,
+                    phase_id=phase.id,
+                    attempt_number=attempt_number,
+                    status="failed",
+                    exit_code=1,
+                    error_message=str(exc),
+                )
+                return PhaseExecutionResult(False, attempt_number, 1, error_message=str(exc)), None
+        await _mark_attempt_running(
+            db,
+            run_id=run.id,
+            phase_id=phase.id,
+            attempt_number=attempt_number,
             pid=session_handle.pid,
         )
     log_path = Path(log_file_path)
@@ -430,8 +479,6 @@ async def run_exploration_phase(
         ensure_artifact_dirs(project.path, run.id)
         model = _phase_model(run, "exploration")
         session_handle = session_handle or create_session()
-        if not session_handle.is_alive():
-            await session_handle.start(build_exploration_command(settings.copilot_cli_path, model), project.path)
         attempt_number, log_file_path = await _start_attempt(
             db,
             settings,
@@ -439,6 +486,26 @@ async def run_exploration_phase(
             phase_id=phase.id,
             phase_type="exploration",
             rendered_prompt="Relay exploration session",
+        )
+        if not session_handle.is_alive():
+            try:
+                await session_handle.start(build_exploration_command(settings.copilot_cli_path, model), project.path)
+            except Exception as exc:
+                await _finish_attempt(
+                    db,
+                    run_id=run.id,
+                    phase_id=phase.id,
+                    attempt_number=attempt_number,
+                    status="failed",
+                    exit_code=1,
+                    error_message=str(exc),
+                )
+                return PhaseExecutionResult(False, attempt_number, 1, error_message=str(exc)), None
+        await _mark_attempt_running(
+            db,
+            run_id=run.id,
+            phase_id=phase.id,
+            attempt_number=attempt_number,
             pid=session_handle.pid,
         )
         stream_path = reset_exploration_stream(str(settings.data_dir), run.id)

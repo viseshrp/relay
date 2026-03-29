@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -30,7 +31,7 @@ async def _stream_logs(websocket: WebSocket, run_id: str) -> None:
                     "attempt_number": attempt_number,
                     "stream": "stdout",
                     "line": line,
-                    "timestamp": "",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -101,6 +102,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     task.cancel()
             elif message_type == "subscribe_all":
                 await manager.subscribe_all(websocket)
+            elif message_type == "unsubscribe_all":
+                await manager.unsubscribe_all(websocket)
     except WebSocketDisconnect:
         pass
     finally:
