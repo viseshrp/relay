@@ -56,7 +56,10 @@ def get_settings() -> Settings:
         db_path=db_path,
         host=os.getenv("RELAY_HOST", "127.0.0.1"),
         port=int(os.getenv("RELAY_PORT", "8080")),
-        copilot_cli_path=os.getenv("RELAY_COPILOT_CLI_PATH", "gh"),
+        # New Relay installs should target the standalone Copilot CLI directly.
+        # The session layer still accepts legacy `gh` overrides and resolves
+        # them to `copilot` when possible.
+        copilot_cli_path=os.getenv("RELAY_COPILOT_CLI_PATH", "copilot"),
         frontend_dist_dir=frontend_dist_dir,
         poll_interval_seconds=float(os.getenv("RELAY_POLL_INTERVAL", "1.0")),
         process_monitor_interval_seconds=float(os.getenv("RELAY_PROCESS_MONITOR_INTERVAL", "10.0")),

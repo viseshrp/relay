@@ -402,10 +402,13 @@ async def run_standard_phase(
             error_message="cancelled",
         )
         return PhaseExecutionResult(False, attempt_number, -9, raw_output, "cancelled"), session_handle
-    process = getattr(session_handle, "process", None)
-    exit_code = getattr(process, "returncode", None)
-    if exit_code is None and not session_handle.is_alive():
-        exit_code = await session_handle.wait()
+    # The session process is a long-lived Relay wrapper around prompt-mode
+    # Copilot invocations. The phase result must be driven by the most recent
+    # prompt exit code, not by whether the wrapper process itself stays alive.
+    exit_code = session_handle.last_response_exit_code
+    if exit_code is None:
+        process = getattr(session_handle, "process", None)
+        exit_code = getattr(process, "returncode", None)
     if exit_code is None:
         exit_code = 0
 
@@ -557,15 +560,27 @@ async def run_exploration_phase(
                 last_processed_user_sequence = message.sequence_number
                 response_chunks: list[str] = []
                 response_message_id = str(uuid.uuid4())
-                with log_path.open("a", encoding="utf-8") as log_file, stream_path.open("a", encoding="utf-8") as stream_file:
-                    sender = session_handle.send_followup if session_handle.is_alive() else session_handle.send
-                    async for chunk in sender(message.content):
-                        response_chunks.append(chunk)
-                        log_file.write(chunk)
-                        stream_file.write(json.dumps({"message_id": response_message_id, "content": chunk, "done": False}) + "\n")
-                        log_file.flush()
-                        stream_file.flush()
-                    stream_file.write(json.dumps({"message_id": response_message_id, "content": "", "done": True}) + "\n")
+                try:
+                    with log_path.open("a", encoding="utf-8") as log_file, stream_path.open("a", encoding="utf-8") as stream_file:
+                        sender = session_handle.send_followup if session_handle.is_alive() else session_handle.send
+                        async for chunk in sender(message.content):
+                            response_chunks.append(chunk)
+                            log_file.write(chunk)
+                            stream_file.write(json.dumps({"message_id": response_message_id, "content": chunk, "done": False}) + "\n")
+                            log_file.flush()
+                            stream_file.flush()
+                        stream_file.write(json.dumps({"message_id": response_message_id, "content": "", "done": True}) + "\n")
+                except Exception as exc:
+                    await _finish_attempt(
+                        db,
+                        run_id=run.id,
+                        phase_id=phase.id,
+                        attempt_number=attempt_number,
+                        status="failed",
+                        exit_code=session_handle.last_response_exit_code or 1,
+                        error_message=str(exc),
+                    )
+                    return PhaseExecutionResult(False, attempt_number, session_handle.last_response_exit_code or 1, error_message=str(exc)), session_handle
                 assistant_content = "".join(response_chunks)
                 next_sequence = (
                     await session.execute(
@@ -619,12 +634,24 @@ async def run_exploration_phase(
                     list(_load_json(run.context_paths)),
                     str(planning_prompt_path(project.path, run.id)),
                 )
-                with log_path.open("a", encoding="utf-8") as log_file:
-                    sender = session_handle.send_followup if session_handle.is_alive() else session_handle.send
-                    async for chunk in sender(prompt):
-                        planning_prompt_chunks.append(chunk)
-                        log_file.write(chunk)
-                        log_file.flush()
+                try:
+                    with log_path.open("a", encoding="utf-8") as log_file:
+                        sender = session_handle.send_followup if session_handle.is_alive() else session_handle.send
+                        async for chunk in sender(prompt):
+                            planning_prompt_chunks.append(chunk)
+                            log_file.write(chunk)
+                            log_file.flush()
+                except Exception as exc:
+                    await _finish_attempt(
+                        db,
+                        run_id=run.id,
+                        phase_id=phase.id,
+                        attempt_number=attempt_number,
+                        status="failed",
+                        exit_code=session_handle.last_response_exit_code or 1,
+                        error_message=str(exc),
+                    )
+                    return PhaseExecutionResult(False, attempt_number, session_handle.last_response_exit_code or 1, error_message=str(exc)), session_handle
                 planning_output = "".join(planning_prompt_chunks)
                 planning_prompt_path(project.path, run.id).write_text(planning_output, encoding="utf-8")
                 run.finalize_requested = False

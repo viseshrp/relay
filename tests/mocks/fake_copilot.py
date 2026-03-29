@@ -21,6 +21,7 @@ class FakeCopilotSession:
         self._alive = False
         self._pid = 99999
         self._exit_code = 0
+        self._last_response_exit_code = 0
 
     async def start(self, cmd: list[str], cwd: str, env: dict | None = None) -> None:
         _ = (cmd, cwd, env)
@@ -31,6 +32,7 @@ class FakeCopilotSession:
         if self._attempt in self._fail_on_attempt:
             self._alive = False
             self._exit_code = 1
+            self._last_response_exit_code = 1
             raise RuntimeError(f"fake copilot failure on attempt {self._attempt}")
 
         if not self._responses:
@@ -42,6 +44,7 @@ class FakeCopilotSession:
             await asyncio.sleep(self._delay)
             yield response[index : index + self._chunk_size]
         self._exit_code = 0
+        self._last_response_exit_code = 0
         if not self._responses:
             self._alive = False
 
@@ -70,3 +73,7 @@ class FakeCopilotSession:
     @property
     def pid(self) -> int | None:
         return self._pid if self._alive else None
+
+    @property
+    def last_response_exit_code(self) -> int | None:
+        return self._last_response_exit_code
