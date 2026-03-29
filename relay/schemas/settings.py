@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserSettingsResponse(BaseModel):
@@ -22,11 +22,27 @@ class UserSettingsUpdateRequest(BaseModel):
     theme: str | None = None
 
 
+class ModelOptionResponse(BaseModel):
+    id: str
+    name: str
+
+
+class CopilotStatusResponse(BaseModel):
+    gh_available: bool | None = None
+    copilot_available: bool | None = None
+    authenticated: bool | None = None
+    gh_path: str | None = None
+    copilot_version: str | None = None
+    auth_details: str | None = None
+    message: str | None = None
+    available_models: list[ModelOptionResponse] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     ok: bool
     database: str
     worker: str
-    copilot: dict[str, object]
+    copilot: CopilotStatusResponse
 
 
 class SystemStatusResponse(BaseModel):
@@ -34,4 +50,4 @@ class SystemStatusResponse(BaseModel):
     worker_status: str
     concurrency_limit: int
     active_workflows: int
-    copilot: dict[str, object]
+    copilot: CopilotStatusResponse

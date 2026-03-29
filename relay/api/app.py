@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from relay.api import artifacts, exploration, phases, projects, runs, settings as settings_router, system, workflow_control, ws
 from relay.config import Settings, get_settings
+from relay.copilot.models import discover_available_models
 from relay.db import DatabaseManager
 from relay.realtime.connection_manager import ConnectionManager
 from relay.realtime.notifier import StatusNotifier
@@ -55,6 +56,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.phase_service = phase_service
         app.state.notifier = notifier
         app.state.active_tasks = {}
+        # Rebuild the Copilot model catalog at app startup so every fresh launch
+        # reflects the CLI's current supported models instead of a stale list
+        # baked into the frontend bundle.
+        app.state.available_copilot_models = [
+            option.to_dict() for option in await discover_available_models(resolved_settings.copilot_cli_path)
+        ]
         notifier_task = asyncio.create_task(notifier.run())
         try:
             yield

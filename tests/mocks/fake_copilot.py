@@ -22,9 +22,15 @@ class FakeCopilotSession:
         self._pid = 99999
         self._exit_code = 0
         self._last_response_exit_code = 0
+        # Tests inspect the recorded startup command to verify that run-level
+        # model selection survives all the way to the Copilot process launch.
+        self.started_commands: list[list[str]] = []
+        self.started_cwds: list[str] = []
 
     async def start(self, cmd: list[str], cwd: str, env: dict | None = None) -> None:
         _ = (cmd, cwd, env)
+        self.started_commands.append(list(cmd))
+        self.started_cwds.append(cwd)
         self._alive = True
 
     async def _emit(self) -> AsyncIterator[str]:

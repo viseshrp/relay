@@ -46,17 +46,23 @@ async def health(request: Request) -> HealthResponse:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
     copilot = await detect_copilot_status(request.app.state.settings)
     worker_status, _limit, _active = await _worker_status(request)
-    return HealthResponse(ok=db_status == "ok", database=db_status, worker=worker_status, copilot=copilot.to_dict())
+    copilot_payload = copilot.to_dict()
+    # Test harnesses and lightweight app fixtures may not preload this field,
+    # so default to an empty catalog rather than raising an attribute error.
+    copilot_payload["available_models"] = getattr(request.app.state, "available_copilot_models", [])
+    return HealthResponse(ok=db_status == "ok", database=db_status, worker=worker_status, copilot=copilot_payload)
 
 
 @router.get("/system/status", response_model=SystemStatusResponse)
 async def system_status(request: Request) -> SystemStatusResponse:
     worker_status, concurrency_limit, active_workflows = await _worker_status(request)
     copilot = await detect_copilot_status(request.app.state.settings)
+    copilot_payload = copilot.to_dict()
+    copilot_payload["available_models"] = getattr(request.app.state, "available_copilot_models", [])
     return SystemStatusResponse(
         version=__version__,
         worker_status=worker_status,
         concurrency_limit=concurrency_limit,
         active_workflows=active_workflows,
-        copilot=copilot.to_dict(),
+        copilot=copilot_payload,
     )
