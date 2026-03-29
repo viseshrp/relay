@@ -38,13 +38,17 @@ export function RunDetailPage() {
   const setSelectedPhaseId = useRunStore((state) => state.setSelectedPhaseId);
   const runQuery = useQuery({ queryKey: ["run", id], queryFn: () => getRun(id), refetchInterval: 4000 });
   const contextQuery = useQuery({ queryKey: ["context", id], queryFn: () => getExplorationContext(id), enabled: Boolean(id) });
+  const currentRun = runQuery.data;
+  const explorationPhase = currentRun?.phases.find((phase) => phase.phase_type === "exploration");
   const planningPromptQuery = useQuery({
     queryKey: ["planning-prompt", id],
     queryFn: async () => {
       const response = await fetch(`/api/v1/runs/${id}/artifacts/exploration/planning_prompt.md`);
       return response.ok ? await response.text() : "";
     },
-    enabled: Boolean(id),
+    // The planning prompt artifact is created only after Exploration finishes,
+    // so deferring the request prevents noisy 404/500 fetches on fresh runs.
+    enabled: Boolean(id) && explorationPhase?.status === "waiting_for_user",
   });
   const { messages, isStreaming, sendMessage, finalize } = useExplorationChat(id);
   const { errors } = useRunStatus(id);
@@ -56,9 +60,7 @@ export function RunDetailPage() {
     setSelectedPhaseId(runQuery.data.phases[0]?.id ?? null);
   }, [runQuery.data, selectedPhaseId, setSelectedPhaseId]);
 
-  const currentRun = runQuery.data;
   const selectedPhase = useMemo(() => currentRun?.phases.find((phase) => phase.id === selectedPhaseId) ?? null, [currentRun, selectedPhaseId]);
-  const explorationPhase = currentRun?.phases.find((phase) => phase.phase_type === "exploration");
   const critiquePhase = currentRun?.phases.find((phase) => phase.phase_type === "plan_critique");
   const reviewPhase = currentRun?.phases.find((phase) => phase.phase_type === "review");
   const showExploration = selectedPhase?.phase_type === "exploration" && explorationPhase?.status !== "succeeded";
