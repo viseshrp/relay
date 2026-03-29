@@ -41,8 +41,8 @@ export function AppShell() {
               <AlertTitle>Copilot CLI Not Available</AlertTitle>
               <AlertDescription>
                 {!copilotAvailable
-                  ? "GitHub Copilot CLI is not installed. Install it with: gh extension install github/gh-copilot"
-                  : "GitHub CLI is not authenticated. Run: gh auth login"}
+                  ? "GitHub Copilot CLI is not installed. Install it with: npm install -g @github/copilot"
+                  : "GitHub Copilot CLI is not authenticated. Run: copilot login"}
               </AlertDescription>
             </div>
           </div>

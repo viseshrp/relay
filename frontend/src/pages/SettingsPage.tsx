@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Toggle } from "@/components/ui/toggle";
-import { KNOWN_MODELS } from "@/types/api";
+import { FALLBACK_MODEL_OPTIONS } from "@/types/api";
 
 const KNOWN_PHASES = [
   "exploration",
@@ -25,6 +25,7 @@ export function SettingsPage() {
   const settingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
   const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
   const [draft, setDraft] = useState(settingsQuery.data);
+  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -100,7 +101,7 @@ export function SettingsPage() {
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {KNOWN_MODELS.map((model) => (
+                      {modelOptions.map((model) => (
                         <SelectItem key={model.id} value={model.id}>
                           {model.name}
                         </SelectItem>

@@ -3,14 +3,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { createRun } from "@/api/runs";
-import { getUserSettings } from "@/api/settings";
+import { getSystemStatus, getUserSettings } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle } from "@/components/ui/toggle";
-import { KNOWN_MODELS } from "@/types/api";
+import { FALLBACK_MODEL_OPTIONS } from "@/types/api";
 
 const KNOWN_PHASES = [
   "exploration",
@@ -31,6 +31,8 @@ export function NewWorkflowPage() {
   const [autopilot, setAutopilot] = useState(true);
   const [phaseModelMapping, setPhaseModelMapping] = useState<Record<string, string>>({});
   const settingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
+  const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
+  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
 
   useEffect(() => {
     if (!settingsQuery.data) {
@@ -57,7 +59,7 @@ export function NewWorkflowPage() {
     onSuccess: (run) => navigate(`/runs/${run.id}`),
   });
 
-  if (settingsQuery.isLoading) {
+  if (settingsQuery.isLoading || systemQuery.isLoading) {
     return (
       <div className="space-y-4 p-6">
         <Skeleton className="h-8 w-48" />
@@ -111,7 +113,7 @@ export function NewWorkflowPage() {
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    {KNOWN_MODELS.map((model) => (
+                    {modelOptions.map((model) => (
                       <SelectItem key={model.id} value={model.id}>
                         {model.name}
                       </SelectItem>

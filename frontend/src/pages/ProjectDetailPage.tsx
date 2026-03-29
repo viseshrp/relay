@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { deleteProject, getProject, getProjectSettings, updateProjectSettings } from "@/api/projects";
 import { listRuns } from "@/api/runs";
-import { getUserSettings } from "@/api/settings";
+import { getSystemStatus, getUserSettings } from "@/api/settings";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
-import { KNOWN_MODELS, type WorkflowStatus } from "@/types/api";
+import { FALLBACK_MODEL_OPTIONS, type WorkflowStatus } from "@/types/api";
 import { formatRunDuration } from "@/lib/utils";
 
 const KNOWN_PHASES = [
@@ -74,6 +74,8 @@ export function ProjectDetailPage() {
   const runsQuery = useQuery({ queryKey: ["runs", "project", id], queryFn: () => listRuns({ project_id: id, limit: 100 }) });
   const projectSettingsQuery = useQuery({ queryKey: ["project-settings", id], queryFn: () => getProjectSettings(id) });
   const userSettingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
+  const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
+  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
 
   useEffect(() => {
     if (!projectSettingsQuery.data || !userSettingsQuery.data) {
@@ -116,7 +118,15 @@ export function ProjectDetailPage() {
     [runsQuery.data?.items],
   );
 
-  if (projectQuery.isLoading || runsQuery.isLoading || projectSettingsQuery.isLoading || userSettingsQuery.isLoading || !projectQuery.data || !userSettingsQuery.data) {
+  if (
+    projectQuery.isLoading ||
+    runsQuery.isLoading ||
+    projectSettingsQuery.isLoading ||
+    userSettingsQuery.isLoading ||
+    systemQuery.isLoading ||
+    !projectQuery.data ||
+    !userSettingsQuery.data
+  ) {
     return (
       <div className="space-y-4 p-6">
         <Skeleton className="h-8 w-48" />
@@ -244,7 +254,7 @@ export function ProjectDetailPage() {
                           <SelectValue placeholder="Select model" />
                         </SelectTrigger>
                         <SelectContent>
-                          {KNOWN_MODELS.map((model) => (
+                          {modelOptions.map((model) => (
                             <SelectItem key={model.id} value={model.id}>
                               {model.name}
                             </SelectItem>
