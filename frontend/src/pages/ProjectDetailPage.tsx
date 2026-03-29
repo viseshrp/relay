@@ -6,11 +6,11 @@ import { deleteProject, getProject, getProjectSettings, updateProjectSettings } 
 import { listRuns } from "@/api/runs";
 import { getSystemStatus, getUserSettings } from "@/api/settings";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ModelSelect } from "@/components/shared/ModelSelect";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -241,27 +241,18 @@ export function ProjectDetailPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Select
+                      <ModelSelect
+                        options={modelOptions}
                         disabled={!hasAvailableModels || (useGlobalModel[phase] ?? true)}
                         value={useGlobalModel[phase] ? userSettingsQuery.data.phase_model_mapping[phase] ?? "" : modelOverrides[phase] ?? ""}
+                        placeholder={hasAvailableModels ? "Select model" : "No models available"}
                         onValueChange={(value) =>
                           setModelOverrides((current) => ({
                             ...current,
                             [phase]: value,
                           }))
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {modelOptions.map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              {model.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

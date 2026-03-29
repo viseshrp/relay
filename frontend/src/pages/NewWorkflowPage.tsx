@@ -4,10 +4,10 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { createRun } from "@/api/runs";
 import { getSystemStatus, getUserSettings } from "@/api/settings";
+import { ModelSelect } from "@/components/shared/ModelSelect";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle } from "@/components/ui/toggle";
 
@@ -100,27 +100,18 @@ export function NewWorkflowPage() {
             {KNOWN_PHASES.map((phase) => (
               <label key={phase} className="space-y-2 text-sm font-medium">
                 <span className="capitalize">{phase.replaceAll("_", " ")} model</span>
-                <Select
+                <ModelSelect
+                  options={modelOptions}
                   disabled={!hasAvailableModels}
                   value={phaseModelMapping[phase] ?? ""}
+                  placeholder={hasAvailableModels ? "Select model" : "No models available"}
                   onValueChange={(value) =>
                     setPhaseModelMapping((current) => ({
                       ...current,
                       [phase]: value,
                     }))
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelOptions.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
               </label>
             ))}
           </div>

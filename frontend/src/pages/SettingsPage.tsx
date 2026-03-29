@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getSystemStatus, getUserSettings, updateUserSettings } from "@/api/settings";
+import { ModelSelect } from "@/components/shared/ModelSelect";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -109,9 +109,11 @@ export function SettingsPage() {
               <TableRow key={phase}>
                 <TableCell className="font-medium capitalize">{phase.replaceAll("_", " ")}</TableCell>
                 <TableCell>
-                  <Select
+                  <ModelSelect
                     value={draft.phase_model_mapping[phase] ?? ""}
+                    options={modelOptions}
                     disabled={!hasAvailableModels}
+                    placeholder={hasAvailableModels ? "Select model" : "No models available"}
                     onValueChange={(value) =>
                       setDraft({
                         ...draft,
@@ -121,18 +123,7 @@ export function SettingsPage() {
                         },
                       })
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelOptions.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </TableCell>
               </TableRow>
             ))}
