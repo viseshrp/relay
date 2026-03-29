@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getSystemStatus, getUserSettings, updateUserSettings } from "@/api/settings";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Toggle } from "@/components/ui/toggle";
-import { FALLBACK_MODEL_OPTIONS } from "@/types/api";
+import type { UserSettings } from "@/types/api";
 
 const KNOWN_PHASES = [
   "exploration",
@@ -22,10 +22,12 @@ const KNOWN_PHASES = [
 ] as const;
 
 export function SettingsPage() {
+  const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
   const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
-  const [draft, setDraft] = useState(settingsQuery.data);
-  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
+  const [draft, setDraft] = useState<UserSettings | null>(null);
+  const modelOptions = systemQuery.data?.copilot.available_models ?? [];
+  const hasAvailableModels = modelOptions.length > 0;
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -34,7 +36,26 @@ export function SettingsPage() {
   }, [settingsQuery.data]);
 
   const mutation = useMutation({
-    mutationFn: () => updateUserSettings(draft ?? {}),
+    mutationFn: () => {
+      if (draft === null) {
+        throw new Error("Settings draft is not ready.");
+      }
+
+      return updateUserSettings({
+        copilot_cli_path_override: draft.copilot_cli_path_override,
+        phase_model_mapping: draft.phase_model_mapping,
+        autopilot: draft.autopilot,
+        retry_limit: draft.retry_limit,
+        review_fix_loop_limit: draft.review_fix_loop_limit,
+        theme: draft.theme,
+      });
+    },
+    onSuccess: (savedSettings) => {
+      // Use the server response as the next source of truth so the page always
+      // reflects what actually persisted rather than the optimistic draft.
+      setDraft(savedSettings);
+      queryClient.setQueryData(["user-settings"], savedSettings);
+    },
   });
 
   if (settingsQuery.isLoading || systemQuery.isLoading || !draft) {
@@ -73,6 +94,9 @@ export function SettingsPage() {
         <div>
           <h2 className="text-lg font-semibold">Models</h2>
         </div>
+        {!hasAvailableModels ? (
+          <p className="text-sm text-muted-foreground">No models are currently available for the authenticated Copilot account.</p>
+        ) : null}
         <Table>
           <TableHeader>
             <TableRow className="border-t-0">
@@ -87,6 +111,7 @@ export function SettingsPage() {
                 <TableCell>
                   <Select
                     value={draft.phase_model_mapping[phase] ?? ""}
+                    disabled={!hasAvailableModels}
                     onValueChange={(value) =>
                       setDraft({
                         ...draft,
@@ -98,7 +123,7 @@ export function SettingsPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select model" />
+                      <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
                     </SelectTrigger>
                     <SelectContent>
                       {modelOptions.map((model) => (
@@ -151,7 +176,9 @@ export function SettingsPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={() => mutation.mutate()}>Save Settings</Button>
+        <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+          {mutation.isPending ? "Saving..." : "Save Settings"}
+        </Button>
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
-import { FALLBACK_MODEL_OPTIONS, type WorkflowStatus } from "@/types/api";
+import type { WorkflowStatus } from "@/types/api";
 import { formatRunDuration } from "@/lib/utils";
 
 const KNOWN_PHASES = [
@@ -75,7 +75,8 @@ export function ProjectDetailPage() {
   const projectSettingsQuery = useQuery({ queryKey: ["project-settings", id], queryFn: () => getProjectSettings(id) });
   const userSettingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
   const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
-  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
+  const modelOptions = systemQuery.data?.copilot.available_models ?? [];
+  const hasAvailableModels = modelOptions.length > 0;
 
   useEffect(() => {
     if (!projectSettingsQuery.data || !userSettingsQuery.data) {
@@ -241,7 +242,7 @@ export function ProjectDetailPage() {
                     </TableCell>
                     <TableCell>
                       <Select
-                        disabled={useGlobalModel[phase] ?? true}
+                        disabled={!hasAvailableModels || (useGlobalModel[phase] ?? true)}
                         value={useGlobalModel[phase] ? userSettingsQuery.data.phase_model_mapping[phase] ?? "" : modelOverrides[phase] ?? ""}
                         onValueChange={(value) =>
                           setModelOverrides((current) => ({
@@ -251,7 +252,7 @@ export function ProjectDetailPage() {
                         }
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select model" />
+                          <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
                         </SelectTrigger>
                         <SelectContent>
                           {modelOptions.map((model) => (

@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle } from "@/components/ui/toggle";
-import { FALLBACK_MODEL_OPTIONS } from "@/types/api";
 
 const KNOWN_PHASES = [
   "exploration",
@@ -32,7 +31,8 @@ export function NewWorkflowPage() {
   const [phaseModelMapping, setPhaseModelMapping] = useState<Record<string, string>>({});
   const settingsQuery = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
   const systemQuery = useQuery({ queryKey: ["system-status"], queryFn: getSystemStatus });
-  const modelOptions = systemQuery.data?.copilot.available_models ?? FALLBACK_MODEL_OPTIONS;
+  const modelOptions = systemQuery.data?.copilot.available_models ?? [];
+  const hasAvailableModels = modelOptions.length > 0;
 
   useEffect(() => {
     if (!settingsQuery.data) {
@@ -101,6 +101,7 @@ export function NewWorkflowPage() {
               <label key={phase} className="space-y-2 text-sm font-medium">
                 <span className="capitalize">{phase.replaceAll("_", " ")} model</span>
                 <Select
+                  disabled={!hasAvailableModels}
                   value={phaseModelMapping[phase] ?? ""}
                   onValueChange={(value) =>
                     setPhaseModelMapping((current) => ({
@@ -110,7 +111,7 @@ export function NewWorkflowPage() {
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select model" />
+                    <SelectValue placeholder={hasAvailableModels ? "Select model" : "No models available"} />
                   </SelectTrigger>
                   <SelectContent>
                     {modelOptions.map((model) => (
