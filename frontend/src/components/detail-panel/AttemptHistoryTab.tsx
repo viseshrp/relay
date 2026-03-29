@@ -1,7 +1,7 @@
 import type { AttemptDetail } from "@/types/api";
 
 import { Button } from "@/components/ui/button";
-import { Table } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export function AttemptHistoryTab({
   attempts,
@@ -12,28 +12,28 @@ export function AttemptHistoryTab({
 }) {
   return (
     <Table>
-      <thead className="bg-secondary/60">
-        <tr>
-          <th className="px-4 py-3 text-left">Attempt</th>
-          <th className="px-4 py-3 text-left">Status</th>
-          <th className="px-4 py-3 text-left">Started</th>
-          <th className="px-4 py-3 text-left">Action</th>
-        </tr>
-      </thead>
-      <tbody>
+      <TableHeader>
+        <TableRow className="border-t-0">
+          <TableHead>Attempt</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Started</TableHead>
+          <TableHead>Action</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {attempts.map((attempt) => (
-          <tr key={attempt.id} className="border-t border-border">
-            <td className="px-4 py-3">{attempt.attempt_number}</td>
-            <td className="px-4 py-3">{attempt.status}</td>
-            <td className="px-4 py-3">{attempt.started_at ? new Date(attempt.started_at).toLocaleString() : "-"}</td>
-            <td className="px-4 py-3">
+          <TableRow key={attempt.id}>
+            <TableCell>{attempt.attempt_number}</TableCell>
+            <TableCell>{attempt.status}</TableCell>
+            <TableCell>{attempt.started_at ? new Date(attempt.started_at).toLocaleString() : "-"}</TableCell>
+            <TableCell>
               <Button variant="ghost" onClick={() => onSelect(attempt.attempt_number)}>
                 View
               </Button>
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
+      </TableBody>
     </Table>
   );
 }

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export function ConfirmDialog({
   open,
@@ -16,20 +16,20 @@ export function ConfirmDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-        </div>
-        <div className="flex justify-end gap-3">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
             Confirm
           </Button>
-        </div>
-      </div>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }

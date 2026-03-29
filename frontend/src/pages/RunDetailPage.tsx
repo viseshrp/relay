@@ -11,18 +11,19 @@ import {
   sendReviewFix,
   updateExplorationContext,
 } from "@/api/exploration";
-import { getRun } from "@/api/runs";
+import { getReviewFixPrompt, getRun } from "@/api/runs";
+import { PhaseDetailPanel } from "@/components/detail-panel/PhaseDetailPanel";
 import { ChatInput } from "@/components/exploration/ChatInput";
 import { ChatThread } from "@/components/exploration/ChatThread";
 import { ContextPanel } from "@/components/exploration/ContextPanel";
 import { FinalizeButton } from "@/components/exploration/FinalizeButton";
 import { PlanningPromptView } from "@/components/exploration/PlanningPromptView";
-import { PhaseDetailPanel } from "@/components/detail-panel/PhaseDetailPanel";
 import { ReviewApprovalBar } from "@/components/review/ReviewApprovalBar";
 import { FixPromptEditor } from "@/components/review/FixPromptEditor";
-import { PhaseGraph } from "@/components/workflow/PhaseGraph";
-import { ReviewFixLoopIndicator } from "@/components/workflow/ReviewFixLoopIndicator";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PhaseGraph } from "@/components/workflow/PhaseGraph";
 import { useExplorationChat } from "@/hooks/useExplorationChat";
 import { useRunStatus } from "@/hooks/useRunStatus";
 import { useRunStore } from "@/store/runStore";
@@ -32,6 +33,7 @@ export function RunDetailPage() {
   const queryClient = useQueryClient();
   const [contextOpen, setContextOpen] = useState(false);
   const [fixPromptOpen, setFixPromptOpen] = useState(false);
+  const [fixPromptValue, setFixPromptValue] = useState("");
   const selectedPhaseId = useRunStore((state) => state.selectedPhaseId);
   const setSelectedPhaseId = useRunStore((state) => state.setSelectedPhaseId);
   const runQuery = useQuery({ queryKey: ["run", id], queryFn: () => getRun(id), refetchInterval: 4000 });
@@ -45,7 +47,7 @@ export function RunDetailPage() {
     enabled: Boolean(id),
   });
   const { messages, isStreaming, sendMessage, finalize } = useExplorationChat(id);
-  useRunStatus(id);
+  const { errors } = useRunStatus(id);
 
   useEffect(() => {
     if (!runQuery.data || selectedPhaseId) {
@@ -59,29 +61,48 @@ export function RunDetailPage() {
   const explorationPhase = currentRun?.phases.find((phase) => phase.phase_type === "exploration");
   const critiquePhase = currentRun?.phases.find((phase) => phase.phase_type === "plan_critique");
   const reviewPhase = currentRun?.phases.find((phase) => phase.phase_type === "review");
-  const showExploration = Boolean(explorationPhase && ["queued", "running", "waiting_for_user"].includes(explorationPhase.status));
+  const showExploration = selectedPhase?.phase_type === "exploration" && explorationPhase?.status !== "succeeded";
+  const compactExplorationSidebar = selectedPhase?.phase_type === "exploration" && selectedPhase.status === "running";
 
   const contextMutation = useMutation({
     mutationFn: (paths: string[]) => updateExplorationContext(id, paths),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["context", id] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["context", id] }),
   });
   const rerunMutation = useMutation({
     mutationFn: (phaseType: string) => rerunRun(id, phaseType),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["run", id] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["run", id] }),
   });
 
-  if (!currentRun) {
-    return null;
+  if (runQuery.isLoading || !currentRun) {
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[24rem,minmax(0,1fr)]">
+    <div className={`grid gap-6 ${compactExplorationSidebar ? "lg:grid-cols-[6rem,minmax(0,1fr)]" : "lg:grid-cols-[24rem,minmax(0,1fr)]"}`}>
       <div className="space-y-4">
-        <ReviewFixLoopIndicator count={currentRun.review_fix_loop_count} limit={currentRun.review_fix_loop_limit} />
-        <PhaseGraph phases={currentRun.phases} selectedPhaseId={selectedPhaseId} onSelect={setSelectedPhaseId} />
+        <PhaseGraph
+          phases={currentRun.phases}
+          selectedPhaseId={selectedPhaseId}
+          onSelect={setSelectedPhaseId}
+          compact={compactExplorationSidebar}
+          loopCount={currentRun.review_fix_loop_count}
+          loopLimit={currentRun.review_fix_loop_limit}
+        />
       </div>
       <div className="space-y-4">
-        {showExploration && selectedPhase?.phase_type === "exploration" ? (
+        {errors.map((error) => (
+          <Alert key={`${error.phase_type}-${error.timestamp}`}>
+            <AlertTitle>{error.phase_type.replaceAll("_", " ")} error</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        ))}
+
+        {showExploration ? (
           <>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -132,7 +153,14 @@ export function RunDetailPage() {
                 await approveReview(id);
                 await queryClient.invalidateQueries({ queryKey: ["run", id] });
               }}
-              onFix={() => setFixPromptOpen(true)}
+              onFix={async () => {
+                const response = await queryClient.fetchQuery({
+                  queryKey: ["review-fix-prompt", id],
+                  queryFn: () => getReviewFixPrompt(id),
+                });
+                setFixPromptValue(response.prompt);
+                setFixPromptOpen(true);
+              }}
               onCancel={async () => {
                 await cancelRun(id);
                 await queryClient.invalidateQueries({ queryKey: ["run", id] });
@@ -140,7 +168,7 @@ export function RunDetailPage() {
             />
             <FixPromptEditor
               open={fixPromptOpen}
-              initialValue=""
+              initialValue={fixPromptValue}
               onOpenChange={setFixPromptOpen}
               onSubmit={async (value) => {
                 await sendReviewFix(id, value);

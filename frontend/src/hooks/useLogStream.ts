@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import { wsClient } from "@/api/ws";
-import type { LogEvent } from "@/types/ws";
 
 export function useLogStream(runId: string | undefined, phaseId: string | undefined, attemptNumber: number | undefined) {
   const [lines, setLines] = useState<string[]>([]);
@@ -12,12 +11,11 @@ export function useLogStream(runId: string | undefined, phaseId: string | undefi
     }
     setLines([]);
     return wsClient.subscribe((event) => {
-      const logEvent = event as LogEvent;
-      if (logEvent.type !== "log") {
+      if (event.type !== "log") {
         return;
       }
-      if (logEvent.run_id === runId && logEvent.phase_id === phaseId && logEvent.attempt_number === attemptNumber) {
-        setLines((current) => [...current, logEvent.line]);
+      if (event.run_id === runId && event.phase_id === phaseId && event.attempt_number === attemptNumber) {
+        setLines((current) => [...current, event.line]);
       }
     });
   }, [attemptNumber, phaseId, runId]);

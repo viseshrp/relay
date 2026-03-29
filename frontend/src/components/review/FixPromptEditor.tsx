@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Sheet } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 
 export function FixPromptEditor({
@@ -16,13 +16,24 @@ export function FixPromptEditor({
   onSubmit: (value: string) => Promise<unknown>;
 }) {
   const [value, setValue] = useState(initialValue);
+
+  useEffect(() => {
+    setValue(initialValue);
+  }, [initialValue]);
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Fix Prompt</h3>
-        <Textarea value={value} onChange={(event) => setValue(event.target.value)} />
-        <Button onClick={() => void onSubmit(value)}>Send to Fix</Button>
-      </div>
+      <SheetContent>
+        <div className="space-y-4">
+          <SheetHeader>
+            <SheetTitle>Fix Prompt</SheetTitle>
+          </SheetHeader>
+          <Textarea className="min-h-[24rem]" value={value} onChange={(event) => setValue(event.target.value)} />
+          <SheetFooter>
+            <Button onClick={() => void onSubmit(value)}>Send to Fix</Button>
+          </SheetFooter>
+        </div>
+      </SheetContent>
     </Sheet>
   );
 }

@@ -4,26 +4,36 @@ import { Link } from "react-router-dom";
 
 import { createProject, listProjects } from "@/api/projects";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Dialog } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function ProjectsListPage() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
-  const { data } = useQuery({ queryKey: ["projects"], queryFn: listProjects });
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
   const createMutation = useMutation({
     mutationFn: () => createProject({ path, name: name || undefined }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
       setOpen(false);
       setPath("");
       setName("");
     },
   });
+
+  if (projectsQuery.isLoading) {
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -35,7 +45,7 @@ export function ProjectsListPage() {
         <Button onClick={() => setOpen(true)}>Add Project</Button>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        {data?.map((project) => (
+        {projectsQuery.data?.map((project) => (
           <Link key={project.id} to={`/projects/${project.id}`}>
             <Card className="space-y-3">
               <div className="flex items-start justify-between gap-3">
@@ -43,7 +53,7 @@ export function ProjectsListPage() {
                   <h2 className="text-xl font-semibold">{project.name}</h2>
                   <p className="text-sm text-muted-foreground">{project.path}</p>
                 </div>
-                <StatusBadge status={project.is_git_repo ? "succeeded" : "queued"} />
+                <Badge variant={project.is_git_repo ? "default" : "secondary"}>{project.is_git_repo ? "Git" : "Local"}</Badge>
               </div>
               <p className="text-sm text-muted-foreground">Active runs: {project.active_run_count}</p>
             </Card>
@@ -51,12 +61,24 @@ export function ProjectsListPage() {
         ))}
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Add Project</h2>
-          <Input placeholder="Absolute path" value={path} onChange={(event) => setPath(event.target.value)} />
-          <Input placeholder="Optional display name" value={name} onChange={(event) => setName(event.target.value)} />
-          <Button onClick={() => createMutation.mutate()}>Save</Button>
-        </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="space-y-2 text-sm font-medium">
+              <span>Absolute path</span>
+              <Input placeholder="Absolute path" value={path} onChange={(event) => setPath(event.target.value)} />
+            </label>
+            <label className="space-y-2 text-sm font-medium">
+              <span>Display name</span>
+              <Input placeholder="Optional display name" value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button onClick={() => createMutation.mutate()}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );

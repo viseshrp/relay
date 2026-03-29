@@ -17,6 +17,10 @@ export function updateProject(projectId: string, payload: { name: string }) {
   return apiRequest<Project>(`/projects/${projectId}`, { method: "PUT", body: JSON.stringify(payload) });
 }
 
+export function deleteProject(projectId: string) {
+  return apiRequest<void>(`/projects/${projectId}`, { method: "DELETE" });
+}
+
 export function getProjectFiles(projectId: string) {
   return apiRequest<FileTreeNode[]>(`/projects/${projectId}/files`);
 }

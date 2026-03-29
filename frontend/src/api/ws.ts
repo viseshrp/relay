@@ -56,6 +56,11 @@ class RelayWsClient {
     this.send({ type: "subscribe_all" });
   }
 
+  unsubscribeAllRuns() {
+    this.subscribeAll = false;
+    this.send({ type: "unsubscribe_all" });
+  }
+
   private send(payload: Record<string, unknown>) {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(payload));

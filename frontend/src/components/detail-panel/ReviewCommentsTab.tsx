@@ -1,28 +1,28 @@
 import type { ReviewComment } from "@/types/api";
 
-import { Table } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export function ReviewCommentsTab({ comments }: { comments: ReviewComment[] }) {
   return (
     <Table>
-      <thead className="bg-secondary/60">
-        <tr>
-          <th className="px-4 py-3 text-left">File</th>
-          <th className="px-4 py-3 text-left">Line</th>
-          <th className="px-4 py-3 text-left">Severity</th>
-          <th className="px-4 py-3 text-left">Comment</th>
-        </tr>
-      </thead>
-      <tbody>
+      <TableHeader>
+        <TableRow className="border-t-0">
+          <TableHead>File</TableHead>
+          <TableHead>Line</TableHead>
+          <TableHead>Severity</TableHead>
+          <TableHead>Comment</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {comments.map((comment) => (
-          <tr key={comment.id} className="border-t border-border">
-            <td className="px-4 py-3">{comment.file_path ?? "General"}</td>
-            <td className="px-4 py-3">{comment.line_number ?? "-"}</td>
-            <td className="px-4 py-3">{comment.severity}</td>
-            <td className="px-4 py-3">{comment.comment}</td>
-          </tr>
+          <TableRow key={comment.id}>
+            <TableCell>{comment.file_path ?? "General"}</TableCell>
+            <TableCell>{comment.line_number ?? "-"}</TableCell>
+            <TableCell>{comment.severity}</TableCell>
+            <TableCell>{comment.comment}</TableCell>
+          </TableRow>
         ))}
-      </tbody>
+      </TableBody>
     </Table>
   );
 }

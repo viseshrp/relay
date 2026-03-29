@@ -28,6 +28,26 @@ export type PhaseType =
 
 export type ReviewSeverity = "error" | "warning" | "suggestion";
 
+export const KNOWN_MODELS = [
+  { id: "", name: "Default (Copilot default)" },
+  { id: "gpt-4o", name: "GPT-4o" },
+  { id: "gpt-4.1", name: "GPT-4.1" },
+  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
+  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano" },
+  { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
+  { id: "o3-mini", name: "o3-mini" },
+] as const;
+
+export interface CopilotStatus {
+  gh_available?: boolean;
+  copilot_available?: boolean;
+  authenticated?: boolean;
+  gh_path?: string | null;
+  message?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -167,7 +187,7 @@ export interface HealthResponse {
   ok: boolean;
   database: string;
   worker: string;
-  copilot: Record<string, unknown>;
+  copilot: CopilotStatus;
 }
 
 export interface SystemStatusResponse {
@@ -175,5 +195,5 @@ export interface SystemStatusResponse {
   worker_status: string;
   concurrency_limit: number;
   active_workflows: number;
-  copilot: Record<string, unknown>;
+  copilot: CopilotStatus;
 }

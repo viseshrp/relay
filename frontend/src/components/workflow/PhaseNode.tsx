@@ -2,6 +2,7 @@ import type { PhaseSummary } from "@/types/api";
 
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Badge } from "@/components/ui/badge";
+import { formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 export function PhaseNode({
@@ -13,6 +14,12 @@ export function PhaseNode({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const latestAttempt = phase.latest_attempt;
+  let durationLabel: string | null = null;
+  if (latestAttempt?.started_at && latestAttempt.ended_at && ["succeeded", "failed", "cancelled"].includes(phase.status)) {
+    durationLabel = formatDuration(latestAttempt.started_at, latestAttempt.ended_at);
+  }
+
   return (
     <button
       type="button"
@@ -30,6 +37,7 @@ export function PhaseNode({
         <StatusBadge status={phase.status} />
       </div>
       {phase.current_attempt > 1 ? <Badge className="mt-3 w-fit bg-accent text-accent-foreground">Attempt {phase.current_attempt}</Badge> : null}
+      {durationLabel ? <div className="mt-3 text-xs text-muted-foreground">{durationLabel}</div> : null}
     </button>
   );
 }
