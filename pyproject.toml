@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "relay"
+version = "0.1.0"
+description = "Relay is a self-hostable AI workflow orchestration app."
+requires-python = ">=3.12"
+dependencies = [
+  "aiofiles>=24.1",
+  "aiosqlite>=0.20",
+  "alembic>=1.14",
+  "fastapi>=0.115",
+  "httpx>=0.28",
+  "psutil>=6.1",
+  "pydantic>=2.10",
+  "sqlalchemy>=2.0",
+  "typer>=0.15",
+  "uvicorn>=0.34",
+  "websockets>=14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "asgi-lifespan>=2.1",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+]
+
+[project.scripts]
+relay = "relay.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["relay"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
