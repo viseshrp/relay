@@ -16,5 +16,9 @@ from .relay import do_stuff
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(_version, "-v", "--version")
 def main(stuff: tuple[str, ...]) -> None:
-    "This is a template repository for Python projects that use uv for their dependency management.\n\n\b\nExample usages:\n"
+    """Relay CLI.
+
+    \b
+    Example usages:
+    """
     do_stuff(stuff)

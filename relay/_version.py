@@ -3,7 +3,10 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("relay")
+    __version__ = version("relay-ai")
 except PackageNotFoundError:  # pragma: no cover
-    # Fallback for local dev or editable installs
-    __version__ = "0.0.0"
+    try:
+        __version__ = version("relay")
+    except PackageNotFoundError:
+        # Fallback for local dev or editable installs
+        __version__ = "0.0.0"

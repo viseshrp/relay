@@ -72,6 +72,18 @@ cog.outl("$ " + "relay" + " --help")
 cog.out(result.output)
 cog.outl("```")
 ]]] -->
+```console
+$ relay --help
+Usage: relay [OPTIONS] <what_you_worked_on>
+
+  Relay CLI.
+
+  Example usages:
+
+Options:
+  -v, --version  Show the version and exit.
+  -h, --help     Show this message and exit.
+```
 <!-- [[[end]]] -->
 
 ## 🛠️ Features

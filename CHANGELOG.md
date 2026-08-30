@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 -
 
-## [0.0.1] - <date>
+## [0.0.1] - 2026-08-30
 
 ### Added
 
