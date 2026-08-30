@@ -35,7 +35,6 @@ CI = "https://github.com/viseshrp/relay/actions"
 
 [project.scripts]
 "relay" = "relay.__main__:main"
-"relay-ai" = "relay.__main__:main"
 
 [dependency-groups]
 dev = [
