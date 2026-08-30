@@ -1,7 +1,7 @@
 # relay
 
-[![PyPI version](https://img.shields.io/pypi/v/relay.svg)](https://pypi.org/project/relay/)
-[![Python versions](https://img.shields.io/pypi/pyversions/relay.svg?logo=python&logoColor=white)](https://pypi.org/project/relay/)
+[![PyPI version](https://img.shields.io/pypi/v/relay-app.svg)](https://pypi.org/project/relay-app/)
+[![Python versions](https://img.shields.io/pypi/pyversions/relay-app.svg?logo=python&logoColor=white)](https://pypi.org/project/relay-app/)
 [![CI](https://github.com/viseshrp/relay/actions/workflows/main.yml/badge.svg)](https://github.com/viseshrp/relay/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/viseshrp/relay/branch/main/graph/badge.svg)](https://codecov.io/gh/viseshrp/relay)
 [![License: MIT](https://img.shields.io/github/license/viseshrp/relay)](https://github.com/viseshrp/relay/blob/main/LICENSE)
@@ -46,7 +46,7 @@ The first commit will include both Cruft's template-tracking file (`.cruft.json`
 ## 📦 Installation
 
 ```bash
-pip install relay
+pip install relay-app
 ```
 
 ## 🧪 Usage
