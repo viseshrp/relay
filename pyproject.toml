@@ -55,7 +55,7 @@ dev = [
     "deptry",
     "liccheck",
     # liccheck imports pkg_resources, which newer setuptools no longer provides.
-    "setuptools<81",
+    "setuptools<85",
     "cogapp",
     "twine",
     "hatch",
