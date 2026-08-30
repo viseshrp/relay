@@ -1,0 +1,104 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+        types: [ toml ]
+      - id: check-yaml
+        types: [ yaml ]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.py$  # Ruff handles Python files
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.49.1
+    hooks:
+      - id: markdownlint
+        name: markdownlint
+        args: [ --fix, --disable, MD024 ]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # Run formatter and linter separately.
+      - id: ruff-format
+        name: ruff-format
+        entry: ruff format
+        language: system
+        types: [ python ]
+
+      - id: ruff-check
+        name: ruff-check
+        entry: ruff check
+        language: system
+        types: [ python ]
+
+      - id: ty
+        name: ty
+        entry: ty check
+        language: system
+        types: [ python ]
+        pass_filenames: false
+
+      - id: pip-audit
+        name: pip-audit
+        entry: pip-audit
+        language: system
+        args: [ "--skip-editable" ]
+        pass_filenames: false
+
+      - id: bandit
+        name: bandit
+        entry: bandit
+        language: system
+        types: [ python ]
+        args: [
+          "-c", "pyproject.toml",
+          "-r",
+          "-n", "3",
+          "--severity-level", "high"
+        ]
+
+      - id: codespell
+        name: codespell
+        entry: codespell
+        language: system
+
+      - id: vulture
+        name: vulture
+        entry: vulture
+        language: system
+        types: [ python ]
+        args: [ "--config", "pyproject.toml" ]
+        pass_filenames: false
+
+      - id: deptry
+        name: deptry
+        entry: uv run deptry .
+        language: system
+        types: [ python ]
+        args: [ "--config", "pyproject.toml" ]
+        pass_filenames: false
+
+      - id: liccheck
+        name: liccheck
+        entry: liccheck
+        language: system
+        files: ^pyproject\.toml$
+        pass_filenames: false
+
+      - id: cog
+        name: cog
+        entry: cog
+        language: system
+        types: [ markdown ]
+        require_serial: true
+        args: [ "-r", "README.md" ]
+        pass_filenames: false
+        always_run: true

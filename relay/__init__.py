@@ -1,3 +1,6 @@
-__all__ = ["__version__"]
+"Top-level package for relay."
 
-__version__ = "0.1.0"
+from ._version import __version__
+from .cli import main
+
+__all__ = ["__version__", "main"]
