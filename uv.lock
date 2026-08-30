@@ -1684,7 +1684,7 @@ wheels = [
 ]
 
 [[package]]
-name = "relay-ai"
+name = "relay-app"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

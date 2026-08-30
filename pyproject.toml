@@ -1,5 +1,5 @@
 [project]
-name = "relay-ai"
+name = "relay-app"
 dynamic = ["version"]
 description = "This is a template repository for Python projects that use uv for their dependency management."
 authors = [{ name = "Visesh Prasad", email = "viseshrprasad@gmail.com" }]

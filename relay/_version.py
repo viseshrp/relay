@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("relay-ai")
+    __version__ = version("relay-app")
 except PackageNotFoundError:  # pragma: no cover
     try:
         __version__ = version("relay")
