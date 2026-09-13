@@ -1,124 +1,101 @@
-# Contributing to `relay`
+# Contributing to Relay
 
-Contributions are welcome, and they are greatly appreciated!
-Every little bit helps, and credit will always be given.
+Relay accepts focused bug fixes, features, documentation, and compatibility
+evidence. Open an issue before work that changes a workflow, persistence,
+event, CLI, or HTTP contract.
 
-You can contribute in many ways:
+## Prerequisites
 
-## Types of Contributions
+- Git
+- Python 3.10 through 3.14
+- [uv](https://docs.astral.sh/uv/)
+- Node.js `^20.19.0` or `>=22.12.0` and npm for frontend or package builds
 
-### Report Bugs
+Node.js is a build dependency. A wheel installation must run without it.
 
-Report bugs at <https://github.com/viseshrp/relay/issues>
+## Development setup
 
-If you are reporting a bug, please include:
+1. Clone your fork and enter the repository.
 
-- Your operating system name and version.
-- Any details about your local setup that might be helpful in troubleshooting.
-- Detailed steps to reproduce the bug.
+   ```bash
+   git clone git@github.com:YOUR_NAME/relay.git
+   cd relay
+   ```
 
-### Fix Bugs
+2. Create a feature branch.
 
-Look through the GitHub issues for bugs.
-Anything tagged with "bug" and "help wanted" is open to whoever wants to
-implement a fix for it.
+   ```bash
+   git switch -c feat/short-description
+   ```
 
-### Implement Features
+3. Install the locked Python environment and pre-commit hooks.
 
-Look through the GitHub issues for features.
-Anything tagged with "enhancement" and "help wanted" is open to whoever
-wants to implement it.
+   ```bash
+   uv sync --frozen
+   uv run pre-commit install
+   ```
 
-### Write Documentation
+4. Install the locked frontend dependencies when changing the web application
+   or building a distribution.
 
-`relay` could always use more documentation, whether as part of the official docs,
-in docstrings, or even on the web in blog posts, articles, and such.
+   ```bash
+   cd frontend
+   npm ci
+   cd ..
+   ```
 
-### Submit Feedback
+## Checks
 
-The best way to send feedback is to file an issue at
-<https://github.com/viseshrp/relay/issues>.
+Run the smallest check that proves each edit, then run the repository gates
+before opening a pull request:
 
-If you are proposing a new feature:
+```bash
+make check
+make test
+make build
+make check-dist
+```
 
-- Explain in detail how it would work.
-- Keep the scope as narrow as possible, to make it easier to implement.
-- Remember that this is a volunteer-driven project, and that
-  contributions are welcome :)
+`make test` runs the supported Python matrix through tox. Frontend and package
+builds use the committed npm lockfile. Do not hand-edit generated files under
+`relay/static/`; regenerate them through the frontend build.
 
-## Get Started
+## Code boundaries
 
-Ready to contribute? Here's how to set up `relay` for local development.
-Please note this documentation assumes you already have `uv` and `Git` installed.
+- Keep workflow rules in domain and application modules.
+- Keep Click, Django, Huey, ACP transport, Git subprocess, and browser code in
+  their interface or adapter layers.
+- Add no service dependency for the local runtime.
+- Preserve Relay-owned errors at CLI, HTTP, SSE, and browser boundaries.
+- Use argument vectors for Git, coding-agent, and command-node subprocesses.
+- Keep Linux, Windows, and macOS behavior equivalent.
 
-1. Fork the `relay` repo on GitHub.
+Every changed Python function and method needs accurate parameter and return
+types. Every changed mutable or optional attribute needs an explicit type.
 
-2. Clone your fork locally:
+## Tests and documentation
 
-    ```bash
-    cd <directory_in_which_repo_should_be_created>
-    git clone git@github.com:YOUR_NAME/relay.git
-    ```
+Add focused tests for normal contributions. Use real subjects under test and
+patch only external collaborators. Update the durable document that owns the
+behavior, and validate commands and workflow examples against the real code.
 
-3. Navigate into the project folder:
+Hand-authored documentation lives in `README.md` and `docs/*.md`. Generated
+CLI help in the README is refreshed with:
 
-    ```bash
-    cd relay
-    ```
+```bash
+uv run cog -r README.md
+```
 
-4. Install and activate the environment:
+Do not edit `CHANGELOG.md` outside a release task.
 
-    ```bash
-    uv sync
-    ```
+## Pull requests
 
-5. Install pre-commit to run linters/formatters at commit time:
+Keep commits narrow and reviewable. A pull request should state:
 
-    ```bash
-    uv run pre-commit install
-    ```
+- the behavior changed,
+- the checks run and their exact result,
+- any platform or external-agent evidence that could not be collected,
+- whether persistence or public contracts changed.
 
-6. Create a branch for local development:
-
-    ```bash
-    git checkout -b name-of-your-bugfix-or-feature
-    ```
-
-7. Add test cases for your changes in the `tests` directory.
-
-8. Check formatting and style:
-
-    ```bash
-    make check
-    ```
-
-9. Run unit tests:
-
-    ```bash
-    make test
-    ```
-
-10. (Optional) Run `tox` to test against multiple Python versions:
-
-    ```bash
-    tox
-    ```
-
-11. Commit your changes and push your branch:
-
-    ```bash
-    git add .
-    git commit -m "Your detailed description of your changes."
-    git push origin name-of-your-bugfix-or-feature
-    ```
-
-12. Submit a pull request through the GitHub website.
-
-## Pull Request Guidelines
-
-Before you submit a pull request, check that it meets these guidelines:
-
-1. The pull request should include tests.
-
-2. If the pull request adds functionality, update the documentation.
-   Add a docstring, and update the feature list in `README.md`.
+Never include credentials, private provider output, local run artifacts, or
+retained worktrees in a commit.
