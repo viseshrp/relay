@@ -8,6 +8,27 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
+from relay.execution.state import (
+    AttemptStatus,
+    AttemptStopReason,
+    CleanupPolicy,
+    ControlKind,
+    ControlState,
+    DispatchState,
+    DraftValidationState,
+    DriverKind,
+    EventSensitivity,
+    EventSource,
+    InteractionKind,
+    InteractionStatus,
+    LockMode,
+    NodeStatus,
+    NodeType,
+    PreservationState,
+    RunStatus,
+    WorktreeState,
+)
+
 
 class RelayModel(models.Model):
     """Typed abstract base exposing Django's default manager."""
@@ -16,138 +37,6 @@ class RelayModel(models.Model):
 
     class Meta:
         abstract = True
-
-
-class RunStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RUNNING = "running", "Running"
-    PAUSED_WAIT = "paused_wait", "Paused for input"
-    CANCELING = "canceling", "Canceling"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
-    CANCELED = "canceled", "Canceled"
-    INTERRUPTED = "interrupted", "Interrupted"
-
-
-class WorktreeState(models.TextChoices):
-    NONE = "none", "None"
-    CREATED = "created", "Created"
-    REMOVED = "removed", "Removed"
-    CLEANUP_FAILED = "cleanup_failed", "Cleanup failed"
-
-
-class CleanupPolicy(models.TextChoices):
-    CLEAN_ON_SUCCESS = "clean_on_success", "Clean on success"
-    RETAIN = "retain", "Retain"
-
-
-class NodeStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    READY = "ready", "Ready"
-    DISPATCHED = "dispatched", "Dispatched"
-    RUNNING = "running", "Running"
-    WAITING = "waiting", "Waiting"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
-    SKIPPED = "skipped", "Skipped"
-    CANCELED = "canceled", "Canceled"
-
-
-class NodeType(models.TextChoices):
-    AGENT = "agent", "Agent"
-    COMMAND = "command", "Command"
-    HUMAN_WAIT = "human_wait", "Human wait"
-    CONDITION = "condition", "Condition"
-    LOOP = "loop", "Loop"
-    SUBWORKFLOW = "subworkflow", "Subworkflow"
-
-
-class AttemptStatus(models.TextChoices):
-    CREATED = "created", "Created"
-    RUNNING = "running", "Running"
-    WAITING = "waiting", "Waiting"
-    TERMINAL = "terminal", "Terminal"
-
-
-class DriverKind(models.TextChoices):
-    ACP = "acp", "ACP"
-    ANTIGRAVITY = "antigravity", "Antigravity"
-
-
-class AttemptStopReason(models.TextChoices):
-    COMPLETED = "completed", "Completed"
-    FAILED = "failed", "Failed"
-    OUTPUT_INVALID = "output_invalid", "Output invalid"
-    TIMEOUT = "timeout", "Timeout"
-    SOFT_DENIED = "soft_denied", "Soft denied"
-    CANCELED = "canceled", "Canceled"
-    WORKER_LOST = "worker_lost", "Worker lost"
-    INTERRUPTED = "interrupted", "Interrupted"
-
-
-class DispatchState(models.TextChoices):
-    DISPATCHED = "dispatched", "Dispatched"
-    CLAIMED = "claimed", "Claimed"
-    CONSUMED = "consumed", "Consumed"
-
-
-class DraftValidationState(models.TextChoices):
-    VALID = "valid", "Valid"
-    INVALID = "invalid", "Invalid"
-    UNCHECKED = "unchecked", "Unchecked"
-
-
-class EventSource(models.TextChoices):
-    RUN = "run", "Run"
-    NODE = "node", "Node"
-    ATTEMPT = "attempt", "Attempt"
-    AGENT = "agent", "Agent"
-    COMMAND = "command", "Command"
-    SYSTEM = "system", "System"
-
-
-class EventSensitivity(models.TextChoices):
-    NORMAL = "normal", "Normal"
-    REDACTED = "redacted", "Redacted"
-
-
-class PreservationState(models.TextChoices):
-    PENDING = "pending", "Pending"
-    PRESERVED = "preserved", "Preserved"
-    FAILED = "failed", "Failed"
-
-
-class InteractionKind(models.TextChoices):
-    PERMISSION = "permission", "Permission"
-    ELICITATION = "elicitation", "Elicitation"
-    WAIT = "wait", "Wait"
-
-
-class InteractionStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    ANSWERED = "answered", "Answered"
-    EXPIRED = "expired", "Expired"
-    DISCARDED = "discarded", "Discarded"
-
-
-class ControlKind(models.TextChoices):
-    PERMISSION_ANSWER = "permission_answer", "Permission answer"
-    ELICITATION_ANSWER = "elicitation_answer", "Elicitation answer"
-    WAIT_ANSWER = "wait_answer", "Wait answer"
-    CANCEL = "cancel", "Cancel"
-
-
-class ControlState(models.TextChoices):
-    PENDING = "pending", "Pending"
-    CLAIMED = "claimed", "Claimed"
-    APPLIED = "applied", "Applied"
-    STALE = "stale", "Stale"
-    INVALID = "invalid", "Invalid"
-
-
-class LockMode(models.TextChoices):
-    READ = "read", "Read"
-    WRITE = "write", "Write"
 
 
 class Installation(RelayModel):
@@ -207,7 +96,7 @@ class WorkflowDraft(RelayModel):
     base_file_hash: models.CharField = models.CharField(max_length=64)
     validation_state: models.CharField = models.CharField(
         max_length=16,
-        choices=DraftValidationState.choices,
+        choices=DraftValidationState.choices(),
         default=DraftValidationState.UNCHECKED,
     )
     updated_at: models.DateTimeField = models.DateTimeField(auto_now=True)
@@ -251,17 +140,17 @@ class Run(RelayModel):
     )
     workflow_key: models.TextField = models.TextField()
     status: models.CharField = models.CharField(
-        max_length=16, choices=RunStatus.choices, default=RunStatus.PENDING
+        max_length=16, choices=RunStatus.choices(), default=RunStatus.PENDING
     )
     source_commit: models.CharField = models.CharField(max_length=40)
     run_branch: models.TextField = models.TextField(unique=True)
     worktree_path: models.TextField = models.TextField(unique=True)
     worktree_state: models.CharField = models.CharField(
-        max_length=16, choices=WorktreeState.choices, default=WorktreeState.NONE
+        max_length=16, choices=WorktreeState.choices(), default=WorktreeState.NONE
     )
     cleanup_policy: models.CharField = models.CharField(
         max_length=20,
-        choices=CleanupPolicy.choices,
+        choices=CleanupPolicy.choices(),
         default=CleanupPolicy.CLEAN_ON_SUCCESS,
     )
     launcher: models.TextField = models.TextField()
@@ -306,10 +195,10 @@ class NodeRun(RelayModel):
     scope_path: models.TextField = models.TextField()
     parent_scope_path: models.TextField = models.TextField(null=True, blank=True)
     node_id: models.TextField = models.TextField()
-    node_type: models.CharField = models.CharField(max_length=16, choices=NodeType.choices)
+    node_type: models.CharField = models.CharField(max_length=16, choices=NodeType.choices())
     frozen_def: models.JSONField = models.JSONField(default=dict)
     status: models.CharField = models.CharField(
-        max_length=16, choices=NodeStatus.choices, default=NodeStatus.PENDING
+        max_length=16, choices=NodeStatus.choices(), default=NodeStatus.PENDING
     )
     writes: models.BooleanField = models.BooleanField(default=False)
     selected_branch: models.TextField = models.TextField(null=True, blank=True)
@@ -333,13 +222,13 @@ class NodeAttempt(RelayModel):
     )
     attempt_number: models.PositiveIntegerField = models.PositiveIntegerField()
     status: models.CharField = models.CharField(
-        max_length=16, choices=AttemptStatus.choices, default=AttemptStatus.CREATED
+        max_length=16, choices=AttemptStatus.choices(), default=AttemptStatus.CREATED
     )
     worker_id: models.TextField = models.TextField()
     process_pid: models.PositiveIntegerField = models.PositiveIntegerField(null=True, blank=True)
     acp_session_id: models.TextField = models.TextField(null=True, blank=True)
     driver_kind: models.CharField = models.CharField(
-        max_length=16, choices=DriverKind.choices, null=True, blank=True
+        max_length=16, choices=DriverKind.choices(), null=True, blank=True
     )
     agent_id: models.TextField = models.TextField(blank=True)
     agent_version: models.TextField = models.TextField(blank=True)
@@ -350,7 +239,7 @@ class NodeAttempt(RelayModel):
     started_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
     ended_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
     stop_reason: models.CharField = models.CharField(
-        max_length=16, choices=AttemptStopReason.choices, null=True, blank=True
+        max_length=16, choices=AttemptStopReason.choices(), null=True, blank=True
     )
     exit_code: models.IntegerField = models.IntegerField(null=True, blank=True)
     error_code: models.TextField = models.TextField(null=True, blank=True)
@@ -382,7 +271,7 @@ class DispatchClaim(RelayModel):
     )
     claim_token: models.CharField = models.CharField(max_length=32, unique=True)
     state: models.CharField = models.CharField(
-        max_length=16, choices=DispatchState.choices, default=DispatchState.DISPATCHED
+        max_length=16, choices=DispatchState.choices(), default=DispatchState.DISPATCHED
     )
     claim_owner: models.TextField = models.TextField(null=True, blank=True)
     enqueued_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
@@ -418,11 +307,11 @@ class RunEvent(RelayModel):
     ts: models.DateTimeField = models.DateTimeField(default=timezone.now)
     type: models.TextField = models.TextField()
     version: models.PositiveSmallIntegerField = models.PositiveSmallIntegerField(default=1)
-    source: models.CharField = models.CharField(max_length=16, choices=EventSource.choices)
+    source: models.CharField = models.CharField(max_length=16, choices=EventSource.choices())
     payload: models.JSONField = models.JSONField(default=dict)
     sensitivity: models.CharField = models.CharField(
         max_length=16,
-        choices=EventSensitivity.choices,
+        choices=EventSensitivity.choices(),
         default=EventSensitivity.NORMAL,
     )
 
@@ -446,7 +335,7 @@ class Artifact(RelayModel):
     bytes: models.BigIntegerField = models.BigIntegerField()
     preservation_state: models.CharField = models.CharField(
         max_length=16,
-        choices=PreservationState.choices,
+        choices=PreservationState.choices(),
         default=PreservationState.PENDING,
     )
 
@@ -463,12 +352,12 @@ class HumanInteraction(RelayModel):
     attempt: models.ForeignKey = models.ForeignKey(
         NodeAttempt, on_delete=models.CASCADE, related_name="interactions"
     )
-    kind: models.CharField = models.CharField(max_length=16, choices=InteractionKind.choices)
+    kind: models.CharField = models.CharField(max_length=16, choices=InteractionKind.choices())
     request_payload: models.JSONField = models.JSONField(default=dict)
     response_payload: models.JSONField = models.JSONField(null=True, blank=True)
     status: models.CharField = models.CharField(
         max_length=16,
-        choices=InteractionStatus.choices,
+        choices=InteractionStatus.choices(),
         default=InteractionStatus.PENDING,
     )
     deadline: models.DateTimeField = models.DateTimeField(null=True, blank=True)
@@ -482,11 +371,11 @@ class ControlRequest(RelayModel):
     attempt: models.ForeignKey = models.ForeignKey(
         NodeAttempt, on_delete=models.CASCADE, related_name="control_requests"
     )
-    kind: models.CharField = models.CharField(max_length=24, choices=ControlKind.choices)
+    kind: models.CharField = models.CharField(max_length=24, choices=ControlKind.choices())
     idempotency_key: models.TextField = models.TextField()
     payload: models.JSONField = models.JSONField(default=dict)
     state: models.CharField = models.CharField(
-        max_length=16, choices=ControlState.choices, default=ControlState.PENDING
+        max_length=16, choices=ControlState.choices(), default=ControlState.PENDING
     )
     claim_owner: models.TextField = models.TextField(null=True, blank=True)
     created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
@@ -529,7 +418,7 @@ class RunLock(RelayModel):
     attempt: models.OneToOneField = models.OneToOneField(
         NodeAttempt, on_delete=models.CASCADE, related_name="run_lock"
     )
-    mode: models.CharField = models.CharField(max_length=8, choices=LockMode.choices)
+    mode: models.CharField = models.CharField(max_length=8, choices=LockMode.choices())
     starting_head: models.CharField = models.CharField(max_length=40)
     recorded_head: models.CharField = models.CharField(max_length=40)
     acquired_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
