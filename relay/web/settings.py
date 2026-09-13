@@ -7,7 +7,7 @@ from pathlib import Path
 import secrets
 import time
 
-from relay.constants import DB_BUSY_TIMEOUT_MS
+from relay.constants import API_MAX_PAGE_BYTES, DB_BUSY_TIMEOUT_MS
 from relay.paths import application_log_path, data_dir, database_path, log_dir
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -86,8 +86,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Strict"
+SESSION_COOKIE_NAME = "relay_sessionid"
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_NAME = "relay_csrftoken"
+CSRF_FAILURE_VIEW = "relay.web.views.actions.csrf_failure"
+DATA_UPLOAD_MAX_MEMORY_SIZE = API_MAX_PAGE_BYTES
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 CONN_MAX_AGE = 0

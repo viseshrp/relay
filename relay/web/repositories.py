@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 import json
+from pathlib import Path
+import shutil
 from typing import NoReturn, TypeVar
 import uuid
 
@@ -15,20 +17,30 @@ from django.utils import timezone
 
 from relay.agents.models import ModelObservation
 from relay.constants import (
+    API_MAX_PAGE,
+    API_MAX_PAGE_BYTES,
     ATTEMPT_STALE_AFTER_SECONDS,
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
     CONTROL_REQUEST_TTL_SECONDS,
     DISPATCH_ORPHAN_AFTER_SECONDS,
+    EDITOR_LEASE_TTL_SECONDS,
     EVENT_MAX_PAYLOAD_BYTES,
     RECONCILE_MAX_ITEMS,
 )
-from relay.errors import PersistenceError, ProjectRelinkError
+from relay.errors import (
+    PermissionFlowError,
+    PersistenceError,
+    ProjectDiscoveryError,
+    ProjectRelinkError,
+    RelayError,
+)
 from relay.execution.control import ClaimedControl, ControlRecovery, ControlResult
 from relay.execution.dispatch import (
     ClaimDisposition,
     ClaimedAttempt,
     ClaimResult,
 )
+from relay.execution.launch import LaunchRequest
 from relay.execution.locks import decide_admission
 from relay.execution.machine import (
     transition_control,
@@ -39,6 +51,7 @@ from relay.execution.machine import (
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resume import RecoveryTarget
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
+from relay.execution.scheduler import RunSchedule, ScheduledNode
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
     AttemptStatus,
@@ -46,6 +59,7 @@ from relay.execution.state import (
     ControlKind,
     ControlState,
     DispatchState,
+    DraftValidationState,
     DriverKind,
     EventSensitivity,
     EventSource,
@@ -55,17 +69,25 @@ from relay.execution.state import (
     NodeType,
     PreservationState,
     RunStatus,
+    WorktreeState,
 )
+from relay.paths import application_log_path, artifacts_dir, safe_resolve, worktrees_dir
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import PreservationResult
+from relay.vcs.git import run_git
+from relay.vcs.worktree import remove_worktree, run_branch, run_worktree_path
+from relay.workflows.loader import load_workflow_text
+from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import enclosing_scope, node_scope, sibling_scope
+from relay.workflows.snapshot import SnapshotBundle
 
 from .models import (
     AgentModelObservation,
     Artifact,
     ControlRequest,
     DispatchClaim,
+    EditorLease,
     HumanInteraction,
     NodeAttempt,
     NodeRun,
@@ -75,6 +97,7 @@ from .models import (
     RunEvent,
     RunLock,
     RunSnapshot,
+    WorkflowDraft,
 )
 
 ModelT = TypeVar("ModelT", bound=models.Model)
@@ -285,6 +308,377 @@ class DjangoProjectStore:
             raise PersistenceError(message) from None
 
 
+def _project_by_id(project_id: str) -> Project:
+    project = Project.objects.filter(pk=project_id).first()
+    if project is None:
+        message = "The requested Relay project does not exist."
+        raise ProjectDiscoveryError(message, context={"project": project_id})
+    return project
+
+
+def _require_run(run: Run | None, run_id: str) -> Run:
+    if run is None:
+        message = "The requested run does not exist."
+        raise ProjectDiscoveryError(message, context={"run": run_id})
+    return run
+
+
+def _require_artifact(artifact: Artifact | None) -> Artifact:
+    if artifact is None:
+        message = "The requested artifact does not exist."
+        raise ProjectDiscoveryError(message)
+    return artifact
+
+
+def _reject_lease_holder(project_id: str, workflow_key: str) -> NoReturn:
+    message = "Another browser holds the workflow editor lease."
+    raise PermissionFlowError(
+        message,
+        context={"project": project_id, "workflow": workflow_key},
+        next_action="Wait for the lease to expire or return to its open tab.",
+    )
+
+
+def _reject_schedule_mismatch(run_id: str) -> NoReturn:
+    message = "The durable top-level node set differs from the run snapshot."
+    raise PersistenceError(message, context={"run": run_id})
+
+
+def _reject_active_cleanup(project_id: str) -> NoReturn:
+    message = "Relay will not clean data while this project has an active run."
+    raise PermissionFlowError(message, context={"project": project_id})
+
+
+def _reject_branch_with_worktree(run_id: str) -> NoReturn:
+    message = "Remove a run worktree before deleting its retained branch."
+    raise PermissionFlowError(
+        message,
+        context={"run": run_id},
+        next_action="Clean worktrees first or select scope all.",
+    )
+
+
+def _require_retained_file(path: Path) -> Path:
+    if not path.is_file():
+        message = "The retained artifact file is missing."
+        raise ProjectDiscoveryError(message)
+    return path
+
+
+def _datetime_text(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _datetime_field(instance: models.Model, name: str) -> datetime | None:
+    value = getattr(instance, name)
+    if value is None or isinstance(value, datetime):
+        return value
+    message = f"Stored field {name} is not a datetime."
+    raise PersistenceError(message)
+
+
+def _foreign_key_text(instance: models.Model, name: str) -> str:
+    value = getattr(instance, f"{name}_id")
+    if value is None:
+        message = f"Stored relation {name} has no identifier."
+        raise PersistenceError(message)
+    return str(value)
+
+
+class DjangoWorkflowStore:
+    """Recovery drafts and renewable editor leases for project YAML files."""
+
+    def get_draft(self, project_id: str, workflow_key: str) -> dict[str, object] | None:
+        try:
+            row = WorkflowDraft.objects.filter(
+                project_id=project_id, workflow_key=workflow_key
+            ).first()
+            if row is None:
+                return None
+            return {
+                "yaml": _string(row, "recovery_yaml"),
+                "base_hash": _string(row, "base_file_hash"),
+                "validation_state": _string(row, "validation_state"),
+                "updated_at": _datetime_text(row.updated_at),
+            }
+        except DatabaseError:
+            message = "Relay could not read the workflow recovery draft."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def save_draft(
+        self,
+        project_id: str,
+        workflow_key: str,
+        yaml_text: str,
+        base_hash: str,
+        validation_state: DraftValidationState,
+    ) -> dict[str, object]:
+        try:
+            project = _project_by_id(project_id)
+            row, _created = WorkflowDraft.objects.update_or_create(
+                project=project,
+                workflow_key=workflow_key,
+                defaults={
+                    "recovery_yaml": yaml_text,
+                    "base_file_hash": base_hash,
+                    "validation_state": validation_state.value,
+                },
+            )
+            return {
+                "yaml": _string(row, "recovery_yaml"),
+                "base_hash": _string(row, "base_file_hash"),
+                "validation_state": _string(row, "validation_state"),
+                "updated_at": _datetime_text(row.updated_at),
+            }
+        except ProjectDiscoveryError:
+            raise
+        except (DatabaseError, IntegrityError):
+            message = "Relay could not save the workflow recovery draft."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def discard_draft(self, project_id: str, workflow_key: str) -> None:
+        try:
+            WorkflowDraft.objects.filter(project_id=project_id, workflow_key=workflow_key).delete()
+        except DatabaseError:
+            message = "Relay saved the workflow but could not clear its recovery draft."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def acquire_lease(
+        self,
+        project_id: str,
+        workflow_key: str,
+        holder: str,
+    ) -> dict[str, object]:
+        try:
+            with transaction.atomic():
+                project = _project_by_id(project_id)
+                now = timezone.now()
+                expires = now + timedelta(seconds=EDITOR_LEASE_TTL_SECONDS)
+                lease = (
+                    EditorLease.objects.select_for_update()
+                    .filter(project=project, workflow_key=workflow_key)
+                    .first()
+                )
+                if lease is not None and lease.expires_at > now:
+                    current_holder = _string(lease, "holder")
+                    if current_holder != holder:
+                        _reject_lease_holder(project_id, workflow_key)
+                if lease is None:
+                    lease = EditorLease.objects.create(
+                        project=project,
+                        workflow_key=workflow_key,
+                        holder=holder,
+                        acquired_at=now,
+                        expires_at=expires,
+                    )
+                else:
+                    _set_model_field(lease, "holder", holder)
+                    _set_model_field(lease, "acquired_at", now)
+                    _set_model_field(lease, "expires_at", expires)
+                    lease.save(update_fields=("holder", "acquired_at", "expires_at"))
+                return {
+                    "holder": holder,
+                    "acquired_at": _datetime_text(lease.acquired_at),
+                    "expires_at": _datetime_text(lease.expires_at),
+                }
+        except (ProjectDiscoveryError, PermissionFlowError):
+            raise
+        except (DatabaseError, IntegrityError):
+            message = "Relay could not acquire the workflow editor lease."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+
+def _run_record(run: Run) -> dict[str, object]:
+    return {
+        "id": _identifier(run),
+        "project_id": _foreign_key_text(run, "project"),
+        "workflow_key": _string(run, "workflow_key"),
+        "status": _string(run, "status"),
+        "source_commit": _string(run, "source_commit"),
+        "run_branch": _string(run, "run_branch"),
+        "worktree_state": _string(run, "worktree_state"),
+        "cleanup_policy": _string(run, "cleanup_policy"),
+        "launcher": _string(run, "launcher"),
+        "started_at": _datetime_text(_datetime_field(run, "started_at")),
+        "ended_at": _datetime_text(_datetime_field(run, "ended_at")),
+        "failure_code": run.failure_code,
+        "failure_summary": run.failure_summary,
+        "entry_point": run.entry_point,
+    }
+
+
+class DjangoReadStore:
+    """Bounded, presentation-neutral reads for the authenticated browser."""
+
+    def list_runs(
+        self,
+        *,
+        project_id: str | None,
+        status: str | None,
+        since: str | None,
+        limit: int,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            query = Run.objects.order_by("-started_at", "-pk")
+            if project_id is not None:
+                query = query.filter(project_id=project_id)
+            if status is not None:
+                query = query.filter(status=status)
+            if since is not None:
+                cursor = _require_run(Run.objects.filter(pk=since).first(), since)
+                cursor_started = _datetime_field(cursor, "started_at")
+                if cursor_started is None:
+                    query = query.filter(started_at__isnull=True, pk__lt=cursor.pk)
+                else:
+                    query = query.filter(
+                        models.Q(started_at__lt=cursor_started)
+                        | models.Q(started_at=cursor_started, pk__lt=cursor.pk)
+                        | models.Q(started_at__isnull=True)
+                    )
+            rows = list(query[: bounded + 1])
+            more = len(rows) > bounded
+            rows = rows[:bounded]
+            records: list[dict[str, object]] = []
+            byte_count = 0
+            for row in rows:
+                record = _run_record(row)
+                encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+                if records and byte_count + len(encoded) > API_MAX_PAGE_BYTES:
+                    more = True
+                    break
+                records.append(record)
+                byte_count += len(encoded)
+            next_value = str(records[-1]["id"]) if more and records else None
+        except ProjectDiscoveryError:
+            raise
+        except DatabaseError:
+            message = "Relay could not read run history."
+            raise PersistenceError(message) from None
+        else:
+            return records, next_value
+
+    def run_detail(self, run_id: str) -> dict[str, object]:
+        try:
+            run = _require_run(
+                Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+            )
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            result = _run_record(run)
+            result["snapshot"] = {
+                "relay_version": _string(snapshot, "relay_version"),
+                "runtime_versions": _mapping(snapshot, "runtime_versions"),
+                "hashes": _mapping(snapshot, "hashes"),
+                "route_table": _mapping(snapshot, "route_table"),
+                "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
+            }
+            result["nodes"] = [
+                {
+                    "id": _identifier(node),
+                    "scope_path": _string(node, "scope_path"),
+                    "node_id": _string(node, "node_id"),
+                    "node_type": _string(node, "node_type"),
+                    "status": _string(node, "status"),
+                    "writes": _boolean(node, "writes"),
+                    "outputs": _mapping(node, "outputs"),
+                    "selected_branch": node.selected_branch,
+                    "loop_index": node.loop_index,
+                }
+                for node in NodeRun.objects.filter(run=run).order_by("scope_path")
+            ]
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read run detail."
+            raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return result
+
+    def page_events(
+        self,
+        run_id: str,
+        since: int,
+        limit: int,
+    ) -> tuple[list[dict[str, object]], int | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            _require_run(Run.objects.filter(pk=run_id).first(), run_id)
+            query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
+            rows = list(query[: bounded + 1])
+            more = len(rows) > bounded
+            events: list[dict[str, object]] = []
+            byte_count = 0
+            for row in rows[:bounded]:
+                event = {
+                    "id": row.id,
+                    "type": _string(row, "type"),
+                    "version": _integer(row, "version"),
+                    "source": _string(row, "source"),
+                    "ts": _datetime_text(row.ts),
+                    "payload": _mapping(row, "payload"),
+                }
+                encoded = json.dumps(event, separators=(",", ":"), ensure_ascii=False).encode(
+                    "utf-8"
+                )
+                if events and byte_count + len(encoded) > API_MAX_PAGE_BYTES:
+                    more = True
+                    break
+                events.append(event)
+                byte_count += len(encoded)
+            next_value = rows[len(events) - 1].id if more and events else None
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read the run event page."
+            raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return events, next_value
+
+    def list_artifacts(self, run_id: str) -> list[dict[str, object]]:
+        try:
+            _require_run(Run.objects.filter(pk=run_id).first(), run_id)
+            rows = Artifact.objects.filter(attempt__node_run__run_id=run_id).order_by("pk")
+            return [
+                {
+                    "id": _identifier(row),
+                    "attempt_id": str(row.attempt_id),
+                    "name": _string(row, "declared_name"),
+                    "source_path": _string(row, "source_path"),
+                    "sha256": _string(row, "sha256"),
+                    "bytes": _integer(row, "bytes"),
+                    "media_type": _string(row, "media_type"),
+                    "preservation_state": _string(row, "preservation_state"),
+                }
+                for row in rows
+            ]
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not list retained run artifacts."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def artifact_file(self, artifact_id: str) -> tuple[Path, str, str]:
+        from relay.paths import artifacts_dir, safe_resolve
+
+        try:
+            row = _require_artifact(
+                Artifact.objects.filter(
+                    pk=artifact_id, preservation_state=PreservationState.PRESERVED.value
+                ).first()
+            )
+            path = _require_retained_file(
+                safe_resolve(artifacts_dir(), _string(row, "retained_path"))
+            )
+            return path, _string(row, "declared_name"), _string(row, "media_type")
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not resolve the retained artifact."
+            raise PersistenceError(message) from None
+
+
 def _append_event(
     run: Run,
     event_type: str,
@@ -389,9 +783,9 @@ def _missing_dispatch_claim() -> NoReturn:
 def _invalid_rerun_target(run_id: str, scope_path: str | None = None) -> NoReturn:
     if scope_path is None:
         message = "Only a failed run can rerun a node."
-        raise PersistenceError(message, context={"run": run_id})
+        raise PermissionFlowError(message, context={"run": run_id})
     message = "Only the failed node can be selected for rerun."
-    raise PersistenceError(message, context={"run": run_id, "node": scope_path})
+    raise PermissionFlowError(message, context={"run": run_id, "node": scope_path})
 
 
 def _scope_persistence_error(message: str, run_id: str) -> NoReturn:
@@ -438,8 +832,289 @@ def _resolved_prompt_contents(
     return tuple(contents)
 
 
-class DjangoExecutionStore:
+class DjangoExecutionStore(DjangoAgentStore):
     """Short-transaction adapter for execution, dispatch, controls, and recovery."""
+
+    def create_pending_run(
+        self,
+        project_id: str,
+        request: LaunchRequest,
+        source_commit: str,
+        snapshot: SnapshotBundle,
+        nodes: Mapping[str, NodeDefinition],
+    ) -> str:
+        """Create the complete immutable launch record in one transaction."""
+        run_id = str(uuid.uuid4())
+        branch = run_branch(run_id)
+        worktree = run_worktree_path(run_id)
+        try:
+            with transaction.atomic():
+                project = _project_by_id(project_id)
+                run_transition = transition_run(None, "launch")
+                run = Run.objects.create(
+                    id=run_id,
+                    project=project,
+                    workflow_key=request.workflow_key,
+                    status=run_transition.status,
+                    source_commit=source_commit,
+                    run_branch=branch,
+                    worktree_path=str(worktree),
+                    worktree_state=WorktreeState.NONE.value,
+                    cleanup_policy=request.cleanup_policy,
+                    launcher=request.launcher,
+                    entry_point=request.entry_point,
+                    recorded_head=source_commit,
+                )
+                RunSnapshot.objects.create(run=run, **snapshot.to_dict())
+                _append_event(
+                    run,
+                    run_transition.event,
+                    EventSource.RUN,
+                    {"status": run_transition.status},
+                )
+                for node_id, definition in nodes.items():
+                    node_transition = transition_node(None, "create")
+                    node = NodeRun.objects.create(
+                        run=run,
+                        scope_path=node_scope(None, node_id),
+                        parent_scope_path=None,
+                        node_id=node_id,
+                        node_type=definition.type,
+                        frozen_def=definition.model_dump(mode="json", by_alias=True),
+                        status=node_transition.status,
+                        writes=getattr(definition, "writes", False),
+                    )
+                    _append_event(
+                        run,
+                        node_transition.event,
+                        EventSource.NODE,
+                        {
+                            "scope_path": _string(node, "scope_path"),
+                            "node_type": definition.type,
+                            "status": node_transition.status,
+                        },
+                        node=node,
+                    )
+                return run_id
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except (DatabaseError, IntegrityError):
+            message = "Relay could not persist the pending run and immutable snapshot."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def mark_run_started(
+        self,
+        run_id: str,
+        branch: str,
+        worktree: Path,
+        source_commit: str,
+    ) -> None:
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=run_id)
+                transition = transition_run(_string(run, "status"), "worktree_ready")
+                if not transition.changed:
+                    return
+                _set_model_field(run, "run_branch", branch)
+                _set_model_field(run, "worktree_path", str(worktree))
+                _set_model_field(run, "source_commit", source_commit)
+                _set_model_field(run, "recorded_head", source_commit)
+                _set_model_field(run, "worktree_state", WorktreeState.CREATED.value)
+                _set_model_field(run, "status", transition.status)
+                _set_model_field(run, "started_at", timezone.now())
+                run.save(
+                    update_fields=(
+                        "run_branch",
+                        "worktree_path",
+                        "source_commit",
+                        "recorded_head",
+                        "worktree_state",
+                        "status",
+                        "started_at",
+                    )
+                )
+                _append_event(
+                    run,
+                    transition.event,
+                    EventSource.RUN,
+                    {"status": transition.status},
+                )
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not mark the run worktree ready."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def mark_run_launch_failed(self, run_id: str, error: RelayError) -> None:
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=run_id)
+                transition = transition_run(_string(run, "status"), "worktree_failed")
+                if not transition.changed:
+                    return
+                _set_model_field(run, "status", transition.status)
+                _set_model_field(run, "worktree_state", WorktreeState.NONE.value)
+                _set_model_field(run, "failure_code", error.error_code)
+                _set_model_field(run, "failure_summary", error.message)
+                _set_model_field(run, "ended_at", timezone.now())
+                run.save(
+                    update_fields=(
+                        "status",
+                        "worktree_state",
+                        "failure_code",
+                        "failure_summary",
+                        "ended_at",
+                    )
+                )
+                _append_event(
+                    run,
+                    transition.event,
+                    EventSource.RUN,
+                    {"status": transition.status, "failure_code": error.error_code},
+                )
+                _append_event(
+                    run,
+                    "error",
+                    EventSource.SYSTEM,
+                    error.to_envelope(),
+                )
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not retain the failed launch state."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def load_run_schedule(self, run_id: str) -> RunSchedule:
+        try:
+            run = Run.objects.select_related("snapshot").get(pk=run_id)
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            loaded = load_workflow_text(
+                _string(snapshot, "workflow_yaml"),
+                source=Path(f"snapshot:{run_id}"),
+            )
+            rows = {
+                _string(node, "node_id"): node
+                for node in NodeRun.objects.filter(run=run, parent_scope_path__isnull=True)
+            }
+            if set(rows) != set(loaded.definition.nodes):
+                _reject_schedule_mismatch(run_id)
+            scheduled = {
+                node_id: ScheduledNode(
+                    _identifier(rows[node_id]),
+                    node_id,
+                    definition,
+                    _string(rows[node_id], "status"),
+                    _mapping(rows[node_id], "outputs"),
+                    (value if isinstance((value := rows[node_id].selected_branch), str) else None),
+                )
+                for node_id, definition in loaded.definition.nodes.items()
+            }
+            return RunSchedule(
+                run_id,
+                scheduled,
+                _mapping(snapshot, "typed_inputs"),
+                {
+                    "run_id": run_id,
+                    "workflow_key": _string(run, "workflow_key"),
+                    "source_commit": _string(run, "source_commit"),
+                    "run_branch": _string(run, "run_branch"),
+                },
+                run.entry_point if isinstance(run.entry_point, str) else None,
+            )
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not load durable scheduling state."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def settle_run(self, run_id: str) -> None:
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=run_id)
+                self._finish_run_if_terminal(run)
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not settle the run after scheduling."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def active_run_ids(self) -> tuple[str, ...]:
+        try:
+            values = (
+                Run.objects.filter(
+                    status__in=(RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value)
+                )
+                .order_by("started_at", "pk")
+                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+            )
+            return tuple(str(value) for value in values)
+        except DatabaseError:
+            message = "Relay could not enumerate active runs for scheduling."
+            raise PersistenceError(message) from None
+
+    def clean_project_data(self, project_id: str, scope: str) -> dict[str, int]:
+        """Delete one confirmed category for the current project in preservation order."""
+        if scope not in {"runs", "worktrees", "branches", "all"}:
+            message = "scope must be runs, worktrees, branches, or all."
+            raise PermissionFlowError(message)
+        try:
+            project = _project_by_id(project_id)
+            active = Run.objects.filter(project=project).exclude(
+                status__in=(
+                    RunStatus.SUCCEEDED.value,
+                    RunStatus.FAILED.value,
+                    RunStatus.CANCELED.value,
+                    RunStatus.INTERRUPTED.value,
+                )
+            )
+            if active.exists():
+                _reject_active_cleanup(project_id)
+            runs = list(Run.objects.filter(project=project).order_by("started_at", "pk"))
+            repository = Path(_string(project, "git_root"))
+            deleted = {"runs": 0, "worktrees": 0, "branches": 0, "artifact_roots": 0, "logs": 0}
+            if scope in {"worktrees", "all"}:
+                root = worktrees_dir()
+                for run in runs:
+                    path = safe_resolve(root, _string(run, "worktree_path"))
+                    if path.exists():
+                        remove_worktree(repository, path)
+                        deleted["worktrees"] += 1
+                    if _string(run, "worktree_state") != WorktreeState.REMOVED.value:
+                        _set_model_field(run, "worktree_state", WorktreeState.REMOVED.value)
+                        run.save(update_fields=("worktree_state",))
+            if scope in {"branches", "all"}:
+                for run in runs:
+                    if Path(_string(run, "worktree_path")).exists():
+                        _reject_branch_with_worktree(_identifier(run))
+                    result = run_git(
+                        repository,
+                        ["branch", "-D", _string(run, "run_branch")],
+                        check=False,
+                    )
+                    if result.returncode == 0:
+                        deleted["branches"] += 1
+            if scope in {"runs", "all"}:
+                artifact_root = artifacts_dir()
+                for run in runs:
+                    directory = safe_resolve(artifact_root, _identifier(run))
+                    if directory.is_dir():
+                        shutil.rmtree(directory)
+                        deleted["artifact_roots"] += 1
+                deleted["runs"] = len(runs)
+                Run.objects.filter(pk__in=[run.pk for run in runs]).delete()
+            if scope == "all":
+                log = application_log_path()
+                for path in (log, *(log.parent.glob(f"{log.name}.*"))):
+                    if path.is_file():
+                        path.unlink()
+                        deleted["logs"] += 1
+        except (PermissionFlowError, PersistenceError, ProjectDiscoveryError):
+            raise
+        except (DatabaseError, OSError):
+            message = "Relay could not complete the confirmed data cleanup."
+            raise PersistenceError(message, context={"project": project_id}) from None
+        else:
+            return deleted
 
     def append_attempt_event(
         self,
@@ -517,6 +1192,8 @@ class DjangoExecutionStore:
             "run_branch": _string(run, "run_branch"),
             "scope_path": scope_path,
         }
+        if isinstance(run.entry_point, str):
+            metadata["entry_point"] = run.entry_point
         loop_index = node.loop_index
         if loop_index is not None:
             if not isinstance(loop_index, int) or isinstance(loop_index, bool):
@@ -1457,6 +2134,21 @@ class DjangoExecutionStore:
                 state = transition_control(None, "post").status
                 if not self._attempt_is_current(attempt):
                     state = transition_control(state, "supersede").status
+                expected_interaction = {
+                    ControlKind.PERMISSION_ANSWER.value: InteractionKind.PERMISSION.value,
+                    ControlKind.ELICITATION_ANSWER.value: InteractionKind.ELICITATION.value,
+                    ControlKind.WAIT_ANSWER.value: InteractionKind.WAIT.value,
+                }.get(kind)
+                if (
+                    state == ControlState.PENDING.value
+                    and expected_interaction is not None
+                    and not HumanInteraction.objects.filter(
+                        attempt=attempt,
+                        kind=expected_interaction,
+                        status=InteractionStatus.PENDING.value,
+                    ).exists()
+                ):
+                    state = transition_control(None, "reject").status
                 ControlRequest.objects.create(
                     attempt=attempt,
                     kind=kind,
@@ -1954,17 +2646,26 @@ class DjangoExecutionStore:
         self.finish_attempt(_identifier(attempt), outcome, _string(attempt, "starting_head"))
         self.release_attempt_lock(_identifier(attempt))
 
-    def request_run_cancellation(self, run_id: str, idempotency_key: str) -> tuple[str, ...]:
+    def request_run_cancellation(self, run_id: str, idempotency_key: str) -> ControlResult:
         try:
             with transaction.atomic():
-                run = Run.objects.select_for_update().get(pk=run_id)
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                duplicate = RunEvent.objects.filter(
+                    run=run,
+                    type="run.canceling",
+                    payload__idempotency_key=idempotency_key,
+                ).exists()
+                if duplicate:
+                    return ControlResult.ALREADY_APPLIED
                 status = _string(run, "status")
                 if status in {
                     RunStatus.SUCCEEDED.value,
                     RunStatus.FAILED.value,
                     RunStatus.CANCELED.value,
                 }:
-                    return ()
+                    return ControlResult.ALREADY_APPLIED
                 if status != RunStatus.CANCELING.value:
                     transition = transition_run(status, "owner_cancel")
                     if transition.changed:
@@ -1974,17 +2675,21 @@ class DjangoExecutionStore:
                             run,
                             transition.event,
                             EventSource.RUN,
-                            {"status": transition.status},
+                            {
+                                "status": transition.status,
+                                "idempotency_key": idempotency_key,
+                            },
                         )
+                else:
+                    return ControlResult.ALREADY_APPLIED
                 self._cancel_not_started(run)
                 expires = timezone.now() + timedelta(seconds=CONTROL_REQUEST_TTL_SECONDS)
-                request_ids: list[str] = []
                 attempts = NodeAttempt.objects.filter(
                     node_run__run=run,
                     status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
                 )
                 for attempt in attempts:
-                    request, _created = ControlRequest.objects.get_or_create(
+                    _request, _created = ControlRequest.objects.get_or_create(
                         attempt=attempt,
                         idempotency_key=f"{idempotency_key}:{_identifier(attempt)}",
                         defaults={
@@ -1994,10 +2699,9 @@ class DjangoExecutionStore:
                             "expires_at": expires,
                         },
                     )
-                    request_ids.append(_identifier(request))
                 self._finish_run_if_terminal(run)
-                return tuple(request_ids)
-        except PersistenceError:
+                return ControlResult.ACCEPTED
+        except (PersistenceError, ProjectDiscoveryError):
             raise
         except (DatabaseError, IntegrityError):
             message = "Relay could not persist run cancellation."

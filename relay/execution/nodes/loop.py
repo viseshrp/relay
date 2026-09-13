@@ -22,7 +22,17 @@ class LoopExecutor:
         node = parse_node(context, LoopNode)
         parent = enclosing_scope(context.attempt.scope_path)
         combined_outputs: dict[str, dict[str, object]] = {}
-        for iteration in range(1, node.max_iterations + 1):
+        first_iteration = 1
+        entry_point = context.attempt.run_metadata.get("entry_point")
+        prefix = f"{context.attempt.scope_path}#"
+        if isinstance(entry_point, str) and entry_point.startswith(prefix):
+            raw_iteration = entry_point[len(prefix) :].split(".", maxsplit=1)[0]
+            if raw_iteration.isdigit():
+                first_iteration = int(raw_iteration)
+        if not 1 <= first_iteration <= node.max_iterations:
+            message = "The declared loop entry point is outside its iteration bound."
+            raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
+        for iteration in range(first_iteration, node.max_iterations + 1):
             iteration_scope = loop_iteration_scope(parent, context.attempt.node_id, iteration)
             result = self.scopes.execute_scope(
                 context,

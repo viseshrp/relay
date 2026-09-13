@@ -11,6 +11,7 @@ from typing import Protocol
 
 from relay.constants import CANCELLATION_GRACE_SECONDS
 from relay.errors import CancellationError
+from relay.execution.control import ControlResult
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class AgentSession(Protocol):
 
 
 class CancellationStore(Protocol):
-    def request_run_cancellation(self, run_id: str, idempotency_key: str) -> tuple[str, ...]: ...
+    def request_run_cancellation(self, run_id: str, idempotency_key: str) -> ControlResult: ...
 
 
 @dataclass(frozen=True, slots=True)

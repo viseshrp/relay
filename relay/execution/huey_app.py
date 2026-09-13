@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import threading
+from typing import Protocol
 
 import django
 from huey import SqliteHuey, signals
@@ -16,8 +17,15 @@ from relay.paths import artifacts_dir, data_dir, huey_database_path, shutdown_ma
 
 from .reconcile import ReconcileResult, reconcile_once
 from .runner import AttemptExecutor, run_claim_token
+from .scheduler import SchedulingStore, dispatch_ready_nodes
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ActiveSchedulingStore(SchedulingStore, Protocol):
+    """Scheduler adapter that can enumerate the bounded active-run set."""
+
+    def active_run_ids(self) -> tuple[str, ...]: ...
 
 
 def _database_path() -> Path:
@@ -62,13 +70,15 @@ def run_node_attempt(claim_token: str) -> None:
     _setup_django()
     from relay.web.repositories import DjangoExecutionStore
 
+    store = DjangoExecutionStore()
     run_claim_token(
-        DjangoExecutionStore(),
+        store,
         claim_token,
         _worker_id(),
         _executors(),
         artifact_root=artifacts_dir(create=True),
     )
+    _advance_active_runs(store)
 
 
 def enqueue_claim(claim_token: str) -> object:
@@ -76,16 +86,25 @@ def enqueue_claim(claim_token: str) -> object:
     return run_node_attempt(claim_token)
 
 
+def _advance_active_runs(store: ActiveSchedulingStore) -> None:
+    """Schedule newly eligible work after a durable state change."""
+    for run_id in store.active_run_ids():
+        dispatch_ready_nodes(store, run_id, enqueue_claim)
+
+
 def reconcile_dispatch() -> ReconcileResult:
     """Run one bounded repair pass in the consumer process."""
     _setup_django()
     from relay.web.repositories import DjangoExecutionStore
 
-    return reconcile_once(
-        DjangoExecutionStore(),
+    store = DjangoExecutionStore()
+    result = reconcile_once(
+        store,
         enqueue_claim,
         orderly_shutdown=shutdown_marker_path().exists(),
     )
+    _advance_active_runs(store)
+    return result
 
 
 def reconciliation_loop(stop: threading.Event) -> None:

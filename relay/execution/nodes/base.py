@@ -16,15 +16,18 @@ from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS, CONTROL_POLL_INT
 from relay.errors import NodeExecutionError, PersistenceError
 from relay.execution.dispatch import dispatch_node
 from relay.execution.runner import AttemptContext, OutcomeKind, run_claim_token
-from relay.execution.scheduler import evaluate_eligibility
+from relay.execution.scheduler import (
+    activation_sources,
+    entry_node_for_scope,
+    evaluate_eligibility,
+    reachable_node_ids,
+)
 from relay.execution.state import EventSource, NodeStatus
 from relay.workflows.graph import compile_graph
 from relay.workflows.outputs import extract_outputs
 from relay.workflows.schema import (
-    ConditionNode,
     JsonPathSelector,
     LabelSelector,
-    LoopNode,
     NodeDefinition,
     OutputSelector,
     YamlPathSelector,
@@ -75,30 +78,6 @@ class MissingNestedScopeRunner:
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
 
 
-def _control_targets(node: NodeDefinition) -> tuple[str, ...]:
-    targets = [node.on_timeout] if node.on_timeout is not None else []
-    if isinstance(node, ConditionNode):
-        targets.extend(node.branches.values())
-    if isinstance(node, LoopNode):
-        targets.append(node.exhausted)
-    return tuple(targets)
-
-
-def _activation_sources(
-    nodes: Mapping[str, NodeDefinition],
-) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
-    incoming_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    outgoing_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    for source_id, node in nodes.items():
-        for target in _control_targets(node):
-            incoming_lists[target].append(source_id)
-            outgoing_lists[source_id].append(target)
-    return (
-        {node_id: tuple(values) for node_id, values in incoming_lists.items()},
-        {node_id: tuple(values) for node_id, values in outgoing_lists.items()},
-    )
-
-
 def _expression_values(
     context: AttemptContext,
     inputs: Mapping[str, object],
@@ -139,7 +118,15 @@ class SynchronousScopeRunner:
             inputs,
             loop_index,
         )
-        incoming, control_downstream = _activation_sources(nodes)
+        incoming, control_downstream = activation_sources(nodes)
+        entry_value = context.attempt.run_metadata.get("entry_point")
+        entry_point = entry_value if isinstance(entry_value, str) else None
+        entry_node = entry_node_for_scope(entry_point, parent_scope)
+        reachable = (
+            reachable_node_ids(entry_node, graph, control_downstream)
+            if entry_node is not None
+            else frozenset(nodes)
+        )
         node_ids = tuple(nodes)
         queue = deque(graph.topological_order)
         propagated: set[str] = set()
@@ -155,8 +142,20 @@ class SynchronousScopeRunner:
             record = records[node_id]
             node = nodes[node_id]
             if record.status == NodeStatus.PENDING.value:
+                if node_id not in reachable:
+                    context.runtime.transition_scope_node(
+                        record.node_run_id, "dependencies_unreachable"
+                    )
+                    queue.extend(graph.downstream[node_id])
+                    queue.extend(control_downstream[node_id])
+                    continue
+                if node_id == entry_node:
+                    # Launch preflight proved this entry point's declared inputs and artifacts.
+                    context.runtime.transition_scope_node(
+                        record.node_run_id, "dependencies_satisfied"
+                    )
                 activators = incoming[node_id]
-                if activators:
+                if activators and node_id != entry_node:
                     source_records = [records[source] for source in activators]
                     selected = any(item.selected_branch == node_id for item in source_records)
                     complete = all(
