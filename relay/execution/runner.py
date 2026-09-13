@@ -64,11 +64,34 @@ class AttemptRuntime(DispatchStore, Protocol):
 
     def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None: ...
 
-    def claim_next_control(self, attempt_id: str, worker_id: str) -> ClaimedControl | None: ...
+    def claim_next_control(
+        self,
+        attempt_id: str,
+        worker_id: str,
+        kinds: tuple[str, ...] | None = None,
+    ) -> ClaimedControl | None: ...
 
     def heartbeat_control(self, request_id: str, worker_id: str) -> bool: ...
 
     def apply_control(self, request_id: str, worker_id: str) -> bool: ...
+
+    def record_agent_session(
+        self,
+        attempt_id: str,
+        *,
+        process_id: int | None,
+        session_id: str | None,
+        agent_version: str,
+        config_ids: Mapping[str, object],
+    ) -> None: ...
+
+    def request_agent_interaction(
+        self,
+        attempt_id: str,
+        kind: str,
+        prompt: str,
+        options: tuple[Mapping[str, object], ...],
+    ) -> str: ...
 
     def ensure_scope_nodes(
         self,

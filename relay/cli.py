@@ -12,6 +12,7 @@ from .constants import (
     DEFAULT_PORT,
     DEFAULT_WORKERS,
     EXIT_ALREADY_INITIALIZED,
+    EXIT_DOCTOR_FAILED,
     EXIT_NOT_A_REPOSITORY,
     EXIT_PROJECT_NOT_FOUND,
 )
@@ -63,9 +64,96 @@ def up_command(host: str, port: int, no_browser: bool, workers: int) -> None:
 
 
 @main.command("doctor")
-def doctor_command() -> None:
+@click.pass_context
+def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
-    click.echo("Readiness checks are not available in this implementation slice.")
+    from .agents.driver import probe_installed_agents
+    from .agents.registry import load_registry
+    from .manage import apply_migrations
+
+    try:
+        apply_migrations()
+        from .web.repositories import DjangoAgentStore
+
+        registry = load_registry()
+        rows = probe_installed_agents(
+            Path.cwd(), registry=registry, observation_store=DjangoAgentStore()
+        )
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_DOCTOR_FAILED)
+
+    agents: list[dict[str, object]] = []
+    all_ready = True
+    for discovered, result in rows:
+        models = [] if result is None else [item.model_value for item in result.models]
+        ready = (
+            discovered.installed
+            and result is not None
+            and result.general_error is None
+            and bool(models)
+        )
+        all_ready = all_ready and ready
+        registry_metadata = (
+            registry.agents.get(discovered.profile.registry_id)
+            if discovered.profile.registry_id is not None
+            else None
+        )
+        agents.append(
+            {
+                "id": discovered.profile.agent_id,
+                "installed": discovered.installed,
+                "ready": ready,
+                "command": (
+                    list(discovered.command.argv()) if discovered.command is not None else None
+                ),
+                "detected_version": discovered.detected_version,
+                "models": models,
+                "reason": (
+                    result.general_error
+                    if result is not None and result.general_error is not None
+                    else discovered.reason
+                ),
+                "cleanup_warning": result.cleanup_warning if result is not None else None,
+                "install_url": discovered.profile.install_url,
+                "registry": (
+                    {
+                        "id": registry_metadata.agent_id,
+                        "version": registry_metadata.version,
+                        "distributions": [
+                            {
+                                "manager": item.manager,
+                                "package": item.package,
+                                "version": item.version,
+                                "args": list(item.args),
+                            }
+                            for item in registry_metadata.distributions
+                        ],
+                    }
+                    if registry_metadata is not None
+                    else None
+                ),
+            }
+        )
+    click.echo(
+        json.dumps(
+            {
+                "ok": all_ready,
+                "temporary_sessions": True,
+                "registry": {
+                    "source_url": registry.source_url,
+                    "fetched_at": registry.fetched_at.isoformat(),
+                    "cache_age_seconds": round(registry.cache_age_seconds, 3),
+                    "stale": registry.stale,
+                    "warning": registry.warning,
+                },
+                "agents": agents,
+            },
+            sort_keys=True,
+        )
+    )
+    if not all_ready:
+        context.exit(EXIT_DOCTOR_FAILED)
 
 
 @main.group("project")

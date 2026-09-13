@@ -13,6 +13,7 @@ from django.db import DatabaseError, IntegrityError, models, transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from relay.agents.models import ModelObservation
 from relay.constants import (
     ATTEMPT_STALE_AFTER_SECONDS,
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
@@ -45,6 +46,7 @@ from relay.execution.state import (
     ControlKind,
     ControlState,
     DispatchState,
+    DriverKind,
     EventSensitivity,
     EventSource,
     InteractionKind,
@@ -60,6 +62,7 @@ from relay.vcs.artifacts import PreservationResult
 from relay.workflows.scope import enclosing_scope, node_scope, sibling_scope
 
 from .models import (
+    AgentModelObservation,
     Artifact,
     ControlRequest,
     DispatchClaim,
@@ -75,6 +78,56 @@ from .models import (
 )
 
 ModelT = TypeVar("ModelT", bound=models.Model)
+
+
+class DjangoAgentStore:
+    """Advisory model observations, replaced only by a fresh successful probe."""
+
+    def replace_model_observations(
+        self,
+        agent_id: str,
+        observations: tuple[ModelObservation, ...],
+    ) -> None:
+        if any(item.agent_id != agent_id for item in observations):
+            message = "An agent observation does not match its cache identity."
+            raise PersistenceError(message, context={"agent": agent_id})
+        try:
+            with transaction.atomic():
+                AgentModelObservation.objects.filter(agent_id=agent_id).delete()
+                AgentModelObservation.objects.bulk_create(
+                    [
+                        AgentModelObservation(
+                            agent_id=item.agent_id,
+                            model_value=item.model_value,
+                            model_name=item.model_name,
+                            config_id=item.config_id,
+                            agent_version=item.agent_version,
+                            observed_at=item.observed_at,
+                        )
+                        for item in observations
+                    ]
+                )
+        except DatabaseError:
+            message = "Relay could not update cached agent model observations."
+            raise PersistenceError(message, context={"agent": agent_id}) from None
+
+    def list_model_observations(self) -> tuple[ModelObservation, ...]:
+        try:
+            rows = AgentModelObservation.objects.order_by("agent_id", "model_value")
+            return tuple(
+                ModelObservation(
+                    agent_id=_string(row, "agent_id"),
+                    model_value=_string(row, "model_value"),
+                    model_name=_string(row, "model_name"),
+                    config_id=_string(row, "config_id"),
+                    agent_version=_string(row, "agent_version"),
+                    observed_at=row.observed_at,
+                )
+                for row in rows
+            )
+        except DatabaseError:
+            message = "Relay could not read cached agent model observations."
+            raise PersistenceError(message) from None
 
 
 def _text_field(project: Project, name: str) -> str:
@@ -275,6 +328,39 @@ def _bounded_attempt_event_payload(
         message = "An attempt event exceeded Relay's persisted payload limit."
         raise PersistenceError(message, context={"node": _identifier(attempt)})
     return event_payload
+
+
+def _truncate_utf8(value: str, limit: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= limit:
+        return value
+    end = limit
+    while end > 0 and (encoded[end] & 0xC0) == 0x80:
+        end -= 1
+    return encoded[:end].decode("utf-8")
+
+
+def _bounded_interaction_request(
+    prompt: str,
+    options: tuple[Mapping[str, object], ...],
+) -> dict[str, object]:
+    """Keep the public interaction useful while honoring the persisted event ceiling."""
+    payload: dict[str, object] = {
+        "prompt": _truncate_utf8(prompt, EVENT_MAX_PAYLOAD_BYTES // 2),
+        "options": [],
+    }
+    retained: list[dict[str, object]] = []
+    for option in options:
+        candidate = [*retained, dict(option)]
+        encoded = json.dumps(
+            {**payload, "options": candidate}, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        if len(encoded) > EVENT_MAX_PAYLOAD_BYTES // 2:
+            payload["options_truncated"] = True
+            break
+        retained = candidate
+    payload["options"] = retained
+    return payload
 
 
 def _control_public_result(state: str) -> ControlResult:
@@ -547,6 +633,29 @@ class DjangoExecutionStore:
                 if needs_lock and not decision.allowed:
                     return ClaimResult(ClaimDisposition.BUSY)
 
+                scope_path = _string(node, "scope_path")
+                frozen = _mapping(node, "frozen_def")
+                (
+                    inputs,
+                    upstream_outputs,
+                    run_metadata,
+                    prompt_contents,
+                    route,
+                    subworkflows,
+                ) = self._claim_context(run, node, snapshot, frozen)
+                selected_agent = route.get("selected_agent", "")
+                model_value = route.get("model_value", "")
+                if not isinstance(selected_agent, str) or not isinstance(model_value, str):
+                    message = "The snapshotted agent route is malformed."
+                    raise PersistenceError(message, context={"node": scope_path})  # noqa: TRY301
+                driver_kind = None
+                if node_type == NodeType.AGENT.value:
+                    driver_kind = (
+                        DriverKind.ANTIGRAVITY.value
+                        if selected_agent == "antigravity"
+                        else DriverKind.ACP.value
+                    )
+
                 maximum = NodeAttempt.objects.filter(node_run=node).aggregate(
                     value=Max("attempt_number")
                 )["value"]
@@ -558,6 +667,9 @@ class DjangoExecutionStore:
                     attempt_number=attempt_number,
                     status=AttemptStatus.RUNNING.value,
                     worker_id=worker_id,
+                    driver_kind=driver_kind,
+                    agent_id=selected_agent,
+                    model_value=model_value,
                     starting_head=starting_head,
                     started_at=now,
                     heartbeat_at=now,
@@ -579,16 +691,6 @@ class DjangoExecutionStore:
                 node_transition = transition_node(_string(node, "status"), "attempt_started")
                 _set_model_field(node, "status", node_transition.status)
                 node.save(update_fields=("status",))
-                scope_path = _string(node, "scope_path")
-                frozen = _mapping(node, "frozen_def")
-                (
-                    inputs,
-                    upstream_outputs,
-                    run_metadata,
-                    prompt_contents,
-                    route,
-                    subworkflows,
-                ) = self._claim_context(run, node, snapshot, frozen)
                 _append_event(
                     run,
                     node_transition.event,
@@ -608,9 +710,9 @@ class DjangoExecutionStore:
                     {
                         "scope_path": scope_path,
                         "attempt_number": attempt_number,
-                        "driver_kind": None,
-                        "agent_id": "",
-                        "model_value": "",
+                        "driver_kind": driver_kind,
+                        "agent_id": selected_agent,
+                        "model_value": model_value,
                     },
                     node=node,
                     attempt=attempt,
@@ -679,6 +781,116 @@ class DjangoExecutionStore:
             ).update(process_pid=process_id)
         except DatabaseError:
             message = "Relay could not record the attempt process."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def record_agent_session(
+        self,
+        attempt_id: str,
+        *,
+        process_id: int | None,
+        session_id: str | None,
+        agent_version: str,
+        config_ids: Mapping[str, object],
+    ) -> None:
+        """Persist process/session correlation without changing attempt ownership."""
+        try:
+            NodeAttempt.objects.filter(
+                pk=attempt_id,
+                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+            ).update(
+                process_pid=process_id,
+                acp_session_id=session_id,
+                agent_version=agent_version,
+                config_ids=dict(config_ids),
+            )
+        except DatabaseError:
+            message = "Relay could not record the agent session."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def request_agent_interaction(
+        self,
+        attempt_id: str,
+        kind: str,
+        prompt: str,
+        options: tuple[Mapping[str, object], ...],
+    ) -> str:
+        """Pause one live attempt on a redacted ACP permission or elicitation."""
+        if kind not in {InteractionKind.PERMISSION.value, InteractionKind.ELICITATION.value}:
+            message = f"Unsupported agent interaction kind {kind!r}."
+            raise PersistenceError(message, context={"node": attempt_id})
+        try:
+            with transaction.atomic():
+                attempt = (
+                    NodeAttempt.objects.select_for_update()
+                    .select_related("node_run__run")
+                    .get(pk=attempt_id)
+                )
+                if not self._attempt_is_current(attempt):
+                    message = "The agent interaction no longer belongs to a live attempt."
+                    raise PersistenceError(message, context={"node": attempt_id})  # noqa: TRY301
+                node = _related(attempt, "node_run", NodeRun)
+                run = _related(node, "run", Run)
+                if HumanInteraction.objects.filter(
+                    attempt=attempt, status=InteractionStatus.PENDING.value
+                ).exists():
+                    message = "The agent attempt already has a pending owner interaction."
+                    raise PersistenceError(message, context={"node": attempt_id})  # noqa: TRY301
+                request_payload = _bounded_interaction_request(prompt, options)
+                interaction = HumanInteraction.objects.create(
+                    run=run,
+                    node_run=node,
+                    attempt=attempt,
+                    kind=kind,
+                    request_payload=request_payload,
+                    status=InteractionStatus.PENDING.value,
+                )
+                if _string(node, "status") == NodeStatus.RUNNING.value:
+                    node_transition = transition_node(
+                        _string(node, "status"), "interaction_requested"
+                    )
+                    _set_model_field(node, "status", node_transition.status)
+                    node.save(update_fields=("status",))
+                    _set_model_field(attempt, "status", AttemptStatus.WAITING.value)
+                    attempt.save(update_fields=("status",))
+                _append_event(
+                    run,
+                    f"{kind}.requested",
+                    EventSource.AGENT,
+                    {
+                        "scope_path": _string(node, "scope_path"),
+                        "attempt_number": _integer(attempt, "attempt_number"),
+                        "interaction_id": _identifier(interaction),
+                        "prompt": request_payload["prompt"],
+                        **(
+                            {"options": request_payload["options"]}
+                            if request_payload["options"]
+                            else {}
+                        ),
+                        **(
+                            {"options_truncated": True}
+                            if request_payload.get("options_truncated") is True
+                            else {}
+                        ),
+                    },
+                    node=node,
+                    attempt=attempt,
+                    sensitivity=EventSensitivity.REDACTED,
+                )
+                if _string(run, "status") == RunStatus.RUNNING.value:
+                    run_transition = transition_run(_string(run, "status"), "node_waiting")
+                    _set_model_field(run, "status", run_transition.status)
+                    run.save(update_fields=("status",))
+                    _append_event(
+                        run,
+                        run_transition.event,
+                        EventSource.RUN,
+                        {"status": run_transition.status},
+                    )
+                return _identifier(interaction)
+        except PersistenceError:
+            raise
+        except (DatabaseError, IntegrityError, ObjectDoesNotExist):
+            message = "Relay could not persist the agent interaction."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
     def ensure_scope_nodes(
@@ -1258,7 +1470,12 @@ class DjangoExecutionStore:
             message = "Relay could not persist the control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
-    def claim_next_control(self, attempt_id: str, worker_id: str) -> ClaimedControl | None:
+    def claim_next_control(
+        self,
+        attempt_id: str,
+        worker_id: str,
+        kinds: tuple[str, ...] | None = None,
+    ) -> ClaimedControl | None:
         try:
             with transaction.atomic():
                 attempt = (
@@ -1281,16 +1498,14 @@ class DjangoExecutionStore:
                     state=ControlState.PENDING.value,
                     expires_at__lte=now,
                 ).update(state=ControlState.STALE.value)
-                request = (
-                    ControlRequest.objects.select_for_update()
-                    .filter(
-                        attempt=attempt,
-                        state=ControlState.PENDING.value,
-                        expires_at__gt=now,
-                    )
-                    .order_by("created_at", "pk")
-                    .first()
+                requests = ControlRequest.objects.select_for_update().filter(
+                    attempt=attempt,
+                    state=ControlState.PENDING.value,
+                    expires_at__gt=now,
                 )
+                if kinds is not None:
+                    requests = requests.filter(kind__in=kinds)
+                request = requests.order_by("created_at", "pk").first()
                 if request is None:
                     return None
                 control_transition = transition_control(_string(request, "state"), "claim")

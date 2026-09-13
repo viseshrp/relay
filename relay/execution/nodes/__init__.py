@@ -5,7 +5,7 @@ from __future__ import annotations
 from relay.execution.runner import AttemptExecutor
 from relay.execution.state import NodeType
 
-from .agent import AgentExecutor, AgentNodeDriver, MissingAgentDriver
+from .agent import AgentExecutor, AgentNodeDriver
 from .base import NestedScopeRunner, SynchronousScopeRunner
 from .command import CommandExecutor
 from .condition import ConditionExecutor
@@ -20,12 +20,14 @@ def node_executors(
     scope_runner: NestedScopeRunner | None = None,
 ) -> dict[str, AttemptExecutor]:
     """Build one registry keyed by the stable persisted node-type values."""
-    driver = agent_driver if agent_driver is not None else MissingAgentDriver()
-    scopes = (
-        scope_runner
-        if scope_runner is not None
-        else SynchronousScopeRunner(driver)
-    )
+    if agent_driver is None:
+        # Agent modules load only when the worker builds its executor registry.
+        from relay.agents.driver import RoutedAgentNodeDriver
+
+        driver = RoutedAgentNodeDriver()
+    else:
+        driver = agent_driver
+    scopes = scope_runner if scope_runner is not None else SynchronousScopeRunner(driver)
     return {
         NodeType.AGENT.value: AgentExecutor(driver),
         NodeType.COMMAND.value: CommandExecutor(),

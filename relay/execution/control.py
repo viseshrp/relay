@@ -54,7 +54,12 @@ class ControlStore(Protocol):
         ttl_seconds: float,
     ) -> ControlResult: ...
 
-    def claim_next_control(self, attempt_id: str, worker_id: str) -> ClaimedControl | None: ...
+    def claim_next_control(
+        self,
+        attempt_id: str,
+        worker_id: str,
+        kinds: tuple[str, ...] | None = None,
+    ) -> ClaimedControl | None: ...
 
     def heartbeat_control(self, request_id: str, worker_id: str) -> bool: ...
 
