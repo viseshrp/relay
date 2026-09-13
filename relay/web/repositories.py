@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+import json
 from typing import NoReturn, TypeVar
 import uuid
 
@@ -17,6 +18,7 @@ from relay.constants import (
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
     CONTROL_REQUEST_TTL_SECONDS,
     DISPATCH_ORPHAN_AFTER_SECONDS,
+    EVENT_MAX_PAYLOAD_BYTES,
     RECONCILE_MAX_ITEMS,
 )
 from relay.errors import PersistenceError, ProjectRelinkError
@@ -35,7 +37,7 @@ from relay.execution.machine import (
 )
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resume import RecoveryTarget
-from relay.execution.runner import ExecutionOutcome, OutcomeKind
+from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
     AttemptStatus,
@@ -55,6 +57,7 @@ from relay.execution.state import (
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import PreservationResult
+from relay.workflows.scope import enclosing_scope, node_scope, sibling_scope
 
 from .models import (
     Artifact,
@@ -68,6 +71,7 @@ from .models import (
     Run,
     RunEvent,
     RunLock,
+    RunSnapshot,
 )
 
 ModelT = TypeVar("ModelT", bound=models.Model)
@@ -121,6 +125,13 @@ def _mapping(instance: models.Model, name: str) -> dict[str, object]:
         message = f"Stored field {name} is not a string-keyed object."
         raise PersistenceError(message)
     return dict(value)
+
+
+def _string_list(value: object, *, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        message = f"Stored field {field} is not a list of strings."
+        raise PersistenceError(message)
+    return tuple(value)
 
 
 def _related(instance: models.Model, name: str, expected: type[ModelT]) -> ModelT:
@@ -229,8 +240,9 @@ def _append_event(
     *,
     node: NodeRun | None = None,
     attempt: NodeAttempt | None = None,
-) -> None:
-    RunEvent.objects.create(
+    sensitivity: EventSensitivity = EventSensitivity.NORMAL,
+) -> RunEvent:
+    return RunEvent.objects.create(
         run=run,
         node_run=node,
         attempt=attempt,
@@ -238,8 +250,31 @@ def _append_event(
         version=1,
         source=source.value,
         payload=dict(payload),
-        sensitivity=EventSensitivity.NORMAL.value,
+        sensitivity=sensitivity.value,
     )
+
+
+def _bounded_attempt_event_payload(
+    payload: Mapping[str, object],
+    node: NodeRun,
+    attempt: NodeAttempt,
+) -> dict[str, object]:
+    event_payload = dict(payload)
+    event_payload["scope_path"] = _string(node, "scope_path")
+    event_payload["attempt_number"] = _integer(attempt, "attempt_number")
+    try:
+        encoded = json.dumps(
+            event_payload,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        message = "An attempt event payload is not JSON-compatible."
+        raise PersistenceError(message, context={"node": _identifier(attempt)}) from None
+    if len(encoded) > EVENT_MAX_PAYLOAD_BYTES:
+        message = "An attempt event exceeded Relay's persisted payload limit."
+        raise PersistenceError(message, context={"node": _identifier(attempt)})
+    return event_payload
 
 
 def _control_public_result(state: str) -> ControlResult:
@@ -273,8 +308,148 @@ def _invalid_rerun_target(run_id: str, scope_path: str | None = None) -> NoRetur
     raise PersistenceError(message, context={"run": run_id, "node": scope_path})
 
 
+def _scope_persistence_error(message: str, run_id: str) -> NoReturn:
+    raise PersistenceError(message, context={"run": run_id})
+
+
+def _resolved_prompt_contents(
+    snapshot: RunSnapshot, frozen: Mapping[str, object]
+) -> tuple[str, ...]:
+    references = frozen.get("prompts", [])
+    if not isinstance(references, list):
+        message = "The frozen node prompt list is invalid."
+        raise PersistenceError(message)
+    rows = snapshot.resolved_prompts
+    if not isinstance(rows, list):
+        message = "The run snapshot prompt list is invalid."
+        raise PersistenceError(message)
+    contents: list[str] = []
+    for reference in references:
+        if not isinstance(reference, dict):
+            message = "A frozen prompt reference is invalid."
+            raise PersistenceError(message)
+        source = "global" if "global" in reference else "local"
+        value = reference.get(source)
+        match = next(
+            (
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and row.get("source") == source
+                and row.get("reference") == value
+                and isinstance(row.get("content"), str)
+            ),
+            None,
+        )
+        if match is None:
+            message = "A frozen prompt is missing from the immutable run snapshot."
+            raise PersistenceError(message)
+        content = match.get("content")
+        if not isinstance(content, str):
+            message = "A snapshotted prompt has invalid content."
+            raise PersistenceError(message)
+        contents.append(content)
+    return tuple(contents)
+
+
 class DjangoExecutionStore:
     """Short-transaction adapter for execution, dispatch, controls, and recovery."""
+
+    def append_attempt_event(
+        self,
+        attempt_id: str,
+        event_type: str,
+        source: EventSource,
+        payload: Mapping[str, object],
+        *,
+        sensitivity: EventSensitivity = EventSensitivity.NORMAL,
+    ) -> None:
+        try:
+            with transaction.atomic():
+                attempt = (
+                    NodeAttempt.objects.select_related("node_run__run")
+                    .select_for_update()
+                    .get(pk=attempt_id)
+                )
+                node = _related(attempt, "node_run", NodeRun)
+                run = _related(node, "run", Run)
+                event_payload = _bounded_attempt_event_payload(payload, node, attempt)
+                _append_event(
+                    run,
+                    event_type,
+                    source,
+                    event_payload,
+                    node=node,
+                    attempt=attempt,
+                    sensitivity=sensitivity,
+                )
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not persist the attempt event."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def _claim_context(
+        self,
+        run: Run,
+        node: NodeRun,
+        snapshot: RunSnapshot,
+        frozen: Mapping[str, object],
+    ) -> tuple[
+        dict[str, object],
+        dict[str, dict[str, object]],
+        dict[str, object],
+        tuple[str, ...],
+        dict[str, object],
+        dict[str, object],
+    ]:
+        parent_scope = node.parent_scope_path
+        if parent_scope is not None and not isinstance(parent_scope, str):
+            message = "The stored node parent scope is invalid."
+            raise PersistenceError(message)
+        inputs = (
+            _mapping(snapshot, "typed_inputs")
+            if parent_scope is None
+            else _mapping(node, "scope_inputs")
+        )
+        needs = _string_list(frozen.get("needs", []), field="needs")
+        upstream: dict[str, dict[str, object]] = {}
+        scope_path = _string(node, "scope_path")
+        for needed in needs:
+            dependency = NodeRun.objects.filter(
+                run=run,
+                scope_path=sibling_scope(scope_path, needed),
+            ).first()
+            if dependency is None:
+                message = f"The durable dependency {needed!r} is missing."
+                raise PersistenceError(message, context={"node": scope_path})
+            upstream[needed] = _mapping(dependency, "outputs")
+        metadata: dict[str, object] = {
+            "run_id": _identifier(run),
+            "workflow_key": _string(run, "workflow_key"),
+            "source_commit": _string(run, "source_commit"),
+            "run_branch": _string(run, "run_branch"),
+            "scope_path": scope_path,
+        }
+        loop_index = node.loop_index
+        if loop_index is not None:
+            if not isinstance(loop_index, int) or isinstance(loop_index, bool):
+                message = "The stored loop iteration is invalid."
+                raise PersistenceError(message, context={"node": scope_path})
+            metadata["loop_index"] = loop_index
+        route_table = _mapping(snapshot, "route_table")
+        route_value = route_table.get(scope_path, {})
+        if not isinstance(route_value, dict):
+            message = "The snapshotted route entry is invalid."
+            raise PersistenceError(message, context={"node": scope_path})
+        return (
+            inputs,
+            upstream,
+            metadata,
+            _resolved_prompt_contents(snapshot, frozen),
+            dict(route_value),
+            _mapping(snapshot, "subworkflows"),
+        )
 
     def create_dispatch(self, node_run_id: str) -> str:
         try:
@@ -351,6 +526,7 @@ class DjangoExecutionStore:
                 related_run = _related(node, "run", Run)
                 run = Run.objects.select_for_update().get(pk=related_run.pk)
                 project = _related(run, "project", Project)
+                snapshot = _related(run, "snapshot", RunSnapshot)
                 if _string(run, "status") not in {
                     RunStatus.RUNNING.value,
                     RunStatus.PAUSED_WAIT.value,
@@ -404,6 +580,15 @@ class DjangoExecutionStore:
                 _set_model_field(node, "status", node_transition.status)
                 node.save(update_fields=("status",))
                 scope_path = _string(node, "scope_path")
+                frozen = _mapping(node, "frozen_def")
+                (
+                    inputs,
+                    upstream_outputs,
+                    run_metadata,
+                    prompt_contents,
+                    route,
+                    subworkflows,
+                ) = self._claim_context(run, node, snapshot, frozen)
                 _append_event(
                     run,
                     node_transition.event,
@@ -434,6 +619,7 @@ class DjangoExecutionStore:
                     claim_token=claim_token,
                     attempt_id=_identifier(attempt),
                     attempt_number=attempt_number,
+                    worker_id=worker_id,
                     run_id=_identifier(run),
                     node_run_id=_identifier(node),
                     project_path=_string(project, "git_root"),
@@ -441,7 +627,13 @@ class DjangoExecutionStore:
                     scope_path=scope_path,
                     node_id=_string(node, "node_id"),
                     node_type=node_type,
-                    frozen_def=_mapping(node, "frozen_def"),
+                    frozen_def=frozen,
+                    inputs=inputs,
+                    upstream_outputs=upstream_outputs,
+                    run_metadata=run_metadata,
+                    prompt_contents=prompt_contents,
+                    route=route,
+                    subworkflows=subworkflows,
                     writes=writes,
                     starting_head=starting_head,
                     recorded_head=starting_head,
@@ -479,7 +671,195 @@ class DjangoExecutionStore:
                 RunLock.objects.filter(attempt_id=attempt_id).update(heartbeat_at=now)
             return updated == 1
 
-    def mark_attempt_waiting(self, attempt_id: str) -> None:
+    def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None:
+        try:
+            NodeAttempt.objects.filter(
+                pk=attempt_id,
+                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+            ).update(process_pid=process_id)
+        except DatabaseError:
+            message = "Relay could not record the attempt process."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def ensure_scope_nodes(
+        self,
+        run_id: str,
+        parent_scope: str,
+        nodes: Mapping[str, Mapping[str, object]],
+        inputs: Mapping[str, object],
+        loop_index: int | None,
+    ) -> None:
+        """Materialize one bounded child scope once without changing frozen rows."""
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=run_id)
+                for node_id, frozen in nodes.items():
+                    node_type = frozen.get("type")
+                    if not isinstance(node_type, str):
+                        message = f"Scoped node {node_id!r} has no valid type."
+                        _scope_persistence_error(message, run_id)
+                    writes = frozen.get("writes", False)
+                    if not isinstance(writes, bool):
+                        message = f"Scoped node {node_id!r} has an invalid write flag."
+                        _scope_persistence_error(message, run_id)
+                    scope_path = node_scope(parent_scope, node_id)
+                    node, created = NodeRun.objects.get_or_create(
+                        run=run,
+                        scope_path=scope_path,
+                        defaults={
+                            "parent_scope_path": parent_scope,
+                            "node_id": node_id,
+                            "node_type": node_type,
+                            "frozen_def": dict(frozen),
+                            "scope_inputs": dict(inputs),
+                            "status": NodeStatus.PENDING.value,
+                            "writes": writes,
+                            "loop_index": loop_index,
+                        },
+                    )
+                    if not created:
+                        if _mapping(node, "frozen_def") != dict(frozen) or _mapping(
+                            node, "scope_inputs"
+                        ) != dict(inputs):
+                            message = f"Scoped node {scope_path!r} conflicts with durable state."
+                            _scope_persistence_error(message, run_id)
+                        continue
+                    transition = transition_node(None, "create")
+                    _append_event(
+                        run,
+                        transition.event,
+                        EventSource.NODE,
+                        {
+                            "scope_path": scope_path,
+                            "node_type": node_type,
+                            "status": transition.status,
+                        },
+                        node=node,
+                    )
+        except PersistenceError:
+            raise
+        except (DatabaseError, IntegrityError, ObjectDoesNotExist):
+            message = "Relay could not materialize the nested workflow scope."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def scope_node_records(
+        self,
+        run_id: str,
+        parent_scope: str,
+        node_ids: tuple[str, ...],
+    ) -> Mapping[str, ScopeNodeRecord]:
+        try:
+            paths = tuple(node_scope(parent_scope, node_id) for node_id in node_ids)
+            rows = NodeRun.objects.filter(
+                run_id=run_id,
+                parent_scope_path=parent_scope,
+                scope_path__in=paths,
+            ).order_by("pk")
+            return {
+                _string(node, "node_id"): ScopeNodeRecord(
+                    node_run_id=_identifier(node),
+                    node_id=_string(node, "node_id"),
+                    status=_string(node, "status"),
+                    outputs=_mapping(node, "outputs"),
+                    selected_branch=(
+                        value if isinstance((value := node.selected_branch), str) else None
+                    ),
+                )
+                for node in rows
+            }
+        except DatabaseError:
+            message = "Relay could not load nested workflow state."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def transition_scope_node(self, node_run_id: str, action: str) -> None:
+        try:
+            with transaction.atomic():
+                node = NodeRun.objects.select_for_update().select_related("run").get(pk=node_run_id)
+                run = _related(node, "run", Run)
+                transition = transition_node(_string(node, "status"), action)
+                if not transition.changed:
+                    return
+                _set_model_field(node, "status", transition.status)
+                node.save(update_fields=("status",))
+                _append_event(
+                    run,
+                    transition.event,
+                    EventSource.NODE,
+                    {
+                        "scope_path": _string(node, "scope_path"),
+                        "node_type": _string(node, "node_type"),
+                        "status": transition.status,
+                    },
+                    node=node,
+                )
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not advance the nested workflow node."
+            raise PersistenceError(message, context={"node": node_run_id}) from None
+
+    def record_loop_iteration(
+        self,
+        coordinator_node_run_id: str,
+        scope_path: str,
+        iteration: int,
+        kind: OutcomeKind,
+        outputs: Mapping[str, Mapping[str, object]],
+    ) -> None:
+        """Record one structural loop-iteration row after its child scope settles."""
+        try:
+            with transaction.atomic():
+                coordinator = (
+                    NodeRun.objects.select_for_update()
+                    .select_related("run")
+                    .get(pk=coordinator_node_run_id)
+                )
+                run = _related(coordinator, "run", Run)
+                status = {
+                    OutcomeKind.SUCCEEDED: NodeStatus.SUCCEEDED.value,
+                    OutcomeKind.FAILED: NodeStatus.FAILED.value,
+                    OutcomeKind.WAITING: NodeStatus.WAITING.value,
+                }[kind]
+                marker, created = NodeRun.objects.get_or_create(
+                    run=run,
+                    scope_path=scope_path,
+                    defaults={
+                        "parent_scope_path": enclosing_scope(scope_path),
+                        "node_id": _string(coordinator, "node_id"),
+                        "node_type": NodeType.LOOP.value,
+                        "frozen_def": _mapping(coordinator, "frozen_def"),
+                        "scope_inputs": _mapping(coordinator, "scope_inputs"),
+                        "outputs": {
+                            node_id: dict(node_outputs) for node_id, node_outputs in outputs.items()
+                        },
+                        "status": status,
+                        "writes": False,
+                        "loop_index": iteration,
+                    },
+                )
+                if created:
+                    _append_event(
+                        run,
+                        f"node.{status}",
+                        EventSource.NODE,
+                        {
+                            "scope_path": scope_path,
+                            "node_type": NodeType.LOOP.value,
+                            "status": status,
+                        },
+                        node=marker,
+                    )
+                    return
+                if _string(marker, "status") != status:
+                    message = f"Loop iteration {scope_path!r} conflicts with durable state."
+                    _scope_persistence_error(message, _identifier(run))
+        except PersistenceError:
+            raise
+        except (DatabaseError, IntegrityError, ObjectDoesNotExist):
+            message = "Relay could not record the loop iteration."
+            raise PersistenceError(message, context={"node": scope_path}) from None
+
+    def mark_attempt_waiting(self, attempt_id: str, timeout_seconds: float | None) -> None:
         try:
             with transaction.atomic():
                 attempt = (
@@ -504,6 +884,11 @@ class DjangoExecutionStore:
                     kind=InteractionKind.WAIT.value,
                     request_payload={"prompt": prompt if isinstance(prompt, str) else str(prompt)},
                     status=InteractionStatus.PENDING.value,
+                    deadline=(
+                        timezone.now() + timedelta(seconds=timeout_seconds)
+                        if timeout_seconds is not None
+                        else None
+                    ),
                 )
                 _append_event(
                     run,
@@ -537,24 +922,45 @@ class DjangoExecutionStore:
     def record_preservation(self, attempt_id: str, preservation: PreservationResult) -> None:
         try:
             with transaction.atomic():
-                attempt = NodeAttempt.objects.select_for_update().get(pk=attempt_id)
+                attempt = (
+                    NodeAttempt.objects.select_for_update()
+                    .select_related("node_run__run")
+                    .get(pk=attempt_id)
+                )
                 if Artifact.objects.filter(attempt=attempt).exists():
                     return
-                Artifact.objects.bulk_create(
-                    [
-                        Artifact(
-                            attempt=attempt,
-                            declared_name=item.name,
-                            source_path=item.source_path,
-                            retained_path=item.retained_path,
-                            sha256=item.sha256,
-                            media_type=item.media_type,
-                            bytes=item.bytes,
-                            preservation_state=PreservationState.PRESERVED.value,
-                        )
-                        for item in preservation.files
-                    ]
-                )
+                rows = [
+                    Artifact(
+                        attempt=attempt,
+                        declared_name=item.name,
+                        source_path=item.source_path,
+                        retained_path=item.retained_path,
+                        sha256=item.sha256,
+                        media_type=item.media_type,
+                        bytes=item.bytes,
+                        preservation_state=PreservationState.PRESERVED.value,
+                    )
+                    for item in preservation.files
+                ]
+                Artifact.objects.bulk_create(rows)
+                node = _related(attempt, "node_run", NodeRun)
+                run = _related(node, "run", Run)
+                for item in preservation.files:
+                    _append_event(
+                        run,
+                        "artifact.preserved",
+                        EventSource.SYSTEM,
+                        {
+                            "scope_path": _string(node, "scope_path"),
+                            "attempt_number": _integer(attempt, "attempt_number"),
+                            "name": item.name,
+                            "sha256": item.sha256,
+                            "bytes": item.bytes,
+                            "media_type": item.media_type,
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
         except DatabaseError:
             message = "Relay preserved attempt files but could not record their metadata."
             raise PersistenceError(
@@ -566,9 +972,16 @@ class DjangoExecutionStore:
     def _finish_node_transition(
         self, node: NodeRun, outcome: ExecutionOutcome
     ) -> tuple[str, str, str]:
-        if outcome.kind is OutcomeKind.SUCCEEDED:
+        if (
+            outcome.kind is OutcomeKind.SUCCEEDED
+            and outcome.stop_reason is AttemptStopReason.TIMEOUT
+            and outcome.selected_branch is not None
+        ):
+            transition = transition_node(_string(node, "status"), "timeout_routed")
+            reason = AttemptStopReason.TIMEOUT.value
+        elif outcome.kind is OutcomeKind.SUCCEEDED:
             transition = transition_node(_string(node, "status"), "complete")
-            reason = AttemptStopReason.COMPLETED.value
+            reason = (outcome.stop_reason or AttemptStopReason.COMPLETED).value
         elif outcome.stop_reason == AttemptStopReason.CANCELED:
             transition = transition_node(_string(node, "status"), "cancel")
             reason = AttemptStopReason.CANCELED.value
@@ -706,7 +1119,8 @@ class DjangoExecutionStore:
                 )
                 _set_model_field(node, "status", node_status)
                 _set_model_field(node, "selected_branch", outcome.selected_branch)
-                node.save(update_fields=("status", "selected_branch"))
+                _set_model_field(node, "outputs", dict(outcome.outputs))
+                node.save(update_fields=("status", "selected_branch", "outputs"))
                 if outcome.kind is OutcomeKind.SUCCEEDED and _boolean(node, "writes"):
                     _set_model_field(run, "recorded_head", ending_head)
                     run.save(update_fields=("recorded_head",))
@@ -1067,6 +1481,122 @@ class DjangoExecutionStore:
             message = "Relay could not reconcile control-request leases."
             raise PersistenceError(message) from None
         return ControlRecovery(returned, stale)
+
+    def resolve_human_wait_controls(self) -> int:
+        """Apply bounded controls for wait nodes, which own no live subprocess."""
+        try:
+            attempt_ids = list(
+                ControlRequest.objects.filter(
+                    state=ControlState.PENDING.value,
+                    kind__in=(ControlKind.WAIT_ANSWER.value, ControlKind.CANCEL.value),
+                    attempt__status=AttemptStatus.WAITING.value,
+                    attempt__node_run__node_type=NodeType.HUMAN_WAIT.value,
+                )
+                .order_by("created_at")
+                .values_list("attempt_id", flat=True)[:RECONCILE_MAX_ITEMS]
+            )
+            applied = 0
+            for attempt_id in dict.fromkeys(attempt_ids):
+                attempt = NodeAttempt.objects.get(pk=attempt_id)
+                worker_id = _string(attempt, "worker_id")
+                control = self.claim_next_control(str(attempt_id), worker_id)
+                if control is None or not self.apply_control(control.request_id, worker_id):
+                    continue
+                outcome = (
+                    ExecutionOutcome(
+                        OutcomeKind.FAILED,
+                        stop_reason=AttemptStopReason.CANCELED,
+                        error_code="canceled",
+                    )
+                    if control.kind == ControlKind.CANCEL.value
+                    else ExecutionOutcome(OutcomeKind.SUCCEEDED)
+                )
+                if control.kind == ControlKind.CANCEL.value:
+                    self._discard_attempt_mailbox(attempt)
+                self.finish_attempt(str(attempt_id), outcome, _string(attempt, "starting_head"))
+                self.release_attempt_lock(str(attempt_id))
+                applied += 1
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not resolve human-wait controls."
+            raise PersistenceError(message) from None
+        else:
+            return applied
+
+    def expire_human_waits(self) -> int:
+        """Resolve each elapsed wait deadline once, taking its declared edge if present."""
+        now = timezone.now()
+        try:
+            interaction_ids = list(
+                HumanInteraction.objects.filter(
+                    status=InteractionStatus.PENDING.value,
+                    kind=InteractionKind.WAIT.value,
+                    deadline__lte=now,
+                    node_run__node_type=NodeType.HUMAN_WAIT.value,
+                )
+                .order_by("deadline")
+                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+            )
+            expired = 0
+            for interaction_id in interaction_ids:
+                with transaction.atomic():
+                    interaction = (
+                        HumanInteraction.objects.select_for_update()
+                        .select_related("attempt__node_run__run")
+                        .get(pk=interaction_id)
+                    )
+                    if (
+                        _string(interaction, "status") != InteractionStatus.PENDING.value
+                        or interaction.deadline is None
+                        or interaction.deadline > now
+                    ):
+                        continue
+                    transition = transition_interaction(_string(interaction, "status"), "deadline")
+                    _set_model_field(interaction, "status", transition.status)
+                    interaction.save(update_fields=("status",))
+                    attempt = _related(interaction, "attempt", NodeAttempt)
+                    node = _related(attempt, "node_run", NodeRun)
+                    run = _related(node, "run", Run)
+                    on_timeout = _mapping(node, "frozen_def").get("on_timeout")
+                    if isinstance(on_timeout, str):
+                        outcome = ExecutionOutcome(
+                            OutcomeKind.SUCCEEDED,
+                            stop_reason=AttemptStopReason.TIMEOUT,
+                            selected_branch=on_timeout,
+                        )
+                    else:
+                        outcome = ExecutionOutcome(
+                            OutcomeKind.FAILED,
+                            stop_reason=AttemptStopReason.TIMEOUT,
+                            error_code="node_timeout",
+                        )
+                    self.finish_attempt(
+                        _identifier(attempt), outcome, _string(attempt, "starting_head")
+                    )
+                    if (
+                        isinstance(on_timeout, str)
+                        and _string(run, "status") == RunStatus.PAUSED_WAIT.value
+                    ):
+                        run_transition = transition_run(_string(run, "status"), "wait_answered")
+                        _set_model_field(run, "status", run_transition.status)
+                        run.save(update_fields=("status",))
+                        _append_event(
+                            run,
+                            run_transition.event,
+                            EventSource.RUN,
+                            {"status": run_transition.status},
+                        )
+                        self._finish_run_if_terminal(run)
+                    self.release_attempt_lock(_identifier(attempt))
+                    expired += 1
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not expire human-wait deadlines."
+            raise PersistenceError(message) from None
+        else:
+            return expired
 
     def orphaned_dispatch_tokens(self) -> tuple[str, ...]:
         cutoff = timezone.now() - timedelta(seconds=DISPATCH_ORPHAN_AFTER_SECONDS)

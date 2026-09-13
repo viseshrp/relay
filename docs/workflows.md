@@ -380,6 +380,11 @@ Missing files, labels, or keys fail the node with `output_invalid`.
 Every artifact path is resolved beneath the node worktree after following
 symlinks. Selectors cannot read a file outside that worktree.
 
+Files named by `label`, `json_path`, and `yaml_path` selectors are also the
+node's required retained artifacts. Relay preserves each file and its SHA-256
+hash before removing an attempt worktree. An `exists` selector is only a
+boolean check: `false` is a valid output, so that path is not a required file.
+
 ## Scope paths
 
 Every runtime node has an unambiguous scope path:
@@ -399,6 +404,19 @@ deterministic. `needs.<id>` resolves to the same enclosing scope; from
 Relay eagerly compiles route keys for every possible bounded loop iteration
 and transitive subworkflow instance. Runtime node rows remain scoped, and
 execution can stop before unused loop instances are materialized.
+
+For example, iteration 2 of loop `build_loop` can contain subworkflow `verify`
+and its child `check`:
+
+```text
+root.build_loop#2
+root.build_loop#2.verify
+root.build_loop#2.verify.check
+```
+
+If `verify` maps child output `check.ready` to `ready`, the loop body reads it
+as `needs.verify.outputs.ready`. Relay resolves that reference only inside
+`root.build_loop#2`; output values do not cross iteration boundaries.
 
 ## Midstream entry points
 

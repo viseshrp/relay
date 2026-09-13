@@ -116,6 +116,47 @@ Human-wait nodes have no subprocess. Their attempt stays durable while the run
 is paused. A deadline takes the declared `on_timeout` edge; without that edge,
 the node fails with `timeout`.
 
+## Node execution
+
+| Type | Runtime behavior |
+| --- | --- |
+| `agent` | Starts one fresh routed agent session, sends the snapshotted prompts and declared context, and validates outputs after the session ends. |
+| `command` | Runs the declared argument vector with `shell=False`, merges `env` over the inherited environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
+| `human_wait` | Creates a durable owner question with no subprocess. The current attempt completes after an answer, deadline, cancellation, or recovery decision. |
+| `condition` | Evaluates one restricted expression and records the target for the matching branch label. Unselected branch targets become `skipped`. |
+| `loop` | Executes its child graph in numbered scopes until `until` is true or `max_iterations` selects the `exhausted` target. |
+| `subworkflow` | Executes a captured child workflow in the same run, with only its declared inputs and outputs crossing the scope boundary. |
+
+Agent and command nodes extract every declared output before success. Files
+used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
+Relay copies them to central evidence storage with their SHA-256 hashes. An
+`exists` selector returns a boolean and does not make a missing file an error.
+
+Loop and subworkflow child graphs execute inline in the enclosing consumer
+thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
+default single worker. A nested human wait still owns no subprocess: the
+enclosing scope checks the durable mailbox at the fixed control cadence and
+keeps its attempt heartbeat current until the answer or deadline settles the
+child node.
+
+## Nested scope example
+
+Suppose loop `build_loop` reaches iteration 2. Its body invokes subworkflow
+`verify`, whose child node `check` produces output `ready`. Relay records these
+rows:
+
+| `scope_path` | `parent_scope_path` | Meaning |
+| --- | --- | --- |
+| `root.build_loop#2` | `root` | Structural record for loop iteration 2. |
+| `root.build_loop#2.verify` | `root.build_loop#2` | The subworkflow invocation in that iteration. |
+| `root.build_loop#2.verify.check` | `root.build_loop#2.verify` | The child node executed by `verify`. |
+
+Inside the subworkflow, `check` reads its siblings within
+`root.build_loop#2.verify`. The subworkflow maps `check.ready` to its own
+`ready` output. The loop then reads that value as
+`needs.verify.outputs.ready`, scoped to `root.build_loop#2`; it cannot read an
+output from iteration 1 or 3.
+
 ## Failure, cancellation, and recovery
 
 The first node failure moves the run to `canceling`, prevents pending work from

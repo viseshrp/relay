@@ -28,6 +28,7 @@ class ClaimedAttempt:
     claim_token: str
     attempt_id: str
     attempt_number: int
+    worker_id: str
     run_id: str
     node_run_id: str
     project_path: str
@@ -36,6 +37,12 @@ class ClaimedAttempt:
     node_id: str
     node_type: str
     frozen_def: Mapping[str, object]
+    inputs: Mapping[str, object]
+    upstream_outputs: Mapping[str, Mapping[str, object]]
+    run_metadata: Mapping[str, object]
+    prompt_contents: tuple[str, ...]
+    route: Mapping[str, object]
+    subworkflows: Mapping[str, object]
     writes: bool
     starting_head: str
     recorded_head: str

@@ -14,8 +14,9 @@ from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import current_head, validate_reader_result, validate_writer_result
 from relay.vcs.worktree import create_reader_worktree, remove_worktree
 
+from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
-from .state import AttemptStopReason, NodeType
+from .state import AttemptStopReason, EventSensitivity, EventSource, NodeType
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,73 @@ class AttemptContext:
 
     attempt: ClaimedAttempt
     worktree: Path
+    runtime: RunnerStore
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeNodeRecord:
+    """Minimal durable child-node state needed by event-driven scheduling."""
+
+    node_run_id: str
+    node_id: str
+    status: str
+    outputs: Mapping[str, object]
+    selected_branch: str | None
+
+
+class AttemptRuntime(DispatchStore, Protocol):
+    """Durable callbacks an executor may use without knowing Django or Huey."""
+
+    def append_attempt_event(
+        self,
+        attempt_id: str,
+        event_type: str,
+        source: EventSource,
+        payload: Mapping[str, object],
+        *,
+        sensitivity: EventSensitivity = EventSensitivity.NORMAL,
+    ) -> None: ...
+
+    def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool: ...
+
+    def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None: ...
+
+    def claim_next_control(self, attempt_id: str, worker_id: str) -> ClaimedControl | None: ...
+
+    def heartbeat_control(self, request_id: str, worker_id: str) -> bool: ...
+
+    def apply_control(self, request_id: str, worker_id: str) -> bool: ...
+
+    def ensure_scope_nodes(
+        self,
+        run_id: str,
+        parent_scope: str,
+        nodes: Mapping[str, Mapping[str, object]],
+        inputs: Mapping[str, object],
+        loop_index: int | None,
+    ) -> None: ...
+
+    def scope_node_records(
+        self,
+        run_id: str,
+        parent_scope: str,
+        node_ids: tuple[str, ...],
+    ) -> Mapping[str, ScopeNodeRecord]: ...
+
+    def transition_scope_node(self, node_run_id: str, action: str) -> None: ...
+
+    def record_loop_iteration(
+        self,
+        coordinator_node_run_id: str,
+        scope_path: str,
+        iteration: int,
+        kind: OutcomeKind,
+        outputs: Mapping[str, Mapping[str, object]],
+    ) -> None: ...
+
+    def resolve_human_wait_controls(self) -> int: ...
+
+    def expire_human_waits(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,16 +113,17 @@ class ExecutionOutcome:
     selected_branch: str | None = None
     exit_code: int | None = None
     error_code: str | None = None
+    wait_timeout_seconds: float | None = None
 
 
 class AttemptExecutor(Protocol):
     def execute(self, context: AttemptContext) -> ExecutionOutcome: ...
 
 
-class RunnerStore(DispatchStore, Protocol):
+class RunnerStore(AttemptRuntime, Protocol):
     def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool: ...
 
-    def mark_attempt_waiting(self, attempt_id: str) -> None: ...
+    def mark_attempt_waiting(self, attempt_id: str, timeout_seconds: float | None) -> None: ...
 
     def record_preservation(self, attempt_id: str, preservation: PreservationResult) -> None: ...
 
@@ -130,7 +199,7 @@ def execute_attempt(
     try:
         worktree, ephemeral_reader = _assigned_worktree(claim)
         worktree_assigned = True
-        outcome = executor.execute(AttemptContext(claim, worktree))
+        outcome = executor.execute(AttemptContext(claim, worktree, store))
     except RelayError as error:
         outcome = _failure(error)
     except Exception:
@@ -141,7 +210,7 @@ def execute_attempt(
     ending_head = claim.starting_head
     preservation: PreservationResult | None = None
     if outcome.kind is OutcomeKind.WAITING:
-        store.mark_attempt_waiting(claim.attempt_id)
+        store.mark_attempt_waiting(claim.attempt_id, outcome.wait_timeout_seconds)
         store.mark_dispatch_consumed(claim.claim_token)
         store.release_attempt_lock(claim.attempt_id)
         return outcome
@@ -224,9 +293,11 @@ def run_claim_token(
 __all__ = [
     "AttemptContext",
     "AttemptExecutor",
+    "AttemptRuntime",
     "ExecutionOutcome",
     "OutcomeKind",
     "RunnerStore",
+    "ScopeNodeRecord",
     "execute_attempt",
     "run_claim_token",
 ]
