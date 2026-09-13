@@ -1,9 +1,26 @@
 """The setup and administration command surface for Relay."""
 
+from dataclasses import asdict
+import json
+from pathlib import Path
+
 import click
 
 from . import __version__ as _version
-from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS
+from .constants import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_WORKERS,
+    EXIT_ALREADY_INITIALIZED,
+    EXIT_NOT_A_REPOSITORY,
+    EXIT_PROJECT_NOT_FOUND,
+)
+from .errors import ProjectDiscoveryError, ProjectRelinkError, RelayError
+
+
+def _render_error(error: RelayError) -> str:
+    """Render the shared envelope as stable, machine-readable CLI JSON."""
+    return json.dumps(error.to_envelope(), sort_keys=True)
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -18,9 +35,20 @@ def main() -> None:
 
 
 @main.command("init")
-def init_command() -> None:
+@click.pass_context
+def init_command(context: click.Context) -> None:
     """Create a blank .relay project surface in the current Git repository."""
-    click.echo("Project initialization is not available in this implementation slice.")
+    from .projects.service import initialize_project
+
+    try:
+        result = initialize_project()
+    except ProjectDiscoveryError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_NOT_A_REPOSITORY)
+    if not result.created:
+        click.echo(f"Relay is already initialized at {result.relay_root}.", err=True)
+        context.exit(EXIT_ALREADY_INITIALIZED)
+    click.echo(f"Initialized blank Relay project at {result.relay_root}.")
 
 
 @main.command("up")
@@ -46,18 +74,46 @@ def project_group() -> None:
 
 
 @project_group.command("list")
-def project_list_command() -> None:
+@click.pass_context
+def project_list_command(context: click.Context) -> None:
     """List projects registered in central Relay storage."""
-    click.echo("Project registration is not available in this implementation slice.")
+    from .manage import apply_migrations
+
+    try:
+        apply_migrations()
+        from .projects.service import list_registered_projects
+        from .web.repositories import DjangoProjectStore
+
+        records = list_registered_projects(DjangoProjectStore())
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    click.echo(json.dumps({"projects": [asdict(record) for record in records]}, sort_keys=True))
 
 
 @project_group.command("relink")
-@click.argument("path", type=click.Path(path_type=str))
-@click.argument("newpath", type=click.Path(path_type=str))
-def project_relink_command(path: str, newpath: str) -> None:
+@click.argument("path", type=click.Path(path_type=Path))
+@click.argument(
+    "newpath", type=click.Path(path_type=Path, exists=True, file_okay=False, resolve_path=True)
+)
+@click.pass_context
+def project_relink_command(context: click.Context, path: Path, newpath: Path) -> None:
     """Relink a registered project after it moves on disk."""
-    del path, newpath
-    click.echo("Project relinking is not available in this implementation slice.")
+    from .manage import apply_migrations
+
+    try:
+        apply_migrations()
+        from .projects.service import relink_project
+        from .web.repositories import DjangoProjectStore
+
+        record = relink_project(DjangoProjectStore(), path, newpath)
+    except ProjectRelinkError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_PROJECT_NOT_FOUND)
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    click.echo(json.dumps({"project": asdict(record)}, sort_keys=True))
 
 
 @main.group("data")
