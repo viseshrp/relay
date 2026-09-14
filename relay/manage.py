@@ -8,11 +8,16 @@ import os
 from pathlib import Path
 import socket
 import sys
+import threading
 import time
 from types import TracebackType
 from typing import BinaryIO
 
-from relay.constants import MIGRATION_LOCK_POLL_SECONDS, MIGRATION_LOCK_WAIT_SECONDS
+from relay.constants import (
+    MIGRATION_LOCK_POLL_SECONDS,
+    MIGRATION_LOCK_WAIT_SECONDS,
+    RECONCILE_INTERVAL_SECONDS,
+)
 from relay.errors import PersistenceError
 from relay.paths import data_dir, migration_lock_path
 
@@ -129,9 +134,34 @@ def apply_migrations(*, verbosity: int = 0) -> None:
 def main(argv: list[str] | None = None) -> None:
     """Run a Django management command against Relay's settings."""
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "relay.web.settings")
+    arguments = argv or sys.argv
+    if len(arguments) > 1 and arguments[1] == "run_huey":
+        import django
+        from huey.bin.huey_consumer import consumer_main
+
+        django.setup()
+        from relay.execution.huey_app import reconciliation_loop
+
+        stop = threading.Event()
+        reconciler = threading.Thread(
+            target=reconciliation_loop,
+            args=(stop,),
+            name="relay-reconciler",
+            daemon=True,
+        )
+        previous = sys.argv
+        sys.argv = [arguments[0], *arguments[2:], "relay.execution.huey_app.huey"]
+        reconciler.start()
+        try:
+            consumer_main()
+        finally:
+            stop.set()
+            reconciler.join(timeout=RECONCILE_INTERVAL_SECONDS + 1.0)
+            sys.argv = previous
+        return
     from django.core.management import execute_from_command_line
 
-    execute_from_command_line(argv or sys.argv)
+    execute_from_command_line(arguments)
 
 
 if __name__ == "__main__":

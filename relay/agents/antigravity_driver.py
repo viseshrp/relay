@@ -23,6 +23,7 @@ from relay.errors import (
     ModelUnavailableError,
     PersistenceError,
 )
+from relay.execution.control import cancel_stop_reason
 from relay.execution.nodes.base import declared_output_artifacts
 from relay.execution.state import ControlKind
 from relay.vcs.commits import current_head
@@ -345,7 +346,13 @@ class AntigravityDriver:
                     )
                     if applied:
                         await _terminate_process(process)
-                        self.result = AgentResult(False, "canceled", process.returncode, "canceled")
+                        reason = cancel_stop_reason(control)
+                        self.result = AgentResult(
+                            False,
+                            reason.value,
+                            process.returncode,
+                            reason.value,
+                        )
                         return
                 now = time.monotonic()
                 if now >= heartbeat_due:

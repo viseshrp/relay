@@ -53,20 +53,24 @@ def api_errors(
 def json_body(request: HttpRequest) -> dict[str, object]:
     """Decode one JSON object without coercing field values."""
     if request.content_type != "application/json":
-        raise ConfigError("This endpoint requires an application/json request body.")
+        message = "This endpoint requires an application/json request body."
+        raise ConfigError(message)
     try:
         value: object = json.loads(request.body)
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ConfigError("The request body is not valid JSON.") from None
+        message = "The request body is not valid JSON."
+        raise ConfigError(message) from None
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ConfigError("The request body must be a JSON object.")
+        message = "The request body must be a JSON object."
+        raise ConfigError(message)
     return value
 
 
 def required_text(body: dict[str, object], field: str) -> str:
     value = body.get(field)
     if not isinstance(value, str) or not value:
-        raise ConfigError(f"{field} must be a non-empty string.")
+        message = f"{field} must be a non-empty string."
+        raise ConfigError(message)
     return value
 
 
@@ -75,14 +79,16 @@ def optional_text(body: dict[str, object], field: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value:
-        raise ConfigError(f"{field} must be a non-empty string when supplied.")
+        message = f"{field} must be a non-empty string when supplied."
+        raise ConfigError(message)
     return value
 
 
 def required_object(body: dict[str, object], field: str) -> dict[str, object]:
     value = body.get(field)
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ConfigError(f"{field} must be a JSON object.")
+        message = f"{field} must be a JSON object."
+        raise ConfigError(message)
     return value
 
 

@@ -15,7 +15,7 @@ from relay.constants import (
 )
 from relay.errors import PermissionFlowError
 
-from .state import ControlKind
+from .state import AttemptStopReason, ControlKind
 
 
 class ControlResult(str, Enum):
@@ -42,6 +42,15 @@ class ControlRecovery:
 
     returned_to_pending: int
     marked_stale: int
+
+
+def cancel_stop_reason(control: ClaimedControl) -> AttemptStopReason:
+    """Distinguish an owner cancellation from resumable supervisor shutdown."""
+    return (
+        AttemptStopReason.INTERRUPTED
+        if control.payload.get("reason") == "orderly_shutdown"
+        else AttemptStopReason.CANCELED
+    )
 
 
 class ControlStore(Protocol):
@@ -104,5 +113,6 @@ __all__ = [
     "ControlRecovery",
     "ControlResult",
     "ControlStore",
+    "cancel_stop_reason",
     "submit_control",
 ]

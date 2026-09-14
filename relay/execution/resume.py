@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Protocol
 
 
@@ -19,6 +20,8 @@ class RecoveryTarget:
     worktree_path: str
     starting_head: str
     protected_head: str
+    uses_git: bool
+    ephemeral_reader: bool
     interrupted: bool
 
 
@@ -27,7 +30,11 @@ class ResumeStore(Protocol):
 
     def interrupted_targets(self) -> tuple[RecoveryTarget, ...]: ...
 
+    def interrupted_run_ids(self) -> tuple[str, ...]: ...
+
     def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
+
+    def activate_interrupted_run(self, run_id: str, idempotency_key: str) -> bool: ...
 
 
 def rerun_failed_node(
@@ -48,13 +55,26 @@ def resume_interrupted(
     prepare_workspace: Callable[[RecoveryTarget], None],
 ) -> tuple[str, ...]:
     """Create fresh attempts for interrupted nodes after workspace recovery."""
-    resumed: list[str] = []
+    targets_by_run: dict[str, list[RecoveryTarget]] = {}
     for target in store.interrupted_targets():
-        prepare_workspace(target)
-        key = f"restart:{target.run_id}:{target.node_run_id}:{target.attempt_id or 'none'}"
-        if store.activate_recovery(target, key):
-            resumed.append(target.run_id)
-    return tuple(dict.fromkeys(resumed))
+        targets_by_run.setdefault(target.run_id, []).append(target)
+
+    resumed: list[str] = []
+    for run_id in store.interrupted_run_ids():
+        targets = sorted(
+            targets_by_run.get(run_id, []),
+            key=lambda target: not target.ephemeral_reader,
+        )
+        for target in targets:
+            prepare_workspace(target)
+        attempt_ids = ",".join(target.attempt_id or "none" for target in targets) or "none"
+        digest = sha256(attempt_ids.encode()).hexdigest()
+        # Hashing bounds the durable key even for a large graph. For example,
+        # attempt list `4,9` hashes to `f9406f...e9bb5e1a`.
+        key = f"restart:{run_id}:{digest}"
+        if store.activate_interrupted_run(run_id, key):
+            resumed.append(run_id)
+    return tuple(resumed)
 
 
 __all__ = ["RecoveryTarget", "ResumeStore", "rerun_failed_node", "resume_interrupted"]

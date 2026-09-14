@@ -34,7 +34,7 @@ from relay.errors import (
     PersistenceError,
     RelayError,
 )
-from relay.execution.control import ClaimedControl
+from relay.execution.control import ClaimedControl, cancel_stop_reason
 from relay.execution.nodes.base import duration_seconds
 from relay.execution.state import ControlKind, InteractionKind
 
@@ -212,6 +212,7 @@ class RelayAcpClient:
         self.expected_model: str | None = None
         self.model_config_id: str | None = None
         self.drift_error: RelayError | None = None
+        self.control_stop: str | None = None
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -297,6 +298,8 @@ class RelayAcpClient:
                     attempt.worker_id,
                 )
                 if applied:
+                    if control.kind == ControlKind.CANCEL.value:
+                        self.control_stop = cancel_stop_reason(control).value
                     return control
             now = time.monotonic()
             if now >= heartbeat_due:
@@ -717,7 +720,7 @@ class AcpDriver:
                                 context.attempt.attempt.worker_id,
                             )
                             if applied:
-                                requested_stop = "canceled"
+                                requested_stop = cancel_stop_reason(control).value
                                 stop_deadline = now + CANCELLATION_GRACE_SECONDS
                                 await connection.cancel(self.session_id)
                     if (
@@ -752,6 +755,8 @@ class AcpDriver:
                             raise
                 if client.drift_error is not None:
                     raise client.drift_error  # noqa: TRY301
+                if requested_stop is None and client.control_stop is not None:
+                    requested_stop = client.control_stop
                 response_stop = response.stop_reason if response is not None else "cancelled"
                 succeeded = response_stop == "end_turn" and requested_stop is None
                 agent_capabilities = initialized.agent_capabilities
@@ -791,6 +796,8 @@ class AcpDriver:
                         if requested_stop == "timeout"
                         else "canceled"
                         if requested_stop == "canceled"
+                        else "interrupted"
+                        if requested_stop == "interrupted"
                         else AgentProtocolError.error_code
                     ),
                 )

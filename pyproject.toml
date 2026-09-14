@@ -16,6 +16,7 @@ dependencies = [
     "platformdirs==4.11.8",
     "pydantic==2.13.5",
     "ruamel.yaml==0.19.1",
+    "uvicorn==0.52.4",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -240,6 +241,8 @@ exclude = ["venv/", ".venv/"]
 
 [tool.deptry]
 exclude = ["venv/.*", ".venv/.*", "tests/.*"]
+# Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
+per_rule_ignores = { DEP002 = ["uvicorn"] }
 
 [tool.liccheck]
 authorized_licenses = [

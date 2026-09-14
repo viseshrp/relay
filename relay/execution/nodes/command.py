@@ -15,6 +15,7 @@ from relay.constants import (
 )
 from relay.errors import NodeExecutionError, PersistenceError
 from relay.execution.cancellation import terminate_process_tree
+from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.schema import CommandNode
@@ -95,7 +96,7 @@ def _wait(
             )
             if control.kind == ControlKind.CANCEL.value:
                 terminate_process_tree(process)
-                return AttemptStopReason.CANCELED
+                return cancel_stop_reason(control)
     return None
 
 
@@ -132,7 +133,11 @@ class CommandExecutor:
                 stop_reason=stop_reason,
                 exit_code=process.returncode,
                 error_code=(
-                    "canceled" if stop_reason is AttemptStopReason.CANCELED else "node_timeout"
+                    "canceled"
+                    if stop_reason is AttemptStopReason.CANCELED
+                    else "interrupted"
+                    if stop_reason is AttemptStopReason.INTERRUPTED
+                    else "node_timeout"
                 ),
             )
         if process.returncode != 0:

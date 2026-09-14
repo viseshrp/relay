@@ -2,9 +2,11 @@
 
 from dataclasses import asdict
 import json
+import logging
 from pathlib import Path
 
 import click
+from click.core import ParameterSource
 
 from . import __version__ as _version
 from .constants import (
@@ -15,8 +17,18 @@ from .constants import (
     EXIT_DOCTOR_FAILED,
     EXIT_NOT_A_REPOSITORY,
     EXIT_PROJECT_NOT_FOUND,
+    EXIT_SUPERVISOR,
+    EXIT_UP_CONFIG,
 )
-from .errors import ProjectDiscoveryError, ProjectRelinkError, RelayError
+from .errors import (
+    ConfigError,
+    PersistenceError,
+    ProjectDiscoveryError,
+    ProjectRelinkError,
+    RelayError,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _render_error(error: RelayError) -> str:
@@ -57,34 +69,166 @@ def init_command(context: click.Context) -> None:
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=click.IntRange(1, 65_535))
 @click.option("--no-browser", is_flag=True, help="Do not open the browser after startup.")
 @click.option("--workers", default=DEFAULT_WORKERS, show_default=True, type=click.IntRange(min=1))
-def up_command(host: str, port: int, no_browser: bool, workers: int) -> None:
+@click.pass_context
+def up_command(
+    context: click.Context,
+    host: str,
+    port: int,
+    no_browser: bool,
+    workers: int,
+) -> None:
     """Start the loopback web application and local worker."""
-    del host, port, no_browser, workers
-    click.echo("The local runtime is not available in this implementation slice.")
+    from .config import RelayConfig, load_config
+    from .web.supervisor import run_supervisor
+
+    try:
+        stored = load_config()
+        effective = RelayConfig(
+            stored.agent_preferences,
+            stored.cleanup_policy,
+            (
+                stored.host
+                if context.get_parameter_source("host") is ParameterSource.DEFAULT
+                else host
+            ),
+            (
+                stored.port
+                if context.get_parameter_source("port") is ParameterSource.DEFAULT
+                else port
+            ),
+            (
+                stored.workers
+                if context.get_parameter_source("workers") is ParameterSource.DEFAULT
+                else workers
+            ),
+        )
+        run_supervisor(
+            effective,
+            open_browser=not no_browser,
+            on_ready=lambda url: click.echo(f"Relay is ready at {url}"),
+        )
+    except ConfigError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_UP_CONFIG)
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_SUPERVISOR)
+    except Exception:
+        LOGGER.exception("Unhandled Relay supervisor failure")
+        error = PersistenceError(
+            "Relay's local runtime failed unexpectedly.",
+            next_action="Inspect the local Relay log before restarting.",
+        )
+        click.echo(_render_error(error), err=True)
+        context.exit(EXIT_SUPERVISOR)
+    click.echo("Relay stopped cleanly.")
 
 
 @main.command("doctor")
 @click.pass_context
 def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
+    from .agents.discovery import discover_agents
     from .agents.driver import probe_installed_agents
     from .agents.registry import load_registry
     from .manage import apply_migrations
+    from .projects.discovery import discover_relay_root, git_root
+    from .vcs.cleanliness import status_porcelain
 
+    checks: list[dict[str, object]] = []
+    repository = Path.cwd().resolve()
+    try:
+        repository = git_root()
+        relay_root = discover_relay_root()
+        changes = status_porcelain(repository)
+        checks.append(
+            {
+                "id": "git",
+                "ok": not changes,
+                "code": "ok" if not changes else "git_dirty",
+                "repository": str(repository),
+                "relay_root": str(relay_root),
+                "changes": list(changes),
+            }
+        )
+    except RelayError as error:
+        checks.append({"id": "git", "ok": False, **error.to_envelope()})
+
+    database_ready = False
     try:
         apply_migrations()
         from .web.repositories import DjangoAgentStore
+        from .web.settings import DATABASES
 
-        registry = load_registry()
-        rows = probe_installed_agents(
-            Path.cwd(), registry=registry, observation_store=DjangoAgentStore()
+        database_ready = True
+        checks.append(
+            {
+                "id": "database",
+                "ok": True,
+                "code": "ok",
+                "path": str(DATABASES["default"]["NAME"]),
+                "migrations": "current",
+            }
         )
     except RelayError as error:
-        click.echo(_render_error(error), err=True)
-        context.exit(EXIT_DOCTOR_FAILED)
+        checks.append({"id": "database", "ok": False, **error.to_envelope()})
+
+    from .web.static_view import STATIC_ROOT
+
+    index = STATIC_ROOT / "index.html"
+    asset_files = tuple(path for path in (STATIC_ROOT / "assets").glob("**/*") if path.is_file())
+    assets_ready = index.is_file() and bool(asset_files)
+    checks.append(
+        {
+            "id": "wheel_assets",
+            "ok": assets_ready,
+            "code": "ok" if assets_ready else "wheel_assets_missing",
+            "index": str(index),
+            "asset_count": len(asset_files),
+        }
+    )
+
+    registry = None
+    registry_payload: dict[str, object]
+    try:
+        registry = load_registry()
+        registry_ready = not registry.stale
+        registry_payload = {
+            "source_url": registry.source_url,
+            "fetched_at": registry.fetched_at.isoformat(),
+            "cache_age_seconds": round(registry.cache_age_seconds, 3),
+            "stale": registry.stale,
+            "warning": registry.warning,
+        }
+        checks.append(
+            {
+                "id": "registry",
+                "ok": registry_ready,
+                "code": "ok" if registry_ready else "registry_stale",
+                **registry_payload,
+            }
+        )
+    except RelayError as error:
+        registry_payload = error.to_envelope()
+        checks.append({"id": "registry", "ok": False, **registry_payload})
+
+    try:
+        rows = probe_installed_agents(
+            repository,
+            registry=registry,
+            observation_store=DjangoAgentStore() if database_ready else None,
+        )
+    except RelayError as error:
+        LOGGER.exception("Relay agent readiness probing failed")
+        checks.append({"id": "agents", "ok": False, **error.to_envelope()})
+        rows = tuple((item, None) for item in discover_agents(registry))
+    except Exception:
+        LOGGER.exception("Unexpected Relay agent readiness probing failure")
+        error = PersistenceError("Relay could not complete agent readiness probes.")
+        checks.append({"id": "agents", "ok": False, **error.to_envelope()})
+        rows = tuple((item, None) for item in discover_agents(registry))
 
     agents: list[dict[str, object]] = []
-    all_ready = True
     for discovered, result in rows:
         models = [] if result is None else [item.model_value for item in result.models]
         ready = (
@@ -93,60 +237,63 @@ def doctor_command(context: click.Context) -> None:
             and result.general_error is None
             and bool(models)
         )
-        all_ready = all_ready and ready
         registry_metadata = (
             registry.agents.get(discovered.profile.registry_id)
-            if discovered.profile.registry_id is not None
+            if registry is not None and discovered.profile.registry_id is not None
             else None
         )
-        agents.append(
+        row: dict[str, object] = {
+            "id": discovered.profile.agent_id,
+            "installed": discovered.installed,
+            "ready": ready,
+            "command": (
+                list(discovered.command.argv()) if discovered.command is not None else None
+            ),
+            "detected_version": discovered.detected_version,
+            "models": models,
+            "reason": (
+                result.general_error
+                if result is not None and result.general_error is not None
+                else discovered.reason
+            ),
+            "cleanup_warning": result.cleanup_warning if result is not None else None,
+            "install_url": discovered.profile.install_url,
+            "registry": (
+                {
+                    "id": registry_metadata.agent_id,
+                    "version": registry_metadata.version,
+                    "distributions": [
+                        {
+                            "manager": item.manager,
+                            "package": item.package,
+                            "version": item.version,
+                            "args": list(item.args),
+                        }
+                        for item in registry_metadata.distributions
+                    ],
+                }
+                if registry_metadata is not None
+                else None
+            ),
+        }
+        agents.append(row)
+        checks.append(
             {
-                "id": discovered.profile.agent_id,
-                "installed": discovered.installed,
-                "ready": ready,
-                "command": (
-                    list(discovered.command.argv()) if discovered.command is not None else None
-                ),
-                "detected_version": discovered.detected_version,
+                "id": f"agent:{discovered.profile.agent_id}",
+                "ok": ready,
+                "code": "ok" if ready else "agent_not_ready",
                 "models": models,
-                "reason": (
-                    result.general_error
-                    if result is not None and result.general_error is not None
-                    else discovered.reason
-                ),
-                "cleanup_warning": result.cleanup_warning if result is not None else None,
-                "install_url": discovered.profile.install_url,
-                "registry": (
-                    {
-                        "id": registry_metadata.agent_id,
-                        "version": registry_metadata.version,
-                        "distributions": [
-                            {
-                                "manager": item.manager,
-                                "package": item.package,
-                                "version": item.version,
-                                "args": list(item.args),
-                            }
-                            for item in registry_metadata.distributions
-                        ],
-                    }
-                    if registry_metadata is not None
-                    else None
-                ),
+                "reason": row["reason"],
             }
         )
+    all_ready = all(bool(check["ok"]) for check in checks)
     click.echo(
         json.dumps(
             {
                 "ok": all_ready,
                 "temporary_sessions": True,
-                "registry": {
-                    "source_url": registry.source_url,
-                    "fetched_at": registry.fetched_at.isoformat(),
-                    "cache_age_seconds": round(registry.cache_age_seconds, 3),
-                    "stale": registry.stale,
-                    "warning": registry.warning,
-                },
+                "checks": checks,
+                "registry": registry_payload,
                 "agents": agents,
             },
             sort_keys=True,

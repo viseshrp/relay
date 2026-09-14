@@ -25,16 +25,23 @@ from relay.constants import (
     DISPATCH_ORPHAN_AFTER_SECONDS,
     EDITOR_LEASE_TTL_SECONDS,
     EVENT_MAX_PAYLOAD_BYTES,
+    INSTANCE_STALE_AFTER_SECONDS,
     RECONCILE_MAX_ITEMS,
 )
 from relay.errors import (
+    ConfigError,
     PermissionFlowError,
     PersistenceError,
     ProjectDiscoveryError,
     ProjectRelinkError,
     RelayError,
 )
-from relay.execution.control import ClaimedControl, ControlRecovery, ControlResult
+from relay.execution.control import (
+    ClaimedControl,
+    ControlRecovery,
+    ControlResult,
+    cancel_stop_reason,
+)
 from relay.execution.dispatch import (
     ClaimDisposition,
     ClaimedAttempt,
@@ -71,12 +78,23 @@ from relay.execution.state import (
     RunStatus,
     WorktreeState,
 )
-from relay.paths import application_log_path, artifacts_dir, safe_resolve, worktrees_dir
+from relay.paths import (
+    application_log_path,
+    artifacts_dir,
+    safe_resolve,
+    shutdown_marker_path,
+    worktrees_dir,
+)
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import PreservationResult
 from relay.vcs.git import run_git
-from relay.vcs.worktree import remove_worktree, run_branch, run_worktree_path
+from relay.vcs.worktree import (
+    reader_worktree_path,
+    remove_worktree,
+    run_branch,
+    run_worktree_path,
+)
 from relay.workflows.loader import load_workflow_text
 from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import enclosing_scope, node_scope, sibling_scope
@@ -89,6 +107,7 @@ from .models import (
     DispatchClaim,
     EditorLease,
     HumanInteraction,
+    Instance,
     NodeAttempt,
     NodeRun,
     Project,
@@ -832,8 +851,245 @@ def _resolved_prompt_contents(
     return tuple(contents)
 
 
+def _reject_active_instance() -> NoReturn:
+    message = "Another Relay supervisor is already active."
+    raise ConfigError(
+        message,
+        next_action=("Use the running Relay instance or stop it before starting another one."),
+    )
+
+
+def _lost_instance_lease() -> NoReturn:
+    message = "Relay lost ownership of the supervisor lease."
+    raise PersistenceError(message)
+
+
+def _too_many_interrupted_runs() -> NoReturn:
+    message = "Too many interrupted runs require one bounded startup pass."
+    raise PersistenceError(
+        message,
+        next_action="Clean old retained runs before starting Relay again.",
+    )
+
+
 class DjangoExecutionStore(DjangoAgentStore):
     """Short-transaction adapter for execution, dispatch, controls, and recovery."""
+
+    def acquire_instance(self, process_id: int, host: str) -> str:
+        """Acquire the singleton supervisor lease or replace an expired owner."""
+        cutoff = timezone.now() - timedelta(seconds=INSTANCE_STALE_AFTER_SECONDS)
+        try:
+            with transaction.atomic():
+                existing = Instance.objects.select_for_update().filter(singleton_key=1).first()
+                if existing is not None:
+                    if (
+                        _integer(existing, "pid") == process_id
+                        and _string(existing, "host") == host
+                    ):
+                        _set_model_field(existing, "heartbeat_at", timezone.now())
+                        _set_model_field(existing, "shutdown_requested", False)
+                        existing.save(update_fields=("heartbeat_at", "shutdown_requested"))
+                        return _identifier(existing)
+                    if existing.heartbeat_at > cutoff:
+                        _reject_active_instance()
+                    existing.delete()
+                instance = Instance.objects.create(pid=process_id, host=host)
+                return _identifier(instance)
+        except ConfigError:
+            raise
+        except (DatabaseError, IntegrityError):
+            message = "Relay could not acquire the local supervisor lease."
+            raise PersistenceError(message) from None
+
+    def heartbeat_instance(self, instance_id: str) -> bool:
+        try:
+            updated = Instance.objects.filter(
+                pk=instance_id,
+                singleton_key=1,
+                shutdown_requested=False,
+            ).update(heartbeat_at=timezone.now())
+        except DatabaseError:
+            message = "Relay could not update the supervisor heartbeat."
+            raise PersistenceError(message) from None
+        else:
+            return updated == 1
+
+    def request_orderly_shutdown(self, instance_id: str) -> int:
+        """Gate launch, mark active runs interrupted, and request worker cancellation."""
+        try:
+            with transaction.atomic():
+                instance = Instance.objects.select_for_update().filter(pk=instance_id).first()
+                if instance is None:
+                    _lost_instance_lease()
+                now = timezone.now()
+                _set_model_field(instance, "shutdown_requested", True)
+                _set_model_field(instance, "heartbeat_at", now)
+                instance.save(update_fields=("shutdown_requested", "heartbeat_at"))
+
+                runs = list(
+                    Run.objects.select_for_update().filter(
+                        status__in=(
+                            RunStatus.RUNNING.value,
+                            RunStatus.PAUSED_WAIT.value,
+                            RunStatus.CANCELING.value,
+                        )
+                    )
+                )
+                for run in runs:
+                    transition = transition_run(_string(run, "status"), "orderly_shutdown")
+                    _set_model_field(run, "status", transition.status)
+                    run.save(update_fields=("status",))
+                    _append_event(
+                        run,
+                        transition.event,
+                        EventSource.RUN,
+                        {"status": transition.status},
+                    )
+
+                expires = now + timedelta(seconds=CONTROL_REQUEST_TTL_SECONDS)
+                attempts = list(
+                    NodeAttempt.objects.select_for_update().filter(
+                        status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
+                    )
+                )
+                for attempt in attempts:
+                    ControlRequest.objects.get_or_create(
+                        attempt=attempt,
+                        idempotency_key=f"shutdown:{instance_id}:{_identifier(attempt)}",
+                        defaults={
+                            "kind": ControlKind.CANCEL.value,
+                            "payload": {"reason": "orderly_shutdown"},
+                            "state": ControlState.PENDING.value,
+                            "expires_at": expires,
+                        },
+                    )
+                return len(attempts)
+        except PersistenceError:
+            raise
+        except (DatabaseError, IntegrityError):
+            message = "Relay could not persist orderly-shutdown intent."
+            raise PersistenceError(message) from None
+
+    def active_attempt_processes(self) -> tuple[tuple[str, int], ...]:
+        try:
+            rows = NodeAttempt.objects.filter(
+                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                process_pid__isnull=False,
+            ).values_list("pk", "process_pid")
+            return tuple(
+                (str(attempt_id), process_id)
+                for attempt_id, process_id in rows
+                if isinstance(process_id, int)
+            )
+        except DatabaseError:
+            message = "Relay could not enumerate active attempt processes."
+            raise PersistenceError(message) from None
+
+    def interrupt_active_attempts(self) -> int:
+        """Force any attempt left after child exit into the resumable terminal state."""
+        try:
+            attempt_ids = list(
+                NodeAttempt.objects.filter(
+                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
+                )
+                .order_by("started_at", "pk")
+                .values_list("pk", flat=True)
+            )
+            interrupted = 0
+            for attempt_id in attempt_ids:
+                with transaction.atomic():
+                    attempt = (
+                        NodeAttempt.objects.select_for_update()
+                        .filter(
+                            pk=attempt_id,
+                            status__in=(
+                                AttemptStatus.RUNNING.value,
+                                AttemptStatus.WAITING.value,
+                            ),
+                        )
+                        .first()
+                    )
+                    if attempt is None:
+                        continue
+                    self._discard_attempt_mailbox(attempt)
+                    self.finish_attempt(
+                        _identifier(attempt),
+                        ExecutionOutcome(
+                            OutcomeKind.FAILED,
+                            stop_reason=AttemptStopReason.INTERRUPTED,
+                            error_code=AttemptStopReason.INTERRUPTED.value,
+                        ),
+                        _string(attempt, "starting_head"),
+                    )
+                    DispatchClaim.objects.filter(attempt=attempt).update(
+                        state=DispatchState.CONSUMED.value,
+                        consumed_at=timezone.now(),
+                    )
+                    self.release_attempt_lock(_identifier(attempt))
+                    interrupted += 1
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not reconcile attempts after supervisor shutdown."
+            raise PersistenceError(message) from None
+        else:
+            return interrupted
+
+    def fail_worker_attempts(self) -> int:
+        """Fail attempts whose worker process exited without orderly-shutdown intent."""
+        try:
+            attempt_ids = list(
+                NodeAttempt.objects.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value)
+                .filter(status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value))
+                .order_by("started_at", "pk")
+                .values_list("pk", flat=True)
+            )
+            failed = 0
+            for attempt_id in attempt_ids:
+                with transaction.atomic():
+                    attempt = (
+                        NodeAttempt.objects.select_for_update()
+                        .filter(
+                            pk=attempt_id,
+                            status__in=(
+                                AttemptStatus.RUNNING.value,
+                                AttemptStatus.WAITING.value,
+                            ),
+                        )
+                        .first()
+                    )
+                    if attempt is None:
+                        continue
+                    self._discard_attempt_mailbox(attempt)
+                    self.finish_attempt(
+                        _identifier(attempt),
+                        ExecutionOutcome(
+                            OutcomeKind.FAILED,
+                            stop_reason=AttemptStopReason.WORKER_LOST,
+                            error_code=AttemptStopReason.WORKER_LOST.value,
+                        ),
+                        _string(attempt, "starting_head"),
+                    )
+                    DispatchClaim.objects.filter(attempt=attempt).update(
+                        state=DispatchState.CONSUMED.value,
+                        consumed_at=timezone.now(),
+                    )
+                    self.release_attempt_lock(_identifier(attempt))
+                    failed += 1
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not record attempts lost with the worker process."
+            raise PersistenceError(message) from None
+        else:
+            return failed
+
+    def release_instance(self, instance_id: str) -> None:
+        try:
+            Instance.objects.filter(pk=instance_id, singleton_key=1).delete()
+        except DatabaseError:
+            message = "Relay could not release the supervisor lease."
+            raise PersistenceError(message) from None
 
     def create_pending_run(
         self,
@@ -849,6 +1105,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         worktree = run_worktree_path(run_id)
         try:
             with transaction.atomic():
+                instance = Instance.objects.select_for_update().filter(singleton_key=1).first()
+                if shutdown_marker_path().exists() or (
+                    instance is not None and _boolean(instance, "shutdown_requested")
+                ):
+                    message = "Relay is shutting down and is not accepting new runs."
+                    raise ConfigError(
+                        message,
+                        next_action="Start Relay again, then relaunch the workflow.",
+                    )
                 project = _project_by_id(project_id)
                 run_transition = transition_run(None, "launch")
                 run = Run.objects.create(
@@ -2412,8 +2677,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                 outcome = (
                     ExecutionOutcome(
                         OutcomeKind.FAILED,
-                        stop_reason=AttemptStopReason.CANCELED,
-                        error_code="canceled",
+                        stop_reason=cancel_stop_reason(control),
+                        error_code=cancel_stop_reason(control).value,
                     )
                     if control.kind == ControlKind.CANCEL.value
                     else ExecutionOutcome(OutcomeKind.SUCCEEDED)
@@ -2707,6 +2972,44 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not persist run cancellation."
             raise PersistenceError(message, context={"run": run_id}) from None
 
+    @staticmethod
+    def _recovery_target(
+        run: Run,
+        node: NodeRun,
+        attempt: NodeAttempt | None,
+        *,
+        interrupted: bool,
+    ) -> RecoveryTarget:
+        project = _related(run, "project", Project)
+        primary = Path(_string(run, "worktree_path"))
+        uses_git = _string(node, "node_type") in {
+            NodeType.AGENT.value,
+            NodeType.COMMAND.value,
+        }
+        ephemeral_reader = bool(attempt is not None and not _boolean(node, "writes") and uses_git)
+        worktree = (
+            reader_worktree_path(primary, _identifier(attempt))
+            if ephemeral_reader and attempt is not None
+            else primary
+        )
+        return RecoveryTarget(
+            run_id=_identifier(run),
+            node_run_id=_identifier(node),
+            scope_path=_string(node, "scope_path"),
+            attempt_id=_identifier(attempt) if attempt is not None else None,
+            project_path=_string(project, "git_root"),
+            worktree_path=str(worktree),
+            starting_head=(
+                _string(attempt, "starting_head")
+                if attempt is not None
+                else _string(run, "recorded_head")
+            ),
+            protected_head=_string(run, "recorded_head"),
+            uses_git=uses_git,
+            ephemeral_reader=ephemeral_reader,
+            interrupted=interrupted,
+        )
+
     def manual_rerun_target(self, run_id: str, scope_path: str) -> RecoveryTarget:
         try:
             run = Run.objects.select_related("project").get(pk=run_id)
@@ -2716,22 +3019,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             if _string(node, "status") != NodeStatus.FAILED.value:
                 _invalid_rerun_target(run_id, scope_path)
             attempt = NodeAttempt.objects.filter(node_run=node).order_by("-attempt_number").first()
-            project = _related(run, "project", Project)
-            return RecoveryTarget(
-                run_id=run_id,
-                node_run_id=_identifier(node),
-                scope_path=scope_path,
-                attempt_id=_identifier(attempt) if attempt is not None else None,
-                project_path=_string(project, "git_root"),
-                worktree_path=_string(run, "worktree_path"),
-                starting_head=(
-                    _string(attempt, "starting_head")
-                    if attempt is not None
-                    else _string(run, "recorded_head")
-                ),
-                protected_head=_string(run, "recorded_head"),
-                interrupted=False,
-            )
+            return self._recovery_target(run, node, attempt, interrupted=False)
         except PersistenceError:
             raise
         except (DatabaseError, ObjectDoesNotExist):
@@ -2741,13 +3029,18 @@ class DjangoExecutionStore(DjangoAgentStore):
     def interrupted_targets(self) -> tuple[RecoveryTarget, ...]:
         try:
             targets: list[RecoveryTarget] = []
-            nodes = NodeRun.objects.select_related("run__project").filter(
-                run__status=RunStatus.INTERRUPTED.value,
-                status=NodeStatus.PENDING.value,
-            )[:RECONCILE_MAX_ITEMS]
+            run_ids = self.interrupted_run_ids()
+            nodes = (
+                NodeRun.objects.select_related("run__project")
+                .filter(
+                    run_id__in=run_ids,
+                    status=NodeStatus.PENDING.value,
+                    attempts__stop_reason=AttemptStopReason.INTERRUPTED.value,
+                )
+                .distinct()
+            )
             for node in nodes:
                 run = _related(node, "run", Run)
-                project = _related(run, "project", Project)
                 attempt = (
                     NodeAttempt.objects.filter(
                         node_run=node, stop_reason=AttemptStopReason.INTERRUPTED.value
@@ -2755,29 +3048,31 @@ class DjangoExecutionStore(DjangoAgentStore):
                     .order_by("-attempt_number")
                     .first()
                 )
-                targets.append(
-                    RecoveryTarget(
-                        run_id=_identifier(run),
-                        node_run_id=_identifier(node),
-                        scope_path=_string(node, "scope_path"),
-                        attempt_id=_identifier(attempt) if attempt is not None else None,
-                        project_path=_string(project, "git_root"),
-                        worktree_path=_string(run, "worktree_path"),
-                        starting_head=(
-                            _string(attempt, "starting_head")
-                            if attempt is not None
-                            else _string(run, "recorded_head")
-                        ),
-                        protected_head=_string(run, "recorded_head"),
-                        interrupted=True,
-                    )
-                )
+                targets.append(self._recovery_target(run, node, attempt, interrupted=True))
             return tuple(targets)
         except DatabaseError:
             message = "Relay could not load interrupted run targets."
             raise PersistenceError(message) from None
 
+    def interrupted_run_ids(self) -> tuple[str, ...]:
+        try:
+            values = list(
+                Run.objects.filter(status=RunStatus.INTERRUPTED.value)
+                .order_by("started_at", "pk")
+                .values_list("pk", flat=True)[: RECONCILE_MAX_ITEMS + 1]
+            )
+            if len(values) > RECONCILE_MAX_ITEMS:
+                _too_many_interrupted_runs()
+            return tuple(str(value) for value in values)
+        except PersistenceError:
+            raise
+        except DatabaseError:
+            message = "Relay could not enumerate interrupted runs."
+            raise PersistenceError(message) from None
+
     def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool:
+        if target.interrupted:
+            return self.activate_interrupted_run(target.run_id, idempotency_key)
         try:
             with transaction.atomic():
                 run = Run.objects.select_for_update().get(pk=target.run_id)
@@ -2789,20 +3084,18 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ).exists()
                 if duplicate:
                     return False
-                action = "restart_reconcile" if target.interrupted else "manual_rerun"
-                run_transition = transition_run(_string(run, "status"), action)
+                run_transition = transition_run(_string(run, "status"), "manual_rerun")
                 _set_model_field(run, "status", run_transition.status)
                 _set_model_field(run, "failure_code", None)
                 _set_model_field(run, "failure_summary", None)
                 _set_model_field(run, "ended_at", None)
                 run.save(update_fields=("status", "failure_code", "failure_summary", "ended_at"))
-                if not target.interrupted:
-                    node_transition = transition_node(_string(node, "status"), "rerun")
-                    _set_model_field(node, "status", node_transition.status)
-                    node.save(update_fields=("status",))
-                    NodeRun.objects.filter(run=run, status=NodeStatus.CANCELED.value).update(
-                        status=NodeStatus.PENDING.value
-                    )
+                node_transition = transition_node(_string(node, "status"), "rerun")
+                _set_model_field(node, "status", node_transition.status)
+                node.save(update_fields=("status",))
+                NodeRun.objects.filter(run=run, status=NodeStatus.CANCELED.value).update(
+                    status=NodeStatus.PENDING.value
+                )
                 _append_event(
                     run,
                     run_transition.event,
@@ -2820,3 +3113,29 @@ class DjangoExecutionStore(DjangoAgentStore):
         except (DatabaseError, ObjectDoesNotExist):
             message = "Relay could not activate run recovery."
             raise PersistenceError(message, context={"run": target.run_id}) from None
+
+    def activate_interrupted_run(self, run_id: str, idempotency_key: str) -> bool:
+        """Reopen one run only after every interrupted checkout is prepared."""
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=run_id)
+                if _string(run, "status") == RunStatus.RUNNING.value:
+                    return False
+                transition = transition_run(_string(run, "status"), "restart_reconcile")
+                _set_model_field(run, "status", transition.status)
+                _set_model_field(run, "failure_code", None)
+                _set_model_field(run, "failure_summary", None)
+                _set_model_field(run, "ended_at", None)
+                run.save(update_fields=("status", "failure_code", "failure_summary", "ended_at"))
+                _append_event(
+                    run,
+                    transition.event,
+                    EventSource.RUN,
+                    {"status": transition.status, "idempotency_key": idempotency_key},
+                )
+                return True
+        except PersistenceError:
+            raise
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not resume an interrupted run."
+            raise PersistenceError(message, context={"run": run_id}) from None

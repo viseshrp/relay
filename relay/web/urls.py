@@ -3,7 +3,7 @@
 from django.urls import URLPattern, URLResolver, path
 
 from .static_view import serve_spa
-from .views import actions, pages
+from .views import actions, pages, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/auth", actions.authentication_state, name="auth-state"),
@@ -20,6 +20,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/agents", pages.agents, name="agents"),
     path("api/runs", actions.runs_collection, name="runs"),
     path("api/runs/<str:run_id>", pages.run_detail, name="run-detail"),
+    path("api/runs/<str:run_id>/stream", stream.run_stream, name="run-stream"),
     path("api/runs/<str:run_id>/events", pages.run_events, name="run-events"),
     path("api/runs/<str:run_id>/artifacts", pages.run_artifacts, name="run-artifacts"),
     path("api/runs/<str:run_id>/cancel", actions.cancel_run, name="run-cancel"),
