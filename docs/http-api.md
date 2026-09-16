@@ -34,14 +34,15 @@ request header is `X-CSRFToken: abc`.
 | `POST /api/projects/open` | `{"path":"/repo"}` | `200 {"project":...}` |
 | `POST /api/projects/relink` | `{"old":"/old","new":"/new"}` | `200 {"project":...}` |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
-| `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"..."}` | `200 {"draft":...}` |
-| `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"..."}` | `200 {"ok":true}` |
+| `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
+| `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
 
 Workflow keys resolve only below `.relay/workflows/`; `review` resolves to
 `review.yaml`. A key such as `../outside` is rejected. Draft autosave preserves
 invalid YAML and labels it `invalid`. Save validates the complete workflow and
 its referenced prompts and subworkflows before an atomic file replacement.
+Draft and Save reject a missing, expired, or differently held editor lease.
 
 `base_hash` is the SHA-256 of the exact saved UTF-8 bytes. For example, loading
 bytes `version: 1\nname: A\nnodes: {}\n` returns their hash; Save with that hash
@@ -56,7 +57,7 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/agents` | none | `200 {"agents":[...],"registry":...}` |
 | `POST /api/runs` | launch object below | `201 {"run_id":"..."}` |
 | `GET /api/runs` | optional query below | `200 {"runs":[...],"next":...}` |
-| `GET /api/runs/{id}` | none | `200 {"run":...}` |
+| `GET /api/runs/{id}` | none | `200 {"run":...}` with nodes, attempts, interactions, and snapshot metadata |
 | `GET /api/runs/{id}/events` | `?since=0&limit=100` | `200 {"events":[...],"next":...}` |
 | `GET /api/runs/{id}/artifacts` | none | `200 {"artifacts":[...]}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
@@ -84,8 +85,8 @@ Run history accepts `project`, `status`, `since`, and `limit`. `since` is the
 opaque run cursor returned as `next`; `limit` is clamped to 200. Event `since`
 is the last numeric event ID already consumed. Event pages are ordered by ID,
 contain at most 200 events and 1 MiB, and can be replayed without gaps by using
-each returned `next` value. The live SSE route adds the same event shape in the
-next implementation step.
+each returned `next` value. The live SSE route emits the same event shape and
+uses each event ID as its replay cursor.
 
 ## Controls
 

@@ -90,6 +90,7 @@ tag: ## 🏷 Tag the current release version (fixes changelog and pushes tag)
 check-dist: ## Validate dist/ artifacts (long description, format)
 	@echo "🔍 Validating dist/ artifacts..."
 	uv run twine check dist/*
+	uv run python scripts/check_distribution_contents.py dist/*
 
 .PHONY: publish
 publish: ## Publish to production PyPI

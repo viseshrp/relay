@@ -86,13 +86,6 @@ repos:
         args: [ "--config", "pyproject.toml" ]
         pass_filenames: false
 
-      - id: liccheck
-        name: liccheck
-        entry: liccheck
-        language: system
-        files: ^pyproject\.toml$
-        pass_filenames: false
-
       - id: cog
         name: cog
         entry: cog

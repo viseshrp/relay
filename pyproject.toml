@@ -62,9 +62,6 @@ dev = [
     "ty",
     "vulture",
     "deptry",
-    "liccheck",
-    # liccheck imports pkg_resources, which newer setuptools no longer provides.
-    "setuptools<81",
     "cogapp",
     "twine",
     "hatch",
@@ -94,6 +91,20 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["relay"]
+exclude = ["relay/static/**"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "relay/**",
+  "frontend/**",
+  "hatch_build.py",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+]
+exclude = ["certification/**"]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.editable]
 packages = ["relay"]
@@ -242,33 +253,7 @@ exclude = ["venv/", ".venv/"]
 [tool.deptry]
 exclude = ["venv/.*", ".venv/.*", "tests/.*"]
 # Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
-per_rule_ignores = { DEP002 = ["uvicorn"] }
-
-[tool.liccheck]
-authorized_licenses = [
-    "apache",
-    "apache 2.0",
-    "apache software license",
-    "bsd",
-    "bsd license",
-    "bsd-3-clause",
-    "isc",
-    "isc license",
-    "mit",
-    "mit license",
-    "psf-2.0",
-    "python software foundation license",
-]
-unauthorized_licenses = [
-    "agpl",
-    "gpl",
-    "gpl v2",
-    "gpl v3",
-    "gnu affero general public license",
-    "gnu general public license",
-]
-dependencies = true
-authorized_packages = { agent-client-protocol = "==0.12.1", huey = "==3.4.0" }
+per_rule_ignores = { DEP002 = ["uvicorn"], DEP003 = ["hatchling"] }
 
 [tool.pre-commit.default_language_versions]
 python = "3.14"

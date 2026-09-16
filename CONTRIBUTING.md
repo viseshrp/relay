@@ -11,7 +11,8 @@ event, CLI, or HTTP contract.
 - [uv](https://docs.astral.sh/uv/)
 - Node.js `^20.19.0` or `>=22.12.0` and npm for frontend or package builds
 
-Node.js is a build dependency. A wheel installation must run without it.
+CI uses Node.js 24.21.0. Node.js is a build dependency. A wheel installation
+must run without it.
 
 ## Development setup
 
@@ -59,6 +60,16 @@ make check-dist
 `make test` runs the supported Python matrix through tox. Frontend and package
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
+
+For a frontend-only check, run:
+
+```bash
+npm --prefix frontend run build
+```
+
+`make check-dist` also asserts that the wheel contains compiled static assets,
+the source distribution contains its frontend build inputs, and neither
+distribution contains workflow or prompt templates.
 
 ## Code boundaries
 

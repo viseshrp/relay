@@ -47,6 +47,97 @@ Later sessions use the same local credentials. Session cookies are HTTP-only,
 same-site strict, and expire when the browser closes. Browser actions use a
 same-site CSRF cookie and header. Relay does not issue bearer tokens.
 
+## Author workflows
+
+The Author tab opens `workflow.yaml` by default. Enter another key to load a
+different file below `.relay/workflows/`; `review` and `review.yaml` both refer
+to `review.yaml`. The canvas and CodeMirror edit one eemeli `yaml` document.
+Typing valid YAML redraws the graph. Adding, deleting, or configuring a canvas
+node rewrites that same document instead of maintaining a second graph model.
+
+The node panel covers all six node types and their shared dependencies. A
+dependency field transforms `build, test` into the YAML sequence
+`needs: [build, test]`. A command argument field transforms the JSON string
+`["python", "-m", "pytest"]` into the equivalent YAML `run` sequence. Invalid
+JSON stays in the field and is not applied to the document.
+
+Canvas changes use canonical YAML formatting. Explicit Save compares the
+canonical text with the editor text and asks before normalizing collection
+style or spacing. For example, `nodes: {}` stays a valid compact empty mapping,
+while structurally edited mappings use block formatting. Comments and scalar
+values remain part of the parsed document. The dialog warns about formatting
+changes because round-trip libraries cannot preserve every presentation choice
+after structural canvas edits.
+
+## Drafts, leases, and conflicts
+
+Each browser tab gets an opaque holder ID in session storage. Loading a
+workflow acquires its 60-second editor lease; the tab renews the lease every 30
+seconds. Draft and Save requests must present that live holder ID. Another tab
+can read the file but cannot autosave or replace it until the lease expires.
+
+Changed editor text autosaves to the database after 600 milliseconds without
+changing the Git-owned workflow file. Invalid YAML is retained as an `invalid`
+recovery draft. Reloading the workflow restores the newest draft and shows its
+validation state.
+
+Save validates the complete workflow, prompts, and subworkflows, then replaces
+one file atomically. It also sends the SHA-256 hash of the exact bytes loaded by
+the tab. If another process changed the file, Relay returns a conflict and
+keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
+again. A successful Save clears the draft and refreshes the base hash.
+
+## Launch a run
+
+The launch form comes from the loaded workflow's typed `inputs` mapping:
+
+- string inputs use text fields;
+- integer and number inputs use numeric fields;
+- boolean inputs use checkboxes;
+- enum inputs use the declared finite values.
+
+Cached model observations appear as suggestions, but Relay sends the exact
+model value entered by the owner. The form also selects `clean_on_success` or
+`retain` and one declared entry point. Launch is disabled while the editor has
+unsaved changes or invalid YAML. The server repeats validation, clean-Git,
+artifact, and exact-model preflight before it creates a run.
+
+## Monitor and control runs
+
+The Runs tab lists bounded history pages and opens one run monitor. The canvas
+shows each materialized scope path with its durable status. Nested loop and
+subworkflow instances therefore appear separately. The monitor combines the
+SSE stream with paginated database reads:
+
+- provider and command output uses a fixed-row virtualized viewport;
+- event history loads forward by the last durable event ID;
+- pending permission, elicitation, and human-wait records show response forms;
+- failed nodes expose a manual rerun action;
+- retained artifacts expose authenticated download links.
+
+Cancel creates one durable, idempotent control request and fans it out to live
+attempts. A stale or duplicate answer cannot reach a later attempt. Manual
+rerun is available only for a failed run and failed node; Relay preserves
+evidence and creates a new attempt. An interrupted run resumes automatically
+when `relay up` restarts, also as a new attempt. The UI never resumes an old
+provider session.
+
+## History, artifacts, and cleanup
+
+History, snapshots, output, interactions, and artifacts remain until explicit
+cleanup. The cleanup panel selects `worktrees`, `branches`, `runs`, or `all`
+and requires a confirmation dialog. Relay rejects cleanup while any run for
+the project is active. Worktree removal preserves evidence first, and cleanup
+never changes the launch branch.
+
+## Browser support
+
+Relay supports current desktop releases of Chrome, Edge, Firefox, and Safari.
+The browser must support modules, `EventSource`, `crypto.randomUUID`, CSS grid,
+and session storage. JavaScript and same-site cookies must be enabled. The UI
+has responsive single-column layouts for narrow windows, but Phase 1 does not
+target mobile browsers or expose a remote web service.
+
 ## Live events and replay
 
 The run monitor connects to `GET /api/runs/{id}/stream` with an authenticated

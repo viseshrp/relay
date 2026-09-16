@@ -72,6 +72,14 @@ def _base_hash(body: dict[str, object]) -> str:
     return value
 
 
+def _lease_holder(body: dict[str, object]) -> str:
+    holder = required_text(body, "holder")
+    if len(holder) > 200:
+        message = "holder must contain at most 200 characters."
+        raise ConfigError(message)
+    return holder
+
+
 def _control_response(result: ControlResult) -> JsonResponse:
     status = {
         ControlResult.ACCEPTED: 202,
@@ -157,8 +165,10 @@ def relink_registered_project(request: HttpRequest) -> HttpResponse:
 def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
     relay_root, project = current_project()
     body = json_body(request)
+    store = DjangoWorkflowStore()
+    store.require_lease(project.id, key, _lease_holder(body))
     draft = autosave_workflow_draft(
-        DjangoWorkflowStore(),
+        store,
         relay_root,
         project.id,
         key,
@@ -174,8 +184,10 @@ def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
 def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
     relay_root, project = current_project()
     body = json_body(request)
+    store = DjangoWorkflowStore()
+    store.require_lease(project.id, key, _lease_holder(body))
     save_workflow_document(
-        DjangoWorkflowStore(),
+        store,
         relay_root,
         project.id,
         key,
@@ -191,10 +203,7 @@ def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
 def acquire_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
     _relay_root, project = current_project()
     body = json_body(request)
-    holder = required_text(body, "holder")
-    if len(holder) > 200:
-        message = "holder must contain at most 200 characters."
-        raise ConfigError(message)
+    holder = _lease_holder(body)
     lease = DjangoWorkflowStore().acquire_lease(project.id, key, holder)
     return JsonResponse({"lease": lease})
 

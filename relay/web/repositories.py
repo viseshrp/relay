@@ -506,6 +506,23 @@ class DjangoWorkflowStore:
             message = "Relay could not acquire the workflow editor lease."
             raise PersistenceError(message, context={"workflow": workflow_key}) from None
 
+    def require_lease(self, project_id: str, workflow_key: str, holder: str) -> None:
+        """Reject a write unless this exact browser still owns the live lease."""
+        try:
+            lease = EditorLease.objects.filter(
+                project_id=project_id,
+                workflow_key=workflow_key,
+                holder=holder,
+                expires_at__gt=timezone.now(),
+            ).first()
+            if lease is None:
+                _reject_lease_holder(project_id, workflow_key)
+        except PermissionFlowError:
+            raise
+        except DatabaseError:
+            message = "Relay could not verify the workflow editor lease."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
 
 def _run_record(run: Run) -> dict[str, object]:
     return {
@@ -606,6 +623,50 @@ class DjangoReadStore:
                     "loop_index": node.loop_index,
                 }
                 for node in NodeRun.objects.filter(run=run).order_by("scope_path")
+            ]
+            result["attempts"] = [
+                {
+                    "id": _identifier(attempt),
+                    "node_run_id": _foreign_key_text(attempt, "node_run"),
+                    "scope_path": _string(_related(attempt, "node_run", NodeRun), "scope_path"),
+                    "attempt_number": _integer(attempt, "attempt_number"),
+                    "status": _string(attempt, "status"),
+                    "driver_kind": attempt.driver_kind,
+                    "agent_id": _string(attempt, "agent_id"),
+                    "agent_version": _string(attempt, "agent_version"),
+                    "model_value": _string(attempt, "model_value"),
+                    "starting_head": _string(attempt, "starting_head"),
+                    "ending_head": attempt.ending_head,
+                    "started_at": _datetime_text(_datetime_field(attempt, "started_at")),
+                    "ended_at": _datetime_text(_datetime_field(attempt, "ended_at")),
+                    "stop_reason": attempt.stop_reason,
+                    "exit_code": attempt.exit_code,
+                    "error_code": attempt.error_code,
+                }
+                for attempt in NodeAttempt.objects.select_related("node_run")
+                .filter(node_run__run=run)
+                .order_by("node_run__scope_path", "attempt_number")
+            ]
+            result["interactions"] = [
+                {
+                    "id": _identifier(interaction),
+                    "attempt_id": _foreign_key_text(interaction, "attempt"),
+                    "scope_path": _string(_related(interaction, "node_run", NodeRun), "scope_path"),
+                    "kind": _string(interaction, "kind"),
+                    "request": _mapping(interaction, "request_payload"),
+                    "response": (
+                        _mapping(interaction, "response_payload")
+                        if interaction.response_payload is not None
+                        else None
+                    ),
+                    "status": _string(interaction, "status"),
+                    "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
+                    "created_at": _datetime_text(_datetime_field(interaction, "created_at")),
+                    "answered_at": _datetime_text(_datetime_field(interaction, "answered_at")),
+                }
+                for interaction in HumanInteraction.objects.select_related("node_run", "attempt")
+                .filter(run=run)
+                .order_by("created_at", "pk")
             ]
         except (ProjectDiscoveryError, PersistenceError):
             raise
