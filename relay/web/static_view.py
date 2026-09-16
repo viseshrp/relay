@@ -8,18 +8,29 @@ from pathlib import Path
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_http_methods
 
-from relay.errors import PathSafetyError
-from relay.paths import safe_resolve
-
 STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
 
 
+def _asset_catalog() -> dict[str, Path]:
+    """Index only packaged files that remain inside the resolved static root."""
+    root = STATIC_ROOT.resolve()
+    catalog: dict[str, Path] = {}
+    for candidate in root.rglob("*"):
+        try:
+            resolved = candidate.resolve()
+            relative = resolved.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved.is_file():
+            catalog[relative.as_posix()] = resolved
+    return catalog
+
+
+_STATIC_ASSETS = _asset_catalog()
+
+
 def _asset(path: str) -> Path | None:
-    try:
-        candidate = safe_resolve(STATIC_ROOT, path)
-    except PathSafetyError:
-        return None
-    return candidate if candidate.is_file() else None
+    return _STATIC_ASSETS.get(path)
 
 
 @require_http_methods(("GET", "HEAD"))

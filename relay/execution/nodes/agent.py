@@ -9,8 +9,6 @@ from relay.errors import AgentLaunchError
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.workflows.schema import AgentNode
 
-from .base import parse_node, validated_outputs
-
 
 class AgentNodeDriver(Protocol):
     """Narrow adapter used by the node layer; provider details stay outside it."""
@@ -34,6 +32,9 @@ class AgentExecutor:
         self.driver: AgentNodeDriver = driver
 
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
+        # Load shared helpers after package initialization to avoid an import cycle.
+        from .base import parse_node, validated_outputs
+
         node = parse_node(context, AgentNode)
         outcome = self.driver.execute(context, node)
         if outcome.kind is not OutcomeKind.SUCCEEDED:

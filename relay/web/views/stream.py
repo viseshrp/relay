@@ -21,6 +21,7 @@ from relay.constants import (
 from relay.execution.state import TERMINAL_RUN_STATUSES
 
 from ..models import Run, RunEvent
+from . import log_context_value
 
 LOGGER = logging.getLogger(__name__)
 _TERMINAL = {item.value for item in TERMINAL_RUN_STATUSES}
@@ -111,7 +112,10 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
     except asyncio.CancelledError:
         raise
     except Exception:
-        LOGGER.exception("Relay SSE stream failed", extra={"run_id": run_id, "cursor": cursor})
+        LOGGER.exception(
+            "Relay SSE stream failed",
+            extra={"run_id": log_context_value(run_id), "cursor": cursor},
+        )
         payload = {
             "id": cursor,
             "type": "error",

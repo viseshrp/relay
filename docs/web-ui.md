@@ -51,9 +51,11 @@ same-site CSRF cookie and header. Relay does not issue bearer tokens.
 
 The Author tab opens `workflow.yaml` by default. Enter another key to load a
 different file below `.relay/workflows/`; `review` and `review.yaml` both refer
-to `review.yaml`. The canvas and CodeMirror edit one eemeli `yaml` document.
-Typing valid YAML redraws the graph. Adding, deleting, or configuring a canvas
-node rewrites that same document instead of maintaining a second graph model.
+to `review.yaml`, and nested keys use `/`. Empty segments, backslashes, `.`,
+and `..` are rejected. The canvas and CodeMirror edit one eemeli `yaml`
+document. Typing valid YAML redraws the graph. Adding, deleting, or configuring
+a canvas node rewrites that same document instead of maintaining a second graph
+model.
 
 The node panel covers all six node types and their shared dependencies. A
 dependency field transforms `build, test` into the YAML sequence

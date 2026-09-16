@@ -130,7 +130,7 @@ def up_command(
 def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
     from .agents.discovery import discover_agents
-    from .agents.driver import probe_installed_agents
+    from .agents.driver import AgentObservationStore, probe_installed_agents
     from .agents.registry import load_registry
     from .manage import apply_migrations
     from .projects.discovery import discover_relay_root, git_root
@@ -155,13 +155,13 @@ def doctor_command(context: click.Context) -> None:
     except RelayError as error:
         checks.append({"id": "git", "ok": False, **error.to_envelope()})
 
-    database_ready = False
+    observation_store: AgentObservationStore | None = None
     try:
         apply_migrations()
         from .web.repositories import DjangoAgentStore
         from .web.settings import DATABASES
 
-        database_ready = True
+        observation_store = DjangoAgentStore()
         checks.append(
             {
                 "id": "database",
@@ -217,7 +217,7 @@ def doctor_command(context: click.Context) -> None:
         rows = probe_installed_agents(
             repository,
             registry=registry,
-            observation_store=DjangoAgentStore() if database_ready else None,
+            observation_store=observation_store,
         )
     except RelayError as error:
         LOGGER.exception("Relay agent readiness probing failed")

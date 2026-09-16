@@ -38,11 +38,13 @@ request header is `X-CSRFToken: abc`.
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
 
-Workflow keys resolve only below `.relay/workflows/`; `review` resolves to
-`review.yaml`. A key such as `../outside` is rejected. Draft autosave preserves
-invalid YAML and labels it `invalid`. Save validates the complete workflow and
-its referenced prompts and subworkflows before an atomic file replacement.
-Draft and Save reject a missing, expired, or differently held editor lease.
+Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
+resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.
+Empty segments, backslashes, `.`, and `..` are rejected. Draft autosave
+preserves invalid YAML and labels it `invalid`. Save validates the complete
+workflow and its referenced prompts and subworkflows before an atomic file
+replacement. Draft and Save reject a missing, expired, or differently held
+editor lease.
 
 `base_hash` is the SHA-256 of the exact saved UTF-8 bytes. For example, loading
 bytes `version: 1\nname: A\nnodes: {}\n` returns their hash; Save with that hash

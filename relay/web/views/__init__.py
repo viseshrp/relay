@@ -24,6 +24,15 @@ P = ParamSpec("P")
 LOGGER = logging.getLogger(__name__)
 
 
+def log_context_value(value: object) -> str:
+    """Escape line breaks before adding owner input to one physical log line.
+
+    For example, ``"run\nforged"`` becomes ``"run\\nforged"`` and
+    ``"run\rforged"`` becomes ``"run\\rforged"``.
+    """
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 def api_errors(
     view: Callable[Concatenate[HttpRequest, P], HttpResponseBase],
 ) -> Callable[Concatenate[HttpRequest, P], HttpResponseBase]:
@@ -39,7 +48,10 @@ def api_errors(
             error = ConfigError("The request body exceeds Relay's byte limit.")
             return JsonResponse(error.to_envelope(), status=error.http_status)
         except Exception:
-            LOGGER.exception("Unhandled Relay HTTP endpoint failure", extra={"path": request.path})
+            LOGGER.exception(
+                "Unhandled Relay HTTP endpoint failure",
+                extra={"path": log_context_value(request.path)},
+            )
             return JsonResponse(
                 {
                     "code": "internal_error",
@@ -153,6 +165,7 @@ __all__ = [
     "canonical_uuid",
     "current_project",
     "json_body",
+    "log_context_value",
     "optional_text",
     "required_object",
     "required_text",

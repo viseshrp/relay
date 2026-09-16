@@ -10,10 +10,8 @@ from relay.errors import ProjectDiscoveryError
 
 
 def git_root(start: Path | None = None) -> Path:
-    """Return the containing Git worktree root without invoking a shell."""
-    location = (start or Path.cwd()).resolve()
-    if location.is_file():
-        location = location.parent
+    """Return the Git worktree root for an owner-selected directory."""
+    location = start if start is not None else Path.cwd()
     executable = shutil.which("git")
     if executable is None:
         message = "Git could not be found on PATH."
