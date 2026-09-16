@@ -88,6 +88,11 @@ def _validate_payload(payload: Mapping[str, object]) -> None:
         raise PermissionFlowError(message)
 
 
+def valid_idempotency_key(value: str) -> bool:
+    """Accept nonempty public keys of at most the durable 200-character limit."""
+    return bool(value) and len(value) <= CONTROL_IDEMPOTENCY_KEY_MAX_CHARS
+
+
 def submit_control(
     store: ControlStore,
     attempt_id: str,
@@ -96,7 +101,7 @@ def submit_control(
     payload: Mapping[str, object],
 ) -> ControlResult:
     """Validate and persist a request; delivery stays with the owning worker."""
-    if not idempotency_key or len(idempotency_key) > CONTROL_IDEMPOTENCY_KEY_MAX_CHARS:
+    if not valid_idempotency_key(idempotency_key):
         return ControlResult.INVALID
     _validate_payload(payload)
     return store.submit_control(
@@ -115,4 +120,5 @@ __all__ = [
     "ControlStore",
     "cancel_stop_reason",
     "submit_control",
+    "valid_idempotency_key",
 ]

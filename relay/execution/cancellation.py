@@ -11,7 +11,7 @@ from typing import Protocol
 
 from relay.constants import CANCELLATION_GRACE_SECONDS
 from relay.errors import CancellationError
-from relay.execution.control import ControlResult
+from relay.execution.control import ControlResult, valid_idempotency_key
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +31,17 @@ class ProcessCancellation:
     exited: bool
     forced: bool
     returncode: int | None
+
+
+def request_cancellation(
+    store: CancellationStore,
+    run_id: str,
+    idempotency_key: str,
+) -> ControlResult:
+    """Validate the public key before any durable run state changes."""
+    if not valid_idempotency_key(idempotency_key):
+        return ControlResult.INVALID
+    return store.request_run_cancellation(run_id, idempotency_key)
 
 
 def _wait(process: subprocess.Popen[bytes] | subprocess.Popen[str], timeout: float) -> bool:
@@ -115,5 +126,6 @@ __all__ = [
     "CancellationStore",
     "ProcessCancellation",
     "cancel_agent_attempt",
+    "request_cancellation",
     "terminate_process_tree",
 ]

@@ -22,7 +22,7 @@ from ..repositories import (
     DjangoReadStore,
     DjangoWorkflowStore,
 )
-from . import api_errors, current_project
+from . import api_errors, canonical_record_id, canonical_uuid, current_project
 
 
 def _nonnegative_int(value: str | None, *, field: str, default: int) -> int:
@@ -143,10 +143,16 @@ def runs(request: HttpRequest) -> HttpResponse:
     if status is not None and status not in {item.value for item in RunStatus}:
         message = "status is not a recognized run state."
         raise ConfigError(message)
+    project_id = request.GET.get("project")
+    if project_id is not None:
+        project_id = canonical_uuid(project_id, resource="project")
+    since = request.GET.get("since")
+    if since is not None:
+        since = canonical_uuid(since, resource="run")
     records, next_value = DjangoReadStore().list_runs(
-        project_id=request.GET.get("project"),
+        project_id=project_id,
         status=status,
-        since=request.GET.get("since"),
+        since=since,
         limit=limit,
     )
     return JsonResponse({"runs": records, "next": next_value})
@@ -157,13 +163,16 @@ def runs(request: HttpRequest) -> HttpResponse:
 @require_GET
 def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
     del request
-    return JsonResponse({"run": DjangoReadStore().run_detail(run_id)})
+    return JsonResponse(
+        {"run": DjangoReadStore().run_detail(canonical_uuid(run_id, resource="run"))}
+    )
 
 
 @api_errors
 @owner_required
 @require_GET
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
     since = _nonnegative_int(request.GET.get("since"), field="since", default=0)
     limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
     if limit == 0:
@@ -178,7 +187,9 @@ def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
 @require_GET
 def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
     del request
-    return JsonResponse({"artifacts": DjangoReadStore().list_artifacts(run_id)})
+    return JsonResponse(
+        {"artifacts": DjangoReadStore().list_artifacts(canonical_uuid(run_id, resource="run"))}
+    )
 
 
 @api_errors
@@ -186,7 +197,9 @@ def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
 @require_GET
 def artifact(request: HttpRequest, artifact_id: str) -> FileResponse:
     del request
-    path, name, media_type = DjangoReadStore().artifact_file(artifact_id)
+    path, name, media_type = DjangoReadStore().artifact_file(
+        canonical_record_id(artifact_id, resource="artifact")
+    )
     return FileResponse(path.open("rb"), as_attachment=True, filename=name, content_type=media_type)
 
 

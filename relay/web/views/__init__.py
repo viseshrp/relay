@@ -9,17 +9,19 @@ import logging
 import os
 from pathlib import Path
 from typing import Concatenate, ParamSpec
+import uuid
 
 from django.core.exceptions import RequestDataTooBig
 from django.http import HttpRequest, JsonResponse
 from django.http.response import HttpResponseBase
 
-from relay.errors import ConfigError, RelayError
+from relay.errors import ConfigError, ProjectDiscoveryError, RelayError
 from relay.projects.discovery import discover_relay_root
 from relay.projects.service import ProjectRecord, register_current_project
 
 P = ParamSpec("P")
 LOGGER = logging.getLogger(__name__)
+_MAX_BIGINT_ID = (1 << 63) - 1
 
 
 def api_errors(
@@ -92,6 +94,34 @@ def required_object(body: dict[str, object], field: str) -> dict[str, object]:
     return value
 
 
+def canonical_uuid(value: str, *, resource: str) -> str:
+    """Normalize public UUIDs before ORM use.
+
+    For example, ``550E8400E29B41D4A716446655440000`` becomes
+    ``550e8400-e29b-41d4-a716-446655440000``. Non-UUID text returns the same
+    resource-not-found contract as an unknown canonical identifier.
+    """
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        message = f"The requested {resource} does not exist."
+        raise ProjectDiscoveryError(message, context={resource: value}) from None
+
+
+def canonical_record_id(value: str, *, resource: str) -> str:
+    """Normalize a public database ID without allowing numeric coercion.
+
+    For example, ``00042`` becomes ``42``. Signs, decimals, zero, and values
+    above SQLite's signed 64-bit integer range use the not-found contract.
+    """
+    valid_digits = value.isascii() and value.isdigit()
+    parsed = int(value) if valid_digits and len(value) <= 19 else 0
+    if parsed < 1 or parsed > _MAX_BIGINT_ID:
+        message = f"The requested {resource} does not exist."
+        raise ProjectDiscoveryError(message, context={resource: value})
+    return str(parsed)
+
+
 def current_project() -> tuple[Path, ProjectRecord]:
     """Resolve the one repository owned by this `relay up` process."""
     from relay.web.repositories import DjangoProjectStore
@@ -105,6 +135,8 @@ def current_project() -> tuple[Path, ProjectRecord]:
 
 __all__ = [
     "api_errors",
+    "canonical_record_id",
+    "canonical_uuid",
     "current_project",
     "json_body",
     "optional_text",

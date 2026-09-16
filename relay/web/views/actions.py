@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
+from relay.execution.cancellation import request_cancellation
 from relay.execution.control import ControlResult, submit_control
 from relay.execution.launch import LaunchRequest, launch_workflow
 from relay.execution.recovery import prepare_recovery_workspace
@@ -32,6 +33,8 @@ from ..auth import (
 from ..repositories import DjangoExecutionStore, DjangoProjectStore, DjangoWorkflowStore
 from . import (
     api_errors,
+    canonical_record_id,
+    canonical_uuid,
     current_project,
     json_body,
     optional_text,
@@ -260,9 +263,10 @@ def _enqueue_claim(claim_token: str) -> object:
 @owner_required
 @require_POST
 def cancel_run(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
     body = json_body(request)
     key = required_text(body, "idempotency_key")
-    result = DjangoExecutionStore().request_run_cancellation(run_id, key)
+    result = request_cancellation(DjangoExecutionStore(), run_id, key)
     return _control_response(result)
 
 
@@ -272,6 +276,7 @@ def _answer_control(
     kind: ControlKind,
     value_field: str,
 ) -> JsonResponse:
+    attempt_id = canonical_record_id(attempt_id, resource="attempt")
     body = json_body(request)
     if value_field not in body:
         message = f"{value_field} is required."
@@ -290,6 +295,7 @@ def _answer_control(
 @owner_required
 @require_POST
 def answer_permission(request: HttpRequest, attempt_id: str) -> HttpResponse:
+    attempt_id = canonical_record_id(attempt_id, resource="attempt")
     body = json_body(request)
     decision = required_text(body, "decision")
     result = submit_control(
@@ -320,18 +326,19 @@ def answer_wait(request: HttpRequest, attempt_id: str) -> HttpResponse:
 @owner_required
 @require_POST
 def rerun_node(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
     body = json_body(request)
     store = DjangoExecutionStore()
-    activated = rerun_failed_node(
+    result = rerun_failed_node(
         store,
         run_id,
         required_text(body, "scope_path"),
         required_text(body, "idempotency_key"),
         lambda target: prepare_recovery_workspace(store, target),
     )
-    if activated:
+    if result is ControlResult.ACCEPTED:
         dispatch_ready_nodes(store, run_id, _enqueue_claim)
-    return _control_response(ControlResult.ACCEPTED if activated else ControlResult.ALREADY_APPLIED)
+    return _control_response(result)
 
 
 @api_errors

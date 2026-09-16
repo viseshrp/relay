@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from hashlib import sha256
 import json
 import logging
 from pathlib import Path
@@ -413,6 +414,12 @@ def _retained_attempt_refs(repository: Path, run_id: str) -> tuple[str, ...]:
         message = "Git returned a retained attempt ref outside the requested run namespace."
         raise PersistenceError(message, context={"run": run_id})
     return refs
+
+
+def _derived_control_key(namespace: str, *parts: str) -> str:
+    """Map `cancel`, `key-1`, `attempt-2` to `cancel:<64 hex characters>`."""
+    digest = sha256("\0".join(parts).encode()).hexdigest()
+    return f"{namespace}:{digest}"
 
 
 def _require_retained_file(path: Path) -> Path:
@@ -3163,7 +3170,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                 for attempt in attempts:
                     _request, _created = ControlRequest.objects.get_or_create(
                         attempt=attempt,
-                        idempotency_key=f"{idempotency_key}:{_identifier(attempt)}",
+                        idempotency_key=_derived_control_key(
+                            "cancel",
+                            idempotency_key,
+                            _identifier(attempt),
+                        ),
                         defaults={
                             "kind": ControlKind.CANCEL.value,
                             "payload": {"reason": "owner_cancel"},

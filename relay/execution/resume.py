@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Protocol
 
+from relay.execution.control import ControlResult, valid_idempotency_key
+
 
 @dataclass(frozen=True, slots=True)
 class RecoveryTarget:
@@ -43,11 +45,17 @@ def rerun_failed_node(
     scope_path: str,
     idempotency_key: str,
     prepare_workspace: Callable[[RecoveryTarget], None],
-) -> bool:
+) -> ControlResult:
     """Preserve/reset first, then reopen only the selected failed node."""
+    if not valid_idempotency_key(idempotency_key):
+        return ControlResult.INVALID
     target = store.manual_rerun_target(run_id, scope_path)
     prepare_workspace(target)
-    return store.activate_recovery(target, idempotency_key)
+    return (
+        ControlResult.ACCEPTED
+        if store.activate_recovery(target, idempotency_key)
+        else ControlResult.ALREADY_APPLIED
+    )
 
 
 def resume_interrupted(

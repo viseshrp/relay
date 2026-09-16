@@ -108,7 +108,9 @@ Control results are distinct and stable:
 | `invalid` | `422` | The body or interaction kind does not match a pending request |
 
 An idempotency key belongs to one exact attempt. Reusing `p-1` for the same
-permission returns the first outcome; it cannot answer a later attempt.
+permission returns the first outcome; it cannot answer a later attempt. Keys
+must contain 1 through 200 characters; longer values return `invalid` before
+Relay changes run or attempt state.
 Cancellation fans out to every active attempt. Failed-node rerun preserves any
 remaining evidence, resets only to the recorded safe head, and creates a new
 attempt; successful nodes stay complete.
@@ -139,3 +141,7 @@ Every JSON failure has this Relay-owned envelope:
 provider fields do not cross the HTTP boundary. Request bodies are limited to
 1 MiB. Control payloads are limited to 64 KiB. Reads and event frames are also
 bounded so one browser request cannot load unbounded history.
+
+Run path identifiers are UUIDs; attempt and artifact identifiers are positive
+integers. A malformed or unknown identifier returns the same Relay-owned `404`
+response and does not reach a state-changing service.
