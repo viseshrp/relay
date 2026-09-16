@@ -96,6 +96,9 @@ and artifact metadata.
 Evidence preservation precedes worktree removal. Relay does not delete the
 only copy of a diff, artifact, or snapshot without confirmation. Retained run
 branches require explicit cleanup even when a successful worktree is removed.
+Cleaning run records alone is rejected while its worktree, run branch, or
+retained attempt refs still exist. Clean worktrees, then Git refs, then records;
+`--all` applies that order and also removes Relay logs.
 
 Agent and command processes inherit the worker environment. Relay has no secret
 vault or output masking, so the database, artifact directory, and logs may

@@ -128,7 +128,9 @@ History, snapshots, output, interactions, and artifacts remain until explicit
 cleanup. The cleanup panel selects `worktrees`, `branches`, `runs`, or `all`
 and requires a confirmation dialog. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
-never changes the launch branch.
+never changes the launch branch. Run-record cleanup is rejected until that
+run's worktree, retained branch, and attempt refs are gone; the `all` scope
+applies the safe worktree, Git-ref, then record order.
 
 ## Browser support
 

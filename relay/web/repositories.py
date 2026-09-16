@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 import json
+import logging
 from pathlib import Path
 import shutil
 from typing import NoReturn, TypeVar
@@ -63,6 +64,7 @@ from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
     AttemptStatus,
     AttemptStopReason,
+    CleanupPolicy,
     ControlKind,
     ControlState,
     DispatchState,
@@ -88,7 +90,7 @@ from relay.paths import (
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import PreservationResult
-from relay.vcs.git import run_git
+from relay.vcs.git import git_stdout, run_git
 from relay.vcs.worktree import (
     reader_worktree_path,
     remove_worktree,
@@ -120,6 +122,7 @@ from .models import (
 )
 
 ModelT = TypeVar("ModelT", bound=models.Model)
+LOGGER = logging.getLogger(__name__)
 
 
 class DjangoAgentStore:
@@ -375,6 +378,41 @@ def _reject_branch_with_worktree(run_id: str) -> NoReturn:
         context={"run": run_id},
         next_action="Clean worktrees first or select scope all.",
     )
+
+
+def _reject_run_with_git_state(run_id: str) -> NoReturn:
+    message = "Remove the retained run worktree and Git refs before deleting its records."
+    raise PermissionFlowError(
+        message,
+        context={"run": run_id},
+        next_action="Clean worktrees, then branches and attempt refs, before run records.",
+    )
+
+
+def _retained_branch_exists(repository: Path, branch: str) -> bool:
+    result = run_git(
+        repository,
+        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    # Re-run without quiet mode so the Relay-owned Git error retains useful context.
+    run_git(repository, ["show-ref", "--verify", f"refs/heads/{branch}"])
+    return False
+
+
+def _retained_attempt_refs(repository: Path, run_id: str) -> tuple[str, ...]:
+    """Map run `abc` to retained refs below `refs/relay/attempts/abc/`."""
+    prefix = f"refs/relay/attempts/{run_id}/"
+    output = git_stdout(repository, ["for-each-ref", "--format=%(refname)", prefix])
+    refs = tuple(line for line in output.splitlines() if line)
+    if any(not ref.startswith(prefix) for ref in refs):
+        message = "Git returned a retained attempt ref outside the requested run namespace."
+        raise PersistenceError(message, context={"run": run_id})
+    return refs
 
 
 def _require_retained_file(path: Path) -> Path:
@@ -1397,7 +1435,14 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _reject_active_cleanup(project_id)
             runs = list(Run.objects.filter(project=project).order_by("started_at", "pk"))
             repository = Path(_string(project, "git_root"))
-            deleted = {"runs": 0, "worktrees": 0, "branches": 0, "artifact_roots": 0, "logs": 0}
+            deleted = {
+                "runs": 0,
+                "worktrees": 0,
+                "branches": 0,
+                "attempt_refs": 0,
+                "artifact_roots": 0,
+                "logs": 0,
+            }
             if scope in {"worktrees", "all"}:
                 root = worktrees_dir()
                 for run in runs:
@@ -1410,16 +1455,34 @@ class DjangoExecutionStore(DjangoAgentStore):
                         run.save(update_fields=("worktree_state",))
             if scope in {"branches", "all"}:
                 for run in runs:
-                    if Path(_string(run, "worktree_path")).exists():
+                    worktree = safe_resolve(worktrees_dir(), _string(run, "worktree_path"))
+                    if worktree.exists():
                         _reject_branch_with_worktree(_identifier(run))
-                    result = run_git(
-                        repository,
-                        ["branch", "-D", _string(run, "run_branch")],
-                        check=False,
-                    )
-                    if result.returncode == 0:
+                    branch = _string(run, "run_branch")
+                    if _retained_branch_exists(repository, branch):
+                        run_git(repository, ["branch", "-D", branch])
                         deleted["branches"] += 1
+                    for retained_ref in _retained_attempt_refs(
+                        repository,
+                        _identifier(run),
+                    ):
+                        run_git(repository, ["update-ref", "-d", retained_ref])
+                        deleted["attempt_refs"] += 1
             if scope in {"runs", "all"}:
+                if scope == "runs":
+                    for run in runs:
+                        worktree = safe_resolve(
+                            worktrees_dir(),
+                            _string(run, "worktree_path"),
+                        )
+                        branch = _string(run, "run_branch")
+                        retained_refs = _retained_attempt_refs(repository, _identifier(run))
+                        if (
+                            worktree.exists()
+                            or _retained_branch_exists(repository, branch)
+                            or retained_refs
+                        ):
+                            _reject_run_with_git_state(_identifier(run))
                 artifact_root = artifacts_dir()
                 for run in runs:
                     directory = safe_resolve(artifact_root, _identifier(run))
@@ -1441,6 +1504,83 @@ class DjangoExecutionStore(DjangoAgentStore):
             raise PersistenceError(message, context={"project": project_id}) from None
         else:
             return deleted
+
+    def _record_cleanup_failure(self, run_id: str, error: RelayError) -> None:
+        """Keep a successful run terminal while surfacing recoverable cleanup failure."""
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().filter(pk=run_id).first()
+                if run is None:
+                    return
+                _set_model_field(run, "worktree_state", WorktreeState.CLEANUP_FAILED.value)
+                run.save(update_fields=("worktree_state",))
+                payload = error.to_envelope()
+                payload["worktree_state"] = WorktreeState.CLEANUP_FAILED.value
+                _append_event(run, "run.cleanup_failed", EventSource.SYSTEM, payload)
+        except DatabaseError:
+            LOGGER.exception(
+                "Relay could not persist worktree cleanup failure",
+                extra={"run": run_id},
+            )
+
+    def _cleanup_successful_run(self, run_id: str) -> None:
+        """Remove one successful primary worktree after its transaction commits."""
+        try:
+            run = Run.objects.select_related("project").get(pk=run_id)
+            if (
+                _string(run, "status") != RunStatus.SUCCEEDED.value
+                or _string(run, "cleanup_policy") != CleanupPolicy.CLEAN_ON_SUCCESS.value
+                or _string(run, "worktree_state") != WorktreeState.CREATED.value
+            ):
+                return
+            pending_evidence = Artifact.objects.filter(attempt__node_run__run=run).exclude(
+                preservation_state=PreservationState.PRESERVED.value
+            )
+            if pending_evidence.exists():
+                message = (
+                    "Relay retained the run worktree because evidence preservation is incomplete."
+                )
+                raise PersistenceError(message, context={"run": run_id})
+            project = _related(run, "project", Project)
+            repository = Path(_string(project, "git_root"))
+            worktree = safe_resolve(worktrees_dir(), _string(run, "worktree_path"))
+            if worktree.exists():
+                remove_worktree(repository, worktree)
+            with transaction.atomic():
+                current = Run.objects.select_for_update().filter(pk=run_id).first()
+                if current is None:
+                    return
+                if _string(current, "worktree_state") != WorktreeState.CREATED.value:
+                    return
+                _set_model_field(current, "worktree_state", WorktreeState.REMOVED.value)
+                current.save(update_fields=("worktree_state",))
+                _append_event(
+                    current,
+                    "run.cleanup_succeeded",
+                    EventSource.SYSTEM,
+                    {"worktree_state": WorktreeState.REMOVED.value},
+                )
+        except ObjectDoesNotExist:
+            return
+        except RelayError as error:
+            LOGGER.exception(
+                "Relay could not remove a successful run worktree",
+                extra={"run": run_id},
+            )
+            self._record_cleanup_failure(run_id, error)
+        except (DatabaseError, OSError):
+            LOGGER.exception(
+                "Unexpected successful-run cleanup failure",
+                extra={"run": run_id},
+            )
+            error = PersistenceError(
+                "Relay could not remove the successful run worktree.",
+                context={"run": run_id},
+                next_action=(
+                    "Close processes using the worktree, then run confirmed data cleanup."
+                ),
+            )
+            self._record_cleanup_failure(run_id, error)
 
     def append_attempt_event(
         self,
@@ -2296,6 +2436,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 "failure_code": run.failure_code,
             },
         )
+        if (
+            transition.status == RunStatus.SUCCEEDED.value
+            and _string(run, "cleanup_policy") == CleanupPolicy.CLEAN_ON_SUCCESS.value
+        ):
+            run_id = _identifier(run)
+            transaction.on_commit(lambda: self._cleanup_successful_run(run_id))
 
     def finish_attempt(
         self,

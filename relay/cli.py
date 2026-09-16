@@ -16,6 +16,7 @@ from .constants import (
     EXIT_ALREADY_INITIALIZED,
     EXIT_DOCTOR_FAILED,
     EXIT_NOT_A_REPOSITORY,
+    EXIT_NOTHING_TO_CLEAN,
     EXIT_PROJECT_NOT_FOUND,
     EXIT_SUPERVISOR,
     EXIT_UP_CONFIG,
@@ -361,12 +362,62 @@ def data_group() -> None:
 @click.option("--worktrees", is_flag=True, help="Remove preserved run worktrees.")
 @click.option("--branches", is_flag=True, help="Delete retained Relay run branches.")
 @click.option("--all", "clean_all", is_flag=True, help="Select every cleanup category.")
+@click.pass_context
 def data_clean_command(
+    context: click.Context,
     runs: bool,
     worktrees: bool,
     branches: bool,
     clean_all: bool,
 ) -> None:
     """Delete confirmed local run data and retained Git state."""
-    del runs, worktrees, branches, clean_all
-    click.echo("Data cleanup is not available in this implementation slice.")
+    from .manage import apply_migrations
+    from .projects.service import register_current_project
+
+    selected = (
+        ("all",)
+        if clean_all
+        else tuple(
+            scope
+            for scope, enabled in (
+                ("worktrees", worktrees),
+                ("branches", branches),
+                ("runs", runs),
+            )
+            if enabled
+        )
+    )
+    if not selected:
+        click.echo(json.dumps({"deleted": {}}, sort_keys=True))
+        context.exit(EXIT_NOTHING_TO_CLEAN)
+    if clean_all and (runs or worktrees or branches):
+        error = ConfigError("Use --all by itself or select individual cleanup categories.")
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    selection = ", ".join(selected)
+    if not click.confirm(f"Delete retained Relay {selection} data for this project?"):
+        raise click.Abort()
+    try:
+        apply_migrations()
+        from .web.repositories import DjangoExecutionStore, DjangoProjectStore
+
+        project = register_current_project(DjangoProjectStore(), Path.cwd())
+        store = DjangoExecutionStore()
+        deleted = {
+            "runs": 0,
+            "worktrees": 0,
+            "branches": 0,
+            "attempt_refs": 0,
+            "artifact_roots": 0,
+            "logs": 0,
+        }
+        for scope in selected:
+            result = store.clean_project_data(project.id, scope)
+            for key, value in result.items():
+                deleted[key] += value
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    click.echo(json.dumps({"deleted": deleted}, sort_keys=True))
+    if not any(deleted.values()):
+        context.exit(EXIT_NOTHING_TO_CLEAN)
