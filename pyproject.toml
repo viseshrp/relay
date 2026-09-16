@@ -1,14 +1,23 @@
 [project]
 name = "relay-app"
 dynamic = ["version"]
-description = "This is a template repository for Python projects that use uv for their dependency management."
+description = "Local workflow orchestration for coding agents."
 authors = [{ name = "Visesh Prasad", email = "viseshrprasad@gmail.com" }]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["python"]
-requires-python = ">=3.10,<4.0"
-dependencies = ["click>=8.5.0", ]
+keywords = ["agents", "automation", "developer-tools", "workflows"]
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "agent-client-protocol==0.12.1",
+    "click>=8.5.0",
+    "Django==5.2.17",
+    "huey==3.4.0",
+    "platformdirs==4.11.8",
+    "pydantic==2.13.5",
+    "ruamel.yaml==0.19.1",
+    "uvicorn==0.52.4",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Natural Language :: English",
@@ -53,9 +62,6 @@ dev = [
     "ty",
     "vulture",
     "deptry",
-    "liccheck",
-    # liccheck imports pkg_resources, which newer setuptools no longer provides.
-    "setuptools<81",
     "cogapp",
     "twine",
     "hatch",
@@ -85,6 +91,20 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["relay"]
+exclude = ["relay/static/**"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "relay/**",
+  "frontend/**",
+  "hatch_build.py",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+]
+exclude = ["certification/**"]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.editable]
 packages = ["relay"]
@@ -232,30 +252,8 @@ exclude = ["venv/", ".venv/"]
 
 [tool.deptry]
 exclude = ["venv/.*", ".venv/.*", "tests/.*"]
-
-[tool.liccheck]
-authorized_licenses = [
-    "apache",
-    "apache 2.0",
-    "apache software license",
-    "bsd",
-    "bsd license",
-    "bsd-3-clause",
-    "isc",
-    "isc license",
-    "mit",
-    "mit license",
-    "python software foundation license",
-]
-unauthorized_licenses = [
-    "agpl",
-    "gpl",
-    "gpl v2",
-    "gpl v3",
-    "gnu affero general public license",
-    "gnu general public license",
-]
-dependencies = true
+# Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
+per_rule_ignores = { DEP002 = ["uvicorn"], DEP003 = ["hatchling"] }
 
 [tool.pre-commit.default_language_versions]
 python = "3.14"
