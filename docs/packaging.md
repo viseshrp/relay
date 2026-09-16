@@ -24,12 +24,13 @@ assets.
 ## Hatch wheel hook
 
 `hatch_build.py` defines `CustomBuildHook(BuildHookInterface)`. The hook does
-nothing for a source-distribution target. For a wheel target it runs these
-argument vectors with `shell=False` from `frontend/`:
+nothing for a source-distribution target. For a wheel target it resolves npm
+from `PATH`, including Windows `PATHEXT` entries such as `npm.cmd`, then runs
+these argument vectors with `shell=False` from `frontend/`:
 
 ```text
-["npm", "ci"]
-["npm", "run", "build"]
+[resolved npm executable, "ci"]
+[resolved npm executable, "run", "build"]
 ```
 
 The hook fails if the build does not create both `index.html` and an asset

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import subprocess
 from typing import Any, TypeAlias
 
@@ -25,10 +26,17 @@ class CustomBuildHook(BuildHookInterface):
         root = Path(self.root)
         frontend = root / "frontend"
         static_root = root / "relay" / "static"
-        # The build environment supplies npm on PATH on Windows and POSIX.
-        subprocess.run(["npm", "ci"], cwd=frontend, check=True, shell=False)  # noqa: S607
-        subprocess.run(
-            ["npm", "run", "build"],  # noqa: S607
+        # Resolve PATHEXT entries so Windows selects npm.cmd without a shell.
+        npm = shutil.which("npm")
+        if npm is None:
+            message = "Building a Relay wheel requires npm on PATH."
+            raise RuntimeError(message)
+        # The build operator controls PATH; shell=False prevents command parsing.
+        subprocess.run(  # noqa: S603
+            [npm, "ci"], cwd=frontend, check=True, shell=False
+        )
+        subprocess.run(  # noqa: S603
+            [npm, "run", "build"],
             cwd=frontend,
             check=True,
             shell=False,
