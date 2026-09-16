@@ -76,10 +76,11 @@ an unadvertised request fails rather than acquiring wider access.
 ## Install and authentication ownership
 
 The official ACP registry supplies adapter package versions and installation
-metadata. On 2026-09-13 it reported Codex adapter 1.11.0, Claude adapter 0.76.0,
-GitHub Copilot CLI 1.0.83, and Cursor 2026.09.08. These observations are dated,
-not permanent pins. `relay doctor` refreshes registry metadata with a bounded
-request, displays installation guidance, and never runs a package manager.
+metadata. On 2026-09-16 UTC it reported Codex adapter 1.12.0, Claude adapter
+0.78.0, GitHub Copilot CLI 1.0.83, and Cursor 2026.09.10. These observations are
+dated, not permanent pins. `relay doctor` refreshes registry metadata with a
+bounded request, displays installation guidance, and never runs a package
+manager.
 
 | Agent | Registry or native install guidance | Authentication |
 | --- | --- | --- |
@@ -90,7 +91,7 @@ request, displays installation guidance, and never runs a package manager.
 | Antigravity | [Antigravity CLI installation](https://antigravity.google/docs/cli/install/) | Authenticate once in `agy` or configure its supported API key. |
 
 Adapter commands remain argument vectors. Registry package text such as
-`@agentclientprotocol/codex-acp@1.11.0` is displayed verbatim; Relay does not
+`@agentclientprotocol/codex-acp@1.12.0` is displayed verbatim; Relay does not
 split, shell-expand, or execute it until a later explicit browser installation
 confirmation. A stale validated registry cache may support discovery when a
 refresh fails, but Relay displays its age and warning.
@@ -134,18 +135,19 @@ the target operating system, a disposable model probe, and an end-to-end
 worktree run. Source review and command discovery do not substitute for that
 evidence.
 
-| Agent | Local status on 2026-09-13 | Certification status |
+| Agent | Local status on 2026-09-16 UTC | Certification status |
 | --- | --- | --- |
 | Codex | `codex-cli 0.145.0` present; `codex-acp` adapter absent | Blocked on registry adapter installation and live authenticated probe. |
-| Claude Code | ACP adapter absent | Blocked on binary and credentials. |
+| Claude Code | `claude` and ACP adapter absent | Blocked on binary and credentials. |
 | GitHub Copilot CLI | CLI absent | Blocked on binary and credentials. |
 | Cursor CLI | CLI absent | Blocked on binary and credentials. |
 | Antigravity | `agy` absent | Blocked on binary and credentials. |
 
 The registry endpoint and all five install links above returned HTTP 200 on
-2026-09-13. The current registry document passed Relay's structural validation.
+2026-09-16 UTC. The current registry document passed Relay's structural validation.
 The ACP SDK pin, Codex and Claude adapter sources, and Antigravity's headless
 documentation were reviewed for the commands, model selection, stream format,
 permission behavior, and timeout described here. Missing live prerequisites
 remain explicit gaps; Relay does not claim five-agent or cross-platform
-certification from this machine.
+certification from this machine. The sanitized local record and selected
+registry fixture are under [`certification/`](../certification/README.md).

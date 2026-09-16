@@ -16,9 +16,11 @@ loopback-only web application.
 
 ## Status
 
-Relay is unreleased while Phase 1 is implemented. The persistence, workflow,
-CLI, HTTP, SSE, and artifact formats described in this repository become
-versioned contracts at the first release.
+Relay Phase 1 is implemented but unreleased. Live certification remains
+environment-dependent; the current five-agent gaps are recorded in
+[`certification/`](certification/README.md). The persistence, workflow, CLI,
+HTTP, SSE, and artifact formats become versioned contracts at the first
+release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
 Redis, Postgres, automatic retries, model fallback, automatic merge, or
@@ -29,7 +31,7 @@ bundled workflow templates.
 - Python 3.10 through 3.14
 - Git
 - macOS, Linux, or Windows
-- At least one supported coding agent with its own credentials
+- At least one supported coding agent with its own credentials for agent nodes
 
 End users do not need Node.js. Contributors who build the browser application
 need a Node version supported by Vite; see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -49,13 +51,17 @@ Run these commands from a clean Git repository:
 
 ```bash
 relay init
+git add .relay
+git commit -m "Add blank Relay workflow"
 relay doctor
 relay up
 ```
 
 `relay init` creates only `.relay/workflows/workflow.yaml` and
 `.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser,
-where workflows are edited and runs are controlled.
+where workflows are edited and runs are controlled. After saving a workflow,
+commit the `.relay/` change before launching it; Relay starts runs only from a
+clean Git snapshot.
 
 ## Command reference
 
@@ -65,18 +71,20 @@ from click.testing import CliRunner
 
 from relay.cli import main
 
-result = CliRunner().invoke(
-    main,
-    ["--help"],
-    prog_name="relay",
+commands = (
+    (["--help"], "$ relay --help"),
+    (["data", "clean", "--help"], "$ relay data clean --help"),
 )
-if result.exit_code != 0:
-    raise RuntimeError(result.output) from result.exception
-
-cog.outl("```console")
-cog.outl("$ relay --help")
-cog.out(result.output)
-cog.outl("```")
+for index, (arguments, prompt) in enumerate(commands):
+    result = CliRunner().invoke(main, arguments, prog_name="relay")
+    if result.exit_code != 0:
+        raise RuntimeError(result.output) from result.exception
+    if index:
+        cog.outl()
+    cog.outl("```console")
+    cog.outl(prompt)
+    cog.out(result.output)
+    cog.outl("```")
 ]]] -->
 ```console
 $ relay --help
@@ -97,6 +105,20 @@ Commands:
   init     Create a blank .relay project surface in the current Git...
   project  Inspect or relink registered projects.
   up       Start the loopback web application and local worker.
+```
+
+```console
+$ relay data clean --help
+Usage: relay data clean [OPTIONS]
+
+  Delete confirmed local run data and retained Git state.
+
+Options:
+  --runs       Delete run records, snapshots, and artifacts.
+  --worktrees  Remove preserved run worktrees.
+  --branches   Delete retained run and attempt refs.
+  --all        Select every category, including logs.
+  -h, --help   Show this message and exit.
 ```
 <!-- [[[end]]] -->
 

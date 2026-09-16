@@ -358,10 +358,10 @@ def data_group() -> None:
 
 
 @data_group.command("clean")
-@click.option("--runs", is_flag=True, help="Delete selected run records and snapshots.")
+@click.option("--runs", is_flag=True, help="Delete run records, snapshots, and artifacts.")
 @click.option("--worktrees", is_flag=True, help="Remove preserved run worktrees.")
-@click.option("--branches", is_flag=True, help="Delete retained Relay run branches.")
-@click.option("--all", "clean_all", is_flag=True, help="Select every cleanup category.")
+@click.option("--branches", is_flag=True, help="Delete retained run and attempt refs.")
+@click.option("--all", "clean_all", is_flag=True, help="Select every category, including logs.")
 @click.pass_context
 def data_clean_command(
     context: click.Context,
