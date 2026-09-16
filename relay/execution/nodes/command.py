@@ -20,7 +20,7 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.schema import CommandNode
 
-from .base import duration_seconds, emit_output_stream, parse_node, validated_outputs
+from .base import emit_output_stream, parse_node, validated_outputs
 
 
 def _creation_flags() -> int:
@@ -78,9 +78,7 @@ def _wait(
             process.wait(timeout=wait_for)
         now = time.monotonic()
         if now >= heartbeat_due:
-            if not context.runtime.heartbeat_attempt(
-                context.attempt.attempt_id, context.attempt.worker_id
-            ):
+            if not context.heartbeat():
                 terminate_process_tree(process)
                 message = "The command attempt lost its durable worker ownership."
                 raise PersistenceError(message, context={"node": context.attempt.scope_path})
@@ -88,13 +86,14 @@ def _wait(
         control = context.runtime.claim_next_control(
             context.attempt.attempt_id,
             context.attempt.worker_id,
+            (ControlKind.CANCEL.value,),
         )
         if control is not None:
-            context.runtime.apply_control(
+            applied = context.runtime.apply_control(
                 control.request_id,
                 context.attempt.worker_id,
             )
-            if control.kind == ControlKind.CANCEL.value:
+            if applied and control.kind == ControlKind.CANCEL.value:
                 terminate_process_tree(process)
                 return cancel_stop_reason(control)
     return None
@@ -105,7 +104,7 @@ class CommandExecutor:
 
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, CommandNode)
-        timeout = duration_seconds(node.timeout)
+        timeout = context.remaining_seconds()
         started = time.monotonic()
         with (
             tempfile.TemporaryFile(mode="w+b") as stdout,

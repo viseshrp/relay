@@ -96,6 +96,10 @@ The launch form comes from the loaded workflow's typed `inputs` mapping:
 - boolean inputs use checkboxes;
 - enum inputs use the declared finite values.
 
+An untouched optional input is omitted so the server can apply its declared
+default or resolve it to `null`. Once the owner enters a value, Relay preserves
+its JSON type in the launch request.
+
 Cached model observations appear as suggestions, but Relay sends the exact
 model value entered by the owner. The form also selects `clean_on_success` or
 `retain` and one declared entry point. Launch is disabled while the editor has
@@ -111,6 +115,7 @@ SSE stream with paginated database reads:
 
 - provider and command output uses a fixed-row virtualized viewport;
 - event history loads forward by the last durable event ID;
+- node, interaction, and artifact lists load bounded pages by record ID;
 - pending permission, elicitation, and human-wait records show response forms;
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
@@ -118,9 +123,10 @@ SSE stream with paginated database reads:
 Cancel creates one durable, idempotent control request and fans it out to live
 attempts. A stale or duplicate answer cannot reach a later attempt. Manual
 rerun is available only for a failed run and failed node; Relay preserves
-evidence and creates a new attempt. An interrupted run resumes automatically
-when `relay up` restarts, also as a new attempt. The UI never resumes an old
-provider session.
+evidence and creates a new attempt. A nested failed node also reopens its failed
+loop or subworkflow parents, while successful siblings remain complete. An
+interrupted run resumes automatically when `relay up` restarts, also as a new
+attempt. The UI never resumes an old provider session.
 
 ## History, artifacts, and cleanup
 
@@ -128,9 +134,10 @@ History, snapshots, output, interactions, and artifacts remain until explicit
 cleanup. The cleanup panel selects `worktrees`, `branches`, `runs`, or `all`
 and requires a confirmation dialog. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
-never changes the launch branch. Run-record cleanup is rejected until that
-run's worktree, retained branch, and attempt refs are gone; the `all` scope
-applies the safe worktree, Git-ref, then record order.
+never changes the launch branch. A disposable reader left by an interruption
+is removed before its primary run worktree. Run-record cleanup is rejected
+until that run's worktree, retained branch, and attempt refs are gone; the
+`all` scope applies the safe worktree, Git-ref, then record order.
 
 ## Browser support
 

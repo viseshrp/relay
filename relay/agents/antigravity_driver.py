@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from datetime import datetime, timezone
 import json
@@ -12,6 +13,8 @@ import re
 import time
 
 from relay.constants import (
+    AGENT_EVENT_QUEUE_MAX_ITEMS,
+    AGENT_STREAM_LINE_MAX_BYTES,
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
     DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS,
@@ -144,21 +147,60 @@ async def _read_lines(
     kind: str,
     queue: asyncio.Queue[tuple[str, object]],
 ) -> None:
+    """Retain raw bytes in bounded chunks and parse only bounded NDJSON lines."""
     if stream is None:
         await queue.put((f"{kind}_done", None))
         return
     pending = bytearray()
+    oversized = False
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="backslashreplace")
+
+    async def finish_line() -> None:
+        nonlocal pending, oversized
+        if oversized:
+            await queue.put((f"{kind}_oversized", None))
+        else:
+            await queue.put((f"{kind}_line", bytes(pending).decode("utf-8", "backslashreplace")))
+        pending = bytearray()
+        oversized = False
+
     while chunk := await stream.read(8_192):
+        visible = decoder.decode(chunk)
+        if visible:
+            await queue.put((f"{kind}_raw", visible))
         parts = chunk.split(b"\n")
-        pending.extend(parts[0])
-        if len(parts) > 1:
-            await queue.put((kind, bytes(pending).decode("utf-8", "backslashreplace")))
-            for line in parts[1:-1]:
-                await queue.put((kind, line.decode("utf-8", "backslashreplace")))
-            pending = bytearray(parts[-1])
-    if pending:
-        await queue.put((kind, bytes(pending).decode("utf-8", "backslashreplace")))
+        for index, part in enumerate(parts):
+            if not oversized:
+                if len(pending) + len(part) <= AGENT_STREAM_LINE_MAX_BYTES:
+                    pending.extend(part)
+                else:
+                    pending = bytearray()
+                    oversized = True
+            if index < len(parts) - 1:
+                await finish_line()
+    tail = decoder.decode(b"", final=True)
+    if tail:
+        await queue.put((f"{kind}_raw", tail))
+    if pending or oversized:
+        await finish_line()
     await queue.put((f"{kind}_done", None))
+
+
+async def _drain_raw_events(
+    queue: asyncio.Queue[tuple[str, object]],
+    readers: tuple[asyncio.Task[None], ...],
+) -> AsyncIterator[AgentEvent]:
+    """Drain bytes already read after a protocol failure without parsing them."""
+    while any(not task.done() for task in readers) or not queue.empty():
+        try:
+            kind, value = await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
+        except TimeoutError:
+            continue
+        if kind == "stderr_raw" and isinstance(value, str):
+            yield AgentEvent("agent.stderr", {"text": value})
+        elif kind == "stdout_raw" and isinstance(value, str):
+            yield AgentEvent("agent.provider_event", {"text": value})
+    await asyncio.gather(*readers, return_exceptions=True)
 
 
 class AntigravityDriver:
@@ -262,10 +304,13 @@ class AntigravityDriver:
         if context.permission_profile not in self.profile.permission_profiles:
             message = f"Unsupported Antigravity permission profile {context.permission_profile!r}."
             raise AgentProtocolError(message, context={"agent": self.profile.agent_id})
-        queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+        queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue(
+            maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS
+        )
         denied: set[str] = set()
         terminal_status: str | None = None
         terminal_error: str | None = None
+        requested_stop: str | None = None
         readers: tuple[asyncio.Task[None], ...] = ()
         try:
             arguments = _argv(context)
@@ -295,11 +340,24 @@ class AntigravityDriver:
                     kind, value = "", None
                 if kind.endswith("_done"):
                     completed_streams += 1
-                elif kind == "stderr" and isinstance(value, str):
+                elif kind == "stderr_raw" and isinstance(value, str):
                     denied.update(_denied_targets(value, context.cwd))
-                    yield AgentEvent("agent.stderr", {"text": value + "\n"})
-                elif kind == "stdout" and isinstance(value, str):
-                    yield AgentEvent("agent.provider_event", {"text": value + "\n"})
+                    yield AgentEvent("agent.stderr", {"text": value})
+                elif kind == "stderr_line" and isinstance(value, str):
+                    denied.update(_denied_targets(value, context.cwd))
+                elif kind == "stderr_oversized":
+                    message = "Antigravity emitted a stderr line above Relay's byte limit."
+                    raise AgentProtocolError(  # noqa: TRY301
+                        message, context={"agent": self.profile.agent_id}
+                    )
+                elif kind == "stdout_raw" and isinstance(value, str):
+                    yield AgentEvent("agent.provider_event", {"text": value})
+                elif kind == "stdout_oversized":
+                    message = "Antigravity emitted a stream-json line above Relay's byte limit."
+                    raise AgentProtocolError(  # noqa: TRY301
+                        message, context={"agent": self.profile.agent_id}
+                    )
+                elif kind == "stdout_line" and isinstance(value, str):
                     try:
                         raw: object = json.loads(value)
                     except json.JSONDecodeError:
@@ -332,34 +390,30 @@ class AntigravityDriver:
                         terminal_status = status if isinstance(status, str) else None
                         error = result.get("error")
                         terminal_error = error if isinstance(error, str) else None
-                control = await asyncio.to_thread(
-                    context.attempt.runtime.claim_next_control,
-                    context.attempt.attempt.attempt_id,
-                    context.attempt.attempt.worker_id,
-                    (ControlKind.CANCEL.value,),
-                )
-                if control is not None:
-                    applied = await asyncio.to_thread(
-                        context.attempt.runtime.apply_control,
-                        control.request_id,
-                        context.attempt.attempt.worker_id,
-                    )
-                    if applied:
-                        await _terminate_process(process)
-                        reason = cancel_stop_reason(control)
-                        self.result = AgentResult(
-                            False,
-                            reason.value,
-                            process.returncode,
-                            reason.value,
-                        )
-                        return
-                now = time.monotonic()
-                if now >= heartbeat_due:
-                    alive = await asyncio.to_thread(
-                        context.attempt.runtime.heartbeat_attempt,
+                if requested_stop is None:
+                    control = await asyncio.to_thread(
+                        context.attempt.runtime.claim_next_control,
                         context.attempt.attempt.attempt_id,
                         context.attempt.attempt.worker_id,
+                        (ControlKind.CANCEL.value,),
+                    )
+                    if control is not None:
+                        applied = await asyncio.to_thread(
+                            context.attempt.runtime.apply_control,
+                            control.request_id,
+                            context.attempt.attempt.worker_id,
+                        )
+                        if applied:
+                            reason = cancel_stop_reason(control)
+                            requested_stop = reason.value
+                            await _terminate_process(process)
+                now = time.monotonic()
+                if requested_stop is None and context.attempt.timed_out():
+                    requested_stop = "timeout"
+                    await _terminate_process(process)
+                if now >= heartbeat_due:
+                    alive = await asyncio.to_thread(
+                        context.attempt.heartbeat,
                     )
                     if not alive:
                         await _terminate_process(process)
@@ -384,10 +438,18 @@ class AntigravityDriver:
                 and current_head(context.cwd) == context.attempt.attempt.starting_head
             )
             soft_denied = context.node.writes and (denied_required or denied_without_commit)
-            succeeded = process.returncode == 0 and terminal_status == "SUCCESS" and not soft_denied
+            succeeded = (
+                requested_stop is None
+                and process.returncode == 0
+                and terminal_status == "SUCCESS"
+                and not soft_denied
+            )
             error_code = None
             stop_reason = "completed"
-            if soft_denied:
+            if requested_stop is not None:
+                error_code = "node_timeout" if requested_stop == "timeout" else requested_stop
+                stop_reason = requested_stop
+            elif soft_denied:
                 error_code = "antigravity_soft_denied"
                 stop_reason = "soft_denied"
             elif terminal_status == "CANCELED":
@@ -417,6 +479,10 @@ class AntigravityDriver:
         except Exception as error:
             if self.process is not None:
                 await _terminate_process(self.process)
+            if readers:
+                async for pending_event in _drain_raw_events(queue, readers):
+                    yield pending_event
+                readers = ()
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
@@ -430,6 +496,10 @@ class AntigravityDriver:
             if self.process is not None and self.process.returncode is None:
                 await _terminate_process(self.process)
             if readers:
+                for reader in readers:
+                    if not reader.done():
+                        # A closed consumer cannot drain the bounded queue.
+                        reader.cancel()
                 await asyncio.gather(*readers, return_exceptions=True)
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,

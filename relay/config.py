@@ -80,7 +80,7 @@ def load_config(path: Path | None = None) -> RelayConfig:
         return RelayConfig()
     try:
         raw: object = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         message = f"Could not read Relay settings at {source}."
         raise ConfigError(
             message,

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
+from relay.execution.timing import duration_seconds
 from relay.workflows.schema import HumanWaitNode
 
-from .base import duration_seconds, parse_node
+from .base import parse_node
 
 
 class HumanWaitExecutor:
@@ -15,7 +16,7 @@ class HumanWaitExecutor:
         node = parse_node(context, HumanWaitNode)
         candidates = [
             seconds
-            for seconds in (duration_seconds(node.deadline), duration_seconds(node.timeout))
+            for seconds in (duration_seconds(node.deadline), context.remaining_seconds())
             if seconds is not None
         ]
         timeout = min(candidates) if candidates else None

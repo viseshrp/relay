@@ -55,11 +55,13 @@ function workflowPath(key: string, suffix = ""): string {
   return `/api/workflows/${encoded}${suffix}`;
 }
 
-function scalarDefault(type: string, value: unknown): JsonScalar {
+type LaunchInputValue = JsonScalar | undefined;
+
+function scalarDefault(type: string, value: unknown): LaunchInputValue {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
-  return type === "boolean" ? false : "";
+  return undefined;
 }
 
 function createHolder(): string {
@@ -85,7 +87,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   const [busy, setBusy] = useState(false);
   const [formattingYaml, setFormattingYaml] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
-  const [launchInputs, setLaunchInputs] = useState<Record<string, JsonScalar>>({});
+  const [launchInputs, setLaunchInputs] = useState<Record<string, LaunchInputValue>>({});
   const [launchModel, setLaunchModel] = useState("");
   const [cleanupPolicy, setCleanupPolicy] = useState("clean_on_success");
   const [entryPoint, setEntryPoint] = useState("");
@@ -172,10 +174,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     const definitions = parsed.value?.inputs ?? {};
     setLaunchInputs((current) =>
       Object.fromEntries(
-        Object.entries(definitions).map(([name, input]) => [
-          name,
-          current[name] ?? scalarDefault(input.type, input.default),
-        ]),
+        Object.entries(current).filter(([name]) => Object.hasOwn(definitions, name)),
       ),
     );
   }, [parsed.value?.inputs]);
@@ -273,11 +272,16 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     setLaunching(true);
     setError(null);
     try {
+      const suppliedInputs = Object.fromEntries(
+        Object.entries(launchInputs).flatMap(([name, value]) =>
+          value === undefined ? [] : [[name, value]],
+        ),
+      );
       const response = await api<{ run_id: string }>("/api/runs", {
         method: "POST",
         body: JSON.stringify({
           workflow_key: loadedKey,
-          inputs: launchInputs,
+          inputs: suppliedInputs,
           ...(launchModel ? { model: launchModel } : {}),
           cleanup_policy: cleanupPolicy,
           ...(entryPoint ? { entry_point: entryPoint } : {}),
@@ -470,7 +474,10 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
           </Box>
           <Box className="field-grid">
             {Object.entries(inputDefinitions).map(([name, input]) => {
-              const value = launchInputs[name] ?? scalarDefault(input.type, input.default);
+              const supplied = launchInputs[name];
+              const value = supplied === undefined
+                ? scalarDefault(input.type, input.default)
+                : supplied;
               if (input.type === "boolean") {
                 return (
                   <FormControlLabel
@@ -478,6 +485,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                     control={
                       <Checkbox
                         checked={value === true}
+                        indeterminate={value === undefined}
                         onChange={(event) =>
                           setLaunchInputs((current) => ({ ...current, [name]: event.target.checked }))
                         }
@@ -499,14 +507,19 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                     <InputLabel>{name}</InputLabel>
                     <Select
                       label={name}
-                      value={JSON.stringify(value)}
+                      value={value === undefined ? "" : JSON.stringify(value)}
                       onChange={(event) =>
                         setLaunchInputs((current) => ({
                           ...current,
-                          [name]: JSON.parse(event.target.value) as JsonScalar,
+                          [name]: event.target.value === ""
+                            ? undefined
+                            : JSON.parse(event.target.value) as JsonScalar,
                         }))
                       }
                     >
+                      <MenuItem value="" disabled={input.required === true}>
+                        {input.required ? "Select a value" : "Unset"}
+                      </MenuItem>
                       {values.map((item) => (
                         <MenuItem key={JSON.stringify(item)} value={JSON.stringify(item)}>
                           {String(item)}
@@ -529,9 +542,11 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                   onChange={(event) =>
                     setLaunchInputs((current) => ({
                       ...current,
-                      [name]: numeric && event.target.value !== ""
-                        ? Number(event.target.value)
-                        : event.target.value,
+                      [name]: event.target.value === ""
+                        ? (numeric ? null : "")
+                        : numeric
+                          ? Number(event.target.value)
+                          : event.target.value,
                     }))
                   }
                 />

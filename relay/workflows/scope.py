@@ -94,6 +94,27 @@ def enclosing_scope(path: str) -> str | None:
     return render_scope_path(segments[:-1])
 
 
+def scope_is_ancestor(ancestor: str, descendant: str) -> bool:
+    """Match structural parents across concrete loop-iteration segments.
+
+    For example, ``root.build`` contains ``root.build#2.check`` while
+    ``root.build#1`` does not contain ``root.build#2.check``.
+    """
+    parent_segments = parse_scope_path(ancestor)
+    child_segments = parse_scope_path(descendant)
+    if len(parent_segments) > len(child_segments):
+        return False
+    return all(
+        parent.node_id == child.node_id
+        and (parent.iteration is None or parent.iteration == child.iteration)
+        for parent, child in zip(
+            parent_segments,
+            child_segments[: len(parent_segments)],
+            strict=True,
+        )
+    )
+
+
 __all__ = [
     "ROOT_SCOPE",
     "ScopeSegment",
@@ -102,5 +123,6 @@ __all__ = [
     "node_scope",
     "parse_scope_path",
     "render_scope_path",
+    "scope_is_ancestor",
     "sibling_scope",
 ]

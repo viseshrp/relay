@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterable, Mapping
+from contextlib import suppress
 from pathlib import Path
+import time
 from typing import Protocol
 
-from relay.constants import AGENT_PROBE_TIMEOUT_SECONDS
+from relay.constants import (
+    AGENT_PROBE_TIMEOUT_SECONDS,
+    ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
+    CANCELLATION_GRACE_SECONDS,
+    CONTROL_POLL_INTERVAL_SECONDS,
+)
 from relay.errors import (
     AgentAuthError,
     AgentLaunchError,
@@ -15,10 +22,12 @@ from relay.errors import (
     ModelSelectionRejectedError,
     ModelSelectorError,
     ModelUnavailableError,
+    PersistenceError,
     RelayError,
 )
+from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
-from relay.execution.state import AttemptStopReason, EventSource
+from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.routing import RouteEntry, RouteRequirement
 from relay.workflows.schema import AgentNode
 
@@ -140,11 +149,14 @@ async def _probe_all(
     registry: RegistrySnapshot | None,
 ) -> dict[str, ProbeResult]:
     models_by_agent: dict[str, list[str]] = {}
+    seen_by_agent: dict[str, set[str]] = {}
     for requirement in requirements:
         for agent_id in requirement.effective_agent_order:
             values = models_by_agent.setdefault(agent_id, [])
-            if requirement.model_value not in values:
+            seen = seen_by_agent.setdefault(agent_id, set())
+            if requirement.model_value not in seen:
                 values.append(requirement.model_value)
+                seen.add(requirement.model_value)
     results: dict[str, ProbeResult] = {}
     for agent_id, values in models_by_agent.items():
         try:
@@ -281,7 +293,90 @@ class RoutedAgentNodeDriver:
             permission_profile,
             installed.command,
         )
-        return asyncio.run(self._execute(_driver(installed.profile, installed.command), execution))
+        return asyncio.run(
+            self._supervise(_driver(installed.profile, installed.command), execution)
+        )
+
+    @staticmethod
+    async def _stop_task(
+        driver: AgentDriver,
+        task: asyncio.Task[ExecutionOutcome],
+    ) -> None:
+        """Bound provider cancellation before closing its event consumer."""
+        with suppress(Exception):
+            await asyncio.wait_for(
+                driver.cancel(),
+                timeout=(CANCELLATION_GRACE_SECONDS * 2) + 1,
+            )
+        task.cancel()
+        done, _pending = await asyncio.wait((task,), timeout=CANCELLATION_GRACE_SECONDS)
+        if task in done:
+            with suppress(asyncio.CancelledError, Exception):
+                task.result()
+
+    async def _supervise(
+        self,
+        driver: AgentDriver,
+        context: AgentExecutionContext,
+    ) -> ExecutionOutcome:
+        """Own timeout, heartbeat, and cancellation across the full session."""
+        task = asyncio.create_task(self._execute(driver, context))
+        heartbeat_due = time.monotonic() + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+        stopped = False
+        try:
+            while not task.done():
+                remaining = context.attempt.remaining_seconds()
+                if remaining is not None and remaining <= 0:
+                    await self._stop_task(driver, task)
+                    stopped = True
+                    return ExecutionOutcome(
+                        OutcomeKind.FAILED,
+                        stop_reason=AttemptStopReason.TIMEOUT,
+                        error_code="node_timeout",
+                    )
+                wait_for = CONTROL_POLL_INTERVAL_SECONDS
+                if remaining is not None:
+                    wait_for = min(wait_for, remaining)
+                await asyncio.wait((task,), timeout=wait_for)
+                if task.done():
+                    break
+                control = await asyncio.to_thread(
+                    context.attempt.runtime.claim_next_control,
+                    context.attempt.attempt.attempt_id,
+                    context.attempt.attempt.worker_id,
+                    (ControlKind.CANCEL.value,),
+                )
+                if control is not None:
+                    applied = await asyncio.to_thread(
+                        context.attempt.runtime.apply_control,
+                        control.request_id,
+                        context.attempt.attempt.worker_id,
+                    )
+                    if applied:
+                        reason = cancel_stop_reason(control)
+                        await self._stop_task(driver, task)
+                        stopped = True
+                        return ExecutionOutcome(
+                            OutcomeKind.FAILED,
+                            stop_reason=reason,
+                            error_code=reason.value,
+                        )
+                now = time.monotonic()
+                if now >= heartbeat_due:
+                    alive = await asyncio.to_thread(context.attempt.heartbeat)
+                    if not alive:
+                        await self._stop_task(driver, task)
+                        stopped = True
+                        message = "The agent attempt lost its durable worker ownership."
+                        raise PersistenceError(
+                            message,
+                            context={"node": context.attempt.attempt.scope_path},
+                        )
+                    heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+            return await task
+        finally:
+            if not stopped and not task.done():
+                await self._stop_task(driver, task)
 
     async def _execute(
         self,

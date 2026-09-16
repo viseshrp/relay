@@ -36,10 +36,12 @@ class RouteEntry(RouteRequirement):
 def effective_agent_order(*preference_lists: Sequence[str]) -> tuple[str, ...]:
     """Concatenate node, workflow, then owner preferences without duplicates."""
     result: list[str] = []
+    seen: set[str] = set()
     for preferences in preference_lists:
         for agent_id in preferences:
-            if agent_id not in result:
+            if agent_id not in seen:
                 result.append(agent_id)
+                seen.add(agent_id)
     return tuple(result)
 
 
@@ -136,10 +138,12 @@ def distinct_probe_requirements(
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Deduplicate launch probes by exact model and candidate order."""
     result: list[tuple[str, tuple[str, ...]]] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
     for requirement in requirements:
         key = (requirement.model_value, requirement.effective_agent_order)
-        if key not in result:
+        if key not in seen:
             result.append(key)
+            seen.add(key)
     return tuple(result)
 
 

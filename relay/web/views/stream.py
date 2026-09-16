@@ -11,9 +11,13 @@ import uuid
 
 from django.db import connections
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
-from django.views.decorators.http import require_GET
 
-from relay.constants import SSE_MAX_BATCH, SSE_MAX_FRAME_BYTES, SSE_POLL_INTERVAL_SECONDS
+from relay.constants import (
+    DATABASE_INTEGER_MAX,
+    SSE_MAX_BATCH,
+    SSE_MAX_FRAME_BYTES,
+    SSE_POLL_INTERVAL_SECONDS,
+)
 from relay.execution.state import TERMINAL_RUN_STATUSES
 
 from ..models import Run, RunEvent
@@ -32,7 +36,7 @@ def _cursor(request: HttpRequest) -> int:
         value = int(raw)
     except ValueError:
         return -1
-    return value
+    return value if 0 <= value <= DATABASE_INTEGER_MAX else -1
 
 
 def _event_dict(row: RunEvent) -> dict[str, object]:
@@ -127,9 +131,16 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
         await asyncio.to_thread(connections.close_all)
 
 
-@require_GET
 async def run_stream(request: HttpRequest, run_id: str) -> StreamingHttpResponse | JsonResponse:
     """Replay rows after `Last-Event-ID`, then follow new rows until terminal."""
+    if request.method != "GET":
+        response = _error(
+            "method_not_allowed",
+            "This Relay API route accepts only GET.",
+            405,
+        )
+        response["Allow"] = "GET"
+        return response
     resolve_user = getattr(request, "auser", None)
     if not callable(resolve_user):
         return _error("internal_error", "Relay could not read the owner session.", 500)
@@ -138,7 +149,11 @@ async def run_stream(request: HttpRequest, run_id: str) -> StreamingHttpResponse
         return _error("authentication_required", "Sign in to the local Relay owner account.", 401)
     after = _cursor(request)
     if after < 0:
-        return _error("config_error", "Last-Event-ID must be a nonnegative integer.", 400)
+        return _error(
+            "config_error",
+            "Last-Event-ID must be within Relay's nonnegative database integer range.",
+            400,
+        )
     try:
         uuid.UUID(run_id)
     except ValueError:

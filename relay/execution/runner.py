@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 from pathlib import Path
-from typing import Protocol
+import time
+from typing import Protocol, TypeAlias
 
 from relay.errors import NodeExecutionError, RelayError
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
@@ -17,8 +18,10 @@ from relay.vcs.worktree import create_reader_worktree, remove_worktree
 from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
 from .state import AttemptStopReason, EventSensitivity, EventSource, NodeType
+from .timing import attempt_deadline, remaining_seconds
 
 LOGGER = logging.getLogger(__name__)
+HeartbeatOwners: TypeAlias = tuple[tuple[str, str], ...]
 
 
 class OutcomeKind(str, Enum):
@@ -34,6 +37,27 @@ class AttemptContext:
     attempt: ClaimedAttempt
     worktree: Path
     runtime: RunnerStore
+    heartbeat_owners: HeartbeatOwners = ()
+    deadline_at: float | None = None
+
+    def heartbeat(self) -> bool:
+        """Renew this attempt and every enclosing synchronous-scope owner."""
+        owners = (
+            (self.attempt.attempt_id, self.attempt.worker_id),
+            *self.heartbeat_owners,
+        )
+        return all(
+            self.runtime.heartbeat_attempt(attempt_id, worker_id)
+            for attempt_id, worker_id in owners
+        )
+
+    def remaining_seconds(self) -> float | None:
+        """Return the time left under this node and all enclosing attempts."""
+        return remaining_seconds(self.deadline_at)
+
+    def timed_out(self) -> bool:
+        """Report whether the monotonic attempt deadline has elapsed."""
+        return self.deadline_at is not None and time.monotonic() >= self.deadline_at
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +132,8 @@ class AttemptRuntime(DispatchStore, Protocol):
         parent_scope: str,
         node_ids: tuple[str, ...],
     ) -> Mapping[str, ScopeNodeRecord]: ...
+
+    def scope_node_record(self, run_id: str, node_run_id: str) -> ScopeNodeRecord: ...
 
     def transition_scope_node(self, node_run_id: str, action: str) -> None: ...
 
@@ -190,6 +216,14 @@ def _failure(error: RelayError) -> ExecutionOutcome:
     )
 
 
+def _timeout_failure() -> ExecutionOutcome:
+    return ExecutionOutcome(
+        OutcomeKind.FAILED,
+        stop_reason=AttemptStopReason.TIMEOUT,
+        error_code="node_timeout",
+    )
+
+
 def _preserve(
     claim: ClaimedAttempt,
     worktree: Path,
@@ -214,6 +248,8 @@ def execute_attempt(
     executor: AttemptExecutor,
     *,
     artifact_root: Path | None = None,
+    heartbeat_owners: HeartbeatOwners = (),
+    inherited_deadline: float | None = None,
 ) -> ExecutionOutcome:
     """Execute once, preserve evidence, persist terminal state, then release admission."""
     worktree = Path(claim.primary_worktree)
@@ -222,7 +258,24 @@ def execute_attempt(
     try:
         worktree, ephemeral_reader = _assigned_worktree(claim)
         worktree_assigned = True
-        outcome = executor.execute(AttemptContext(claim, worktree, store))
+        timeout_value = claim.frozen_def.get("timeout")
+        deadline = attempt_deadline(
+            timeout_value if isinstance(timeout_value, str) else None,
+            inherited_deadline,
+        )
+        context = AttemptContext(
+            claim,
+            worktree,
+            store,
+            heartbeat_owners=heartbeat_owners,
+            deadline_at=deadline,
+        )
+        if context.timed_out() and claim.node_type != NodeType.HUMAN_WAIT.value:
+            outcome = _timeout_failure()
+        else:
+            outcome = executor.execute(context)
+            if outcome.kind is OutcomeKind.SUCCEEDED and context.timed_out():
+                outcome = _timeout_failure()
     except RelayError as error:
         outcome = _failure(error)
     except Exception:
@@ -291,6 +344,8 @@ def run_claim_token(
     executor_for: Mapping[str, AttemptExecutor],
     *,
     artifact_root: Path | None = None,
+    heartbeat_owners: HeartbeatOwners = (),
+    inherited_deadline: float | None = None,
 ) -> ExecutionOutcome | None:
     """Claim a Huey token once and dispatch to the node-type executor."""
     result = claim_node_attempt(store, claim_token, worker_id)
@@ -310,7 +365,14 @@ def run_claim_token(
             if terminal_persisted:
                 store.release_attempt_lock(claim.attempt_id)
         return outcome
-    return execute_attempt(store, claim, executor, artifact_root=artifact_root)
+    return execute_attempt(
+        store,
+        claim,
+        executor,
+        artifact_root=artifact_root,
+        heartbeat_owners=heartbeat_owners,
+        inherited_deadline=inherited_deadline,
+    )
 
 
 __all__ = [
@@ -318,6 +380,7 @@ __all__ = [
     "AttemptExecutor",
     "AttemptRuntime",
     "ExecutionOutcome",
+    "HeartbeatOwners",
     "OutcomeKind",
     "RunnerStore",
     "ScopeNodeRecord",

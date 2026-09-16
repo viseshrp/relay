@@ -9,6 +9,7 @@ from typing import Protocol
 
 from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
+from relay.execution.machine import transition_node
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.schema import ConditionNode, LoopNode, NodeDefinition
@@ -161,80 +162,90 @@ def reachable_node_ids(
 
 
 def advance_run_schedule(store: SchedulingStore, run_id: str) -> tuple[str, ...]:
-    """Derive top-level readiness until stable, then return ready row ids."""
-    while True:
-        schedule = store.load_run_schedule(run_id)
-        definitions = {node_id: row.definition for node_id, row in schedule.nodes.items()}
-        graph = compile_graph(definitions)
-        incoming, control_downstream = activation_sources(definitions)
-        entry_root = entry_node_for_scope(schedule.entry_point, None)
-        reachable = (
-            reachable_node_ids(entry_root, graph, control_downstream)
-            if entry_root is not None
-            else frozenset(definitions)
-        )
-        changed = False
-        for node_id in graph.topological_order:
-            row = schedule.nodes[node_id]
-            if row.status != NodeStatus.PENDING.value:
-                continue
-            if node_id not in reachable:
-                store.transition_scope_node(row.node_run_id, "dependencies_unreachable")
-                changed = True
-                break
-            if node_id == entry_root:
-                # Declared entry-point inputs and artifacts were proven before this run row existed.
-                store.transition_scope_node(row.node_run_id, "dependencies_satisfied")
-                changed = True
-                break
+    """Derive top-level readiness in O(V+E), then return ready row ids."""
+    schedule = store.load_run_schedule(run_id)
+    definitions = {node_id: row.definition for node_id, row in schedule.nodes.items()}
+    graph = compile_graph(definitions)
+    incoming, control_downstream = activation_sources(definitions)
+    entry_root = entry_node_for_scope(schedule.entry_point, None)
+    reachable = (
+        reachable_node_ids(entry_root, graph, control_downstream)
+        if entry_root is not None
+        else frozenset(definitions)
+    )
+    statuses = {node_id: row.status for node_id, row in schedule.nodes.items()}
+    terminal = {
+        NodeStatus.SUCCEEDED.value,
+        NodeStatus.SKIPPED.value,
+        NodeStatus.FAILED.value,
+        NodeStatus.CANCELED.value,
+    }
+    queue = deque(graph.topological_order)
+    queued = set(graph.topological_order)
+
+    def enqueue_candidates(node_id: str) -> None:
+        # Every terminal node can wake only its direct data and control successors.
+        for candidate in (*graph.downstream[node_id], *control_downstream[node_id]):
+            if statuses[candidate] == NodeStatus.PENDING.value and candidate not in queued:
+                queue.append(candidate)
+                queued.add(candidate)
+
+    while queue:
+        node_id = queue.popleft()
+        queued.remove(node_id)
+        if statuses[node_id] != NodeStatus.PENDING.value:
+            continue
+        row = schedule.nodes[node_id]
+        action: str | None = None
+        if node_id not in reachable:
+            action = "dependencies_unreachable"
+        elif node_id == entry_root:
+            # Declared entry-point inputs and artifacts were proven before this run row existed.
+            action = "dependencies_satisfied"
+        else:
             activators = incoming[node_id]
             if activators:
-                source_rows = [schedule.nodes[source] for source in activators]
-                selected = any(item.selected_branch == node_id for item in source_rows)
-                complete = all(
-                    item.status
-                    in {
-                        NodeStatus.SUCCEEDED.value,
-                        NodeStatus.SKIPPED.value,
-                        NodeStatus.FAILED.value,
-                        NodeStatus.CANCELED.value,
-                    }
-                    for item in source_rows
+                selected = any(
+                    schedule.nodes[source].selected_branch == node_id for source in activators
                 )
+                complete = all(statuses[source] in terminal for source in activators)
                 if complete and not selected:
-                    store.transition_scope_node(row.node_run_id, "dependencies_unreachable")
-                    changed = True
-                    break
-                if not selected:
+                    action = "dependencies_unreachable"
+                elif not selected:
                     continue
-            dependencies = {
-                needed: schedule.nodes[needed] for needed in graph.dependencies[node_id]
-            }
-            eligibility = evaluate_eligibility(
-                row.definition,
-                {needed: item.status for needed, item in dependencies.items()},
-                {
-                    "inputs": dict(schedule.inputs),
-                    "needs": {
-                        needed: {"outputs": dict(item.outputs)}
-                        for needed, item in dependencies.items()
+            if action is None:
+                dependencies = {
+                    needed: schedule.nodes[needed] for needed in graph.dependencies[node_id]
+                }
+                eligibility = evaluate_eligibility(
+                    row.definition,
+                    {needed: statuses[needed] for needed in dependencies},
+                    {
+                        "inputs": dict(schedule.inputs),
+                        "needs": {
+                            needed: {"outputs": dict(item.outputs)}
+                            for needed, item in dependencies.items()
+                        },
+                        "run": dict(schedule.run_metadata),
+                        "loop": {},
                     },
-                    "run": dict(schedule.run_metadata),
-                    "loop": {},
-                },
-            )
-            if eligibility.action is not None:
-                store.transition_scope_node(row.node_run_id, eligibility.action)
-                changed = True
-                break
-        if not changed:
-            ready = tuple(
-                row.node_run_id
-                for node_id in graph.topological_order
-                if (row := schedule.nodes[node_id]).status == NodeStatus.READY.value
-            )
-            store.settle_run(run_id)
-            return ready
+                )
+                action = eligibility.action
+        if action is None:
+            continue
+        transition = transition_node(statuses[node_id], action)
+        store.transition_scope_node(row.node_run_id, action)
+        statuses[node_id] = transition.status
+        if transition.status in terminal:
+            enqueue_candidates(node_id)
+
+    ready = tuple(
+        schedule.nodes[node_id].node_run_id
+        for node_id in graph.topological_order
+        if statuses[node_id] == NodeStatus.READY.value
+    )
+    store.settle_run(run_id)
+    return ready
 
 
 def dispatch_ready_nodes(

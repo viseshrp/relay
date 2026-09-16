@@ -9,7 +9,7 @@ from django.views.decorators.http import require_GET
 
 from relay.agents.discovery import discover_agents
 from relay.agents.registry import load_registry
-from relay.constants import API_MAX_PAGE
+from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX
 from relay.errors import ConfigError
 from relay.execution.state import RunStatus
 from relay.projects.service import list_registered_projects
@@ -25,7 +25,13 @@ from ..repositories import (
 from . import api_errors, canonical_record_id, canonical_uuid, current_project
 
 
-def _nonnegative_int(value: str | None, *, field: str, default: int) -> int:
+def _nonnegative_int(
+    value: str | None,
+    *,
+    field: str,
+    default: int,
+    maximum: int | None = None,
+) -> int:
     if value is None:
         return default
     try:
@@ -35,6 +41,9 @@ def _nonnegative_int(value: str | None, *, field: str, default: int) -> int:
         raise ConfigError(message) from None
     if parsed < 0:
         message = f"{field} must not be negative."
+        raise ConfigError(message)
+    if maximum is not None and parsed > maximum:
+        message = f"{field} exceeds Relay's database integer range."
         raise ConfigError(message)
     return parsed
 
@@ -162,10 +171,27 @@ def runs(request: HttpRequest) -> HttpResponse:
 @owner_required
 @require_GET
 def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
-    del request
-    return JsonResponse(
-        {"run": DjangoReadStore().run_detail(canonical_uuid(run_id, resource="run"))}
+    collection = request.GET.get("collection", "nodes")
+    if collection not in {"nodes", "interactions"}:
+        message = "collection must be nodes or interactions."
+        raise ConfigError(message)
+    since = _nonnegative_int(
+        request.GET.get("since"),
+        field="since",
+        default=0,
+        maximum=DATABASE_INTEGER_MAX,
     )
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    run, next_value = DjangoReadStore().run_detail(
+        canonical_uuid(run_id, resource="run"),
+        collection=collection,
+        since=since,
+        limit=limit,
+    )
+    return JsonResponse({"run": run, "next": next_value})
 
 
 @api_errors
@@ -173,7 +199,12 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
 @require_GET
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
-    since = _nonnegative_int(request.GET.get("since"), field="since", default=0)
+    since = _nonnegative_int(
+        request.GET.get("since"),
+        field="since",
+        default=0,
+        maximum=DATABASE_INTEGER_MAX,
+    )
     limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
     if limit == 0:
         message = "limit must be at least 1."
@@ -186,10 +217,22 @@ def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
 @owner_required
 @require_GET
 def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
-    del request
-    return JsonResponse(
-        {"artifacts": DjangoReadStore().list_artifacts(canonical_uuid(run_id, resource="run"))}
+    since = _nonnegative_int(
+        request.GET.get("since"),
+        field="since",
+        default=0,
+        maximum=DATABASE_INTEGER_MAX,
     )
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    artifacts, next_value = DjangoReadStore().page_artifacts(
+        canonical_uuid(run_id, resource="run"),
+        since,
+        limit,
+    )
+    return JsonResponse({"artifacts": artifacts, "next": next_value})
 
 
 @api_errors
@@ -204,6 +247,7 @@ def artifact(request: HttpRequest, artifact_id: str) -> FileResponse:
 
 
 @api_errors
+@owner_required
 def api_not_found(request: HttpRequest, path: str = "") -> HttpResponse:
     del request, path
     return JsonResponse(

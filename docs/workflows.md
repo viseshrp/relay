@@ -27,6 +27,9 @@ when the graph is compiled.
 
 Durations contain digits followed by `ms`, `s`, `m`, or `h`: `250ms`, `30s`,
 `5m`, and `2h` are valid. There is no implicit unit.
+Loop and subworkflow deadlines also bound their nested attempts. A timeout
+while a node is running fails that attempt; `on_timeout` is taken when a
+`human_wait` deadline expires while waiting.
 
 ## Typed inputs
 
@@ -284,7 +287,9 @@ reference `child` resolves to `.relay/workflows/child.yaml`; `child.yml` or
 `nested/child.yaml` keeps its explicit suffix and relative path. Resolution
 cannot leave `.relay/workflows/`, and recursive references fail validation.
 Inputs are explicit. Each parent output names a child output as
-`<child-node>.<output>`.
+`<child-node>.<output>`. Relay evaluates parent expressions, applies the child
+input defaults, and validates the resulting values against the child's typed
+input contract before materializing its scope.
 
 <!-- relay-example: valid subworkflow -->
 ```yaml

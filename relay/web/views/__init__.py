@@ -15,13 +15,13 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpRequest, JsonResponse
 from django.http.response import HttpResponseBase
 
+from relay.constants import DATABASE_INTEGER_MAX
 from relay.errors import ConfigError, ProjectDiscoveryError, RelayError
 from relay.projects.discovery import discover_relay_root
 from relay.projects.service import ProjectRecord, register_current_project
 
 P = ParamSpec("P")
 LOGGER = logging.getLogger(__name__)
-_MAX_BIGINT_ID = (1 << 63) - 1
 
 
 def api_errors(
@@ -32,7 +32,7 @@ def api_errors(
     @wraps(view)
     def wrapped(request: HttpRequest, *args: P.args, **kwargs: P.kwargs) -> HttpResponseBase:
         try:
-            return view(request, *args, **kwargs)
+            response = view(request, *args, **kwargs)
         except RelayError as error:
             return JsonResponse(error.to_envelope(), status=error.http_status)
         except RequestDataTooBig:
@@ -48,6 +48,20 @@ def api_errors(
                 },
                 status=500,
             )
+        if response.status_code != 405:
+            return response
+        replacement = JsonResponse(
+            {
+                "code": "method_not_allowed",
+                "message": "This Relay API route does not accept that HTTP method.",
+                "context": {},
+            },
+            status=405,
+        )
+        allowed = response.headers.get("Allow")
+        if allowed is not None:
+            replacement["Allow"] = allowed
+        return replacement
 
     return wrapped
 
@@ -116,7 +130,7 @@ def canonical_record_id(value: str, *, resource: str) -> str:
     """
     valid_digits = value.isascii() and value.isdigit()
     parsed = int(value) if valid_digits and len(value) <= 19 else 0
-    if parsed < 1 or parsed > _MAX_BIGINT_ID:
+    if parsed < 1 or parsed > DATABASE_INTEGER_MAX:
         message = f"The requested {resource} does not exist."
         raise ProjectDiscoveryError(message, context={resource: value})
     return str(parsed)

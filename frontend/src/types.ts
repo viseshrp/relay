@@ -81,28 +81,8 @@ export interface RunNode {
   node_type: string;
   status: string;
   writes: boolean;
-  outputs: Record<string, JsonValue>;
   selected_branch: string | null;
   loop_index: number | null;
-}
-
-export interface RunAttempt {
-  id: string;
-  node_run_id: string;
-  scope_path: string;
-  attempt_number: number;
-  status: string;
-  driver_kind: string | null;
-  agent_id: string;
-  agent_version: string;
-  model_value: string;
-  starting_head: string;
-  ending_head: string | null;
-  started_at: string | null;
-  ended_at: string | null;
-  stop_reason: string | null;
-  exit_code: number | null;
-  error_code: string | null;
 }
 
 export interface RunInteraction {
@@ -123,11 +103,9 @@ export interface RunDetail extends RunSummary {
     relay_version: string;
     runtime_versions: Record<string, JsonValue>;
     hashes: Record<string, JsonValue>;
-    route_table: Record<string, JsonValue>;
     created_at: string;
   };
   nodes: RunNode[];
-  attempts: RunAttempt[];
   interactions: RunInteraction[];
 }
 

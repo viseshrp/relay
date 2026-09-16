@@ -5,7 +5,7 @@ from __future__ import annotations
 import codecs
 from collections import deque
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeVar
@@ -15,6 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS, CONTROL_POLL_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, PersistenceError
 from relay.execution.dispatch import dispatch_node
+from relay.execution.machine import transition_node
 from relay.execution.runner import AttemptContext, OutcomeKind, run_claim_token
 from relay.execution.scheduler import (
     activation_sources,
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
 NodeT = TypeVar("NodeT", bound=NodeDefinition)
 _NODE_ADAPTER: TypeAdapter[NodeDefinition] = TypeAdapter(NodeDefinition)
 _OUTPUT_READ_BYTES = 8_192
-_DURATION_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3_600.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,71 +128,76 @@ class SynchronousScopeRunner:
             else frozenset(nodes)
         )
         node_ids = tuple(nodes)
+        records = dict(
+            context.runtime.scope_node_records(context.attempt.run_id, parent_scope, node_ids)
+        )
         queue = deque(graph.topological_order)
+        queued = set(graph.topological_order)
         propagated: set[str] = set()
+        terminal = {
+            NodeStatus.SUCCEEDED.value,
+            NodeStatus.SKIPPED.value,
+            NodeStatus.FAILED.value,
+            NodeStatus.CANCELED.value,
+        }
+
+        def enqueue_candidates(node_id: str) -> None:
+            for candidate in (*graph.downstream[node_id], *control_downstream[node_id]):
+                if (
+                    records[candidate].status == NodeStatus.PENDING.value
+                    and candidate not in queued
+                ):
+                    queue.append(candidate)
+                    queued.add(candidate)
+
+        def apply_action(node_id: str, action: str) -> None:
+            record = records[node_id]
+            transition = transition_node(record.status, action)
+            context.runtime.transition_scope_node(record.node_run_id, action)
+            records[node_id] = replace(record, status=transition.status)
 
         from . import node_executors
 
         executors = node_executors(agent_driver=self.agent_driver, scope_runner=self)
         while queue:
             node_id = queue.popleft()
-            records = context.runtime.scope_node_records(
-                context.attempt.run_id, parent_scope, node_ids
-            )
+            queued.remove(node_id)
             record = records[node_id]
             node = nodes[node_id]
             if record.status == NodeStatus.PENDING.value:
+                action: str | None = None
                 if node_id not in reachable:
-                    context.runtime.transition_scope_node(
-                        record.node_run_id, "dependencies_unreachable"
-                    )
-                    queue.extend(graph.downstream[node_id])
-                    queue.extend(control_downstream[node_id])
-                    continue
-                if node_id == entry_node:
+                    action = "dependencies_unreachable"
+                elif node_id == entry_node:
                     # Launch preflight proved this entry point's declared inputs and artifacts.
-                    context.runtime.transition_scope_node(
-                        record.node_run_id, "dependencies_satisfied"
-                    )
-                activators = incoming[node_id]
-                if activators and node_id != entry_node:
-                    source_records = [records[source] for source in activators]
-                    selected = any(item.selected_branch == node_id for item in source_records)
-                    complete = all(
-                        item.status
-                        in {
-                            NodeStatus.SUCCEEDED.value,
-                            NodeStatus.SKIPPED.value,
-                            NodeStatus.FAILED.value,
-                            NodeStatus.CANCELED.value,
-                        }
-                        for item in source_records
-                    )
-                    if complete and not selected:
-                        context.runtime.transition_scope_node(
-                            record.node_run_id, "dependencies_unreachable"
+                    action = "dependencies_satisfied"
+                else:
+                    activators = incoming[node_id]
+                    if activators:
+                        selected = any(
+                            records[source].selected_branch == node_id for source in activators
                         )
-                    elif not selected:
-                        continue
-                records = context.runtime.scope_node_records(
-                    context.attempt.run_id, parent_scope, node_ids
-                )
-                record = records[node_id]
-                if record.status == NodeStatus.PENDING.value:
-                    dependencies = {
-                        needed: records[needed].outputs for needed in graph.dependencies[node_id]
-                    }
-                    eligibility = evaluate_eligibility(
-                        node,
-                        {needed: records[needed].status for needed in graph.dependencies[node_id]},
-                        _expression_values(context, inputs, dependencies, loop_index),
-                    )
-                    if eligibility.action is None:
-                        continue
-                    context.runtime.transition_scope_node(record.node_run_id, eligibility.action)
-                    records = context.runtime.scope_node_records(
-                        context.attempt.run_id, parent_scope, node_ids
-                    )
+                        complete = all(records[source].status in terminal for source in activators)
+                        if complete and not selected:
+                            action = "dependencies_unreachable"
+                        elif not selected:
+                            continue
+                    if action is None:
+                        dependencies = {
+                            needed: records[needed].outputs
+                            for needed in graph.dependencies[node_id]
+                        }
+                        eligibility = evaluate_eligibility(
+                            node,
+                            {
+                                needed: records[needed].status
+                                for needed in graph.dependencies[node_id]
+                            },
+                            _expression_values(context, inputs, dependencies, loop_index),
+                        )
+                        action = eligibility.action
+                if action is not None:
+                    apply_action(node_id, action)
                     record = records[node_id]
 
             if record.status == NodeStatus.READY.value:
@@ -208,28 +213,25 @@ class SynchronousScopeRunner:
                         token,
                         context.attempt.worker_id,
                         executors,
+                        heartbeat_owners=(
+                            (context.attempt.attempt_id, context.attempt.worker_id),
+                            *context.heartbeat_owners,
+                        ),
+                        inherited_deadline=context.deadline_at,
                     )
-                    records = context.runtime.scope_node_records(
-                        context.attempt.run_id, parent_scope, node_ids
+                    record = context.runtime.scope_node_record(
+                        context.attempt.run_id, record.node_run_id
                     )
-                    record = records[node_id]
+                    records[node_id] = record
                     if outcome is not None and outcome.kind is not OutcomeKind.WAITING:
                         break
-                    if record.status in {
-                        NodeStatus.SUCCEEDED.value,
-                        NodeStatus.SKIPPED.value,
-                        NodeStatus.FAILED.value,
-                        NodeStatus.CANCELED.value,
-                    }:
+                    if record.status in terminal:
                         break
                     context.runtime.resolve_human_wait_controls()
                     context.runtime.expire_human_waits()
                     now = time.monotonic()
                     if now >= heartbeat_due:
-                        if not context.runtime.heartbeat_attempt(
-                            context.attempt.attempt_id,
-                            context.attempt.worker_id,
-                        ):
+                        if not context.heartbeat():
                             message = "The enclosing scope lost its durable worker ownership."
                             raise PersistenceError(
                                 message,
@@ -237,13 +239,13 @@ class SynchronousScopeRunner:
                             )
                         heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
                     time.sleep(CONTROL_POLL_INTERVAL_SECONDS)
-                records = context.runtime.scope_node_records(
-                    context.attempt.run_id, parent_scope, node_ids
-                )
-                record = records[node_id]
 
             if record.status in {NodeStatus.FAILED.value, NodeStatus.CANCELED.value}:
-                return NestedScopeResult(OutcomeKind.FAILED, {}, "nested_node_failed")
+                return NestedScopeResult(
+                    OutcomeKind.FAILED,
+                    {},
+                    "node_timeout" if context.timed_out() else "nested_node_failed",
+                )
             if (
                 record.status
                 in {
@@ -252,11 +254,9 @@ class SynchronousScopeRunner:
                 }
                 and node_id not in propagated
             ):
-                queue.extend(graph.downstream[node_id])
-                queue.extend(control_downstream[node_id])
+                enqueue_candidates(node_id)
                 propagated.add(node_id)
 
-        records = context.runtime.scope_node_records(context.attempt.run_id, parent_scope, node_ids)
         if any(
             record.status not in {NodeStatus.SUCCEEDED.value, NodeStatus.SKIPPED.value}
             for record in records.values()
@@ -279,19 +279,6 @@ def parse_node(context: AttemptContext, expected: type[NodeT]) -> NodeT:
         message = f"The executor cannot run node type {node.type!r}."
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
     return node
-
-
-def duration_seconds(value: str | None) -> float | None:
-    """Convert schema-validated `250ms`, `4s`, `3m`, or `2h` to seconds."""
-    if value is None:
-        return None
-    suffix = "ms" if value.endswith("ms") else value[-1]
-    number = value[: -len(suffix)]
-    try:
-        return int(number) * _DURATION_UNITS[suffix]
-    except (KeyError, ValueError):
-        message = f"Duration {value!r} is not valid."
-        raise NodeExecutionError(message) from None
 
 
 def expression_context(context: AttemptContext) -> dict[str, object]:
@@ -367,7 +354,6 @@ __all__ = [
     "SynchronousScopeRunner",
     "declared_output_artifacts",
     "decoded_chunks",
-    "duration_seconds",
     "emit_output_stream",
     "expression_context",
     "parse_node",

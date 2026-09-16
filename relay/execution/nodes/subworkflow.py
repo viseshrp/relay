@@ -8,11 +8,12 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from relay.errors import NodeExecutionError
+from relay.errors import NodeExecutionError, WorkflowValidationError
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.schema import SubworkflowNode, WorkflowDefinition
+from relay.workflows.validation import resolve_inputs
 
 from .base import NestedScopeRunner, expression_context, parse_node
 
@@ -50,7 +51,15 @@ class SubworkflowExecutor:
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, SubworkflowNode)
         definition = _child_definition(context, node.workflow)
-        inputs = {name: _input_value(value, context) for name, value in node.inputs.items()}
+        supplied = {name: _input_value(value, context) for name, value in node.inputs.items()}
+        try:
+            inputs = resolve_inputs(definition, supplied)
+        except WorkflowValidationError as error:
+            message = f"Subworkflow {node.workflow!r} received invalid inputs: {error.message}"
+            raise NodeExecutionError(
+                message,
+                context={"node": context.attempt.scope_path},
+            ) from None
         result = self.scopes.execute_scope(
             context,
             definition.nodes,
@@ -58,6 +67,13 @@ class SubworkflowExecutor:
             inputs=inputs,
         )
         if result.kind is not OutcomeKind.SUCCEEDED:
+            timed_out = context.timed_out() or result.error_code == "node_timeout"
+            if timed_out:
+                return ExecutionOutcome(
+                    OutcomeKind.FAILED,
+                    stop_reason=AttemptStopReason.TIMEOUT,
+                    error_code="node_timeout",
+                )
             return ExecutionOutcome(
                 result.kind,
                 stop_reason=(

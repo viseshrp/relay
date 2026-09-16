@@ -127,6 +127,12 @@ the node fails with `timeout`.
 | `loop` | Executes its child graph in numbered scopes until `until` is true or `max_iterations` selects the `exhausted` target. |
 | `subworkflow` | Executes a captured child workflow in the same run, with only its declared inputs and outputs crossing the scope boundary. |
 
+Every declared `timeout` becomes one monotonic attempt deadline. A loop or
+subworkflow passes its remaining deadline into each nested attempt, so child
+work cannot outlive the enclosing node. A running timeout fails with stop
+reason `timeout`; a waiting `human_wait` may instead select its declared
+`on_timeout` edge.
+
 Agent and command nodes extract every declared output before success. Files
 used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
 Relay copies them to central evidence storage with their SHA-256 hashes. An
@@ -134,10 +140,11 @@ Relay copies them to central evidence storage with their SHA-256 hashes. An
 
 Loop and subworkflow child graphs execute inline in the enclosing consumer
 thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
-default single worker. A nested human wait still owns no subprocess: the
-enclosing scope checks the durable mailbox at the fixed control cadence and
-keeps its attempt heartbeat current until the answer or deadline settles the
-child node.
+default single worker. Each child heartbeat also renews its bounded chain of
+enclosing attempts, so a long child cannot make its owning loop or subworkflow
+look abandoned. A nested human wait still owns no subprocess: the enclosing
+scope checks the durable mailbox at the fixed control cadence until the answer
+or deadline settles the child node.
 
 ## Nested scope example
 
@@ -167,8 +174,11 @@ same bounded process-tree stop. Evidence preservation precedes worktree removal
 and lock release.
 
 An owner may rerun one failed node after Relay preserves its evidence and resets
-only that attempt's changes. Successful nodes remain complete. Nodes canceled
-only by fail-fast return to `pending` and have eligibility recomputed. This is a
+only that attempt's changes. For a nested failure, Relay reopens the failed leaf
+and its loop or subworkflow parents so the synchronous scope can reach that
+leaf. Successful nodes remain complete. Nodes canceled only by fail-fast return
+to `pending` and have eligibility recomputed. If a separate concurrent failure
+remains, the run returns to `failed` after the selected rerun settles. This is a
 new attempt initiated by the owner, not an automatic retry.
 
 During orderly shutdown, active attempts end as `interrupted` and their nodes
@@ -178,9 +188,9 @@ artifacts, then creates new attempts. An unmarked stale heartbeat ends as
 
 ## Scheduling and worktree admission
 
-Relay evaluates roots once and later considers only direct dependents of a node
-that changed. The compiled dependency and downstream indexes keep total graph
-initialization at O(V+E) and each completion update at O(outdegree). Loop and
+Each durable scheduling pass loads and compiles the graph once, then drains a
+bounded queue of direct data and control successors. A pass is O(V+E); within
+that pass, a terminal update enqueues only O(outdegree) candidates. Loop and
 subworkflow expansion is bounded before execution.
 
 Nodes that do not touch Git state need no worktree gate. Git-backed read-only

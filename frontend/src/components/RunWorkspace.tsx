@@ -48,6 +48,8 @@ const EVENT_TYPES = [
   "run.interrupted",
   "run.succeeded",
   "run.rerun",
+  "run.cleanup_succeeded",
+  "run.cleanup_failed",
   "node.created",
   "node.ready",
   "node.dispatched",
@@ -58,6 +60,7 @@ const EVENT_TYPES = [
   "node.skipped",
   "node.canceled",
   "node.interrupted",
+  "node.pending",
   "attempt.started",
   "attempt.ended",
   "agent.message",
@@ -90,10 +93,55 @@ interface RunWorkspaceProps {
   onSelectRun: (runId: string | null) => void;
 }
 
+type DetailCollection = "nodes" | "interactions";
+type PageMode = "replace" | "append" | "refresh";
+
+interface RunDetailPage {
+  run: RunDetail;
+  next: number | null;
+}
+
+interface ArtifactPage {
+  artifacts: ArtifactRecord[];
+  next: number | null;
+}
+
 function mergeEvents(current: RunEvent[], incoming: RunEvent[]): RunEvent[] {
   const events = new Map(current.map((event) => [event.id, event]));
   for (const event of incoming) events.set(event.id, event);
   return Array.from(events.values()).sort((left, right) => left.id - right.id);
+}
+
+function mergeRecords<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const records = new Map(current.map((record) => [record.id, record]));
+  for (const record of incoming) records.set(record.id, record);
+  return Array.from(records.values());
+}
+
+function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail | null {
+  if (current === null) return null;
+  const status = event.payload.status;
+  if (event.type.startsWith("run.") && typeof status === "string") {
+    return { ...current, status };
+  }
+  if (event.type.startsWith("node.")) {
+    const scopePath = event.payload.scope_path;
+    if (typeof scopePath === "string" && typeof status === "string") {
+      return {
+        ...current,
+        nodes: current.nodes.map((node) => (
+          node.scope_path === scopePath ? { ...node, status } : node
+        )),
+      };
+    }
+  }
+  if (event.type === "run.cleanup_succeeded" || event.type === "run.cleanup_failed") {
+    const worktreeState = event.payload.worktree_state;
+    return typeof worktreeState === "string"
+      ? { ...current, worktree_state: worktreeState }
+      : current;
+  }
+  return current;
 }
 
 function runGraph(run: RunDetail | null): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
@@ -205,7 +253,13 @@ function InteractionCard({
         try {
           answerValue = JSON.parse(value) as JsonValue;
         } catch {
-          answerValue = value;
+          throw new Error("An elicitation response must be a JSON object or null.");
+        }
+        if (
+          answerValue !== null
+          && (typeof answerValue !== "object" || Array.isArray(answerValue))
+        ) {
+          throw new Error("An elicitation response must be a JSON object or null.");
         }
       }
       await api<{ result: string }>(path, {
@@ -246,7 +300,11 @@ function InteractionCard({
         ) : (
           <TextField
             size="small"
-            label={interaction.kind === "permission" ? "Decision" : "Response (text or JSON)"}
+            label={interaction.kind === "elicitation"
+              ? "Response (JSON object or null)"
+              : interaction.kind === "permission"
+                ? "Decision"
+                : "Response (text or JSON)"}
             value={value}
             onChange={(event) => setValue(event.target.value)}
           />
@@ -264,9 +322,12 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [nodeCursor, setNodeCursor] = useState<number | null>(null);
+  const [interactionCursor, setInteractionCursor] = useState<number | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [eventCursor, setEventCursor] = useState<number | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
+  const [artifactCursor, setArtifactCursor] = useState<number | null>(null);
   const [streamState, setStreamState] = useState("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [cleanupScope, setCleanupScope] = useState("all");
@@ -283,18 +344,64 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     if (!cursor && selectedRun === null && response.runs[0]) onSelectRun(response.runs[0].id);
   }, [onSelectRun, selectedRun]);
 
-  const refreshDetail = useCallback(async (): Promise<RunDetail | null> => {
-    if (selectedRun === null) return null;
-    const [runResponse, artifactResponse] = await Promise.all([
-      api<{ run: RunDetail }>(`/api/runs/${encodeURIComponent(selectedRun)}`),
-      api<{ artifacts: ArtifactRecord[] }>(
-        `/api/runs/${encodeURIComponent(selectedRun)}/artifacts`,
-      ),
-    ]);
-    setDetail(runResponse.run);
-    setArtifacts(artifactResponse.artifacts);
-    return runResponse.run;
+  const loadDetailCollection = useCallback(async (
+    collection: DetailCollection,
+    since: number,
+    mode: PageMode,
+  ): Promise<RunDetail> => {
+    if (selectedRun === null) throw new Error("Select a run before loading its detail.");
+    const query = new URLSearchParams({ collection, since: String(since), limit: "200" });
+    const response = await api<RunDetailPage>(
+      `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
+    );
+    setDetail((current) => {
+      const sameRun = current?.id === response.run.id;
+      const currentNodes = sameRun ? current.nodes : [];
+      const currentInteractions = sameRun ? current.interactions : [];
+      return {
+        ...response.run,
+        nodes: collection === "nodes"
+          ? (mode === "replace"
+            ? response.run.nodes
+            : mergeRecords(currentNodes, response.run.nodes))
+          : currentNodes,
+        interactions: collection === "interactions"
+          ? (mode === "replace"
+            ? response.run.interactions
+            : mergeRecords(currentInteractions, response.run.interactions))
+          : currentInteractions,
+      };
+    });
+    if (collection === "nodes") setNodeCursor(response.next);
+    else setInteractionCursor(response.next);
+    return response.run;
   }, [selectedRun]);
+
+  const loadArtifacts = useCallback(async (
+    since: number,
+    mode: PageMode,
+  ): Promise<void> => {
+    if (selectedRun === null) return;
+    const query = new URLSearchParams({ since: String(since), limit: "200" });
+    const response = await api<ArtifactPage>(
+      `/api/runs/${encodeURIComponent(selectedRun)}/artifacts?${query.toString()}`,
+    );
+    setArtifacts((current) => (
+      mode === "replace" ? response.artifacts : mergeRecords(current, response.artifacts)
+    ));
+    setArtifactCursor(response.next);
+  }, [selectedRun]);
+
+  const refreshDetail = useCallback(async (reset = false): Promise<RunDetail | null> => {
+    if (selectedRun === null) return null;
+    const mode: PageMode = reset ? "replace" : "refresh";
+    const [run] = await Promise.all([
+      loadDetailCollection("nodes", 0, mode),
+      loadDetailCollection("interactions", 0, mode),
+      loadArtifacts(0, mode),
+    ]);
+    return run;
+  }, [loadArtifacts, loadDetailCollection, selectedRun]);
 
   const loadEvents = useCallback(async (since = 0) => {
     if (selectedRun === null) return;
@@ -311,11 +418,14 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
 
   useEffect(() => {
     setDetail(null);
+    setNodeCursor(null);
+    setInteractionCursor(null);
     setEvents([]);
     setArtifacts([]);
+    setArtifactCursor(null);
     setEventCursor(null);
     if (selectedRun === null) return;
-    void Promise.all([refreshDetail(), loadEvents()]).catch((caught: unknown) =>
+    void Promise.all([refreshDetail(true), loadEvents()]).catch((caught: unknown) =>
       setError(errorMessage(caught)),
     );
 
@@ -329,15 +439,33 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
       }
       try {
         const item = JSON.parse(event.data) as RunEvent;
+        if (item.version !== 1) return;
         setEvents((current) => mergeEvents(current, [item]));
-        void refreshDetail()
-          .then((run) => {
-            if (run && TERMINAL_RUNS.has(run.status)) {
-              source.close();
-              setStreamState("complete");
-            }
-          })
-          .catch((caught: unknown) => setError(errorMessage(caught)));
+        setDetail((current) => applyStateEvent(current, item));
+        if (item.type === "node.created") {
+          void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
+            setError(errorMessage(caught)),
+          );
+        }
+        if (
+          item.type === "attempt.ended"
+          || item.type.endsWith(".requested")
+          || item.type.endsWith(".answered")
+        ) {
+          void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
+            setError(errorMessage(caught)),
+          );
+        }
+        if (item.type === "artifact.preserved") {
+          void loadArtifacts(0, "refresh").catch((caught: unknown) =>
+            setError(errorMessage(caught)),
+          );
+        }
+        const status = item.payload.status;
+        if (typeof status === "string" && TERMINAL_RUNS.has(status)) {
+          source.close();
+          setStreamState("complete");
+        }
       } catch {
         setError("Relay received an invalid event frame.");
       }
@@ -345,7 +473,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     for (const type of EVENT_TYPES) source.addEventListener(type, receive);
     source.addEventListener("error", receive);
     return () => source.close();
-  }, [loadEvents, refreshDetail, selectedRun]);
+  }, [loadArtifacts, loadDetailCollection, loadEvents, refreshDetail, selectedRun]);
 
   async function cancelRun() {
     if (selectedRun === null) return;
@@ -368,6 +496,33 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
         body: JSON.stringify({ scope_path: scopePath, idempotency_key: crypto.randomUUID() }),
       });
       await refreshDetail();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function loadMoreNodes() {
+    if (nodeCursor === null) return;
+    try {
+      await loadDetailCollection("nodes", nodeCursor, "append");
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function loadMoreInteractions() {
+    if (interactionCursor === null) return;
+    try {
+      await loadDetailCollection("interactions", interactionCursor, "append");
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function loadMoreArtifacts() {
+    if (artifactCursor === null) return;
+    try {
+      await loadArtifacts(artifactCursor, "append");
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -457,20 +612,32 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                 )}
               </Paper>
 
-              {pendingInteractions.length > 0 && (
-                <Box className="interaction-grid">
-                  {pendingInteractions.map((interaction) => (
-                    <InteractionCard
-                      key={interaction.id}
-                      interaction={interaction}
-                      onAnswered={async () => { await refreshDetail(); }}
-                    />
-                  ))}
-                </Box>
+              {(pendingInteractions.length > 0 || interactionCursor !== null) && (
+                <Stack spacing={1}>
+                  <Box className="interaction-grid">
+                    {pendingInteractions.map((interaction) => (
+                      <InteractionCard
+                        key={interaction.id}
+                        interaction={interaction}
+                        onAnswered={async () => { await refreshDetail(); }}
+                      />
+                    ))}
+                  </Box>
+                  {interactionCursor !== null && (
+                    <Button onClick={() => void loadMoreInteractions()}>
+                      Load more interactions
+                    </Button>
+                  )}
+                </Stack>
               )}
 
               <Paper variant="outlined" className="canvas-panel run-canvas">
                 <FlowCanvas nodes={graph.nodes} edges={graph.edges} />
+                {nodeCursor !== null && (
+                  <Button fullWidth onClick={() => void loadMoreNodes()}>
+                    Load more nodes
+                  </Button>
+                )}
               </Paper>
 
               <Paper variant="outlined" className="section-card">
@@ -542,6 +709,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                   ))}
                   {artifacts.length === 0 && (
                     <Typography color="text.secondary">No preserved artifacts.</Typography>
+                  )}
+                  {artifactCursor !== null && (
+                    <Button onClick={() => void loadMoreArtifacts()}>
+                      Load more artifacts
+                    </Button>
                   )}
                 </Stack>
               </Paper>

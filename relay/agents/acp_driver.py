@@ -20,6 +20,7 @@ from acp import RequestError, schema
 
 from relay._version import __version__
 from relay.constants import (
+    AGENT_EVENT_QUEUE_MAX_ITEMS,
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CANCELLATION_GRACE_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
@@ -35,7 +36,6 @@ from relay.errors import (
     RelayError,
 )
 from relay.execution.control import ClaimedControl, cancel_stop_reason
-from relay.execution.nodes.base import duration_seconds
 from relay.execution.state import ControlKind, InteractionKind
 
 from .events import AgentEvent, normalize_acp_update
@@ -304,9 +304,7 @@ class RelayAcpClient:
             now = time.monotonic()
             if now >= heartbeat_due:
                 alive = await asyncio.to_thread(
-                    self.context.attempt.runtime.heartbeat_attempt,
-                    attempt.attempt_id,
-                    attempt.worker_id,
+                    self.context.attempt.heartbeat,
                 )
                 if not alive:
                     message = "The ACP attempt lost its durable worker ownership."
@@ -317,7 +315,10 @@ class RelayAcpClient:
     async def _cancel_session(self) -> None:
         if self.agent is not None and self.session_id is not None:
             with suppress(Exception):
-                await self.agent.cancel(self.session_id)
+                await asyncio.wait_for(
+                    self.agent.cancel(self.session_id),
+                    timeout=CANCELLATION_GRACE_SECONDS,
+                )
 
     async def create_elicitation(
         self,
@@ -501,6 +502,19 @@ async def _finish_stdio(
         await _terminate_process(process)
 
 
+async def _drain_agent_events(
+    queue: asyncio.Queue[AgentEvent],
+    reader: asyncio.Task[None],
+) -> AsyncIterator[AgentEvent]:
+    """Drain a bounded provider queue while its stderr reader reaches EOF."""
+    while not reader.done() or not queue.empty():
+        try:
+            yield await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
+        except TimeoutError:
+            continue
+    await reader
+
+
 class AcpDriver:
     """One installed ACP agent command, used for probes and fresh attempts."""
 
@@ -632,7 +646,7 @@ class AcpDriver:
         context: AgentExecutionContext,
     ) -> AsyncIterator[AgentEvent]:
         """Run one fresh session while yielding normalized updates as they arrive."""
-        queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
+        queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
         client = RelayAcpClient(context, self.profile, queue)
         agent_version = ""
         stderr_task: asyncio.Task[None] | None = None
@@ -685,7 +699,7 @@ class AcpDriver:
                 )
                 started = time.monotonic()
                 heartbeat_due = started + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-                timeout_seconds = duration_seconds(context.node.timeout)
+                timeout_seconds = context.attempt.remaining_seconds()
                 requested_stop: str | None = None
                 stop_deadline: float | None = None
                 while not prompt_task.done() or not queue.empty():
@@ -705,7 +719,11 @@ class AcpDriver:
                     ):
                         requested_stop = "timeout"
                         stop_deadline = now + CANCELLATION_GRACE_SECONDS
-                        await connection.cancel(self.session_id)
+                        with suppress(Exception):
+                            await asyncio.wait_for(
+                                connection.cancel(self.session_id),
+                                timeout=CANCELLATION_GRACE_SECONDS,
+                            )
                     if requested_stop is None:
                         control = await asyncio.to_thread(
                             context.attempt.runtime.claim_next_control,
@@ -722,7 +740,11 @@ class AcpDriver:
                             if applied:
                                 requested_stop = cancel_stop_reason(control).value
                                 stop_deadline = now + CANCELLATION_GRACE_SECONDS
-                                await connection.cancel(self.session_id)
+                                with suppress(Exception):
+                                    await asyncio.wait_for(
+                                        connection.cancel(self.session_id),
+                                        timeout=CANCELLATION_GRACE_SECONDS,
+                                    )
                     if (
                         stop_deadline is not None
                         and now >= stop_deadline
@@ -735,9 +757,7 @@ class AcpDriver:
                         break
                     if now >= heartbeat_due:
                         alive = await asyncio.to_thread(
-                            context.attempt.runtime.heartbeat_attempt,
-                            context.attempt.attempt.attempt_id,
-                            context.attempt.attempt.worker_id,
+                            context.attempt.heartbeat,
                         )
                         if not alive:
                             message = "The ACP attempt lost its durable worker ownership."
@@ -782,9 +802,9 @@ class AcpDriver:
                             {"message": "The ACP session may remain in the agent's history."},
                         )
                 await _finish_stdio(connection, process)
-                await stderr_task
-                while not queue.empty():
-                    yield queue.get_nowait()
+                async for pending_event in _drain_agent_events(queue, stderr_task):
+                    yield pending_event
+                stderr_task = None
                 self.result = AgentResult(
                     succeeded=succeeded,
                     stop_reason=requested_stop or response_stop,
@@ -802,6 +822,16 @@ class AcpDriver:
                     ),
                 )
         except Exception as error:
+            if stderr_task is not None:
+                try:
+                    async for pending_event in _drain_agent_events(queue, stderr_task):
+                        yield pending_event
+                except Exception:
+                    LOGGER.exception(
+                        "ACP stderr drain failed",
+                        extra={"agent_id": self.profile.agent_id},
+                    )
+                stderr_task = None
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
@@ -812,8 +842,10 @@ class AcpDriver:
             raise mapped from None
         finally:
             if stderr_task is not None and not stderr_task.done():
-                with suppress(asyncio.CancelledError, Exception):
-                    await stderr_task
+                # A caller closing the async generator no longer consumes the
+                # bounded queue, so cancel the reader instead of waiting forever.
+                stderr_task.cancel()
+                await asyncio.gather(stderr_task, return_exceptions=True)
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,
                 context.attempt.attempt.attempt_id,
@@ -838,7 +870,10 @@ class AcpDriver:
     async def cancel(self) -> None:
         if self.connection is not None and self.session_id is not None:
             with suppress(Exception):
-                await self.connection.cancel(self.session_id)
+                await asyncio.wait_for(
+                    self.connection.cancel(self.session_id),
+                    timeout=CANCELLATION_GRACE_SECONDS,
+                )
         if self.process is not None:
             await _terminate_process(self.process)
 

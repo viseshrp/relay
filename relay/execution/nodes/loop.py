@@ -48,6 +48,12 @@ class LoopExecutor:
                 result.kind,
                 result.node_outputs,
             )
+            if context.timed_out() or result.error_code == "node_timeout":
+                return ExecutionOutcome(
+                    OutcomeKind.FAILED,
+                    stop_reason=AttemptStopReason.TIMEOUT,
+                    error_code="node_timeout",
+                )
             if result.kind is OutcomeKind.WAITING:
                 return ExecutionOutcome(OutcomeKind.WAITING)
             if result.kind is OutcomeKind.FAILED:

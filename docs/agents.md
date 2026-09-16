@@ -22,6 +22,9 @@ node route. Relay does not fall back to a different model. The node's fresh ACP
 session repeats the selection proof. If a later `config_option_update` reports
 a different value, Relay cancels and fails that attempt.
 
+The attempt deadline, cancellation mailbox, and heartbeat cover initialization,
+model selection, prompt execution, and provider shutdown as one lifecycle.
+
 Antigravity is not an ACP agent in Relay. Its preflight requires exact
 membership in a fresh `agy models` result. Execution passes the same value with
 `--model` and rejects a different model reported by the stream, but the native
@@ -120,8 +123,12 @@ Antigravity always has a print timeout. A node timeout such as `15m` becomes
 `--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
 five-minute default and passes `--print-timeout 5m` explicitly.
 
-Relay retains each stdout NDJSON line before normalizing it. It also inspects
-stream fields and stderr for documented soft-deny signals. A target such as
+Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
+using a bounded queue that applies pipe backpressure. JSON parsing holds at
+most one 1 MiB line; a larger line is retained as raw output and then fails the
+attempt as a protocol error. Cancellation and timeout drain bytes already read
+before the attempt settles. Relay also inspects stream fields and stderr for
+documented soft-deny signals. A target such as
 `write_file(src/report.md)` becomes worktree-relative `src/report.md`; a path
 outside the worktree is ignored by the write-target rule. A writing attempt
 fails with `soft_denied` when a denied target covers a required artifact, or
