@@ -44,17 +44,23 @@ The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, and `registry-cache/`.
 Snapshots are database rows. Each process that emits a diagnostic, including
 a CLI command, writes a rotating `relay-{pid}.log` with up to three backups
-of 5 MB each. Quiet commands create no empty log file. Logging setup removes
-empty files from stopped processes and retains the three most recent nonempty
-process log sets, including their rotations. Files for live or unverifiable
-PIDs are retained; a reused PID can therefore keep an older set until that
-process exits. The former shared `relay.log` is retained for manual cleanup.
-Windows process queries and log retention remain unverified on Windows.
+of 5 MB each. Quiet commands create no empty log file. Every log file Relay
+creates starts with the line `Relay process log`, and a rotation keeps that
+line. Retention and data cleanup change only `relay-{pid}.log` files and
+rotations that start with it, so other files in the same directory are never
+removed or emptied. Logging setup removes stopped-process files that hold only
+that line and retains the three most recent stopped-process log sets that have
+records, including their rotations. Files for live or unverifiable PIDs are
+retained; a reused PID can therefore keep an older set until that process
+exits. Files without the line, such as the former shared `relay.log` or logs
+from earlier builds, are left for manual cleanup. Windows process queries and
+log retention remain unverified on Windows.
 A `RELAY_LOG_PATH=/path/custom.log` override produces
-`/path/custom-{pid}.log` and its rotations. Separate files prevent concurrent
-processes from rotating the same open file. Diagnostic context such as run,
-attempt, path, and cursor appears as escaped JSON alongside the message and
-exception trace.
+`/path/custom-{pid}.log` and its rotations. A shared override directory is
+safe because Relay changes only the files it marked. Separate files prevent
+concurrent processes from rotating the same open file. Diagnostic context
+such as run, attempt, path, and cursor appears as escaped JSON alongside the
+message and exception trace.
 
 ## Database and disk roles
 
@@ -132,10 +138,12 @@ only copy of a diff, artifact, or snapshot without confirmation. Retained run
 branches require explicit cleanup even when a successful worktree is removed.
 Cleaning run records alone is rejected while its worktree, run branch, or
 retained attempt refs still exist. Clean worktrees, then Git refs, then records;
-`--all` applies that order and truncates Relay process logs, rotations, and any
-former shared `relay.log` in place. It keeps open append handlers attached, so
-active processes can continue logging after cleanup. Windows file-handle
-behavior remains unverified until exercised on Windows.
+`--all` applies that order and empties Relay's marked process logs and
+rotations in place, keeping each file's `Relay process log` line. Files without
+that line, including the former shared `relay.log`, are left alone. Open
+append handlers stay attached, so active processes can continue logging after
+cleanup. Windows file-handle behavior remains unverified until exercised on
+Windows.
 
 Agent and command processes inherit the worker environment. Relay has no secret
 vault or output masking, so the database, artifact directory, and logs may

@@ -170,9 +170,10 @@ can retry after the active request finishes.
 `true` returns `409`. Relay rejects cleanup while the current project has an
 active run. Reader worktrees are removed before their primary run worktree,
 and all worktrees are removed before branches. Run rows and their retained
-artifact directories are removed only for `runs` or `all`. `all` also removes
-the contents of Relay process logs and rotations by truncating them in place,
-so open append handlers can continue writing. Cleanup never changes the launch branch.
+artifact directories are removed only for `runs` or `all`. `all` also empties
+Relay process logs and rotations in place, keeping their `Relay process log`
+first line, so open append handlers can continue writing. Files without that
+line are left alone. Cleanup never changes the launch branch.
 
 ## Errors and limits
 

@@ -155,7 +155,7 @@ LOGGING: dict[str, object] = {
     },
     "handlers": {
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "relay.web.logging.OwnedRotatingFileHandler",
             "filename": str(resolved_log_path),
             "formatter": "relay",
             "maxBytes": APPLICATION_LOG_MAX_BYTES,

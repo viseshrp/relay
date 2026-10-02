@@ -12,6 +12,7 @@ from platformdirs import PlatformDirs
 
 from .constants import (
     APP_NAME,
+    APPLICATION_LOG_OWNERSHIP_LINE,
     APPLICATION_LOG_RETAINED_PROCESSES,
     WINDOWS_ERROR_INVALID_PARAMETER,
     WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION,
@@ -20,6 +21,9 @@ from .constants import (
 from .errors import PathSafetyError
 
 _DIRS: PlatformDirs = PlatformDirs(appname=APP_NAME, appauthor=False, roaming=False)
+_OWNERSHIP_MARKER: bytes = APPLICATION_LOG_OWNERSHIP_LINE.encode("ascii")
+# The marker plus a Windows CRLF line ending.
+_OWNERSHIP_LINE_MAX_BYTES: int = len(_OWNERSHIP_MARKER) + len(b"\r\n")
 
 
 def ensure_private_dir(path: Path) -> Path:
@@ -98,18 +102,69 @@ def application_log_path() -> Path:
     return base.with_name(f"{base.stem}-{os.getpid()}{base.suffix}")
 
 
-def application_log_files() -> tuple[Path, ...]:
-    """Include process files, rotations, and the former shared log for cleanup."""
+def _ownership_line_size(path: Path) -> int | None:
+    """Return the byte length of a file's ownership line, or None without one.
+
+    A name match alone never proves that Relay created a file. The line is
+    written in text mode, so `Relay process log\\n` is 18 bytes on Linux and
+    `Relay process log\\r\\n` is 19 bytes on Windows.
+    """
+    try:
+        with path.open("rb") as stream:
+            line = stream.readline(_OWNERSHIP_LINE_MAX_BYTES)
+    except OSError:
+        return None
+    if line in {_OWNERSHIP_MARKER + b"\n", _OWNERSHIP_MARKER + b"\r\n"}:
+        return len(line)
+    return None
+
+
+def _owned_log_groups() -> dict[int, list[Path]]:
+    """Group Relay-created process files by PID.
+
+    For the base `relay.log`, `relay-42.log` and `relay-42.log.1` belong to PID 42
+    when each starts with the ownership line. `relay.log`, `relay-other.log`, and
+    another program's `relay-20261002.log` without that line are excluded.
+    """
     base = _application_log_base()
-    return tuple(
-        dict.fromkeys(
-            (
-                base,
-                *base.parent.glob(f"{base.name}.*"),
-                *base.parent.glob(f"{base.stem}-*{base.suffix}*"),
-            )
-        )
-    )
+    pattern = re.compile(rf"{re.escape(base.stem)}-([1-9]\d*){re.escape(base.suffix)}(?:\.\d+)?")
+    groups = {}
+    try:
+        candidates = tuple(base.parent.iterdir())
+    except OSError:
+        # An unreadable or missing log directory has no files Relay can prove it owns.
+        return groups
+    for path in candidates:
+        match = pattern.fullmatch(path.name)
+        if match is not None and path.is_file() and _ownership_line_size(path) is not None:
+            groups.setdefault(int(match.group(1)), []).append(path)
+    return groups
+
+
+def application_log_files() -> tuple[Path, ...]:
+    """Return Relay-created process files and rotations for cleanup."""
+    return tuple(path for paths in _owned_log_groups().values() for path in paths)
+
+
+def clear_application_logs() -> int:
+    """Empty Relay-created log files in place and return how many were cleared.
+
+    Each file keeps only its ownership line. Live processes keep their append
+    handles on Linux and Windows and continue writing after that line.
+    """
+    cleared = 0
+    for path in application_log_files():
+        # Re-check just before truncating; a concurrent prune may have removed it.
+        line_size = _ownership_line_size(path)
+        if line_size is None:
+            continue
+        try:
+            with path.open("r+b") as stream:
+                stream.truncate(line_size)
+        except FileNotFoundError:
+            continue
+        cleared += 1
+    return cleared
 
 
 def _windows_process_alive(pid: int) -> bool:
@@ -159,20 +214,14 @@ def _process_alive(pid: int) -> bool:
 
 
 def prune_application_logs() -> None:
-    """Keep recent inactive groups; `relay-42.log.1` belongs to PID 42.
+    """Keep recent inactive groups of Relay-created files; remove the rest.
 
-    The former shared `relay.log` and names such as `relay-other.log` are left
-    alone. Live or unverifiable PIDs retain all their current files.
+    Only files that start with the ownership line are considered, so the former
+    shared `relay.log` and other programs' files are left alone. Live or
+    unverifiable PIDs retain all their current files.
     """
-    base = _application_log_base()
-    pattern = re.compile(rf"{re.escape(base.stem)}-([1-9]\d*){re.escape(base.suffix)}(?:\.\d+)?")
-    groups = {}
-    for path in application_log_files():
-        match = pattern.fullmatch(path.name)
-        if match is not None:
-            groups.setdefault(int(match.group(1)), []).append(path)
     inactive = {}
-    for pid, paths in groups.items():
+    for pid, paths in _owned_log_groups().items():
         if _process_alive(pid):
             continue
         try:
@@ -182,7 +231,8 @@ def prune_application_logs() -> None:
         inactive[pid] = (
             max(info.st_mtime_ns for info in metadata),
             paths,
-            any(info.st_size for info in metadata),
+            # A file holding only the ownership line has no diagnostic records.
+            any(info.st_size > _OWNERSHIP_LINE_MAX_BYTES for info in metadata),
         )
     # A fixed-size heap selects retained groups in linear time in the file count.
     retained = set(
