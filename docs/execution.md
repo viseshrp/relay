@@ -33,6 +33,9 @@ target state already holds is a no-op.
 | `failed` | `manual_rerun` | `owner_requested_failed_node` | `running` | `run.rerun` |
 <!-- relay-transitions:run:end -->
 
+A run succeeds only when every node is `succeeded` or `skipped`. A terminal
+`canceled` node cannot satisfy the `all_succeeded` guard.
+
 ### Nodes
 
 <!-- relay-transitions:node:start -->

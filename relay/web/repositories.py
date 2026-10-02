@@ -2558,6 +2558,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                 .first()
             )
             if failed_node is None:
+                # Canceled nodes cannot satisfy the run's all-success guard.
+                if (
+                    NodeRun.objects.filter(run=run)
+                    .exclude(status__in=(NodeStatus.SUCCEEDED.value, NodeStatus.SKIPPED.value))
+                    .exists()
+                ):
+                    return
                 action = "all_succeeded"
             else:
                 latest_error = (
