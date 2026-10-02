@@ -61,21 +61,6 @@ class NestedScopeRunner(Protocol):
     ) -> NestedScopeResult: ...
 
 
-class MissingNestedScopeRunner:
-    def execute_scope(
-        self,
-        context: AttemptContext,
-        nodes: Mapping[str, NodeDefinition],
-        *,
-        parent_scope: str,
-        inputs: Mapping[str, object],
-        loop_index: int | None = None,
-    ) -> NestedScopeResult:
-        del nodes, parent_scope, inputs, loop_index
-        message = "No durable nested-scope runner is available."
-        raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
-
-
 def _expression_values(
     context: AttemptContext,
     inputs: Mapping[str, object],
@@ -93,8 +78,10 @@ def _expression_values(
 class SynchronousScopeRunner:
     """Run a finite child DAG inline so a one-worker consumer cannot deadlock."""
 
+    agent_driver: AgentNodeDriver
+
     def __init__(self, agent_driver: AgentNodeDriver) -> None:
-        self.agent_driver: AgentNodeDriver = agent_driver
+        self.agent_driver = agent_driver
 
     def execute_scope(
         self,
@@ -131,7 +118,7 @@ class SynchronousScopeRunner:
         )
         queue = deque(graph.topological_order)
         queued = set(graph.topological_order)
-        propagated: set[str] = set()
+        propagated = set()
         terminal = {
             NodeStatus.SUCCEEDED.value,
             NodeStatus.SKIPPED.value,
@@ -163,7 +150,7 @@ class SynchronousScopeRunner:
             record = records[node_id]
             node = nodes[node_id]
             if record.status == NodeStatus.PENDING.value:
-                action: str | None = None
+                action = None
                 if node_id not in reachable:
                     action = "dependencies_unreachable"
                 elif node_id == entry_node:
@@ -330,7 +317,6 @@ def emit_output_stream(context: AttemptContext, stream: BinaryIO, event_type: st
 
 
 __all__ = [
-    "MissingNestedScopeRunner",
     "NestedScopeResult",
     "NestedScopeRunner",
     "SynchronousScopeRunner",

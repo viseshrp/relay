@@ -33,7 +33,7 @@ class RelayError(Exception):
 
     def to_envelope(self) -> dict[str, object]:
         """Return the versioned shape shared by CLI, HTTP, and events."""
-        envelope: dict[str, object] = {
+        envelope = {
             "code": self.error_code,
             "message": self.message,
             "context": dict(self.context),

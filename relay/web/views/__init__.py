@@ -88,7 +88,7 @@ def json_body(request: HttpRequest) -> dict[str, object]:
         message = "This endpoint requires an application/json request body."
         raise ConfigError(message)
     try:
-        value: object = json.loads(request.body)
+        value = json.loads(request.body)
     except (UnicodeDecodeError, json.JSONDecodeError):
         message = "The request body is not valid JSON."
         raise ConfigError(message) from None

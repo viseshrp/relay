@@ -51,7 +51,7 @@ def build_snapshot(
     routes: Iterable[RouteRequirement],
 ) -> SnapshotBundle:
     """Capture exact workflow and prompt bytes plus all launch decisions."""
-    subworkflows: dict[str, object] = {}
+    subworkflows = {}
     hashes = {"workflow": _digest(workflow.root.text)}
     agent_prefs: list[dict[str, object]] = [
         {

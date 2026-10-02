@@ -127,11 +127,13 @@ def _installed_agent(agent_id: str, registry: RegistrySnapshot | None) -> Discov
 
 
 def _aggregate_error(reasons: Mapping[str, ProbeFailure]) -> RelayError:
-    """Keep an all-auth failure typed as AgentAuthError and list `codex: code: message`."""
+    """Codex's ``agent_auth_error: Login.`` becomes
+    ``No candidate confirmed the requested exact model. codex: agent_auth_error: Login.``
+    as AgentAuthError when every candidate has that code.
+    """
     text = "; ".join(f"{candidate}: {reason}" for candidate, reason in reasons.items())
     message = f"No candidate confirmed the requested exact model. {text}"
     prefixes = {reason.code for reason in reasons.values()}
-    error_type: type[RelayError]
     if prefixes == {AgentLaunchError.error_code}:
         error_type = AgentLaunchError
     elif prefixes == {AgentAuthError.error_code}:
@@ -155,8 +157,8 @@ async def _probe_all(
     cwd: Path,
     registry: RegistrySnapshot | None,
 ) -> dict[str, ProbeResult]:
-    models_by_agent: dict[str, list[str]] = {}
-    seen_by_agent: dict[str, set[str]] = {}
+    models_by_agent = {}
+    seen_by_agent = {}
     for requirement in requirements:
         for agent_id in requirement.effective_agent_order:
             profile = PROFILES.get(agent_id)
@@ -171,7 +173,7 @@ async def _probe_all(
             if requirement.model_value not in seen:
                 values.append(requirement.model_value)
                 seen.add(requirement.model_value)
-    results: dict[str, ProbeResult] = {}
+    results = {}
     for agent_id, values in models_by_agent.items():
         try:
             installed = _installed_agent(agent_id, registry)
@@ -203,11 +205,11 @@ def preflight_routes(
         for result in results.values():
             if result.general_error is None:
                 observation_store.replace_model_observations(result.agent_id, result.models)
-    entries: list[RouteEntry] = []
+    entries = []
     all_failures = {}
     for requirement in requested:
-        failures: dict[str, ProbeFailure] = {}
-        selected: str | None = None
+        failures = {}
+        selected = None
         for agent_id in requirement.effective_agent_order:
             profile = PROFILES.get(agent_id)
             if (
@@ -263,7 +265,7 @@ def probe_installed_agents(
     """Actively inventory models without installing agents or authorizing a launch."""
 
     async def probe() -> tuple[tuple[DiscoveredAgent, ProbeResult | None], ...]:
-        rows: list[tuple[DiscoveredAgent, ProbeResult | None]] = []
+        rows = []
         for discovered in discover_agents(registry):
             result = None
             if discovered.command is not None:
@@ -299,8 +301,10 @@ def _stop_reason(result: AgentResult) -> AttemptStopReason:
 class RoutedAgentNodeDriver:
     """Consume only the immutable selected route captured before run creation."""
 
+    registry: RegistrySnapshot | None
+
     def __init__(self, registry: RegistrySnapshot | None = None) -> None:
-        self.registry: RegistrySnapshot | None = registry
+        self.registry = registry
 
     def execute(self, context: AttemptContext, node: AgentNode) -> ExecutionOutcome:
         route = context.attempt.route

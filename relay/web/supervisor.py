@@ -77,7 +77,7 @@ def _validate_bind(host: str, port: int) -> None:
     if host not in LOOPBACK_HOSTS:
         message = "Relay may bind only to a loopback address."
         raise ConfigError(message)
-    errors: list[OSError] = []
+    errors = []
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
@@ -364,13 +364,10 @@ def run_supervisor(
     instance_id = store.acquire_instance(os.getpid(), socket.gethostname())
     stop = threading.Event()
     signal_requested = threading.Event()
-    unexpected: RelayError | None = None
-    web: subprocess.Popen[bytes] | None = None
-    consumer: subprocess.Popen[bytes] | None = None
-    previous_handlers: dict[
-        signal.Signals,
-        Callable[[int, FrameType | None], object] | int | None,
-    ] = {}
+    unexpected = None
+    web = None
+    consumer = None
+    previous_handlers = {}
 
     def request_stop(_signum: int, _frame: FrameType | None) -> None:
         signal_requested.set()

@@ -76,9 +76,4 @@ PROFILES: dict[str, AgentProfile] = {
 }
 
 
-def profile_for(agent_id: str) -> AgentProfile | None:
-    """Return compatibility metadata only for the locked five-agent scope."""
-    return PROFILES.get(agent_id)
-
-
-__all__ = ["PROFILES", "profile_for"]
+__all__ = ["PROFILES"]

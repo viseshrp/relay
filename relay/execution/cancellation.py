@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-import logging
 import os
 from pathlib import Path
 import signal
@@ -19,12 +18,6 @@ from relay.constants import (
 )
 from relay.errors import CancellationError
 from relay.execution.control import ControlResult, valid_idempotency_key
-
-LOGGER = logging.getLogger(__name__)
-
-
-class AgentSession(Protocol):
-    def cancel(self) -> None: ...
 
 
 class CancellationStore(Protocol):
@@ -170,26 +163,9 @@ def terminate_process_tree(
     return ProcessCancellation(True, True, process.returncode)
 
 
-def cancel_agent_attempt(
-    session: AgentSession,
-    process: subprocess.Popen[bytes] | subprocess.Popen[str],
-    *,
-    grace_seconds: float = CANCELLATION_GRACE_SECONDS,
-) -> ProcessCancellation:
-    """Request protocol cancellation before enforcing the process-tree bound."""
-    try:
-        session.cancel()
-    except Exception:
-        # Process-tree termination remains mandatory when protocol cancellation fails.
-        LOGGER.exception("Protocol cancellation failed; stopping the process tree")
-    return terminate_process_tree(process, grace_seconds=grace_seconds)
-
-
 __all__ = [
-    "AgentSession",
     "CancellationStore",
     "ProcessCancellation",
-    "cancel_agent_attempt",
     "request_cancellation",
     "terminate_process_tree",
 ]

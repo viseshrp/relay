@@ -67,12 +67,4 @@ def resolve_prompt(reference: LocalPrompt | GlobalPrompt, relay_root: Path) -> R
     return ResolvedPrompt(source, value, str(path), content, digest)
 
 
-def resolve_prompts(nodes: Mapping[str, NodeDefinition], relay_root: Path) -> list[ResolvedPrompt]:
-    """Resolve every declared prompt in deterministic node and list order."""
-    prompts: list[ResolvedPrompt] = []
-    for node in iter_agent_nodes(nodes):
-        prompts.extend(resolve_prompt(reference, relay_root) for reference in node.prompts)
-    return prompts
-
-
-__all__ = ["ResolvedPrompt", "iter_agent_nodes", "resolve_prompt", "resolve_prompts"]
+__all__ = ["ResolvedPrompt", "iter_agent_nodes", "resolve_prompt"]

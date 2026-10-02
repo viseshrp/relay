@@ -9,7 +9,7 @@ from pathlib import Path
 from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS, LOOPBACK_HOSTS
 from .errors import ConfigError
 from .execution.state import CleanupPolicy
-from .paths import global_prompts_dir, settings_path
+from .paths import settings_path
 
 _ALLOWED_KEYS: set[str] = {
     "agent_preferences",
@@ -80,7 +80,7 @@ def load_config(path: Path | None = None) -> RelayConfig:
     if not source.exists():
         return RelayConfig()
     try:
-        raw: object = json.loads(source.read_text(encoding="utf-8"))
+        raw = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         message = f"Could not read Relay settings at {source}."
         raise ConfigError(
@@ -88,8 +88,3 @@ def load_config(path: Path | None = None) -> RelayConfig:
             next_action="Fix or remove the settings file and run the command again.",
         ) from None
     return _validate_config(raw)
-
-
-def prompt_root(*, create: bool = False) -> Path:
-    """Return the configured global-prompt root."""
-    return global_prompts_dir(create=create)

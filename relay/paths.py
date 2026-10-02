@@ -60,12 +60,6 @@ def huey_database_path() -> Path:
     return data_dir() / "huey.db"
 
 
-def snapshots_dir(*, create: bool = False) -> Path:
-    """Return the immutable snapshot support directory."""
-    path = data_dir(create=create) / "snapshots"
-    return ensure_private_dir(path) if create else path
-
-
 def artifacts_dir(*, create: bool = False) -> Path:
     """Return the retained artifact and attempt-evidence directory."""
     path = data_dir(create=create) / "artifacts"

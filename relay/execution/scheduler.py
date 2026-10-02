@@ -126,7 +126,7 @@ def activation_sources(
 
 
 def entry_node_for_scope(entry_point: str | None, parent_scope: str | None) -> str | None:
-    """Return the direct child selected by a declared entry point in this scope."""
+    """``root.loop#2.check`` -> ``loop`` at root, or ``check`` under ``root.loop#2``."""
     if entry_point is None:
         return None
     normalized = entry_point if entry_point.startswith("root.") else f"root.{entry_point}"
@@ -145,7 +145,7 @@ def reachable_node_ids(
     graph: CompiledGraph,
     control_downstream: Mapping[str, tuple[str, ...]],
 ) -> frozenset[str]:
-    reachable: set[str] = set()
+    reachable = set()
     queue = deque((start,))
     while queue:
         node_id = queue.popleft()
@@ -235,7 +235,7 @@ def advance_run_schedule(
                 propagated.add(node_id)
                 enqueue_candidates(node_id)
             continue
-        action: str | None = None
+        action = None
         if node_id not in reachable:
             action = "dependencies_unreachable"
         elif node_id == entry_root:

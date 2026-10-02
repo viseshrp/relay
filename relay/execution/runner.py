@@ -99,8 +99,6 @@ class AttemptRuntime(DispatchStore, Protocol):
         kinds: tuple[str, ...] | None = None,
     ) -> ClaimedControl | None: ...
 
-    def heartbeat_control(self, request_id: str, worker_id: str) -> bool: ...
-
     def apply_control(self, request_id: str, worker_id: str) -> bool: ...
 
     def record_agent_session(
@@ -344,7 +342,7 @@ def _execute_attempt(
         outcome = _failure(NodeExecutionError(message))
 
     ending_head = claim.starting_head
-    preservation: PreservationResult | None = None
+    preservation = None
     if outcome.kind is OutcomeKind.WAITING:
         store.mark_attempt_waiting(claim.attempt_id, outcome.wait_timeout_seconds)
         store.mark_dispatch_consumed(claim.claim_token)

@@ -128,7 +128,7 @@ def _untracked_paths(worktree: Path) -> tuple[Path, ...]:
         worktree,
         ["ls-files", "--others", "--exclude-standard", "-z"],
     )
-    paths: list[Path] = []
+    paths = []
     for raw_path in result.stdout.split(b"\0"):
         if not raw_path:
             continue
@@ -141,7 +141,7 @@ def _untracked_paths(worktree: Path) -> tuple[Path, ...]:
 
 
 def _preserve_untracked(worktree: Path, staging: Path) -> list[PreservedArtifact]:
-    records: list[PreservedArtifact] = []
+    records = []
     for relative in _untracked_paths(worktree):
         source = worktree / relative
         try:
@@ -179,7 +179,7 @@ def _preserve_declared(
     staging: Path,
     declared: dict[str, str],
 ) -> list[PreservedArtifact]:
-    records: list[PreservedArtifact] = []
+    records = []
     for name, reference in declared.items():
         safe_name = _component(name, "artifact name")
         try:
@@ -292,6 +292,7 @@ def preserve_attempt_evidence(
 
     ending_head = current_head(worktree)
     reference = retained_attempt_ref(safe_run, safe_attempt)
+    staging = None
     try:
         # Preserve partial commits first; the ref survives even if a later copy fails.
         _require_new_ref(repository, reference)
@@ -329,7 +330,7 @@ def preserve_attempt_evidence(
             "Attempt evidence preservation failed",
             extra={"run_id": safe_run, "attempt_id": safe_attempt},
         )
-        if "staging" in locals() and staging.exists():
+        if staging is not None and staging.exists():
             shutil.rmtree(staging)
         message = "Relay could not preserve all attempt evidence."
         raise ArtifactPreservationError(

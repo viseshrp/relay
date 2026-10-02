@@ -47,6 +47,7 @@ def _args(value: object, field: str) -> tuple[str, ...]:
 
 
 def _package_version(package: str, fallback: str) -> str:
+    """``@org/agent@1.2`` -> ``1.2``; ``agent`` -> the supplied fallback."""
     marker = package.rfind("@")
     return package[marker + 1 :] if marker > 0 else fallback
 
@@ -55,7 +56,7 @@ def _parse_distributions(raw: object, agent_version: str) -> tuple[RegistryDistr
     if not isinstance(raw, dict) or not raw:
         message = "An ACP registry agent has no usable distribution metadata."
         raise AgentDiscoveryError(message)
-    result: list[RegistryDistribution] = []
+    result = []
     for manager, value in raw.items():
         if manager in {"npx", "uvx"}:
             if not isinstance(value, dict):
@@ -103,7 +104,7 @@ def _auth_methods(raw: object) -> tuple[str, ...]:
     if not isinstance(raw, list):
         message = "The ACP registry auth methods must be a list."
         raise AgentDiscoveryError(message)
-    result: list[str] = []
+    result = []
     for item in raw:
         if isinstance(item, str) and item:
             result.append(item)
@@ -125,7 +126,7 @@ def validate_registry_document(raw: object) -> tuple[str, dict[str, RegistryAgen
     if not isinstance(rows, list):
         message = "The ACP registry agents field is not a list."
         raise AgentDiscoveryError(message)
-    agents: dict[str, RegistryAgent] = {}
+    agents = {}
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             message = f"ACP registry agent {index} is not an object."
@@ -149,7 +150,7 @@ def validate_registry_document(raw: object) -> tuple[str, dict[str, RegistryAgen
 
 def _read_cache(path: Path, now: datetime) -> tuple[object, datetime] | None:
     try:
-        payload: object = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
@@ -242,18 +243,4 @@ def load_registry(
         )
 
 
-def registry_agent(snapshot: RegistrySnapshot, agent_id: str) -> RegistryAgent:
-    """Resolve one entry or fail without guessing another agent family."""
-    try:
-        return snapshot.agents[agent_id]
-    except KeyError:
-        message = f"The official ACP registry has no agent {agent_id!r}."
-        raise AgentDiscoveryError(message, context={"agent": agent_id}) from None
-
-
-__all__ = [
-    "REGISTRY_URL",
-    "load_registry",
-    "registry_agent",
-    "validate_registry_document",
-]
+__all__ = ["REGISTRY_URL", "load_registry", "validate_registry_document"]

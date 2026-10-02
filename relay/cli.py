@@ -33,7 +33,9 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _render_error(error: RelayError) -> str:
-    """`ConfigError('Bad host.')` -> JSON code/config_error, context/{}, message/Bad host."""
+    """`ConfigError('Bad host.')` ->
+    `{"code": "config_error", "context": {}, "message": "Bad host."}`.
+    """
     return json.dumps(error.to_envelope(), sort_keys=True)
 
 
@@ -142,13 +144,13 @@ def up_command(
 def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
     from .agents.discovery import discover_agents
-    from .agents.driver import AgentObservationStore, probe_installed_agents
+    from .agents.driver import probe_installed_agents
     from .agents.registry import load_registry
     from .manage import apply_migrations
     from .projects.discovery import discover_relay_root, git_root
     from .vcs.cleanliness import status_porcelain
 
-    checks: list[dict[str, object]] = []
+    checks = []
     repository = Path.cwd().resolve()
     try:
         repository = git_root()
@@ -167,7 +169,7 @@ def doctor_command(context: click.Context) -> None:
     except RelayError as error:
         checks.append({"id": "git", "ok": False, **error.to_envelope()})
 
-    observation_store: AgentObservationStore | None = None
+    observation_store = None
     try:
         apply_migrations()
         from .web.repositories import DjangoAgentStore
@@ -202,7 +204,6 @@ def doctor_command(context: click.Context) -> None:
     )
 
     registry = None
-    registry_payload: dict[str, object]
     try:
         registry = load_registry()
         registry_ready = not registry.stale
@@ -241,7 +242,7 @@ def doctor_command(context: click.Context) -> None:
         checks.append({"id": "agents", "ok": False, **error.to_envelope()})
         rows = tuple((item, None) for item in discover_agents(registry))
 
-    agents: list[dict[str, object]] = []
+    agents = []
     for discovered, result in rows:
         models = [] if result is None else [item.model_value for item in result.models]
         ready = (
@@ -255,7 +256,7 @@ def doctor_command(context: click.Context) -> None:
             if registry is not None and discovered.profile.registry_id is not None
             else None
         )
-        row: dict[str, object] = {
+        row = {
             "id": discovered.profile.agent_id,
             "installed": discovered.installed,
             "ready": ready,

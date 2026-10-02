@@ -96,11 +96,11 @@ def resume_interrupted(
     prepare_workspace: Callable[[RecoveryTarget], None],
 ) -> tuple[str, ...]:
     """Create fresh attempts for interrupted nodes after workspace recovery."""
-    targets_by_run: dict[str, list[RecoveryTarget]] = {}
+    targets_by_run = {}
     for target in store.interrupted_targets():
         targets_by_run.setdefault(target.run_id, []).append(target)
 
-    resumed: list[str] = []
+    resumed = []
     for run_id in store.interrupted_run_ids():
         # Remove reader checkouts and restore the primary writer before a
         # structural parent verifies that the shared worktree is clean.

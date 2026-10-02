@@ -34,7 +34,7 @@ def parse_scope_path(path: str) -> tuple[ScopeSegment, ...]:
     if len(parts) < 2 or parts[0] != ROOT_SCOPE:
         message = f"Scope path {path!r} must begin with 'root.'."
         raise WorkflowValidationError(message)
-    segments: list[ScopeSegment] = []
+    segments = []
     for part in parts[1:]:
         if "#" in part:
             node_id, separator, raw_iteration = part.partition("#")

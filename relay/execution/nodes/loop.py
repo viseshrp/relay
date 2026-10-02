@@ -15,13 +15,15 @@ from .base import NestedScopeRunner, expression_context, parse_node
 class LoopExecutor:
     """Run at most the declared number of iterations and select exhaustion."""
 
+    scopes: NestedScopeRunner
+
     def __init__(self, scopes: NestedScopeRunner) -> None:
-        self.scopes: NestedScopeRunner = scopes
+        self.scopes = scopes
 
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, LoopNode)
         parent = enclosing_scope(context.attempt.scope_path)
-        combined_outputs: dict[str, dict[str, object]] = {}
+        combined_outputs = {}
         first_iteration = 1
         entry_point = context.attempt.run_metadata.get("entry_point")
         prefix = f"{context.attempt.scope_path}#"

@@ -15,7 +15,7 @@ STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
 def _asset_catalog() -> dict[str, Path]:
     """Index only packaged files that remain inside the resolved static root."""
     root = STATIC_ROOT.resolve()
-    catalog: dict[str, Path] = {}
+    catalog = {}
     for candidate in root.rglob("*"):
         try:
             resolved = candidate.resolve()

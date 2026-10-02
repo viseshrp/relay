@@ -151,23 +151,7 @@ def reset_worktree(
     return resolved_target
 
 
-def cleanup_worktrees(
-    repository: Path,
-    paths: tuple[Path, ...],
-    *,
-    evidence_preserved: bool,
-) -> None:
-    """Remove deepest worktrees first only after the caller proves preservation."""
-    if not evidence_preserved:
-        message = "Relay refused worktree cleanup before evidence preservation."
-        raise WorktreeError(message, context={"project": str(repository)})
-    for path in sorted(paths, key=lambda item: len(item.parts), reverse=True):
-        if path.exists():
-            remove_worktree(repository, path)
-
-
 __all__ = [
-    "cleanup_worktrees",
     "create_primary_worktree",
     "create_reader_worktree",
     "reader_worktree_path",

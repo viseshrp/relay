@@ -113,7 +113,7 @@ def _visible_content(content: object) -> Mapping[str, object] | None:
 
 
 def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str:
-    summary: dict[str, object] = {}
+    summary = {}
     if update.kind is not None:
         summary["kind"] = update.kind
     if update.status is not None:
@@ -127,7 +127,7 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
         summary["raw_input"] = update.raw_input
     if update.raw_output is not None:
         summary["raw_output"] = update.raw_output
-    visible: list[object] = []
+    visible = []
     for item in update.content or []:
         if isinstance(item, schema.ContentToolCallContent):
             text = _visible_text(item.content)

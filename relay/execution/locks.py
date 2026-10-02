@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
 
 from .state import LockMode
 
@@ -18,12 +17,6 @@ class AdmissionDecision:
     reason: str | None = None
 
 
-class LockStore(Protocol):
-    def heartbeat_attempt_lock(self, attempt_id: str, worker_id: str) -> bool: ...
-
-    def release_attempt_lock(self, attempt_id: str) -> None: ...
-
-
 def decide_admission(writes: bool, active_modes: Iterable[str]) -> AdmissionDecision:
     """Allow many readers or exactly one exclusive writer."""
     modes = tuple(active_modes)
@@ -35,4 +28,4 @@ def decide_admission(writes: bool, active_modes: Iterable[str]) -> AdmissionDeci
     return AdmissionDecision(True, requested)
 
 
-__all__ = ["AdmissionDecision", "LockStore", "decide_admission"]
+__all__ = ["AdmissionDecision", "decide_admission"]

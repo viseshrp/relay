@@ -38,8 +38,8 @@ class RouteEntry(RouteRequirement):
 
 def effective_agent_order(*preference_lists: Sequence[str]) -> tuple[str, ...]:
     """Concatenate node, workflow, then owner preferences without duplicates."""
-    result: list[str] = []
-    seen: set[str] = set()
+    result = []
+    seen = set()
     for preferences in preference_lists:
         for agent_id in preferences:
             if agent_id not in seen:
@@ -136,20 +136,6 @@ def compile_route_requirements(
     return requirements
 
 
-def distinct_probe_requirements(
-    requirements: Iterable[RouteRequirement],
-) -> tuple[tuple[str, tuple[str, ...]], ...]:
-    """Deduplicate launch probes by exact model and candidate order."""
-    result: list[tuple[str, tuple[str, ...]]] = []
-    seen: set[tuple[str, tuple[str, ...]]] = set()
-    for requirement in requirements:
-        key = (requirement.model_value, requirement.effective_agent_order)
-        if key not in seen:
-            result.append(key)
-            seen.add(key)
-    return tuple(result)
-
-
 def serialize_route_table(entries: Iterable[RouteRequirement]) -> dict[str, dict[str, object]]:
     """Serialize routes under their unique runtime scope paths."""
     return {
@@ -166,7 +152,6 @@ __all__ = [
     "RouteEntry",
     "RouteRequirement",
     "compile_route_requirements",
-    "distinct_probe_requirements",
     "effective_agent_order",
     "serialize_route_table",
 ]

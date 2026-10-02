@@ -30,9 +30,4 @@ def require_clean(repository: Path, *, stage: str) -> None:
         )
 
 
-def is_clean(repository: Path) -> bool:
-    """Return whether the worktree has no porcelain records."""
-    return not status_porcelain(repository)
-
-
-__all__ = ["is_clean", "require_clean", "status_porcelain"]
+__all__ = ["require_clean", "status_porcelain"]

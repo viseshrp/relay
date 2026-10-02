@@ -26,14 +26,14 @@ class CompiledGraph:
 
 
 def _expression_errors(node_id: str, node: NodeDefinition) -> list[str]:
-    expressions: list[tuple[str, str]] = []
+    expressions = []
     if node.condition is not None:
         expressions.append(("if", node.condition))
     if isinstance(node, ConditionNode):
         expressions.append(("expr", node.expr))
     if isinstance(node, LoopNode) and node.until is not None:
         expressions.append(("until", node.until))
-    errors: list[str] = []
+    errors = []
     for field, expression in expressions:
         try:
             validate_expression(expression)
@@ -43,7 +43,7 @@ def _expression_errors(node_id: str, node: NodeDefinition) -> list[str]:
 
 
 def control_targets(node: NodeDefinition) -> tuple[str, ...]:
-    targets: list[str] = []
+    targets = []
     if node.on_timeout is not None:
         targets.append(node.on_timeout)
     if isinstance(node, ConditionNode):
@@ -55,13 +55,13 @@ def control_targets(node: NodeDefinition) -> tuple[str, ...]:
 
 def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root") -> CompiledGraph:
     """Validate and index a graph in O(V+E) time."""
-    errors: list[str] = []
-    downstream_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    cycle_edges: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    indegree: dict[str, int] = dict.fromkeys(nodes, 0)
-    loop_bodies: dict[str, CompiledGraph] = {}
-    incoming: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    controls: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+    errors = []
+    downstream_lists = {node_id: [] for node_id in nodes}
+    cycle_edges = {node_id: [] for node_id in nodes}
+    indegree = dict.fromkeys(nodes, 0)
+    loop_bodies = {}
+    incoming = {node_id: [] for node_id in nodes}
+    controls = {node_id: [] for node_id in nodes}
 
     for node_id, node in nodes.items():
         errors.extend(_expression_errors(f"{location}.{node_id}", node))
@@ -98,7 +98,7 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
         for child in children:
             indegree[child] += 1
     ready = deque(node_id for node_id in nodes if indegree[node_id] == 0)
-    order: list[str] = []
+    order = []
     while ready:
         node_id = ready.popleft()
         order.append(node_id)

@@ -19,6 +19,7 @@ from .base import NestedScopeRunner, expression_context, parse_node
 
 
 def _snapshot_key(reference: str) -> str:
+    """``nested/review`` -> ``nested/review.yaml``; ``review.yml`` stays unchanged."""
     path = PurePosixPath(reference)
     return path.as_posix() if path.suffix in {".yaml", ".yml"} else f"{path.as_posix()}.yaml"
 
@@ -45,8 +46,10 @@ def _input_value(value: object, context: AttemptContext) -> object:
 class SubworkflowExecutor:
     """Execute one captured child graph and expose only declared child outputs."""
 
+    scopes: NestedScopeRunner
+
     def __init__(self, scopes: NestedScopeRunner) -> None:
-        self.scopes: NestedScopeRunner = scopes
+        self.scopes = scopes
 
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, SubworkflowNode)
@@ -81,7 +84,7 @@ class SubworkflowExecutor:
                 ),
                 error_code=result.error_code,
             )
-        outputs: dict[str, object] = {}
+        outputs = {}
         for name, child_reference in node.outputs.items():
             child_id, separator, output_name = child_reference.partition(".")
             child_outputs = result.node_outputs.get(child_id)

@@ -80,7 +80,7 @@ SessionConfigOption: TypeAlias = (
 
 
 def _model_options(option: schema.SessionConfigOptionSelect) -> tuple[tuple[str, str], ...]:
-    result: list[tuple[str, str]] = []
+    result = []
     for item in option.options:
         if isinstance(item, schema.SessionConfigSelectGroup):
             result.extend((child.value, child.name) for child in item.options)
@@ -175,6 +175,15 @@ async def _read_stderr(
 class RelayAcpClient:
     """ACP callbacks backed by the exact attempt's durable control mailbox."""
 
+    context: AgentExecutionContext | None
+    profile: AgentProfile
+    event_queue: asyncio.Queue[AgentEvent] | None
+    session_id: str | None
+    expected_model: str | None
+    model_config_id: str | None
+    drift_error: RelayError | None
+    control_stop: str | None
+
     agent: acp.Agent | None
 
     def __init__(
@@ -183,15 +192,15 @@ class RelayAcpClient:
         profile: AgentProfile,
         event_queue: asyncio.Queue[AgentEvent] | None = None,
     ) -> None:
-        self.context: AgentExecutionContext | None = context
-        self.profile: AgentProfile = profile
-        self.event_queue: asyncio.Queue[AgentEvent] | None = event_queue
+        self.context = context
+        self.profile = profile
+        self.event_queue = event_queue
         self.agent = None
-        self.session_id: str | None = None
-        self.expected_model: str | None = None
-        self.model_config_id: str | None = None
-        self.drift_error: RelayError | None = None
-        self.control_stop: str | None = None
+        self.session_id = None
+        self.expected_model = None
+        self.model_config_id = None
+        self.drift_error = None
+        self.control_stop = None
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -509,15 +518,22 @@ async def _finish_stdio(
 class AcpDriver:
     """One installed ACP agent command, used for probes and fresh attempts."""
 
+    profile: AgentProfile
+    command: AgentCommand
+    result: AgentResult | None
+    connection: acp.ClientSideConnection | None
+    process: asyncio.subprocess.Process | None
+    session_id: str | None
+
     agent_version: str
 
     def __init__(self, profile: AgentProfile, command: AgentCommand) -> None:
-        self.profile: AgentProfile = profile
-        self.command: AgentCommand = command
-        self.result: AgentResult | None = None
-        self.connection: acp.ClientSideConnection | None = None
-        self.process: asyncio.subprocess.Process | None = None
-        self.session_id: str | None = None
+        self.profile = profile
+        self.command = command
+        self.result = None
+        self.connection = None
+        self.process = None
+        self.session_id = None
         self.agent_version = ""
 
     async def probe_models(
@@ -527,8 +543,8 @@ class AcpDriver:
     ) -> ProbeResult:
         """Open one disposable session and prove every requested exact value."""
         client = RelayAcpClient(None, self.profile)
-        cleanup_warning: str | None = None
-        session_id: str | None = None
+        cleanup_warning = None
+        session_id = None
         try:
             async with _connection(self.command, cwd, client) as (connection, _process):
                 initialized = await _initialize(connection, self.profile)
@@ -555,8 +571,8 @@ class AcpDriver:
                     for value, name in _model_options(selector)
                 )
                 advertised = {item.model_value for item in observations}
-                confirmed: set[str] = set()
-                failures: dict[str, ProbeFailure] = {}
+                confirmed = set()
+                failures = {}
                 for requirement in requirements:
                     if requirement.model_value not in advertised:
                         error = ModelUnavailableError(

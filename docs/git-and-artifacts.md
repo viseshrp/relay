@@ -145,9 +145,9 @@ Linux and macOS make one attempt. An unrecoverable removal reports the path and
 keeps its evidence and refs; Relay does not fall back to deleting an uncertain
 directory tree.
 
-Worktrees are removed deepest first, so reader paths precede the primary. A
-caller must explicitly prove evidence preservation before the cleanup helper
-will remove anything.
+The execution store refuses completion cleanup if any artifact record has not
+been preserved. Confirmed data cleanup removes known worktrees deepest first,
+so reader paths precede the primary.
 
 ## Privacy and storage
 

@@ -196,7 +196,7 @@ def _evaluate(node: ast.AST, context: ExpressionContext) -> object:
             message = "Expression set members must be hashable."
             raise WorkflowValidationError(message) from None
     if isinstance(node, ast.Dict):
-        result: dict[object, object] = {}
+        result = {}
         try:
             for key, value in zip(node.keys, node.values, strict=True):
                 if key is not None:
@@ -207,7 +207,7 @@ def _evaluate(node: ast.AST, context: ExpressionContext) -> object:
         return result
     if isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
-            result: object = True
+            result = True
             for value in node.values:
                 result = _evaluate(value, context)
                 if not result:

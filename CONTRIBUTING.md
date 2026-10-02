@@ -96,6 +96,10 @@ distribution contains workflow or prompt templates.
 
 Every changed Python function and method needs accurate parameter and return
 types. Every changed mutable or optional attribute needs an explicit type.
+Declare instance-attribute types at class scope. Let local variables infer
+their types unless the configured `ty` check needs an annotation. Django model
+access uses validated repository accessors; the project does not use
+`django-stubs`.
 
 ## Tests and documentation
 

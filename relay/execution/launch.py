@@ -22,7 +22,7 @@ from relay.paths import safe_resolve
 from relay.vcs.cleanliness import require_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import create_primary_worktree
-from relay.workflows.loader import LoadedWorkflow, load_workflow, resolve_workflow_path
+from relay.workflows.loader import load_workflow, resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
 from relay.workflows.scope import parse_scope_path
@@ -85,6 +85,7 @@ class LaunchStore(SchedulingStore, AgentObservationStore, Protocol):
 
 
 def _normalize_entry_point(value: str) -> str:
+    """``build`` -> ``root.build``; ``root.loop#2.check`` stays unchanged."""
     normalized = value if value.startswith("root.") else f"root.{value}"
     parse_scope_path(normalized)
     return normalized
@@ -105,7 +106,7 @@ def _subworkflow_definition(
 
 
 def _validate_entry_scope(workflow: ValidatedWorkflow, scope_path: str) -> None:
-    nodes: Mapping[str, NodeDefinition] = workflow.root.definition.nodes
+    nodes = workflow.root.definition.nodes
     segments = parse_scope_path(scope_path)
     for index, segment in enumerate(segments):
         node = nodes.get(segment.node_id)
@@ -197,7 +198,7 @@ def launch_workflow(
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
     workflows_root = relay_root / "workflows"
     workflow_path = resolve_workflow_path(workflows_root, request.workflow_key)
-    root: LoadedWorkflow = load_workflow(workflow_path)
+    root = load_workflow(workflow_path)
     workflow = validate_loaded_workflow(root, relay_root)
     typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     repository = relay_root.parent.resolve()

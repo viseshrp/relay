@@ -149,7 +149,7 @@ def _denied_targets(notice: str, worktree: Path) -> tuple[str, ...]:
 
 def _model_rows(output: str) -> tuple[tuple[str, str], ...]:
     """`gemini-pro Gemini Pro\n` becomes ((`gemini-pro`, `Gemini Pro`),)."""
-    rows: list[tuple[str, str]] = []
+    rows = []
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line or line.startswith(("Available", "MODEL", "─", "-")):
@@ -226,11 +226,16 @@ async def _drain_raw_events(
 class AntigravityDriver:
     """One installed agy command using the documented stream-json interface."""
 
+    profile: AgentProfile
+    command: AgentCommand
+    process: asyncio.subprocess.Process | None
+    result: AgentResult | None
+
     def __init__(self, profile: AgentProfile, command: AgentCommand) -> None:
-        self.profile: AgentProfile = profile
-        self.command: AgentCommand = command
-        self.process: asyncio.subprocess.Process | None = None
-        self.result: AgentResult | None = None
+        self.profile = profile
+        self.command = command
+        self.process = None
+        self.result = None
 
     async def probe_models(
         self,
@@ -317,13 +322,11 @@ class AntigravityDriver:
         if context.permission_profile not in self.profile.permission_profiles:
             message = f"Unsupported Antigravity permission profile {context.permission_profile!r}."
             raise AgentProtocolError(message, context={"agent": self.profile.agent_id})
-        queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue(
-            maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS
-        )
-        denied: set[str] = set()
-        terminal_status: str | None = None
-        requested_stop: str | None = None
-        readers: tuple[asyncio.Task[None], ...] = ()
+        queue = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
+        denied = set()
+        terminal_status = None
+        requested_stop = None
+        readers = ()
         stopper = None
         try:
             arguments = _argv(context)
@@ -371,7 +374,7 @@ class AntigravityDriver:
                     )
                 elif kind == "stdout_line" and isinstance(value, str):
                     try:
-                        raw: object = json.loads(value)
+                        raw = json.loads(value)
                     except json.JSONDecodeError:
                         message = "Antigravity emitted a malformed stream-json line."
                         raise AgentProtocolError(
