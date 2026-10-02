@@ -17,7 +17,13 @@ from relay.constants import (
     SECRET_KEY_TOKEN_BYTES,
 )
 from relay.errors import PersistenceError
-from relay.paths import application_log_path, data_dir, database_path, log_dir
+from relay.paths import (
+    application_log_path,
+    data_dir,
+    database_path,
+    log_dir,
+    prune_application_logs,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -136,6 +142,7 @@ resolved_log_path = application_log_path()
 resolved_log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 if os.environ.get("RELAY_LOG_PATH") is None:
     log_dir(create=True)
+prune_application_logs()
 LOGGING: dict[str, object] = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -153,6 +160,7 @@ LOGGING: dict[str, object] = {
             "formatter": "relay",
             "maxBytes": APPLICATION_LOG_MAX_BYTES,
             "backupCount": APPLICATION_LOG_BACKUP_COUNT,
+            "delay": True,
         }
     },
     "root": {"handlers": ["file"], "level": "INFO"},

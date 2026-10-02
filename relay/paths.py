@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import heapq
 import os
 from pathlib import Path
+import re
+import sys
 
 from platformdirs import PlatformDirs
 
-from .constants import APP_NAME
+from .constants import (
+    APP_NAME,
+    APPLICATION_LOG_RETAINED_PROCESSES,
+    WINDOWS_ERROR_INVALID_PARAMETER,
+    WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION,
+    WINDOWS_PROCESS_STILL_ACTIVE,
+)
 from .errors import PathSafetyError
 
 _DIRS: PlatformDirs = PlatformDirs(appname=APP_NAME, appauthor=False, roaming=False)
@@ -101,6 +110,97 @@ def application_log_files() -> tuple[Path, ...]:
             )
         )
     )
+
+
+def _windows_process_alive(pid: int) -> bool:
+    """Query process state without sending a Windows termination signal."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    exit_status = kernel.GetExitCodeProcess
+    exit_status.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    exit_status.restype = wintypes.BOOL
+    close_handle = kernel.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    handle = open_process(WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Access denial or an unknown query failure cannot prove the PID is dead.
+        return ctypes.get_last_error() != WINDOWS_ERROR_INVALID_PARAMETER
+    try:
+        code = wintypes.DWORD()
+        if not exit_status(handle, ctypes.byref(code)):
+            return True
+        return code.value == WINDOWS_PROCESS_STILL_ACTIVE
+    finally:
+        close_handle(handle)
+
+
+def _process_alive(pid: int) -> bool:
+    """Keep files for live or unverifiable PIDs; never terminate a process."""
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        return _windows_process_alive(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, OverflowError):
+        return True
+    return True
+
+
+def prune_application_logs() -> None:
+    """Keep recent inactive groups; `relay-42.log.1` belongs to PID 42.
+
+    The former shared `relay.log` and names such as `relay-other.log` are left
+    alone. Live or unverifiable PIDs retain all their current files.
+    """
+    base = _application_log_base()
+    pattern = re.compile(rf"{re.escape(base.stem)}-([1-9]\d*){re.escape(base.suffix)}(?:\.\d+)?")
+    groups = {}
+    for path in application_log_files():
+        match = pattern.fullmatch(path.name)
+        if match is not None:
+            groups.setdefault(int(match.group(1)), []).append(path)
+    inactive = {}
+    for pid, paths in groups.items():
+        if _process_alive(pid):
+            continue
+        try:
+            metadata = [path.stat() for path in paths]
+        except OSError:
+            continue
+        inactive[pid] = (
+            max(info.st_mtime_ns for info in metadata),
+            paths,
+            any(info.st_size for info in metadata),
+        )
+    # A fixed-size heap selects retained groups in linear time in the file count.
+    retained = set(
+        heapq.nlargest(
+            APPLICATION_LOG_RETAINED_PROCESSES,
+            (pid for pid, (_modified, _paths, nonempty) in inactive.items() if nonempty),
+            key=lambda pid: inactive[pid][0],
+        )
+    )
+    for pid, (_modified, paths, _nonempty) in inactive.items():
+        if pid in retained or _process_alive(pid):
+            continue
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                # Retention must not prevent commands from running on a locked file.
+                continue
 
 
 def shutdown_marker_path() -> Path:

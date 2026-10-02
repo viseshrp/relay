@@ -42,9 +42,15 @@ if other local accounts can access the profile.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, and `registry-cache/`.
-Snapshots are database rows. The log root contains one rotating
-`relay-{pid}.log` per supervisor, web, or consumer process, with up to three
-backups of 5 MB each. A `RELAY_LOG_PATH=/path/custom.log` override produces
+Snapshots are database rows. Each process that emits a diagnostic, including
+a CLI command, writes a rotating `relay-{pid}.log` with up to three backups
+of 5 MB each. Quiet commands create no empty log file. Logging setup removes
+empty files from stopped processes and retains the three most recent nonempty
+process log sets, including their rotations. Files for live or unverifiable
+PIDs are retained; a reused PID can therefore keep an older set until that
+process exits. The former shared `relay.log` is retained for manual cleanup.
+Windows process queries and log retention remain unverified on Windows.
+A `RELAY_LOG_PATH=/path/custom.log` override produces
 `/path/custom-{pid}.log` and its rotations. Separate files prevent concurrent
 processes from rotating the same open file. Diagnostic context such as run,
 attempt, path, and cursor appears as escaped JSON alongside the message and
