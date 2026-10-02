@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeVar
+from typing import IO, TYPE_CHECKING, Protocol, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -292,7 +292,7 @@ def validated_outputs(
     return extract_outputs(worktree, selectors), declared_output_artifacts(selectors)
 
 
-def decoded_chunks(stream: BinaryIO) -> Iterator[str]:
+def decoded_chunks(stream: IO[bytes]) -> Iterator[str]:
     """Decode every output byte in bounded chunks, escaping malformed UTF-8."""
     decoder = codecs.getincrementaldecoder("utf-8")(errors="backslashreplace")
     while data := stream.read(_OUTPUT_READ_BYTES):
@@ -304,7 +304,7 @@ def decoded_chunks(stream: BinaryIO) -> Iterator[str]:
         yield tail
 
 
-def emit_output_stream(context: AttemptContext, stream: BinaryIO, event_type: str) -> None:
+def emit_output_stream(context: AttemptContext, stream: IO[bytes], event_type: str) -> None:
     """Persist a complete command stream as bounded ordered event chunks."""
     stream.seek(0)
     for chunk in decoded_chunks(stream):

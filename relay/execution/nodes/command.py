@@ -7,7 +7,7 @@ import os
 import subprocess
 import tempfile
 import time
-from typing import BinaryIO
+from typing import IO
 
 from relay.constants import (
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
@@ -33,8 +33,8 @@ def _creation_flags() -> int:
 def _launch(
     context: AttemptContext,
     node: CommandNode,
-    stdout: BinaryIO,
-    stderr: BinaryIO,
+    stdout: IO[bytes],
+    stderr: IO[bytes],
 ) -> subprocess.Popen[bytes]:
     environment = os.environ.copy()
     environment.update(node.env)
