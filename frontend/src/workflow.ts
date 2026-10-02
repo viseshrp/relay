@@ -54,6 +54,7 @@ export function parseWorkflow(text: string): ParsedWorkflow {
 }
 
 export function canonicalYaml(text: string): string {
+  // "version: 1\nname: A\nnodes: {}" -> the same YAML with a final newline.
   const parsed = parseWorkflow(text);
   if (parsed.errors.length > 0) throw new Error(parsed.errors.join("\n"));
   return parsed.document.toString({ lineWidth: 100 });
@@ -95,6 +96,7 @@ export function flowElements(
 }
 
 export function nextNodeId(value: WorkflowValue | null): string {
+  // Existing IDs "node", "node_2" -> "node_3"; an empty map -> "node".
   const ids = new Set(Object.keys(value?.nodes ?? {}));
   if (!ids.has("node")) return "node";
   let index = 2;

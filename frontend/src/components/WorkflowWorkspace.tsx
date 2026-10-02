@@ -48,6 +48,7 @@ interface WorkflowWorkspaceProps {
 }
 
 function workflowPath(key: string, suffix = ""): string {
+  // "nested/my flow" + "/save" -> "/api/workflows/nested/my%20flow/save".
   const encoded = key
     .split("/")
     .map((part) => encodeURIComponent(part))
@@ -57,7 +58,7 @@ function workflowPath(key: string, suffix = ""): string {
 
 type LaunchInputValue = JsonScalar | undefined;
 
-function scalarDefault(type: string, value: unknown): LaunchInputValue {
+function scalarDefault(value: unknown): LaunchInputValue {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
@@ -82,6 +83,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [leaseReady, setLeaseReady] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [needsDraft, setNeedsDraft] = useState<{ nodeId: string; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -380,13 +382,17 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
               <TextField
                 size="small"
                 label="Needs (comma separated)"
-                value={(definition.needs ?? []).join(", ")}
-                onChange={(event) =>
+                value={needsDraft?.nodeId === selectedNode
+                  ? needsDraft.text : (definition.needs ?? []).join(", ")}
+                onFocus={(event) => setNeedsDraft({ nodeId: selectedNode, text: event.target.value })}
+                onChange={(event) => setNeedsDraft({ nodeId: selectedNode, text: event.target.value })}
+                onBlur={(event) => {
+                  // "build, test, " -> ["build", "test"], only after editing ends.
                   setNodeField(
-                    "needs",
-                    event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                  )
-                }
+                    "needs", event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                  );
+                  setNeedsDraft(null);
+                }}
               />
               {(definition.type === "agent" || definition.type === "command") && (
                 <FormControlLabel
@@ -476,7 +482,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
             {Object.entries(inputDefinitions).map(([name, input]) => {
               const supplied = launchInputs[name];
               const value = supplied === undefined
-                ? scalarDefault(input.type, input.default)
+                ? scalarDefault(input.default)
                 : supplied;
               if (input.type === "boolean") {
                 return (

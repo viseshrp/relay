@@ -22,7 +22,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { type UIEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import type {
@@ -84,9 +84,10 @@ const EVENT_TYPES = [
   "artifact.preserved",
 ] as const;
 
-const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled", "interrupted"]);
+const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled"]);
 const OUTPUT_ROW_HEIGHT = 86;
 const OUTPUT_VIEW_HEIGHT = 430;
+const VIRTUAL_ROW_OVERSCAN = 3;
 
 interface RunWorkspaceProps {
   selectedRun: string | null;
@@ -107,9 +108,22 @@ interface ArtifactPage {
 }
 
 function mergeEvents(current: RunEvent[], incoming: RunEvent[]): RunEvent[] {
-  const events = new Map(current.map((event) => [event.id, event]));
-  for (const event of incoming) events.set(event.id, event);
-  return Array.from(events.values()).sort((left, right) => left.id - right.id);
+  // Both the API and SSE emit ordered IDs. Most live batches append directly;
+  // overlapping pages merge once in linear time, preferring the incoming row.
+  if (current.length === 0) return incoming;
+  if (incoming.length === 0) return current;
+  if (incoming[0].id > current[current.length - 1].id) return current.concat(incoming);
+  const merged: RunEvent[] = [];
+  let left = 0;
+  let right = 0;
+  while (left < current.length && right < incoming.length) {
+    if (current[left].id < incoming[right].id) merged.push(current[left++]);
+    else {
+      if (current[left].id === incoming[right].id) left += 1;
+      merged.push(incoming[right++]);
+    }
+  }
+  return merged.concat(current.slice(left), incoming.slice(right));
 }
 
 function mergeRecords<T extends { id: string }>(current: T[], incoming: T[]): T[] {
@@ -158,6 +172,7 @@ function runGraph(run: RunDetail | null): { nodes: Node<WorkflowNodeData>[]; edg
 }
 
 function outputText(event: RunEvent): string | null {
+  // {text: "Done."} -> "Done."; {plan: ["build"]} -> indented JSON.
   const keys = ["text", "chunk", "summary", "plan", "content", "event"];
   for (const key of keys) {
     const value = event.payload[key];
@@ -169,17 +184,18 @@ function outputText(event: RunEvent): string | null {
     : null;
 }
 
-function VirtualOutput({ events }: { events: RunEvent[] }) {
+function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | "history" }) {
   const rows = useMemo(
     () => events.flatMap((event) => {
-      const text = outputText(event);
+      const text = mode === "output" ? outputText(event) : JSON.stringify(event.payload, null, 2);
       return text === null ? [] : [{ event, text }];
     }),
-    [events],
+    [events, mode],
   );
   const [scrollTop, setScrollTop] = useState(0);
-  const start = Math.max(0, Math.floor(scrollTop / OUTPUT_ROW_HEIGHT) - 3);
-  const visibleCount = Math.ceil(OUTPUT_VIEW_HEIGHT / OUTPUT_ROW_HEIGHT) + 6;
+  const [expanded, setExpanded] = useState<{ event: RunEvent; text: string } | null>(null);
+  const start = Math.max(0, Math.floor(scrollTop / OUTPUT_ROW_HEIGHT) - VIRTUAL_ROW_OVERSCAN);
+  const visibleCount = Math.ceil(OUTPUT_VIEW_HEIGHT / OUTPUT_ROW_HEIGHT) + VIRTUAL_ROW_OVERSCAN * 2;
   const visible = rows.slice(start, start + visibleCount);
 
   function updateScroll(event: UIEvent<HTMLDivElement>) {
@@ -187,34 +203,51 @@ function VirtualOutput({ events }: { events: RunEvent[] }) {
   }
 
   return (
-    <Box className="output-viewport" onScroll={updateScroll}>
-      <Box sx={{ position: "relative", height: Math.max(rows.length * OUTPUT_ROW_HEIGHT, 1) }}>
-        {visible.map(({ event, text }, offset) => (
-          <Box
-            className="output-row"
-            key={event.id}
-            style={{ top: (start + offset) * OUTPUT_ROW_HEIGHT, height: OUTPUT_ROW_HEIGHT }}
-          >
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-              <Chip size="small" label={event.type} />
-              <Typography variant="caption" color="text.secondary">
-                #{event.id} · {new Date(event.ts).toLocaleTimeString()}
+    <>
+      <Box className={mode === "output" ? "output-viewport" : "event-list"} onScroll={updateScroll}>
+        <Box sx={{ position: "relative", height: Math.max(rows.length * OUTPUT_ROW_HEIGHT, 1) }}>
+          {visible.map(({ event, text }, offset) => (
+            <Box
+              className={mode === "output" ? "output-row" : "event-row"}
+              key={event.id}
+              style={{ top: (start + offset) * OUTPUT_ROW_HEIGHT, height: OUTPUT_ROW_HEIGHT }}
+            >
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <Chip size="small" label={event.type} />
+                <Typography variant="caption" color="text.secondary">
+                  #{event.id} · {new Date(event.ts).toLocaleTimeString()}
+                </Typography>
+                <Button size="small" color="inherit" onClick={() => setExpanded({ event, text })}>
+                  View full text
+                </Button>
+              </Stack>
+              <Typography component="pre" variant="body2" className="output-text">
+                {text}
               </Typography>
-            </Stack>
-            <Typography component="pre" variant="body2" className="output-text">
-              {text}
-            </Typography>
-          </Box>
-        ))}
+            </Box>
+          ))}
+        </Box>
+        {rows.length === 0 && (
+          <Typography color="text.secondary" sx={{ p: 2 }}>
+            {mode === "output" ? "No provider or command output yet." : "No events yet."}
+          </Typography>
+        )}
       </Box>
-      {rows.length === 0 && (
-        <Typography color="text.secondary" sx={{ p: 2 }}>No provider or command output yet.</Typography>
-      )}
-    </Box>
+      <Dialog open={expanded !== null} onClose={() => setExpanded(null)} fullWidth maxWidth="lg">
+        <DialogTitle>{expanded?.event.type} #{expanded?.event.id}</DialogTitle>
+        <DialogContent>
+          <Typography component="pre" variant="body2" className="full-output-text">
+            {expanded?.text}
+          </Typography>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setExpanded(null)}>Close</Button></DialogActions>
+      </Dialog>
+    </>
   );
 }
 
 function optionValue(value: JsonValue): string | null {
+  // "allow" and {id: "allow", name: "Allow"} -> "allow"; a number -> null.
   if (typeof value === "string") return value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   for (const key of ["id", "value", "optionId"]) {
@@ -332,6 +365,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   const [error, setError] = useState<string | null>(null);
   const [cleanupScope, setCleanupScope] = useState("all");
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [streamRun, setStreamRun] = useState<string | null>(null);
+  const [streamEpoch, setStreamEpoch] = useState(0);
+  const currentRun = useRef<string | null>(null);
+  const eventAfter = useRef(0);
+  const previousRunStatus = useRef<string | null>(null);
 
   const loadHistory = useCallback(async (cursor?: string) => {
     const query = new URLSearchParams({ limit: "50" });
@@ -354,6 +392,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     const response = await api<RunDetailPage>(
       `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
     );
+    if (currentRun.current !== selectedRun) return response.run;
     setDetail((current) => {
       const sameRun = current?.id === response.run.id;
       const currentNodes = sameRun ? current.nodes : [];
@@ -386,6 +425,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     const response = await api<ArtifactPage>(
       `/api/runs/${encodeURIComponent(selectedRun)}/artifacts?${query.toString()}`,
     );
+    if (currentRun.current !== selectedRun) return;
     setArtifacts((current) => (
       mode === "replace" ? response.artifacts : mergeRecords(current, response.artifacts)
     ));
@@ -408,6 +448,8 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     const response = await api<{ events: RunEvent[]; next: number | null }>(
       `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=100`,
     );
+    if (currentRun.current !== selectedRun) return;
+    eventAfter.current = Math.max(eventAfter.current, response.events.at(-1)?.id ?? 0);
     setEvents((current) => (since === 0 ? response.events : mergeEvents(current, response.events)));
     setEventCursor(response.next);
   }, [selectedRun]);
@@ -417,6 +459,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   }, [loadHistory]);
 
   useEffect(() => {
+    let disposed = false;
+    currentRun.current = selectedRun;
+    eventAfter.current = 0;
+    previousRunStatus.current = null;
+    setStreamRun(null);
     setDetail(null);
     setNodeCursor(null);
     setInteractionCursor(null);
@@ -425,44 +472,77 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     setArtifactCursor(null);
     setEventCursor(null);
     if (selectedRun === null) return;
-    void Promise.all([refreshDetail(true), loadEvents()]).catch((caught: unknown) =>
-      setError(errorMessage(caught)),
-    );
+    void Promise.all([refreshDetail(true), loadEvents()])
+      .then(() => { if (!disposed) setStreamRun(selectedRun); })
+      .catch((caught: unknown) => { if (!disposed) setError(errorMessage(caught)); });
+    return () => { disposed = true; };
+  }, [loadEvents, refreshDetail, selectedRun]);
 
-    const source = new EventSource(`/api/runs/${encodeURIComponent(selectedRun)}/stream`);
+  useEffect(() => {
+    if (detail === null || detail.id !== selectedRun) return;
+    const previous = previousRunStatus.current;
+    previousRunStatus.current = detail.status;
+    if (
+      previous !== null && TERMINAL_RUNS.has(previous)
+      && !TERMINAL_RUNS.has(detail.status) && streamState === "complete"
+    ) setStreamEpoch((value) => value + 1);
+  }, [detail, selectedRun, streamState]);
+
+  useEffect(() => {
+    if (selectedRun === null || streamRun !== selectedRun) return;
+    const source = new EventSource(
+      `/api/runs/${encodeURIComponent(selectedRun)}/stream?since=${eventAfter.current}`,
+    );
+    let incoming: RunEvent[] = [];
+    let frame: number | null = null;
+    const flush = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+      const batch = incoming;
+      incoming = [];
+      if (batch.length === 0) return;
+      setEvents((current) => mergeEvents(current, batch));
+      setDetail((current) => batch.reduce(applyStateEvent, current));
+      if (batch.some((item) => item.type === "node.created")) {
+        void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
+          setError(errorMessage(caught)),
+        );
+      }
+      if (batch.some((item) => item.type === "attempt.ended"
+        || item.type.endsWith(".requested") || item.type.endsWith(".answered"))) {
+        void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
+          setError(errorMessage(caught)),
+        );
+      }
+      if (batch.some((item) => item.type === "artifact.preserved")) {
+        void loadArtifacts(0, "refresh").catch((caught: unknown) =>
+          setError(errorMessage(caught)),
+        );
+      }
+    };
     setStreamState("connecting");
     source.onopen = () => setStreamState("live");
     const receive = (event: Event) => {
       if (!(event instanceof MessageEvent)) {
-        setStreamState("reconnecting");
+        if (TERMINAL_RUNS.has(previousRunStatus.current ?? "")) {
+          flush();
+          source.close();
+          setStreamState("complete");
+        } else setStreamState("reconnecting");
         return;
       }
       try {
         const item = JSON.parse(event.data) as RunEvent;
         if (item.version !== 1) return;
-        setEvents((current) => mergeEvents(current, [item]));
-        setDetail((current) => applyStateEvent(current, item));
-        if (item.type === "node.created") {
-          void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
-            setError(errorMessage(caught)),
-          );
-        }
-        if (
-          item.type === "attempt.ended"
-          || item.type.endsWith(".requested")
-          || item.type.endsWith(".answered")
-        ) {
-          void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
-            setError(errorMessage(caught)),
-          );
-        }
-        if (item.type === "artifact.preserved") {
-          void loadArtifacts(0, "refresh").catch((caught: unknown) =>
-            setError(errorMessage(caught)),
-          );
-        }
+        eventAfter.current = Math.max(eventAfter.current, item.id);
+        if (incoming.at(-1)?.id === item.id) incoming[incoming.length - 1] = item;
+        else incoming.push(item);
+        // Publish one ordered batch per paint instead of copying/sorting the
+        // growing history for each replayed event.
+        if (frame === null) frame = requestAnimationFrame(flush);
         const status = item.payload.status;
-        if (typeof status === "string" && TERMINAL_RUNS.has(status)) {
+        if (item.type.startsWith("run.") && typeof status === "string" && TERMINAL_RUNS.has(status)) {
+          flush();
           source.close();
           setStreamState("complete");
         }
@@ -472,8 +552,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     };
     for (const type of EVENT_TYPES) source.addEventListener(type, receive);
     source.addEventListener("error", receive);
-    return () => source.close();
-  }, [loadArtifacts, loadDetailCollection, loadEvents, refreshDetail, selectedRun]);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      source.close();
+    };
+  }, [loadArtifacts, loadDetailCollection, selectedRun, streamEpoch, streamRun]);
 
   async function cancelRun() {
     if (selectedRun === null) return;
@@ -495,6 +578,8 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
         method: "POST",
         body: JSON.stringify({ scope_path: scopePath, idempotency_key: crypto.randomUUID() }),
       });
+      previousRunStatus.current = null;
+      setStreamEpoch((value) => value + 1);
       await refreshDetail();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -642,7 +727,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
 
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1.5 }}>Provider and command output</Typography>
-                <VirtualOutput events={events} />
+                <VirtualEvents key={`output-${detail.id}`} events={events} mode="output" />
               </Paper>
 
               <Paper variant="outlined" className="section-card">
@@ -652,17 +737,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                     <Button onClick={() => void loadEvents(eventCursor)}>Load next page</Button>
                   )}
                 </Stack>
-                <Box className="event-list">
-                  {events.map((event) => (
-                    <Box key={event.id} className="event-row">
-                      <Typography variant="caption" color="text.secondary">#{event.id}</Typography>
-                      <Chip size="small" label={event.type} />
-                      <Typography component="code" variant="body2" className="event-payload">
-                        {JSON.stringify(event.payload)}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Box>
+                <VirtualEvents key={`history-${detail.id}`} events={events} mode="history" />
               </Paper>
 
               <Paper variant="outlined" className="section-card">

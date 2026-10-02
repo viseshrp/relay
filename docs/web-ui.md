@@ -47,6 +47,9 @@ Later sessions use the same local credentials. Session cookies are HTTP-only,
 same-site strict, and expire when the browser closes. Browser actions use a
 same-site CSRF cookie and header. Relay does not issue bearer tokens.
 
+If the first authentication request fails, Relay shows the error and a Retry
+button. A failed sign-out request also shows its error and can be retried.
+
 ## Author workflows
 
 The Author tab opens `workflow.yaml` by default. Enter another key to load a
@@ -58,8 +61,9 @@ a canvas node rewrites that same document instead of maintaining a second graph
 model.
 
 The node panel covers all six node types and their shared dependencies. A
-dependency field transforms `build, test` into the YAML sequence
-`needs: [build, test]`. A command argument field transforms the JSON string
+dependency field retains raw text while focused, including a trailing comma.
+On blur, `"build, test, "` becomes the YAML sequence `needs: [build, test]`.
+A command argument field transforms the JSON string
 `["python", "-m", "pytest"]` into the equivalent YAML `run` sequence. Invalid
 JSON stays in the field and is not applied to the document.
 
@@ -115,8 +119,10 @@ shows each materialized scope path with its durable status. Nested loop and
 subworkflow instances therefore appear separately. The monitor combines the
 SSE stream with paginated database reads:
 
-- provider and command output uses a fixed-row virtualized viewport;
-- event history loads forward by the last durable event ID;
+- provider output and event history use virtualized preview rows with a
+  View full text action that opens the complete retained payload;
+- event history loads forward by the last durable event ID, then starts its
+  live stream after the last loaded event;
 - node, interaction, and artifact lists load bounded pages by record ID;
 - pending permission, elicitation, and human-wait records show response forms;
 - failed nodes expose a manual rerun action;
@@ -129,6 +135,11 @@ evidence and creates a new attempt. A nested failed node also reopens its failed
 loop or subworkflow parents, while successful siblings remain complete. An
 interrupted run resumes automatically when `relay up` restarts, also as a new
 attempt. The UI never resumes an old provider session.
+Node completion leaves the live stream open. Only a run-level `succeeded`,
+`failed`, or `canceled` event closes it. Interrupted runs keep their stream
+open, and an accepted rerun reopens a completed stream without changing the
+selected run. Events arriving in one browser frame update history together;
+ordered pages merge without sorting the entire history for each event.
 
 ## History, artifacts, and cleanup
 

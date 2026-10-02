@@ -25,13 +25,14 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect }: FlowCanvasPro
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
   useEffect(() => {
-    setNodes((current) =>
-      nodes.map((node) => ({
+    setNodes((current) => {
+      const positions = new Map(current.map((node) => [node.id, node.position]));
+      return nodes.map((node) => ({
         ...node,
-        position: current.find((item) => item.id === node.id)?.position ?? node.position,
+        position: positions.get(node.id) ?? node.position,
         selected: node.id === selectedId,
-      })),
-    );
+      }));
+    });
   }, [nodes, selectedId, setNodes]);
 
   useEffect(() => setEdges(edges), [edges, setEdges]);

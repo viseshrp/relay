@@ -123,13 +123,15 @@ body {
   overflow: auto;
 }
 
-.output-row {
+.output-row,
+.event-row {
   border-bottom: 1px solid #263244;
   left: 0;
   overflow: hidden;
   padding: 10px 14px;
   position: absolute;
   right: 0;
+  box-sizing: border-box;
 }
 
 .output-text {
@@ -137,6 +139,7 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   margin: 6px 0 0;
   overflow: hidden;
+  max-height: 40px;
   text-overflow: ellipsis;
   white-space: pre-wrap;
 }
@@ -144,24 +147,24 @@ body {
 .event-list {
   border: 1px solid #e2e6ef;
   border-radius: 8px;
-  max-height: 420px;
+  height: 430px;
   overflow: auto;
 }
 
 .event-row {
-  align-items: center;
   border-bottom: 1px solid #eef0f5;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 58px 190px minmax(0, 1fr);
-  padding: 8px 10px;
 }
 
 .event-row:last-child {
   border-bottom: 0;
 }
 
-.event-payload,
+.full-output-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
 .mono-wrap {
   overflow-wrap: anywhere;
 }

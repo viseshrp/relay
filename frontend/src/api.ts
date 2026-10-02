@@ -13,6 +13,7 @@ export class RelayApiError extends Error {
 }
 
 function csrfToken(): string {
+  // "other=1; relay_csrftoken=a%2Fb" -> "a/b"; a missing cookie -> "".
   const prefix = "relay_csrftoken=";
   const cookie = document.cookie
     .split(";")
