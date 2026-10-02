@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from relay.errors import RelayError
 from relay.execution.runner import AttemptContext
 from relay.workflows.schema import AgentNode
 
@@ -76,15 +77,31 @@ class ProbeRequirement:
 
 
 @dataclass(frozen=True, slots=True)
+class ProbeFailure:
+    """Keep machine-readable error identity separate from presentation."""
+
+    code: str
+    message: str
+
+    @classmethod
+    def from_error(cls, error: RelayError) -> ProbeFailure:
+        return cls(error.error_code, error.message)
+
+    def __str__(self) -> str:
+        """Render (`agent_auth_error`, `Sign in.`) as `agent_auth_error: Sign in.`."""
+        return f"{self.code}: {self.message}"
+
+
+@dataclass(frozen=True, slots=True)
 class ProbeResult:
     """Fresh capability evidence and bounded cleanup status for one agent."""
 
     agent_id: str
     models: tuple[ModelObservation, ...] = ()
     confirmed_values: frozenset[str] = field(default_factory=frozenset)
-    failures: Mapping[str, str] = field(default_factory=dict)
+    failures: Mapping[str, ProbeFailure] = field(default_factory=dict)
     cleanup_warning: str | None = None
-    general_error: str | None = None
+    general_error: ProbeFailure | None = None
 
 
 @dataclass(frozen=True, slots=True)

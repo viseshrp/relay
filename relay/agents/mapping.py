@@ -10,7 +10,6 @@ from relay.errors import (
     AgentAuthError,
     AgentLaunchError,
     AgentProtocolError,
-    ModelSelectionRejectedError,
     RelayError,
 )
 
@@ -22,22 +21,16 @@ def map_agent_exception(error: BaseException, *, agent_id: str) -> RelayError:
     LOGGER.exception("Agent adapter failure", exc_info=error, extra={"agent_id": agent_id})
     if isinstance(error, RelayError):
         return error
-    text = str(error).lower()
     context = {"agent": agent_id}
-    if "auth" in text or "credential" in text or "login" in text:
+    if isinstance(error, RequestError) and error.code == RequestError.auth_required().code:
         return AgentAuthError(
             f"Agent {agent_id!r} requires authentication.",
             context=context,
             next_action="Authenticate with the agent directly, then retry the probe.",
         )
-    if isinstance(error, (FileNotFoundError, OSError)):
+    if isinstance(error, OSError) and not isinstance(error, (ConnectionError, BrokenPipeError)):
         return AgentLaunchError(
             f"Relay could not start agent {agent_id!r}.",
-            context=context,
-        )
-    if isinstance(error, RequestError) and "config" in text:
-        return ModelSelectionRejectedError(
-            f"Agent {agent_id!r} rejected the exact model selection.",
             context=context,
         )
     return AgentProtocolError(

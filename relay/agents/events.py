@@ -8,9 +8,11 @@ import json
 
 from acp import schema
 
+from relay.constants import EVENT_MAX_PAYLOAD_BYTES
 from relay.execution.state import EventSensitivity
 
-_SAFE_CHUNK_BYTES = 32_768
+# Reserve half of the persistence limit for scope/attempt metadata and SSE framing.
+_SAFE_CHUNK_BYTES = EVENT_MAX_PAYLOAD_BYTES // 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,16 +24,25 @@ class AgentEvent:
     sensitivity: EventSensitivity = EventSensitivity.NORMAL
 
 
-def _utf8_chunks(value: str) -> tuple[str, ...]:
-    encoded = value.encode("utf-8")
-    chunks: list[str] = []
+def _json_chunks(value: str, budget: int) -> tuple[str, ...]:
+    """`a\"é` with a 3-byte JSON-content budget becomes (`a\"`, `é`)."""
+    chunks = []
     start = 0
-    while start < len(encoded):
-        end = min(len(encoded), start + _SAFE_CHUNK_BYTES)
-        while end < len(encoded) and (encoded[end] & 0xC0) == 0x80:
-            end -= 1
-        chunks.append(encoded[start:end].decode("utf-8"))
-        start = end
+    size = 0
+    for index, character in enumerate(value):
+        if character in ('"', "\\", "\b", "\f", "\n", "\r", "\t"):
+            width = 2
+        elif ord(character) < 32:
+            width = 6  # Other JSON control characters use a six-byte \u00xx escape.
+        else:
+            width = len(character.encode("utf-8"))
+        if size + width > budget:
+            chunks.append(value[start:index])
+            start = index
+            size = 0
+        size += width
+    if start < len(value):
+        chunks.append(value[start:])
     return tuple(chunks) or ("",)
 
 
@@ -43,7 +54,16 @@ def bounded_agent_events(event: AgentEvent) -> tuple[AgentEvent, ...]:
     for key in ("text", "summary", "chunk"):
         value = event.payload.get(key)
         if isinstance(value, str):
-            chunks = _utf8_chunks(value)
+            # Number fields can never need more digits than the character count.
+            template = {**event.payload, key: "", "part": len(value), "parts": len(value)}
+            overhead = len(
+                json.dumps(template, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            )
+            budget = _SAFE_CHUNK_BYTES - overhead
+            if budget < 6:
+                # Oversized metadata must also be retained, through serialized parts.
+                break
+            chunks = _json_chunks(value, budget)
             return tuple(
                 AgentEvent(
                     event.event_type,
@@ -53,7 +73,9 @@ def bounded_agent_events(event: AgentEvent) -> tuple[AgentEvent, ...]:
                 for index, chunk in enumerate(chunks, start=1)
             )
     serialized = json.dumps(event.payload, separators=(",", ":"), ensure_ascii=False)
-    chunks = _utf8_chunks(serialized)
+    template = {"chunk": "", "part": len(serialized), "parts": len(serialized)}
+    overhead = len(json.dumps(template, separators=(",", ":")).encode("utf-8"))
+    chunks = _json_chunks(serialized, _SAFE_CHUNK_BYTES - overhead)
     return tuple(
         AgentEvent(
             event.event_type,

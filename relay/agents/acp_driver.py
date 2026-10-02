@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 import json
 import logging
-import os
 from pathlib import Path
-import signal
-import subprocess
 import time
 from typing import TypeAlias
 
@@ -24,6 +22,8 @@ from relay.constants import (
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CANCELLATION_GRACE_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
+    PROCESS_EXIT_GRACE_SECONDS,
+    PROCESS_STREAM_CHUNK_BYTES,
 )
 from relay.errors import (
     AgentAuthError,
@@ -34,6 +34,11 @@ from relay.errors import (
     PermissionFlowError,
     PersistenceError,
     RelayError,
+)
+from relay.execution.cancellation import (
+    discard_process_stream,
+    spawn_process,
+    terminate_async_process_tree,
 )
 from relay.execution.control import ClaimedControl, cancel_stop_reason
 from relay.execution.state import ControlKind, InteractionKind
@@ -46,13 +51,13 @@ from .models import (
     AgentProfile,
     AgentResult,
     ModelObservation,
+    ProbeFailure,
     ProbeRequirement,
     ProbeResult,
 )
 
 LOGGER = logging.getLogger(__name__)
 _AUTH_REQUIRED_CODE = RequestError.auth_required().code
-_PROCESS_EXIT_GRACE_SECONDS = 2.0
 
 SessionUpdate: TypeAlias = (
     schema.UserMessageChunk
@@ -131,6 +136,7 @@ def _capabilities(profile: AgentProfile) -> schema.ClientCapabilities:
 
 
 def _prompt_blocks(context: AgentExecutionContext) -> list[schema.TextContentBlock]:
+    """Keep `Review.\n` intact; `{'target': 'api'}` gets its own JSON block."""
     blocks = [
         schema.TextContentBlock(type="text", text=value)
         for value in context.attempt.attempt.prompt_contents
@@ -150,47 +156,20 @@ def _prompt_blocks(context: AgentExecutionContext) -> list[schema.TextContentBlo
     return blocks
 
 
-async def _terminate_process(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
+async def _read_stderr(
+    process: asyncio.subprocess.Process, queue: asyncio.Queue[AgentEvent] | None
+) -> None:
+    """Drain from spawn onward; attempts retain bytes and probes discard them."""
+    if process.stderr is None:
         return
-    if os.name != "nt":
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGTERM)
-    else:
-        with suppress(ProcessLookupError):
-            process.terminate()
-    try:
-        await asyncio.wait_for(process.wait(), timeout=CANCELLATION_GRACE_SECONDS)
-    except TimeoutError:
-        if os.name != "nt":
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-        else:
-            with suppress(ProcessLookupError):
-                process.kill()
-        await process.wait()
-
-
-async def _spawn(command: AgentCommand, cwd: Path) -> asyncio.subprocess.Process:
-    if os.name == "nt":
-        return await asyncio.create_subprocess_exec(
-            *command.argv(),
-            cwd=str(cwd),
-            env=os.environ.copy(),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        )
-    return await asyncio.create_subprocess_exec(
-        *command.argv(),
-        cwd=str(cwd),
-        env=os.environ.copy(),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="backslashreplace")
+    while chunk := await process.stderr.read(PROCESS_STREAM_CHUNK_BYTES):
+        text = decoder.decode(chunk)
+        if queue is not None and text:
+            await queue.put(AgentEvent("agent.stderr", {"text": text}))
+    tail = decoder.decode(b"", final=True)
+    if queue is not None and tail:
+        await queue.put(AgentEvent("agent.stderr", {"text": tail}))
 
 
 class RelayAcpClient:
@@ -426,26 +405,45 @@ async def _connection(
     cwd: Path,
     client: RelayAcpClient,
 ) -> AsyncIterator[tuple[acp.ClientSideConnection, asyncio.subprocess.Process]]:
-    process = await _spawn(command, cwd)
+    process = await spawn_process(command.argv(), cwd)
+    stderr_task = asyncio.create_task(_read_stderr(process, client.event_queue))
     if process.stdin is None or process.stdout is None:
-        await _terminate_process(process)
+        await terminate_async_process_tree(process)
+        await stderr_task
         message = "The ACP process did not expose both protocol streams."
         raise AgentProtocolError(message, context={"agent": client.profile.agent_id})
-    # Session cleanup capabilities in SDK 0.12.1 remain behind its negotiated
-    # unstable router even though the wire protocol version stays at 1.
+    # SDK 0.12.1 gates incoming elicitation/create on this flag. Outgoing
+    # close_session does not depend on it; the wire protocol version stays 1.
     connection = acp.connect_to_agent(
         client, process.stdin, process.stdout, use_unstable_protocol=True
     )
+    canceled = False
     try:
         yield connection, process
+    except asyncio.CancelledError:
+        canceled = True
+        raise
     finally:
+        if canceled:
+            # A closed event consumer cannot service queue backpressure. Drain
+            # directly while stopping the process so cleanup still reaches EOF.
+            stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
+            stderr_task = asyncio.create_task(_read_stderr(process, None))
         with suppress(Exception):
             await connection.close()
         if process.stdin is not None:
             process.stdin.close()
             with suppress(Exception):
                 await process.stdin.wait_closed()
-        await _terminate_process(process)
+        stdout_task = asyncio.create_task(discard_process_stream(process.stdout))
+        try:
+            await terminate_async_process_tree(process)
+        finally:
+            for reader in (stderr_task, stdout_task):
+                if process.returncode is None:
+                    reader.cancel()
+            await asyncio.gather(stderr_task, stdout_task, return_exceptions=True)
 
 
 async def _initialize(
@@ -496,27 +494,22 @@ async def _finish_stdio(
         process.stdin.close()
         with suppress(Exception):
             await process.stdin.wait_closed()
+    stdout_task = asyncio.create_task(discard_process_stream(process.stdout))
     try:
-        await asyncio.wait_for(process.wait(), timeout=_PROCESS_EXIT_GRACE_SECONDS)
-    except TimeoutError:
-        await _terminate_process(process)
-
-
-async def _drain_agent_events(
-    queue: asyncio.Queue[AgentEvent],
-    reader: asyncio.Task[None],
-) -> AsyncIterator[AgentEvent]:
-    """Drain a bounded provider queue while its stderr reader reaches EOF."""
-    while not reader.done() or not queue.empty():
         try:
-            yield await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
+            await asyncio.wait_for(process.wait(), timeout=PROCESS_EXIT_GRACE_SECONDS)
         except TimeoutError:
-            continue
-    await reader
+            await terminate_async_process_tree(process)
+    finally:
+        if process.returncode is None:
+            stdout_task.cancel()
+        await asyncio.gather(stdout_task, return_exceptions=True)
 
 
 class AcpDriver:
     """One installed ACP agent command, used for probes and fresh attempts."""
+
+    agent_version: str
 
     def __init__(self, profile: AgentProfile, command: AgentCommand) -> None:
         self.profile: AgentProfile = profile
@@ -525,6 +518,7 @@ class AcpDriver:
         self.connection: acp.ClientSideConnection | None = None
         self.process: asyncio.subprocess.Process | None = None
         self.session_id: str | None = None
+        self.agent_version = ""
 
     async def probe_models(
         self,
@@ -562,7 +556,7 @@ class AcpDriver:
                 )
                 advertised = {item.model_value for item in observations}
                 confirmed: set[str] = set()
-                failures: dict[str, str] = {}
+                failures: dict[str, ProbeFailure] = {}
                 for requirement in requirements:
                     if requirement.model_value not in advertised:
                         error = ModelUnavailableError(
@@ -570,7 +564,7 @@ class AcpDriver:
                             f"{self.profile.agent_id!r}.",
                             context={"agent": self.profile.agent_id},
                         )
-                        failures[requirement.model_value] = f"{error.error_code}: {error.message}"
+                        failures[requirement.model_value] = ProbeFailure.from_error(error)
                         continue
                     try:
                         selected = await connection.set_config_option(
@@ -582,7 +576,7 @@ class AcpDriver:
                             f"{requirement.model_value!r}.",
                             context={"agent": self.profile.agent_id},
                         )
-                        failures[requirement.model_value] = f"{error.error_code}: {error.message}"
+                        failures[requirement.model_value] = ProbeFailure.from_error(error)
                         continue
                     if (
                         selected is None
@@ -594,7 +588,7 @@ class AcpDriver:
                             f"{requirement.model_value!r}.",
                             context={"agent": self.profile.agent_id},
                         )
-                        failures[requirement.model_value] = f"{error.error_code}: {error.message}"
+                        failures[requirement.model_value] = ProbeFailure.from_error(error)
                     else:
                         confirmed.add(requirement.model_value)
                 agent_capabilities = initialized.agent_capabilities
@@ -627,7 +621,7 @@ class AcpDriver:
         except Exception as error:
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             failures = {
-                requirement.model_value: f"{mapped.error_code}: {mapped.message}"
+                requirement.model_value: ProbeFailure.from_error(mapped)
                 for requirement in requirements
             }
             return ProbeResult(
@@ -638,233 +632,176 @@ class AcpDriver:
                     if session_id is not None
                     else None
                 ),
-                general_error=f"{mapped.error_code}: {mapped.message}",
+                general_error=ProbeFailure.from_error(mapped),
             )
 
-    async def start_attempt(
-        self,
-        context: AgentExecutionContext,
-    ) -> AsyncIterator[AgentEvent]:
-        """Run one fresh session while yielding normalized updates as they arrive."""
-        queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
-        client = RelayAcpClient(context, self.profile, queue)
-        agent_version = ""
-        stderr_task: asyncio.Task[None] | None = None
-        try:
-            async with _connection(self.command, context.cwd, client) as (connection, process):
-                self.connection = connection
-                self.process = process
-                initialized = await _initialize(connection, self.profile)
-                new_session = await _new_session(
-                    connection,
-                    initialized,
-                    context.cwd,
-                    allow_authentication=True,
-                )
-                self.session_id = new_session.session_id
-                client.session_id = self.session_id
-                selector = _model_selector(new_session.config_options or [], self.profile)
-                client.model_config_id = selector.id
-                client.expected_model = context.model_value
-                if context.model_value not in {value for value, _name in _model_options(selector)}:
-                    message = f"Exact model {context.model_value!r} is no longer advertised."
-                    raise ModelUnavailableError(  # noqa: TRY301
-                        message, context={"agent": self.profile.agent_id}
-                    )
+    async def _perform_attempt(
+        self, context: AgentExecutionContext, client: RelayAcpClient
+    ) -> AgentResult:
+        # Run the entire stdio lifecycle concurrently with the event consumer,
+        # including initialization and cleanup, so stderr backpressure is serviced.
+        async with _connection(self.command, context.cwd, client) as (connection, process):
+            self.connection = connection
+            self.process = process
+            initialized = await _initialize(connection, self.profile)
+            new_session = await _new_session(
+                connection, initialized, context.cwd, allow_authentication=True
+            )
+            self.session_id = new_session.session_id
+            client.session_id = self.session_id
+            selector = _model_selector(new_session.config_options or [], self.profile)
+            client.model_config_id = selector.id
+            client.expected_model = context.model_value
+            if context.model_value not in {value for value, _name in _model_options(selector)}:
+                message = f"Exact model {context.model_value!r} is no longer advertised."
+                raise ModelUnavailableError(message, context={"agent": self.profile.agent_id})
+            try:
                 selected = await connection.set_config_option(
                     selector.id, self.session_id, context.model_value
                 )
-                if (
-                    selected is None
-                    or _selected_value(selected.config_options, selector.id) != context.model_value
-                ):
-                    message = f"Agent {self.profile.agent_id!r} rejected the snapshotted model."
-                    raise ModelSelectionRejectedError(  # noqa: TRY301
-                        message, context={"agent": self.profile.agent_id}
+            except RequestError as error:
+                if error.code == _AUTH_REQUIRED_CODE:
+                    raise
+                message = f"Agent {self.profile.agent_id!r} rejected the snapshotted model."
+                raise ModelSelectionRejectedError(
+                    message, context={"agent": self.profile.agent_id}
+                ) from None
+            if (
+                selected is None
+                or _selected_value(selected.config_options, selector.id) != context.model_value
+            ):
+                message = f"Agent {self.profile.agent_id!r} rejected the snapshotted model."
+                raise ModelSelectionRejectedError(message, context={"agent": self.profile.agent_id})
+            self.agent_version = (
+                initialized.agent_info.version if initialized.agent_info is not None else ""
+            )
+            await asyncio.to_thread(
+                context.attempt.runtime.record_agent_session,
+                context.attempt.attempt.attempt_id,
+                process_id=process.pid,
+                session_id=self.session_id,
+                agent_version=self.agent_version,
+                config_ids={"model": selector.id},
+            )
+            response = await connection.prompt(self.session_id, _prompt_blocks(context))
+            if client.drift_error is not None:
+                raise client.drift_error
+            capabilities = (
+                initialized.agent_capabilities.session_capabilities
+                if initialized.agent_capabilities is not None
+                else None
+            )
+            if capabilities is not None and capabilities.close is not None:
+                try:
+                    await connection.close_session(self.session_id)
+                except Exception:
+                    LOGGER.exception(
+                        "ACP attempt session close failed",
+                        extra={"agent_id": self.profile.agent_id},
                     )
-                agent_version = (
-                    initialized.agent_info.version if initialized.agent_info is not None else ""
-                )
-                await asyncio.to_thread(
-                    context.attempt.runtime.record_agent_session,
-                    context.attempt.attempt.attempt_id,
-                    process_id=process.pid,
-                    session_id=self.session_id,
-                    agent_version=agent_version,
-                    config_ids={"model": selector.id},
-                )
-                stderr_task = asyncio.create_task(self._read_stderr(process, queue))
-                prompt_task = asyncio.create_task(
-                    connection.prompt(self.session_id, _prompt_blocks(context))
-                )
-                started = time.monotonic()
-                heartbeat_due = started + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-                timeout_seconds = context.attempt.remaining_seconds()
-                requested_stop: str | None = None
-                stop_deadline: float | None = None
-                while not prompt_task.done() or not queue.empty():
-                    try:
-                        event = await asyncio.wait_for(
-                            queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS
-                        )
-                    except TimeoutError:
-                        event = None
-                    if event is not None:
-                        yield event
-                    now = time.monotonic()
-                    if (
-                        requested_stop is None
-                        and timeout_seconds is not None
-                        and now - started >= timeout_seconds
-                    ):
-                        requested_stop = "timeout"
-                        stop_deadline = now + CANCELLATION_GRACE_SECONDS
-                        with suppress(Exception):
-                            await asyncio.wait_for(
-                                connection.cancel(self.session_id),
-                                timeout=CANCELLATION_GRACE_SECONDS,
+                    if client.event_queue is not None:
+                        await client.event_queue.put(
+                            AgentEvent(
+                                "agent.cleanup_warning",
+                                {"message": "The ACP session may remain in the agent's history."},
                             )
-                    if requested_stop is None:
+                        )
+            await _finish_stdio(connection, process)
+            succeeded = response.stop_reason == "end_turn" and client.control_stop is None
+            return AgentResult(
+                succeeded,
+                client.control_stop or response.stop_reason,
+                process.returncode,
+                None if succeeded else AgentProtocolError.error_code,
+            )
+
+    async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+        """Consume a bounded queue throughout initialization, prompt, and shutdown."""
+        queue = asyncio.Queue[AgentEvent](maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
+        client = RelayAcpClient(context, self.profile, queue)
+        lifecycle = asyncio.create_task(self._perform_attempt(context, client))
+        stopper = None
+        requested_stop = None
+        stop_deadline = None
+        heartbeat_due = time.monotonic() + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+        try:
+            while not lifecycle.done() or not queue.empty():
+                with suppress(TimeoutError):
+                    yield await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
+                now = time.monotonic()
+                if requested_stop is None:
+                    if context.attempt.timed_out():
+                        requested_stop = "timeout"
+                    else:
                         control = await asyncio.to_thread(
                             context.attempt.runtime.claim_next_control,
                             context.attempt.attempt.attempt_id,
                             context.attempt.attempt.worker_id,
                             (ControlKind.CANCEL.value,),
                         )
-                        if control is not None:
-                            applied = await asyncio.to_thread(
-                                context.attempt.runtime.apply_control,
-                                control.request_id,
-                                context.attempt.attempt.worker_id,
-                            )
-                            if applied:
-                                requested_stop = cancel_stop_reason(control).value
-                                stop_deadline = now + CANCELLATION_GRACE_SECONDS
-                                with suppress(Exception):
-                                    await asyncio.wait_for(
-                                        connection.cancel(self.session_id),
-                                        timeout=CANCELLATION_GRACE_SECONDS,
-                                    )
-                    if (
-                        stop_deadline is not None
-                        and now >= stop_deadline
-                        and not prompt_task.done()
-                    ):
-                        await _terminate_process(process)
-                        prompt_task.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await prompt_task
-                        break
-                    if now >= heartbeat_due:
-                        alive = await asyncio.to_thread(
-                            context.attempt.heartbeat,
-                        )
-                        if not alive:
-                            message = "The ACP attempt lost its durable worker ownership."
-                            raise PersistenceError(  # noqa: TRY301
-                                message,
-                                context={"node": context.attempt.attempt.scope_path},
-                            )
-                        heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-                response: schema.PromptResponse | None = None
-                if prompt_task.done() and not prompt_task.cancelled():
-                    try:
-                        response = await prompt_task
-                    except Exception:
-                        if requested_stop is None:
-                            raise
-                if client.drift_error is not None:
-                    raise client.drift_error  # noqa: TRY301
-                if requested_stop is None and client.control_stop is not None:
-                    requested_stop = client.control_stop
-                response_stop = response.stop_reason if response is not None else "cancelled"
-                succeeded = response_stop == "end_turn" and requested_stop is None
-                agent_capabilities = initialized.agent_capabilities
-                capabilities = (
-                    agent_capabilities.session_capabilities
-                    if agent_capabilities is not None
-                    else None
-                )
+                        if control is not None and await asyncio.to_thread(
+                            context.attempt.runtime.apply_control,
+                            control.request_id,
+                            context.attempt.attempt.worker_id,
+                        ):
+                            requested_stop = cancel_stop_reason(control).value
+                    if requested_stop is not None:
+                        stop_deadline = now + CANCELLATION_GRACE_SECONDS
+                        if self.connection is not None and self.session_id is not None:
+                            with suppress(Exception):
+                                await asyncio.wait_for(
+                                    self.connection.cancel(self.session_id),
+                                    timeout=CANCELLATION_GRACE_SECONDS,
+                                )
                 if (
-                    capabilities is not None
-                    and capabilities.close is not None
-                    and process.returncode is None
+                    stop_deadline is not None
+                    and now >= stop_deadline
+                    and self.process is not None
+                    and stopper is None
                 ):
-                    try:
-                        await connection.close_session(self.session_id)
-                    except Exception:
-                        LOGGER.exception(
-                            "ACP attempt session close failed",
-                            extra={"agent_id": self.profile.agent_id},
+                    stopper = asyncio.create_task(terminate_async_process_tree(self.process))
+                if now >= heartbeat_due:
+                    if not await asyncio.to_thread(context.attempt.heartbeat):
+                        message = "The ACP attempt lost its durable worker ownership."
+                        raise PersistenceError(  # noqa: TRY301
+                            message, context={"node": context.attempt.attempt.scope_path}
                         )
-                        yield AgentEvent(
-                            "agent.cleanup_warning",
-                            {"message": "The ACP session may remain in the agent's history."},
-                        )
-                await _finish_stdio(connection, process)
-                async for pending_event in _drain_agent_events(queue, stderr_task):
-                    yield pending_event
-                stderr_task = None
+                    heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+            try:
+                self.result = await lifecycle
+            except Exception:
+                if requested_stop is None:
+                    raise
+            if requested_stop is not None:
+                error_code = "node_timeout" if requested_stop == "timeout" else requested_stop
                 self.result = AgentResult(
-                    succeeded=succeeded,
-                    stop_reason=requested_stop or response_stop,
-                    exit_code=process.returncode,
-                    error_code=(
-                        None
-                        if succeeded
-                        else "node_timeout"
-                        if requested_stop == "timeout"
-                        else "canceled"
-                        if requested_stop == "canceled"
-                        else "interrupted"
-                        if requested_stop == "interrupted"
-                        else AgentProtocolError.error_code
-                    ),
+                    False,
+                    requested_stop,
+                    self.process.returncode if self.process is not None else None,
+                    error_code,
                 )
         except Exception as error:
-            if stderr_task is not None:
-                try:
-                    async for pending_event in _drain_agent_events(queue, stderr_task):
-                        yield pending_event
-                except Exception:
-                    LOGGER.exception(
-                        "ACP stderr drain failed",
-                        extra={"agent_id": self.profile.agent_id},
-                    )
-                stderr_task = None
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
                 "failed",
-                exit_code=self.process.returncode if self.process is not None else None,
-                error_code=mapped.error_code,
+                self.process.returncode if self.process is not None else None,
+                mapped.error_code,
             )
             raise mapped from None
         finally:
-            if stderr_task is not None and not stderr_task.done():
-                # A caller closing the async generator no longer consumes the
-                # bounded queue, so cancel the reader instead of waiting forever.
-                stderr_task.cancel()
-                await asyncio.gather(stderr_task, return_exceptions=True)
+            if not lifecycle.done():
+                lifecycle.cancel()
+            await asyncio.gather(lifecycle, return_exceptions=True)
+            if stopper is not None:
+                await stopper
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,
                 context.attempt.attempt.attempt_id,
                 process_id=None,
                 session_id=self.session_id,
-                agent_version=agent_version,
+                agent_version=self.agent_version,
                 config_ids={"model": client.model_config_id or ""},
-            )
-
-    async def _read_stderr(
-        self,
-        process: asyncio.subprocess.Process,
-        queue: asyncio.Queue[AgentEvent],
-    ) -> None:
-        if process.stderr is None:
-            return
-        while chunk := await process.stderr.read(8_192):
-            await queue.put(
-                AgentEvent("agent.stderr", {"text": chunk.decode("utf-8", "backslashreplace")})
             )
 
     async def cancel(self) -> None:
@@ -875,7 +812,7 @@ class AcpDriver:
                     timeout=CANCELLATION_GRACE_SECONDS,
                 )
         if self.process is not None:
-            await _terminate_process(self.process)
+            await terminate_async_process_tree(self.process)
 
     async def finalize(self) -> AgentResult:
         if self.result is None:

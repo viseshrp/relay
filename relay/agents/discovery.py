@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from .models import AgentCommand, DiscoveredAgent, RegistrySnapshot
+from .models import AgentCommand, AgentProfile, DiscoveredAgent, RegistrySnapshot
 from .profiles import PROFILES
 
 _VERSION_TIMEOUT_SECONDS = 5.0
@@ -40,37 +40,34 @@ def _version(command: AgentCommand) -> str:
 
 def discover_agents(registry: RegistrySnapshot | None = None) -> tuple[DiscoveredAgent, ...]:
     """Detect installed commands without invoking package managers or login flows."""
-    results: list[DiscoveredAgent] = []
-    for profile in PROFILES.values():
-        executable = _find_executable(profile.executable_names)
-        if executable is None:
-            results.append(
-                DiscoveredAgent(
-                    profile,
-                    None,
-                    reason=f"No executable named {', '.join(profile.executable_names)} is on PATH.",
-                )
-            )
-            continue
-        command = AgentCommand(executable, profile.adapter_args)
-        detected_version = _version(command)
-        reason = None
-        if profile.registry_id is not None and registry is not None:
-            metadata = registry.agents.get(profile.registry_id)
-            if metadata is None:
-                reason = f"Registry metadata {profile.registry_id!r} is unavailable."
-        results.append(DiscoveredAgent(profile, command, detected_version, reason))
-    return tuple(results)
+    return tuple(_detect_profile(profile, registry) for profile in PROFILES.values())
+
+
+def _detect_profile(profile: AgentProfile, registry: RegistrySnapshot | None) -> DiscoveredAgent:
+    executable = _find_executable(profile.executable_names)
+    if executable is None:
+        return DiscoveredAgent(
+            profile,
+            None,
+            reason=f"No executable named {', '.join(profile.executable_names)} is on PATH.",
+        )
+    command = AgentCommand(executable, profile.adapter_args)
+    reason = None
+    if (
+        profile.registry_id is not None
+        and registry is not None
+        and profile.registry_id not in registry.agents
+    ):
+        reason = f"Registry metadata {profile.registry_id!r} is unavailable."
+    return DiscoveredAgent(profile, command, _version(command), reason)
 
 
 def discovered_by_id(
     agent_id: str, registry: RegistrySnapshot | None = None
 ) -> DiscoveredAgent | None:
     """Return one read-only detection result by stable Relay profile id."""
-    return next(
-        (item for item in discover_agents(registry) if item.profile.agent_id == agent_id),
-        None,
-    )
+    profile = PROFILES.get(agent_id)
+    return _detect_profile(profile, registry) if profile is not None else None
 
 
 __all__ = ["discover_agents", "discovered_by_id"]

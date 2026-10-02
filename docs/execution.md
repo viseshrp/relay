@@ -189,7 +189,10 @@ The first node failure moves the run to `canceling`, prevents pending work from
 starting, and sends one durable cancel request to each active sibling attempt.
 Agent cancellation asks the protocol session to stop, then Relay terminates the
 whole process tree after the fixed grace period. Command cancellation uses the
-same bounded process-tree stop. Evidence preservation precedes worktree removal
+same bounded process-tree stop: an isolated group receives a graceful signal,
+then `SIGKILL` on Linux or `taskkill /T /F` on Windows if needed. The force
+command and final exit wait are bounded. Windows process-tree behavior remains
+unverified until exercised on Windows. Evidence preservation precedes worktree removal
 and lock release.
 
 An owner may rerun one failed node after Relay preserves its evidence and resets

@@ -4,34 +4,43 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import time
 
 from relay.constants import (
     AGENT_EVENT_QUEUE_MAX_ITEMS,
     AGENT_STREAM_LINE_MAX_BYTES,
+    ANTIGRAVITY_PROMPT_MAX_BYTES,
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
     DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS,
+    PROCESS_STREAM_CHUNK_BYTES,
+    WINDOWS_BATCH_COMMAND_MAX_CHARS,
+    WINDOWS_COMMAND_MAX_CHARS,
 )
 from relay.errors import (
-    AgentAuthError,
     AgentProtocolError,
     ModelSelectionRejectedError,
     ModelUnavailableError,
+    NodeExecutionError,
     PersistenceError,
+)
+from relay.execution.cancellation import (
+    discard_process_stream,
+    spawn_process,
+    terminate_async_process_tree,
 )
 from relay.execution.control import cancel_stop_reason
 from relay.execution.nodes.base import declared_output_artifacts
 from relay.execution.state import ControlKind
 from relay.vcs.commits import current_head
 
-from .acp_driver import _spawn, _terminate_process
 from .events import AgentEvent, normalize_antigravity_event
 from .mapping import map_agent_exception
 from .models import (
@@ -40,6 +49,7 @@ from .models import (
     AgentProfile,
     AgentResult,
     ModelObservation,
+    ProbeFailure,
     ProbeRequirement,
     ProbeResult,
 )
@@ -49,10 +59,10 @@ _SOFT_DENY = re.compile(
     r"(?i)(?:\bdenied\b|soft[- ]?deny|requires approval|permission[^\n]*not granted)"
 )
 _ACTION_TARGET = re.compile(r"(?:write_file|delete_file|move_file|command)\(([^)]+)\)")
-_PATH_TOKEN = re.compile(r"(?:[A-Za-z]:[\\/]|\.{0,2}/)[^\s\"']+")
 
 
 def _prompt(context: AgentExecutionContext) -> str:
+    """`Review.\n` is followed by `--- Relay inputs (JSON) ---\n{...}`."""
     prompt_bytes = "".join(context.attempt.attempt.prompt_contents)
     sections = (
         ("Relay inputs", context.attempt.attempt.inputs),
@@ -67,15 +77,23 @@ def _prompt(context: AgentExecutionContext) -> str:
 
 
 def _timeout_value(context: AgentExecutionContext) -> str:
+    """A node's `15m` remains `15m`; an absent timeout becomes `5m`."""
     return context.node.timeout or f"{DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS // 60}m"
 
 
 def _argv(context: AgentExecutionContext) -> tuple[str, ...]:
+    """Keep the composed prompt in `-p`, rejecting oversized platform arguments."""
+    prompt = _prompt(context)
+    if len(prompt.encode("utf-8")) > ANTIGRAVITY_PROMPT_MAX_BYTES:
+        message = "The composed Antigravity prompt exceeds Relay's 32 KiB UTF-8 limit."
+        raise NodeExecutionError(
+            message, next_action="Reduce prompt files, inputs, or upstream output."
+        )
     values = [
         context.command.executable,
         *context.command.args,
         "-p",
-        _prompt(context),
+        prompt,
         "--output-format",
         "stream-json",
         "--model",
@@ -85,20 +103,22 @@ def _argv(context: AgentExecutionContext) -> tuple[str, ...]:
     ]
     if context.permission_profile == "auto_approve":
         values.append("--dangerously-skip-permissions")
+    if os.name == "nt":
+        # CreateProcess counts UTF-16 units, including the terminating NUL.
+        # For example, one emoji consumes two units, while ASCII consumes one.
+        command = subprocess.list2cmdline(values)
+        size = len(command.encode("utf-16-le")) // 2 + 1
+        limit = WINDOWS_COMMAND_MAX_CHARS
+        if Path(values[0]).suffix.lower() in {".cmd", ".bat"}:
+            # Reserve cmd.exe's wrapper and quoting within its smaller limit.
+            size += len('cmd.exe /c """"')
+            limit = WINDOWS_BATCH_COMMAND_MAX_CHARS
+        if size > limit:
+            message = "The Antigravity command exceeds the Windows command-line limit."
+            raise NodeExecutionError(
+                message, next_action="Reduce prompt files, inputs, or upstream output."
+            )
     return tuple(values)
-
-
-def _nested_strings(value: object) -> Iterator[str]:
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, Mapping):
-        for key, item in value.items():
-            if isinstance(key, str):
-                yield key
-            yield from _nested_strings(item)
-    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        for item in value:
-            yield from _nested_strings(item)
 
 
 def _inside_worktree(target: str, worktree: Path) -> str | None:
@@ -114,14 +134,13 @@ def _inside_worktree(target: str, worktree: Path) -> str | None:
     return relative.as_posix()
 
 
-def _denied_targets(value: object, worktree: Path) -> tuple[str, ...]:
-    strings = tuple(_nested_strings(value))
-    if not any(_SOFT_DENY.search(item) for item in strings):
+def _denied_targets(notice: str, worktree: Path) -> tuple[str, ...]:
+    """A stderr notice `denied write_file(src/a.py)` yields (`src/a.py`,)."""
+    if not _SOFT_DENY.search(notice):
         return ()
-    candidates: list[str] = []
-    for item in strings:
-        candidates.extend(_ACTION_TARGET.findall(item))
-        candidates.extend(_PATH_TOKEN.findall(item))
+    # Only a complete stderr tool notice is eligible. Natural-language stdout
+    # and partial raw chunks must never become permission decisions.
+    candidates = _ACTION_TARGET.findall(notice)
     targets = {
         target for item in candidates if (target := _inside_worktree(item, worktree)) is not None
     }
@@ -129,6 +148,7 @@ def _denied_targets(value: object, worktree: Path) -> tuple[str, ...]:
 
 
 def _model_rows(output: str) -> tuple[tuple[str, str], ...]:
+    """`gemini-pro Gemini Pro\n` becomes ((`gemini-pro`, `Gemini Pro`),)."""
     rows: list[tuple[str, str]] = []
     for raw_line in output.splitlines():
         line = raw_line.strip()
@@ -164,7 +184,7 @@ async def _read_lines(
         pending = bytearray()
         oversized = False
 
-    while chunk := await stream.read(8_192):
+    while chunk := await stream.read(PROCESS_STREAM_CHUNK_BYTES):
         visible = decoder.decode(chunk)
         if visible:
             await queue.put((f"{kind}_raw", visible))
@@ -219,35 +239,25 @@ class AntigravityDriver:
     ) -> ProbeResult:
         """Check exact membership against a fresh bounded `agy models` result."""
         try:
-            process = await asyncio.create_subprocess_exec(
-                self.command.executable,
-                *self.command.args,
-                "models",
-                cwd=str(cwd),
-                env=os.environ.copy(),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            process = await spawn_process((*self.command.argv(), "models"), cwd, input_pipe=False)
+            communication = asyncio.create_task(process.communicate())
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=_MODEL_LIST_TIMEOUT_SECONDS
+                stdout, _stderr = await asyncio.wait_for(
+                    asyncio.shield(communication), timeout=_MODEL_LIST_TIMEOUT_SECONDS
                 )
             except TimeoutError:
-                await _terminate_process(process)
+                await terminate_async_process_tree(process)
+                await communication
                 message = "Antigravity did not return its model list within 15 seconds."
                 raise AgentProtocolError(
                     message,
                     context={"agent": self.profile.agent_id},
                 ) from None
-            error_text = stderr.decode("utf-8", "backslashreplace")
+            except asyncio.CancelledError:
+                await terminate_async_process_tree(process)
+                await communication
+                raise
             if process.returncode != 0:
-                if "auth" in error_text.lower() or "login" in error_text.lower():
-                    message = "Antigravity requires authentication before model discovery."
-                    raise AgentAuthError(  # noqa: TRY301
-                        message,
-                        context={"agent": self.profile.agent_id},
-                    )
                 message = "Antigravity model discovery failed."
                 raise AgentProtocolError(  # noqa: TRY301
                     message,
@@ -269,8 +279,11 @@ class AntigravityDriver:
             advertised = {value for value, _name in rows}
             failures = {
                 requirement.model_value: (
-                    f"{ModelUnavailableError.error_code}: Exact model "
-                    f"{requirement.model_value!r} is not advertised by Antigravity."
+                    ProbeFailure(
+                        ModelUnavailableError.error_code,
+                        f"Exact model {requirement.model_value!r} is not advertised "
+                        "by Antigravity.",
+                    )
                 )
                 for requirement in requirements
                 if requirement.model_value not in advertised
@@ -290,10 +303,10 @@ class AntigravityDriver:
             return ProbeResult(
                 self.profile.agent_id,
                 failures={
-                    requirement.model_value: f"{mapped.error_code}: {mapped.message}"
+                    requirement.model_value: ProbeFailure.from_error(mapped)
                     for requirement in requirements
                 },
-                general_error=f"{mapped.error_code}: {mapped.message}",
+                general_error=ProbeFailure.from_error(mapped),
             )
 
     async def start_attempt(
@@ -309,14 +322,18 @@ class AntigravityDriver:
         )
         denied: set[str] = set()
         terminal_status: str | None = None
-        terminal_error: str | None = None
         requested_stop: str | None = None
         readers: tuple[asyncio.Task[None], ...] = ()
+        stopper = None
         try:
             arguments = _argv(context)
             command = AgentCommand(arguments[0], arguments[1:])
-            process = await _spawn(command, context.cwd)
+            process = await spawn_process(command.argv(), context.cwd, input_pipe=False)
             self.process = process
+            readers = (
+                asyncio.create_task(_read_lines(process.stdout, "stdout", queue)),
+                asyncio.create_task(_read_lines(process.stderr, "stderr", queue)),
+            )
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,
                 context.attempt.attempt.attempt_id,
@@ -324,10 +341,6 @@ class AntigravityDriver:
                 session_id=None,
                 agent_version="",
                 config_ids={"model": "native:model"},
-            )
-            readers = (
-                asyncio.create_task(_read_lines(process.stdout, "stdout", queue)),
-                asyncio.create_task(_read_lines(process.stderr, "stderr", queue)),
             )
             completed_streams = 0
             heartbeat_due = time.monotonic() + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
@@ -341,7 +354,6 @@ class AntigravityDriver:
                 if kind.endswith("_done"):
                     completed_streams += 1
                 elif kind == "stderr_raw" and isinstance(value, str):
-                    denied.update(_denied_targets(value, context.cwd))
                     yield AgentEvent("agent.stderr", {"text": value})
                 elif kind == "stderr_line" and isinstance(value, str):
                     denied.update(_denied_targets(value, context.cwd))
@@ -370,7 +382,6 @@ class AntigravityDriver:
                         raise AgentProtocolError(  # noqa: TRY301
                             message, context={"agent": self.profile.agent_id}
                         )
-                    denied.update(_denied_targets(raw, context.cwd))
                     init = raw.get("init") if raw.get("event") == "init" else None
                     if isinstance(init, dict):
                         observed_model = init.get("model")
@@ -388,8 +399,6 @@ class AntigravityDriver:
                     if isinstance(result, dict):
                         status = result.get("status")
                         terminal_status = status if isinstance(status, str) else None
-                        error = result.get("error")
-                        terminal_error = error if isinstance(error, str) else None
                 if requested_stop is None:
                     control = await asyncio.to_thread(
                         context.attempt.runtime.claim_next_control,
@@ -406,23 +415,24 @@ class AntigravityDriver:
                         if applied:
                             reason = cancel_stop_reason(control)
                             requested_stop = reason.value
-                            await _terminate_process(process)
+                            stopper = asyncio.create_task(terminate_async_process_tree(process))
                 now = time.monotonic()
                 if requested_stop is None and context.attempt.timed_out():
                     requested_stop = "timeout"
-                    await _terminate_process(process)
+                    stopper = asyncio.create_task(terminate_async_process_tree(process))
                 if now >= heartbeat_due:
                     alive = await asyncio.to_thread(
                         context.attempt.heartbeat,
                     )
                     if not alive:
-                        await _terminate_process(process)
                         message = "The Antigravity attempt lost its durable worker ownership."
                         raise PersistenceError(  # noqa: TRY301
                             message, context={"node": context.attempt.attempt.scope_path}
                         )
                     heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
             await asyncio.gather(*readers)
+            if stopper is not None:
+                await stopper
             await process.wait()
             required = set(declared_output_artifacts(context.node.outputs).values())
             denied_required = any(
@@ -458,16 +468,8 @@ class AntigravityDriver:
             elif terminal_status == "INTERRUPTED":
                 error_code = AgentProtocolError.error_code
                 stop_reason = "interrupted"
-            elif terminal_error is not None and "timeout" in terminal_error.lower():
-                error_code = "node_timeout"
-                stop_reason = "timeout"
             elif not succeeded:
-                error_code = (
-                    AgentAuthError.error_code
-                    if terminal_error is not None
-                    and ("auth" in terminal_error.lower() or "login" in terminal_error.lower())
-                    else AgentProtocolError.error_code
-                )
+                error_code = AgentProtocolError.error_code
                 stop_reason = "failed"
             self.result = AgentResult(
                 succeeded,
@@ -477,12 +479,14 @@ class AntigravityDriver:
                 tuple(sorted(denied)),
             )
         except Exception as error:
-            if self.process is not None:
-                await _terminate_process(self.process)
+            if self.process is not None and stopper is None:
+                stopper = asyncio.create_task(terminate_async_process_tree(self.process))
             if readers:
                 async for pending_event in _drain_raw_events(queue, readers):
                     yield pending_event
                 readers = ()
+            if stopper is not None:
+                await stopper
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
@@ -493,14 +497,26 @@ class AntigravityDriver:
             )
             raise mapped from None
         finally:
-            if self.process is not None and self.process.returncode is None:
-                await _terminate_process(self.process)
             if readers:
                 for reader in readers:
                     if not reader.done():
                         # A closed consumer cannot drain the bounded queue.
                         reader.cancel()
                 await asyncio.gather(*readers, return_exceptions=True)
+            if self.process is not None and self.process.returncode is None:
+                # A closed generator has no queue consumer. Direct drains keep
+                # pipe backpressure from blocking the bounded process wait.
+                drains = (
+                    asyncio.create_task(discard_process_stream(self.process.stdout)),
+                    asyncio.create_task(discard_process_stream(self.process.stderr)),
+                )
+                try:
+                    await terminate_async_process_tree(self.process)
+                finally:
+                    for drain in drains:
+                        if self.process.returncode is None:
+                            drain.cancel()
+                    await asyncio.gather(*drains, return_exceptions=True)
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,
                 context.attempt.attempt.attempt_id,
@@ -512,7 +528,7 @@ class AntigravityDriver:
 
     async def cancel(self) -> None:
         if self.process is not None:
-            await _terminate_process(self.process)
+            await terminate_async_process_tree(self.process)
 
     async def finalize(self) -> AgentResult:
         if self.result is None:

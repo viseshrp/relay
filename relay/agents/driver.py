@@ -11,6 +11,7 @@ from typing import Protocol
 
 from relay.constants import (
     AGENT_PROBE_TIMEOUT_SECONDS,
+    AGENT_STOP_TIMEOUT_SECONDS,
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CANCELLATION_GRACE_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
@@ -42,10 +43,12 @@ from .models import (
     AgentResult,
     DiscoveredAgent,
     ModelObservation,
+    ProbeFailure,
     ProbeRequirement,
     ProbeResult,
     RegistrySnapshot,
 )
+from .profiles import PROFILES
 
 
 class AgentDriver(Protocol):
@@ -95,13 +98,16 @@ async def _bounded_probe(
         )
     except TimeoutError:
         message = (
-            f"agent_launch_error: Agent {agent_id!r} did not complete its probe in "
+            f"Agent {agent_id!r} did not complete its probe in "
             f"{AGENT_PROBE_TIMEOUT_SECONDS:g} seconds."
         )
         return ProbeResult(
             agent_id,
-            failures={item.model_value: message for item in requirements},
-            general_error=message,
+            failures={
+                item.model_value: ProbeFailure(AgentProtocolError.error_code, message)
+                for item in requirements
+            },
+            general_error=ProbeFailure(AgentProtocolError.error_code, message),
         )
 
 
@@ -120,10 +126,11 @@ def _installed_agent(agent_id: str, registry: RegistrySnapshot | None) -> Discov
     return discovered
 
 
-def _aggregate_error(reasons: Mapping[str, str]) -> RelayError:
+def _aggregate_error(reasons: Mapping[str, ProbeFailure]) -> RelayError:
+    """Keep an all-auth failure typed as AgentAuthError and list `codex: code: message`."""
     text = "; ".join(f"{candidate}: {reason}" for candidate, reason in reasons.items())
     message = f"No candidate confirmed the requested exact model. {text}"
-    prefixes = {reason.partition(":")[0] for reason in reasons.values()}
+    prefixes = {reason.code for reason in reasons.values()}
     error_type: type[RelayError]
     if prefixes == {AgentLaunchError.error_code}:
         error_type = AgentLaunchError
@@ -152,6 +159,13 @@ async def _probe_all(
     seen_by_agent: dict[str, set[str]] = {}
     for requirement in requirements:
         for agent_id in requirement.effective_agent_order:
+            profile = PROFILES.get(agent_id)
+            if (
+                profile is not None
+                and requirement.permission_profile is not None
+                and requirement.permission_profile not in profile.permission_profiles
+            ):
+                continue
             values = models_by_agent.setdefault(agent_id, [])
             seen = seen_by_agent.setdefault(agent_id, set())
             if requirement.model_value not in seen:
@@ -164,7 +178,7 @@ async def _probe_all(
         except RelayError as error:
             results[agent_id] = ProbeResult(
                 agent_id,
-                failures=dict.fromkeys(values, f"{error.error_code}: {error.message}"),
+                failures=dict.fromkeys(values, ProbeFailure.from_error(error)),
             )
             continue
         if installed.command is None:
@@ -190,23 +204,43 @@ def preflight_routes(
             if result.general_error is None:
                 observation_store.replace_model_observations(result.agent_id, result.models)
     entries: list[RouteEntry] = []
+    all_failures = {}
     for requirement in requested:
-        failures: dict[str, str] = {}
+        failures: dict[str, ProbeFailure] = {}
         selected: str | None = None
         for agent_id in requirement.effective_agent_order:
+            profile = PROFILES.get(agent_id)
+            if (
+                profile is not None
+                and requirement.permission_profile is not None
+                and requirement.permission_profile not in profile.permission_profiles
+            ):
+                failures[agent_id] = ProbeFailure(
+                    AgentLaunchError.error_code,
+                    f"Permission profile {requirement.permission_profile!r} is not "
+                    f"supported by agent {agent_id!r}.",
+                )
+                continue
             result = results.get(agent_id)
             if result is not None and requirement.model_value in result.confirmed_values:
                 selected = agent_id
                 break
             failures[agent_id] = (
                 result.failures.get(
-                    requirement.model_value, "agent_launch_error: probe unavailable"
+                    requirement.model_value,
+                    ProbeFailure(AgentLaunchError.error_code, "probe unavailable"),
                 )
                 if result is not None
-                else "agent_launch_error: probe unavailable"
+                else ProbeFailure(AgentLaunchError.error_code, "probe unavailable")
             )
         if selected is None:
-            raise _aggregate_error(failures)
+            all_failures.update(
+                {
+                    f"{requirement.scope_path}/{agent_id}": reason
+                    for agent_id, reason in failures.items()
+                }
+            )
+            continue
         entries.append(
             RouteEntry(
                 requirement.scope_path,
@@ -215,6 +249,8 @@ def preflight_routes(
                 selected,
             )
         )
+    if all_failures:
+        raise _aggregate_error(all_failures)
     return tuple(entries), tuple(results.values())
 
 
@@ -306,7 +342,7 @@ class RoutedAgentNodeDriver:
         with suppress(Exception):
             await asyncio.wait_for(
                 driver.cancel(),
-                timeout=(CANCELLATION_GRACE_SECONDS * 2) + 1,
+                timeout=AGENT_STOP_TIMEOUT_SECONDS,
             )
         task.cancel()
         done, _pending = await asyncio.wait((task,), timeout=CANCELLATION_GRACE_SECONDS)

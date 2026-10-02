@@ -253,7 +253,7 @@ def doctor_command(context: click.Context) -> None:
             "detected_version": discovered.detected_version,
             "models": models,
             "reason": (
-                result.general_error
+                str(result.general_error)
                 if result is not None and result.general_error is not None
                 else discovered.reason
             ),

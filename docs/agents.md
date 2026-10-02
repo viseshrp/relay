@@ -22,6 +22,11 @@ node route. Relay does not fall back to a different model. The node's fresh ACP
 session repeats the selection proof. If a later `config_option_update` reports
 a different value, Relay cancels and fails that attempt.
 
+An explicit `permission_profile` must be supported by the candidate agent at
+launch preflight. Relay reports permission and route failures together before
+running any node. Registry installation metadata is advisory; a registry fetch
+failure does not prevent installed agents from proving their routes.
+
 The attempt deadline, cancellation mailbox, and heartbeat cover initialization,
 model selection, prompt execution, and provider shutdown as one lifecycle.
 
@@ -37,9 +42,10 @@ each adapter over stdio, opens a fresh session in the assigned Git worktree
 without MCP servers, selects the model, sends the prompt, closes the session
 when supported, closes stdio, and stops the process tree within a bounded
 grace. The SDK is pre-1.0; its pin and behavior must be re-certified before an
-upgrade. SDK 0.12.1 still gates session-close routing behind its unstable
-feature negotiation, so Relay enables that negotiation only to call a close
-capability the agent advertised. The SDK exposes no supported session-delete
+upgrade. SDK 0.12.1 gates incoming `elicitation/create` on
+`use_unstable_protocol=True`, which Relay enables for browser-backed
+elicitations. The outgoing `close_session` call does not require that flag.
+The SDK exposes no supported session-delete
 client method; Relay reports a cleanup warning when an agent advertises delete
 and the disposable session may remain.
 
@@ -52,16 +58,25 @@ Relay never appends an earlier conversation transcript.
 ACP message, thought, tool-call, tool-result, and plan updates become Relay
 events. Content explicitly marked for an audience that excludes `user`, or
 marked private in ACP metadata, is dropped. A visible string larger than the
-event limit is split into numbered UTF-8-safe parts. For example, one 70 KiB
-message becomes three ordered `agent.message` events rather than one truncated
-event. Agent stderr is retained as `agent.stderr` events.
+event limit is split into numbered UTF-8-safe parts sized after JSON escaping.
+For example, a 70 KiB plain-text message becomes three ordered `agent.message`
+events; quotes, backslashes, and control characters can require more parts.
+Each provider payload stays within 32 KiB, reserving space for Relay metadata
+and SSE framing. ACP stderr drains as soon as the process starts, including
+initialization, model selection, and shutdown. Attempts retain it as
+`agent.stderr` events; disposable model probes discard it.
 
 Relay always services permission requests and form or URL elicitations through
 the browser-backed durable mailbox. The request contains only the tool title,
 offered option IDs, names, and kinds; provider-private request fields are not
 persisted. The response goes only to the worker that owns the exact attempt and
 session. A stale or duplicate answer cannot reach a later attempt. Cancel asks
-ACP to cancel the session before Relay stops its process tree.
+ACP to cancel the session before Relay stops its process tree. Relay signals
+the isolated process group, waits up to ten seconds, then forces the tree to
+stop. On Windows it uses a console break followed by `taskkill /T /F` when
+needed; on Linux it signals the process group with `SIGTERM` then `SIGKILL`.
+The final exit wait is bounded. Windows behavior remains unverified until a
+Windows certification run.
 
 The Phase 1 profiles advertise no client-mediated file or terminal methods:
 
@@ -123,12 +138,20 @@ Antigravity always has a print timeout. A node timeout such as `15m` becomes
 `--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
 five-minute default and passes `--print-timeout 5m` explicitly.
 
+The complete composed prompt must fit in 32 KiB of UTF-8. On Windows the
+command must also fit the 32,767 UTF-16-unit process limit, including its final
+NUL, or the smaller 8,191-character limit when the executable is a `.cmd` or
+`.bat` shim. Relay checks the quoted command and wrapper allowance before
+starting it. Oversized input raises `node_execution_error` with guidance to
+reduce prompt files, inputs, or upstream output. Prompts continue to use `-p`.
+
 Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
 using a bounded queue that applies pipe backpressure. JSON parsing holds at
 most one 1 MiB line; a larger line is retained as raw output and then fails the
 attempt as a protocol error. Cancellation and timeout drain bytes already read
-before the attempt settles. Relay also inspects stream fields and stderr for
-documented soft-deny signals. A target such as
+before the attempt settles. Relay detects soft denies only in complete stderr
+tool notices, as described by the headless documentation. The exact notice
+format remains unverified until live certification. A target such as
 `write_file(src/report.md)` becomes worktree-relative `src/report.md`; a path
 outside the worktree is ignored by the write-target rule. A writing attempt
 fails with `soft_denied` when a denied target covers a required artifact, or

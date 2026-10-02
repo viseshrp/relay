@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from relay.errors import WorkflowValidationError
@@ -21,9 +21,12 @@ class RouteRequirement:
     scope_path: str
     model_value: str
     effective_agent_order: tuple[str, ...]
+    permission_profile: str | None = field(default=None, kw_only=True)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        result = asdict(self)
+        result.pop("permission_profile")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +83,7 @@ def _routes_for_nodes(
             if not agents:
                 message = f"Agent node {scope} has no candidate agents."
                 raise WorkflowValidationError(message, context={"node": scope})
-            yield RouteRequirement(scope, model, agents)
+            yield RouteRequirement(scope, model, agents, permission_profile=node.permission_profile)
         elif isinstance(node, LoopNode):
             for iteration in range(1, node.max_iterations + 1):
                 loop_scope = loop_iteration_scope(parent_scope, node_id, iteration)

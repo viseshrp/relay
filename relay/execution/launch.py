@@ -5,13 +5,19 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
+import logging
 from pathlib import Path
 from typing import Protocol
 
 from relay.agents.driver import AgentObservationStore, preflight_routes
 from relay.agents.models import ModelObservation
 from relay.agents.registry import load_registry
-from relay.errors import ArtifactPreservationError, RelayError, WorkflowValidationError
+from relay.errors import (
+    AgentDiscoveryError,
+    ArtifactPreservationError,
+    RelayError,
+    WorkflowValidationError,
+)
 from relay.paths import safe_resolve
 from relay.vcs.cleanliness import require_clean
 from relay.vcs.commits import current_head
@@ -26,6 +32,7 @@ from relay.workflows.validation import ValidatedWorkflow, resolve_inputs, valida
 from .scheduler import SchedulingStore, dispatch_ready_nodes
 
 _HASH_CHUNK_BYTES = 1024 * 1024
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +224,11 @@ def launch_workflow(
     )
     routes = requirements
     if requirements:
-        registry = load_registry()
+        try:
+            registry = load_registry()
+        except AgentDiscoveryError:
+            LOGGER.exception("Agent registry metadata unavailable during launch")
+            registry = None
         routes, _probes = preflight_routes(
             requirements,
             repository,
