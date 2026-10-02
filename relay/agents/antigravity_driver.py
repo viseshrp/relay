@@ -39,6 +39,7 @@ from relay.execution.cancellation import (
 from relay.execution.control import cancel_stop_reason
 from relay.execution.nodes.base import declared_output_artifacts
 from relay.execution.state import ControlKind
+from relay.execution.timing import attempt_deadline, duration_seconds
 from relay.vcs.commits import current_head
 
 from .events import AgentEvent, normalize_antigravity_event
@@ -325,11 +326,16 @@ class AntigravityDriver:
         queue = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
         denied = set()
         terminal_status = None
+        terminal_timed_out = False
         requested_stop = None
         readers = ()
         stopper = None
         try:
             arguments = _argv(context)
+            # agy reports failures as ERROR plus free text, without a documented
+            # timeout code. Enforce its advertised print ceiling locally as well.
+            print_deadline = attempt_deadline(_timeout_value(context), context.attempt.deadline_at)
+            print_limit = duration_seconds(_timeout_value(context))
             command = AgentCommand(arguments[0], arguments[1:])
             process = await spawn_process(command.argv(), context.cwd, input_pipe=False)
             self.process = process
@@ -402,6 +408,16 @@ class AntigravityDriver:
                     if isinstance(result, dict):
                         status = result.get("status")
                         terminal_status = status if isinstance(status, str) else None
+                        elapsed = result.get("duration_seconds")
+                        # The documented numeric duration proves expiry without
+                        # interpreting prose such as "timeout configuration failed".
+                        terminal_timed_out = (
+                            terminal_status == "ERROR"
+                            and print_limit is not None
+                            and isinstance(elapsed, (int, float))
+                            and not isinstance(elapsed, bool)
+                            and elapsed >= print_limit
+                        )
                 if requested_stop is None:
                     control = await asyncio.to_thread(
                         context.attempt.runtime.claim_next_control,
@@ -420,7 +436,15 @@ class AntigravityDriver:
                             requested_stop = reason.value
                             stopper = asyncio.create_task(terminate_async_process_tree(process))
                 now = time.monotonic()
-                if requested_stop is None and context.attempt.timed_out():
+                if requested_stop is None and (
+                    context.attempt.timed_out()
+                    or (
+                        print_deadline is not None
+                        and now >= print_deadline
+                        and terminal_status != "SUCCESS"
+                        and process.returncode is None
+                    )
+                ):
                     requested_stop = "timeout"
                     stopper = asyncio.create_task(terminate_async_process_tree(process))
                 if now >= heartbeat_due:
@@ -462,6 +486,9 @@ class AntigravityDriver:
             if requested_stop is not None:
                 error_code = "node_timeout" if requested_stop == "timeout" else requested_stop
                 stop_reason = requested_stop
+            elif terminal_timed_out:
+                error_code = "node_timeout"
+                stop_reason = "timeout"
             elif soft_denied:
                 error_code = "antigravity_soft_denied"
                 stop_reason = "soft_denied"

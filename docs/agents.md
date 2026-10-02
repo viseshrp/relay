@@ -142,6 +142,14 @@ Headless mode cannot pause for mid-run permission or elicitation input.
 Antigravity always has a print timeout. A node timeout such as `15m` becomes
 `--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
 five-minute default and passes `--print-timeout 5m` explicitly.
+Relay also enforces that ceiling with a monotonic deadline from process
+startup, including when the node has no declared timeout. Expiry reports
+`node_timeout` with stop reason `timeout`. A received `SUCCESS` result is
+not reclassified as a print timeout while buffered output drains. Relay does
+not infer timeout from the free-text `error` field. An `ERROR` result whose
+documented numeric `duration_seconds` reaches the print ceiling also reports
+a timeout. The headless documentation provides no separate timeout code.
+Live timeout behavior remains unverified.
 
 The disposable `agy models` probe has a 15-second response limit and runs in
 its own process group. Relay stops that group before reporting a model-list
