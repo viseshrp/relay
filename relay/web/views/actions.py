@@ -217,14 +217,14 @@ def acquire_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
 def launch_run(request: HttpRequest) -> HttpResponse:
     relay_root, project = current_project()
     body = json_body(request)
-    cleanup_value = body.get("cleanup_policy", load_config().cleanup_policy)
+    config = load_config()
+    cleanup_value = body.get("cleanup_policy", config.cleanup_policy)
     if not isinstance(cleanup_value, str):
         message = "cleanup_policy must be a string."
         raise ConfigError(message)
     if cleanup_value not in {item.value for item in CleanupPolicy}:
         message = "cleanup_policy must be clean_on_success or retain."
         raise ConfigError(message)
-    config = load_config()
     launcher = owner_username(request)
     result = launch_workflow(
         DjangoExecutionStore(),

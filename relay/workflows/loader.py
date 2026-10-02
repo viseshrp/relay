@@ -33,7 +33,8 @@ def _yaml() -> YAML:
 
 
 def _validation_message(error: ValidationError) -> str:
-    issues: list[str] = []
+    """A missing name -> ``Workflow validation failed:\n- name: Field required``."""
+    issues = []
     for item in error.errors(include_url=False, include_context=False):
         location = ".".join(str(part) for part in item["loc"]) or "workflow"
         issues.append(f"{location}: {item['msg']}")
@@ -82,12 +83,13 @@ def load_workflow_text(text: str, *, source: Path | None = None) -> LoadedWorkfl
     return LoadedWorkflow(display, text, document, definition)
 
 
-def _subworkflow_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[SubworkflowNode]:
+def subworkflow_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[SubworkflowNode]:
+    """Yield child references in insertion order, including references in loops."""
     for node in nodes.values():
         if isinstance(node, SubworkflowNode):
             yield node
         elif isinstance(node, LoopNode):
-            yield from _subworkflow_nodes(node.body)
+            yield from subworkflow_nodes(node.body)
 
 
 def workflow_key_parts(workflow_key: str) -> tuple[str, ...]:
@@ -124,10 +126,10 @@ def resolve_workflow_path(workflows_root: Path, reference: str) -> Path:
 def load_workflow_tree(root: LoadedWorkflow, workflows_root: Path) -> dict[str, LoadedWorkflow]:
     """Load each transitive child once and reject recursive references."""
     resolved_root = workflows_root.resolve()
-    loaded: dict[str, LoadedWorkflow] = {}
+    loaded = {}
 
     def visit(workflow: LoadedWorkflow, stack: tuple[Path, ...]) -> None:
-        for reference in _subworkflow_nodes(workflow.definition.nodes):
+        for reference in subworkflow_nodes(workflow.definition.nodes):
             child_path = resolve_workflow_path(resolved_root, reference.workflow)
             if child_path in stack:
                 chain = " -> ".join(path.name for path in (*stack, child_path))
@@ -153,4 +155,5 @@ __all__ = [
     "load_workflow_text",
     "load_workflow_tree",
     "resolve_workflow_path",
+    "subworkflow_nodes",
 ]

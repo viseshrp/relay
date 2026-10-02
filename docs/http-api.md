@@ -102,6 +102,29 @@ provider and command output remains available through the event history.
 Artifact pages use the same numeric cursor rule. The browser merges pages by
 record ID, so loading another page cannot duplicate an item.
 
+## Provider and cleanup events
+
+Every event page row contains `id`, `type`, `version` (1), `source`, `ts`, and
+`payload`. SSE sends that JSON object as `data`, its type as `event`, and its
+numeric ID as `id`. Attempt payloads also contain `scope_path` and
+`attempt_number`; run cleanup payloads have no attempt fields.
+
+| Type | Source | Payload |
+| --- | --- | --- |
+| `run.cleanup_succeeded` | `system` | `{"worktree_state":"removed"}` after successful worktree removal. |
+| `run.cleanup_failed` | `system` | The Relay error envelope (`code`, `message`, `context`, optional `next_action`) plus `"worktree_state":"cleanup_failed"`. The run remains succeeded. |
+| `agent.provider_event` | `agent` | ACP uses `{"content":...}` for visible non-text content or `{"update":...}` for command, mode, configuration, session, and usage updates. Antigravity uses `{"event":...}` for a malformed step update or `{"text":"..."}` for raw stdout. |
+| `agent.result` | `agent` | Antigravity's result object with `response` and `structured_output` omitted. Agent response deltas use `agent.message`. |
+| `agent.cleanup_warning` | `agent` | `{"message":"The ACP session may remain in the agent's history."}` when session close fails. |
+
+Provider payloads above the 32 KiB normalization budget split into ordered
+parts. A string field (`text`, `summary`, or `chunk`) keeps its other fields
+and gains one-based `part` and total `parts` counts. Other large payloads become
+`{"chunk":"...","part":1,"parts":2}` records containing consecutive slices
+of the original JSON text. Join those chunks before parsing the JSON. Relay
+reserves the remaining persisted-event budget for scope and attempt metadata;
+it splits on Unicode character boundaries and accounts for JSON escaping.
+
 ## Controls
 
 Run cancel and rerun keys are stored in an indexed event column; duplicate

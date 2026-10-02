@@ -2,35 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-import shutil
-import subprocess
 
-from relay.errors import ProjectDiscoveryError
+from relay.errors import GitError, ProjectDiscoveryError
+from relay.vcs.git import run_git
+
+LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
 def git_root(start: Path | None = None) -> Path:
     """Return the Git worktree root for an owner-selected directory."""
     location = start if start is not None else Path.cwd()
-    executable = shutil.which("git")
-    if executable is None:
-        message = "Git could not be found on PATH."
-        raise ProjectDiscoveryError(
-            message,
-            next_action="Install Git and ensure it is available on PATH.",
-        )
     try:
-        # The executable is resolved by PATH, arguments are isolated, and no shell is used.
-        result = subprocess.run(  # noqa: S603
-            [executable, "-C", str(location), "rev-parse", "--show-toplevel"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        message = "Git could not be started."
+        result = run_git(location, ["rev-parse", "--show-toplevel"], check=False)
+    except GitError as error:
+        LOGGER.exception("Git project discovery failed", extra={"project": str(location)})
         raise ProjectDiscoveryError(
-            message,
+            error.message,
             next_action="Install Git and ensure it is available on PATH.",
         ) from None
     if result.returncode != 0:

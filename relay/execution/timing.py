@@ -10,7 +10,7 @@ _DURATION_UNITS: dict[str, float] = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3_60
 
 
 def duration_seconds(value: str | None) -> float | None:
-    """Convert schema-validated `250ms`, `4s`, `3m`, or `2h` to seconds."""
+    """`250ms` -> 0.25, `4s` -> 4.0, `3m` -> 180.0, `2h` -> 7200.0; None -> None."""
     if value is None:
         return None
     suffix = "ms" if value.endswith("ms") else value[-1]

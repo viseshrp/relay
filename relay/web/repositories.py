@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
 from functools import lru_cache
 from hashlib import sha256
@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
-from typing import NoReturn, TypeVar
+from typing import NamedTuple, NoReturn, TypeVar
 import uuid
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -141,6 +141,22 @@ from .models import (
 
 ModelT = TypeVar("ModelT", bound=models.Model)
 LOGGER = logging.getLogger(__name__)
+_CONTROL_INTERACTION_KINDS: dict[str, str] = {
+    ControlKind.PERMISSION_ANSWER.value: InteractionKind.PERMISSION.value,
+    ControlKind.ELICITATION_ANSWER.value: InteractionKind.ELICITATION.value,
+    ControlKind.WAIT_ANSWER.value: InteractionKind.WAIT.value,
+}
+
+
+class _ClaimContext(NamedTuple):
+    """Validated snapshot values used to construct one claimed attempt."""
+
+    inputs: dict[str, object]
+    upstream_outputs: dict[str, dict[str, object]]
+    run_metadata: dict[str, object]
+    prompt_contents: tuple[str, ...]
+    route: dict[str, object]
+    subworkflows: dict[str, object]
 
 
 @lru_cache(maxsize=RECONCILE_MAX_ITEMS)
@@ -213,19 +229,6 @@ class DjangoAgentStore:
             raise PersistenceError(message) from None
 
 
-def _text_field(project: Project, name: str) -> str:
-    value = getattr(project, name)
-    if not isinstance(value, str):
-        message = f"Stored project field {name} is not text."
-        raise PersistenceError(message)
-    return value
-
-
-def _set_field(project: Project, name: str, value: object) -> None:
-    """Assign through a Django descriptor after application-level validation."""
-    setattr(project, name, value)
-
-
 def _set_model_field(instance: models.Model, name: str, value: object) -> None:
     """Assign a validated value through a Django model descriptor."""
     setattr(instance, name, value)
@@ -289,9 +292,9 @@ def _identifier(instance: models.Model) -> str:
 def _record(project: Project) -> ProjectRecord:
     return ProjectRecord(
         id=str(project.pk),
-        canonical_path=_text_field(project, "canonical_path"),
-        display_name=_text_field(project, "display_name"),
-        git_root=_text_field(project, "git_root"),
+        canonical_path=_string(project, "canonical_path"),
+        display_name=_string(project, "display_name"),
+        git_root=_string(project, "git_root"),
     )
 
 
@@ -342,11 +345,11 @@ class DjangoProjectStore:
                     old_path,
                 )
                 _reject_duplicate(project, identity.canonical_path)
-                previous = _text_field(project, "canonical_path")
-                _set_field(project, "canonical_path", identity.canonical_path)
-                _set_field(project, "display_name", identity.display_name)
-                _set_field(project, "git_root", identity.git_root)
-                _set_field(project, "last_opened_at", timezone.now())
+                previous = _string(project, "canonical_path")
+                _set_model_field(project, "canonical_path", identity.canonical_path)
+                _set_model_field(project, "display_name", identity.display_name)
+                _set_model_field(project, "git_root", identity.git_root)
+                _set_model_field(project, "last_opened_at", timezone.now())
                 project.save(
                     update_fields=(
                         "canonical_path",
@@ -642,6 +645,85 @@ def _run_record(run: Run) -> dict[str, object]:
     }
 
 
+def _node_record(node: NodeRun) -> dict[str, object]:
+    # Monitor summaries omit outputs; paged events retain their visible source bytes.
+    return {
+        "id": _identifier(node),
+        "scope_path": _string(node, "scope_path"),
+        "node_id": _string(node, "node_id"),
+        "node_type": _string(node, "node_type"),
+        "status": _string(node, "status"),
+        "writes": _boolean(node, "writes"),
+        "selected_branch": node.selected_branch,
+        "loop_index": node.loop_index,
+    }
+
+
+def _interaction_record(interaction: HumanInteraction) -> dict[str, object]:
+    return {
+        "id": _identifier(interaction),
+        "attempt_id": _foreign_key_text(interaction, "attempt"),
+        "scope_path": _string(_related(interaction, "node_run", NodeRun), "scope_path"),
+        "kind": _string(interaction, "kind"),
+        "request": _mapping(interaction, "request_payload"),
+        "response": (
+            _mapping(interaction, "response_payload")
+            if interaction.response_payload is not None
+            else None
+        ),
+        "status": _string(interaction, "status"),
+        "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
+        "created_at": _datetime_text(_datetime_field(interaction, "created_at")),
+        "answered_at": _datetime_text(_datetime_field(interaction, "answered_at")),
+    }
+
+
+def _event_record(event: RunEvent) -> dict[str, object]:
+    return {
+        "id": event.id,
+        "type": _string(event, "type"),
+        "version": _integer(event, "version"),
+        "source": _string(event, "source"),
+        "ts": _datetime_text(_datetime_field(event, "ts")),
+        "payload": _mapping(event, "payload"),
+    }
+
+
+def _artifact_record(artifact: Artifact) -> dict[str, object]:
+    return {
+        "id": _identifier(artifact),
+        "attempt_id": _foreign_key_text(artifact, "attempt"),
+        "name": _string(artifact, "declared_name"),
+        "source_path": _string(artifact, "source_path"),
+        "sha256": _string(artifact, "sha256"),
+        "bytes": _integer(artifact, "bytes"),
+        "media_type": _string(artifact, "media_type"),
+        "preservation_state": _string(artifact, "preservation_state"),
+    }
+
+
+def _bounded_page(
+    rows: Sequence[ModelT],
+    limit: int,
+    serialize: Callable[[ModelT], dict[str, object]],
+    *,
+    byte_budget: int = API_MAX_PAGE_BYTES,
+) -> tuple[list[dict[str, object]], bool]:
+    """Serialize an ordered prefix once, retaining a first row so cursors advance."""
+    more = len(rows) > limit
+    records = []
+    byte_count = 0
+    for row in rows[:limit]:
+        record = serialize(row)
+        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if records and byte_count + len(encoded) > byte_budget:
+            more = True
+            break
+        records.append(record)
+        byte_count += len(encoded)
+    return records, more
+
+
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
@@ -672,20 +754,7 @@ class DjangoReadStore:
                         | models.Q(started_at__isnull=True)
                     )
             rows = list(query[: bounded + 1])
-            more = len(rows) > bounded
-            rows = rows[:bounded]
-            records: list[dict[str, object]] = []
-            byte_count = 0
-            for row in rows:
-                record = _run_record(row)
-                encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode(
-                    "utf-8"
-                )
-                if records and byte_count + len(encoded) > API_MAX_PAGE_BYTES:
-                    more = True
-                    break
-                records.append(record)
-                byte_count += len(encoded)
+            records, more = _bounded_page(rows, bounded, _run_record)
             next_value = str(records[-1]["id"]) if more and records else None
         except ProjectDiscoveryError:
             raise
@@ -719,75 +788,24 @@ class DjangoReadStore:
             }
             result["nodes"] = []
             result["interactions"] = []
+            # Reserve half the response ceiling for run and snapshot metadata.
             byte_budget = API_MAX_PAGE_BYTES // 2
-            byte_count = 0
-            records: list[dict[str, object]] = []
-            last_id = since
             if collection == "nodes":
-                rows = list(
+                nodes = list(
                     NodeRun.objects.filter(run=run, pk__gt=since).order_by("pk")[: bounded + 1]
                 )
-                more = len(rows) > bounded
-                for node in rows[:bounded]:
-                    # Run detail is a monitor summary. Full outputs remain durable and
-                    # their visible source bytes are replayed through paged events.
-                    record: dict[str, object] = {
-                        "id": _identifier(node),
-                        "scope_path": _string(node, "scope_path"),
-                        "node_id": _string(node, "node_id"),
-                        "node_type": _string(node, "node_type"),
-                        "status": _string(node, "status"),
-                        "writes": _boolean(node, "writes"),
-                        "selected_branch": node.selected_branch,
-                        "loop_index": node.loop_index,
-                    }
-                    encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode(
-                        "utf-8"
-                    )
-                    if records and byte_count + len(encoded) > byte_budget:
-                        more = True
-                        break
-                    records.append(record)
-                    byte_count += len(encoded)
-                    last_id = int(_identifier(node))
-                result["nodes"] = records
+                records, more = _bounded_page(nodes, bounded, _node_record, byte_budget=byte_budget)
             else:
-                rows = list(
+                interactions = list(
                     HumanInteraction.objects.select_related("node_run", "attempt")
                     .filter(run=run, pk__gt=since)
                     .order_by("pk")[: bounded + 1]
                 )
-                more = len(rows) > bounded
-                for interaction in rows[:bounded]:
-                    interaction_record: dict[str, object] = {
-                        "id": _identifier(interaction),
-                        "attempt_id": _foreign_key_text(interaction, "attempt"),
-                        "scope_path": _string(
-                            _related(interaction, "node_run", NodeRun), "scope_path"
-                        ),
-                        "kind": _string(interaction, "kind"),
-                        "request": _mapping(interaction, "request_payload"),
-                        "response": (
-                            _mapping(interaction, "response_payload")
-                            if interaction.response_payload is not None
-                            else None
-                        ),
-                        "status": _string(interaction, "status"),
-                        "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
-                        "created_at": _datetime_text(_datetime_field(interaction, "created_at")),
-                        "answered_at": _datetime_text(_datetime_field(interaction, "answered_at")),
-                    }
-                    encoded = json.dumps(
-                        interaction_record, separators=(",", ":"), ensure_ascii=False
-                    ).encode("utf-8")
-                    if records and byte_count + len(encoded) > byte_budget:
-                        more = True
-                        break
-                    records.append(interaction_record)
-                    byte_count += len(encoded)
-                    last_id = int(_identifier(interaction))
-                result["interactions"] = records
-            next_value = last_id if more and records else None
+                records, more = _bounded_page(
+                    interactions, bounded, _interaction_record, byte_budget=byte_budget
+                )
+            result[collection] = records
+            next_value = int(str(records[-1]["id"])) if more and records else None
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except DatabaseError:
@@ -807,27 +825,8 @@ class DjangoReadStore:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
             query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
             rows = list(query[: bounded + 1])
-            more = len(rows) > bounded
-            events: list[dict[str, object]] = []
-            byte_count = 0
-            for row in rows[:bounded]:
-                event = {
-                    "id": row.id,
-                    "type": _string(row, "type"),
-                    "version": _integer(row, "version"),
-                    "source": _string(row, "source"),
-                    "ts": _datetime_text(row.ts),
-                    "payload": _mapping(row, "payload"),
-                }
-                encoded = json.dumps(event, separators=(",", ":"), ensure_ascii=False).encode(
-                    "utf-8"
-                )
-                if events and byte_count + len(encoded) > API_MAX_PAGE_BYTES:
-                    more = True
-                    break
-                events.append(event)
-                byte_count += len(encoded)
-            next_value = rows[len(events) - 1].id if more and events else None
+            events, more = _bounded_page(rows, bounded, _event_record)
+            next_value = int(str(events[-1]["id"])) if more and events else None
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except DatabaseError:
@@ -852,31 +851,8 @@ class DjangoReadStore:
                     pk__gt=since,
                 ).order_by("pk")[: bounded + 1]
             )
-            more = len(rows) > bounded
-            records: list[dict[str, object]] = []
-            byte_count = 0
-            last_id = since
-            for row in rows[:bounded]:
-                record: dict[str, object] = {
-                    "id": _identifier(row),
-                    "attempt_id": str(row.attempt_id),
-                    "name": _string(row, "declared_name"),
-                    "source_path": _string(row, "source_path"),
-                    "sha256": _string(row, "sha256"),
-                    "bytes": _integer(row, "bytes"),
-                    "media_type": _string(row, "media_type"),
-                    "preservation_state": _string(row, "preservation_state"),
-                }
-                encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode(
-                    "utf-8"
-                )
-                if records and byte_count + len(encoded) > API_MAX_PAGE_BYTES:
-                    more = True
-                    break
-                records.append(record)
-                byte_count += len(encoded)
-                last_id = int(_identifier(row))
-            next_value = last_id if more and records else None
+            records, more = _bounded_page(rows, bounded, _artifact_record)
+            next_value = int(str(records[-1]["id"])) if more and records else None
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except DatabaseError:
@@ -953,6 +929,7 @@ def _bounded_attempt_event_payload(
 
 
 def _truncate_utf8(value: str, limit: int) -> str:
+    """``aéz`` with a 2-byte limit -> ``a``; with 3 bytes -> ``aé``."""
     encoded = value.encode("utf-8")
     if len(encoded) <= limit:
         return value
@@ -967,20 +944,24 @@ def _bounded_interaction_request(
     options: tuple[Mapping[str, object], ...],
 ) -> dict[str, object]:
     """Keep the public interaction useful while honoring the persisted event ceiling."""
-    payload: dict[str, object] = {
-        "prompt": _truncate_utf8(prompt, EVENT_MAX_PAYLOAD_BYTES // 2),
+    # Reserve half the event ceiling for scope, attempt, and response metadata.
+    budget = EVENT_MAX_PAYLOAD_BYTES // 2
+    payload = {
+        "prompt": _truncate_utf8(prompt, budget),
         "options": [],
     }
-    retained: list[dict[str, object]] = []
+    retained = []
+    byte_count = len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     for option in options:
-        candidate = [*retained, dict(option)]
-        encoded = json.dumps(
-            {**payload, "options": candidate}, separators=(",", ":"), ensure_ascii=False
-        ).encode("utf-8")
-        if len(encoded) > EVENT_MAX_PAYLOAD_BYTES // 2:
+        record = dict(option)
+        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        # Each option is encoded once; later options add one JSON comma byte.
+        added_bytes = len(encoded) + (1 if retained else 0)
+        if byte_count + added_bytes > budget:
             payload["options_truncated"] = True
             break
-        retained = candidate
+        retained.append(record)
+        byte_count += added_bytes
     payload["options"] = retained
     return payload
 
@@ -1050,7 +1031,7 @@ def _resolved_prompt_contents(
     if not isinstance(rows, list):
         message = "The run snapshot prompt list is invalid."
         raise PersistenceError(message)
-    contents: list[str] = []
+    contents = []
     for reference in references:
         if not isinstance(reference, dict):
             message = "A frozen prompt reference is invalid."
@@ -1212,108 +1193,68 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not enumerate active attempt processes."
             raise PersistenceError(message) from None
 
+    def _stop_active_attempts(self, reason: AttemptStopReason) -> int:
+        attempts = NodeAttempt.objects.filter(
+            status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
+        )
+        if reason is AttemptStopReason.WORKER_LOST:
+            # Human waits and yielded structural scopes have no worker to lose.
+            attempts = attempts.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value).exclude(
+                status=AttemptStatus.WAITING.value,
+                node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+            )
+        attempt_ids = list(attempts.order_by("started_at", "pk").values_list("pk", flat=True))
+        stopped = 0
+        for attempt_id in attempt_ids:
+            with transaction.atomic():
+                attempt = (
+                    NodeAttempt.objects.select_for_update()
+                    .filter(
+                        pk=attempt_id,
+                        status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                    )
+                    .first()
+                )
+                if attempt is None:
+                    continue
+                self._discard_attempt_mailbox(attempt)
+                self.finish_attempt(
+                    _identifier(attempt),
+                    ExecutionOutcome(
+                        OutcomeKind.FAILED, stop_reason=reason, error_code=reason.value
+                    ),
+                    _string(attempt, "starting_head"),
+                )
+                DispatchClaim.objects.filter(attempt=attempt).update(
+                    state=DispatchState.CONSUMED.value, consumed_at=timezone.now()
+                )
+                self.release_attempt_lock(_identifier(attempt))
+                stopped += 1
+        return stopped
+
     def interrupt_active_attempts(self) -> int:
         """Force any attempt left after child exit into the resumable terminal state."""
         try:
-            attempt_ids = list(
-                NodeAttempt.objects.filter(
-                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
-                )
-                .order_by("started_at", "pk")
-                .values_list("pk", flat=True)
-            )
-            interrupted = 0
-            for attempt_id in attempt_ids:
-                with transaction.atomic():
-                    attempt = (
-                        NodeAttempt.objects.select_for_update()
-                        .filter(
-                            pk=attempt_id,
-                            status__in=(
-                                AttemptStatus.RUNNING.value,
-                                AttemptStatus.WAITING.value,
-                            ),
-                        )
-                        .first()
-                    )
-                    if attempt is None:
-                        continue
-                    self._discard_attempt_mailbox(attempt)
-                    self.finish_attempt(
-                        _identifier(attempt),
-                        ExecutionOutcome(
-                            OutcomeKind.FAILED,
-                            stop_reason=AttemptStopReason.INTERRUPTED,
-                            error_code=AttemptStopReason.INTERRUPTED.value,
-                        ),
-                        _string(attempt, "starting_head"),
-                    )
-                    DispatchClaim.objects.filter(attempt=attempt).update(
-                        state=DispatchState.CONSUMED.value,
-                        consumed_at=timezone.now(),
-                    )
-                    self.release_attempt_lock(_identifier(attempt))
-                    interrupted += 1
+            stopped = self._stop_active_attempts(AttemptStopReason.INTERRUPTED)
         except PersistenceError:
             raise
         except DatabaseError:
             message = "Relay could not reconcile attempts after supervisor shutdown."
             raise PersistenceError(message) from None
         else:
-            return interrupted
+            return stopped
 
     def fail_worker_attempts(self) -> int:
         """Fail attempts whose worker process exited without orderly-shutdown intent."""
         try:
-            attempt_ids = list(
-                NodeAttempt.objects.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value)
-                .exclude(
-                    status=AttemptStatus.WAITING.value,
-                    node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
-                )
-                .filter(status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value))
-                .order_by("started_at", "pk")
-                .values_list("pk", flat=True)
-            )
-            failed = 0
-            for attempt_id in attempt_ids:
-                with transaction.atomic():
-                    attempt = (
-                        NodeAttempt.objects.select_for_update()
-                        .filter(
-                            pk=attempt_id,
-                            status__in=(
-                                AttemptStatus.RUNNING.value,
-                                AttemptStatus.WAITING.value,
-                            ),
-                        )
-                        .first()
-                    )
-                    if attempt is None:
-                        continue
-                    self._discard_attempt_mailbox(attempt)
-                    self.finish_attempt(
-                        _identifier(attempt),
-                        ExecutionOutcome(
-                            OutcomeKind.FAILED,
-                            stop_reason=AttemptStopReason.WORKER_LOST,
-                            error_code=AttemptStopReason.WORKER_LOST.value,
-                        ),
-                        _string(attempt, "starting_head"),
-                    )
-                    DispatchClaim.objects.filter(attempt=attempt).update(
-                        state=DispatchState.CONSUMED.value,
-                        consumed_at=timezone.now(),
-                    )
-                    self.release_attempt_lock(_identifier(attempt))
-                    failed += 1
+            stopped = self._stop_active_attempts(AttemptStopReason.WORKER_LOST)
         except PersistenceError:
             raise
         except DatabaseError:
             message = "Relay could not record attempts lost with the worker process."
             raise PersistenceError(message) from None
         else:
-            return failed
+            return stopped
 
     def release_instance(self, instance_id: str) -> None:
         try:
@@ -1814,14 +1755,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         node: NodeRun,
         snapshot: RunSnapshot,
         frozen: Mapping[str, object],
-    ) -> tuple[
-        dict[str, object],
-        dict[str, dict[str, object]],
-        dict[str, object],
-        tuple[str, ...],
-        dict[str, object],
-        dict[str, object],
-    ]:
+    ) -> _ClaimContext:
         parent_scope = node.parent_scope_path
         if parent_scope is not None and not isinstance(parent_scope, str):
             message = "The stored node parent scope is invalid."
@@ -1832,7 +1766,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             else _mapping(node, "scope_inputs")
         )
         needs = _string_list(frozen.get("needs", []), field="needs")
-        upstream: dict[str, dict[str, object]] = {}
+        upstream = {}
         scope_path = _string(node, "scope_path")
         for needed in needs:
             dependency = NodeRun.objects.filter(
@@ -1843,7 +1777,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 message = f"The durable dependency {needed!r} is missing."
                 raise PersistenceError(message, context={"node": scope_path})
             upstream[needed] = _mapping(dependency, "outputs")
-        metadata: dict[str, object] = {
+        metadata = {
             "run_id": _identifier(run),
             "workflow_key": _string(run, "workflow_key"),
             "source_commit": _string(run, "source_commit"),
@@ -1863,7 +1797,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         if not isinstance(route_value, dict):
             message = "The snapshotted route entry is invalid."
             raise PersistenceError(message, context={"node": scope_path})
-        return (
+        return _ClaimContext(
             inputs,
             upstream,
             metadata,
@@ -1992,16 +1926,9 @@ class DjangoExecutionStore(DjangoAgentStore):
 
                 scope_path = _string(node, "scope_path")
                 frozen = _mapping(node, "frozen_def")
-                (
-                    inputs,
-                    upstream_outputs,
-                    run_metadata,
-                    prompt_contents,
-                    route,
-                    subworkflows,
-                ) = self._claim_context(run, node, snapshot, frozen)
-                selected_agent = route.get("selected_agent", "")
-                model_value = route.get("model_value", "")
+                context = self._claim_context(run, node, snapshot, frozen)
+                selected_agent = context.route.get("selected_agent", "")
+                model_value = context.route.get("model_value", "")
                 if not isinstance(selected_agent, str) or not isinstance(model_value, str):
                     message = "The snapshotted agent route is malformed."
                     raise PersistenceError(message, context={"node": scope_path})  # noqa: TRY301
@@ -2135,12 +2062,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                     node_id=_string(node, "node_id"),
                     node_type=node_type,
                     frozen_def=frozen,
-                    inputs=inputs,
-                    upstream_outputs=upstream_outputs,
-                    run_metadata=run_metadata,
-                    prompt_contents=prompt_contents,
-                    route=route,
-                    subworkflows=subworkflows,
+                    inputs=context.inputs,
+                    upstream_outputs=context.upstream_outputs,
+                    run_metadata=context.run_metadata,
+                    prompt_contents=context.prompt_contents,
+                    route=context.route,
+                    subworkflows=context.subworkflows,
                     writes=writes,
                     starting_head=starting_head,
                     recorded_head=starting_head,
@@ -3035,11 +2962,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 state = transition_control(None, "post").status
                 if not self._attempt_is_current(attempt):
                     state = transition_control(state, "supersede").status
-                expected_interaction = {
-                    ControlKind.PERMISSION_ANSWER.value: InteractionKind.PERMISSION.value,
-                    ControlKind.ELICITATION_ANSWER.value: InteractionKind.ELICITATION.value,
-                    ControlKind.WAIT_ANSWER.value: InteractionKind.WAIT.value,
-                }.get(kind)
+                expected_interaction = _CONTROL_INTERACTION_KINDS.get(kind)
                 interaction = None
                 if state == ControlState.PENDING.value and expected_interaction is not None:
                     interaction = (
@@ -3131,19 +3054,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not claim the next control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
-    def heartbeat_control(self, request_id: str, worker_id: str) -> bool:
-        try:
-            updated = ControlRequest.objects.filter(
-                pk=request_id,
-                state=ControlState.CLAIMED.value,
-                claim_owner=worker_id,
-            ).update(claim_heartbeat_at=timezone.now())
-        except DatabaseError:
-            message = "Relay could not update the control-request heartbeat."
-            raise PersistenceError(message) from None
-        else:
-            return updated == 1
-
     def apply_control(self, request_id: str, worker_id: str) -> bool:
         try:
             with transaction.atomic():
@@ -3173,11 +3083,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _set_model_field(request, "applied_at", now)
                 request.save(update_fields=("state", "applied_at"))
                 kind = _string(request, "kind")
-                interaction_kind = {
-                    ControlKind.PERMISSION_ANSWER.value: InteractionKind.PERMISSION.value,
-                    ControlKind.ELICITATION_ANSWER.value: InteractionKind.ELICITATION.value,
-                    ControlKind.WAIT_ANSWER.value: InteractionKind.WAIT.value,
-                }.get(kind)
+                interaction_kind = _CONTROL_INTERACTION_KINDS.get(kind)
                 if interaction_kind is not None:
                     interaction = (
                         HumanInteraction.objects.select_for_update()
@@ -3740,7 +3646,7 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def interrupted_targets(self) -> tuple[RecoveryTarget, ...]:
         try:
-            targets: list[RecoveryTarget] = []
+            targets = []
             run_ids = self.interrupted_run_ids()
             nodes = (
                 NodeRun.objects.select_related("run__project")

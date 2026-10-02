@@ -13,7 +13,7 @@ from relay.constants import MAX_EXPANDED_NODES
 from relay.errors import PromptResolutionError, WorkflowValidationError
 
 from .graph import CompiledGraph, compile_graph
-from .loader import LoadedWorkflow, load_workflow_tree, resolve_workflow_path
+from .loader import LoadedWorkflow, load_workflow_tree, resolve_workflow_path, subworkflow_nodes
 from .prompts import ResolvedPrompt, iter_agent_nodes, resolve_prompt
 from .schema import (
     NODE_ID_PATTERN,
@@ -45,6 +45,7 @@ class ValidatedWorkflow:
 
 
 def _issue_text(issues: Iterable[str]) -> str:
+    """[``unknown input 'x'``] -> ``Workflow validation failed:\n- unknown input 'x'``."""
     return "Workflow validation failed:\n- " + "\n- ".join(issues)
 
 
@@ -58,7 +59,7 @@ def _pattern_adapter(pattern: str) -> TypeAdapter[str]:
 
 
 def _definition_issues(definition: WorkflowDefinition, *, label: str) -> list[str]:
-    issues: list[str] = []
+    issues = []
     for input_id, item in definition.inputs.items():
         if isinstance(item, StringInput) and item.constraints.pattern is not None:
             try:
@@ -83,16 +84,8 @@ def _definition_issues(definition: WorkflowDefinition, *, label: str) -> list[st
     return issues
 
 
-def _walk_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[SubworkflowNode]:
-    for node in nodes.values():
-        if isinstance(node, SubworkflowNode):
-            yield node
-        elif isinstance(node, LoopNode):
-            yield from _walk_nodes(node.body)
-
-
 def _declared_outputs(definition: WorkflowDefinition) -> set[str]:
-    outputs: set[str] = set()
+    outputs = set()
     for node_id, node in definition.nodes.items():
         if isinstance(node, (AgentNode, CommandNode, SubworkflowNode)):
             outputs.update(f"{node_id}.{name}" for name in node.outputs)
@@ -106,8 +99,8 @@ def _subworkflow_io_issues(
     *,
     label: str,
 ) -> list[str]:
-    issues: list[str] = []
-    for node in _walk_nodes(definition.nodes):
+    issues = []
+    for node in subworkflow_nodes(definition.nodes):
         path = resolve_workflow_path(workflows_root, node.workflow)
         key = path.relative_to(workflows_root.resolve()).as_posix()
         child = subworkflows.get(key)
@@ -155,7 +148,7 @@ def _expanded_node_count(
 def _resolved_prompts(
     workflows: Iterable[LoadedWorkflow], relay_root: Path, issues: list[str]
 ) -> list[ResolvedPrompt]:
-    prompts: list[ResolvedPrompt] = []
+    prompts = []
     for workflow in workflows:
         for node in iter_agent_nodes(workflow.definition.nodes):
             for reference in node.prompts:
@@ -177,7 +170,7 @@ def validate_loaded_workflow(root: LoadedWorkflow, relay_root: Path) -> Validate
         issues.append(error.message)
         graph = CompiledGraph({}, (), {}, {}, {}, {}, {})
 
-    subworkflow_graphs: dict[str, CompiledGraph] = {}
+    subworkflow_graphs = {}
     for key, workflow in subworkflows.items():
         issues.extend(_definition_issues(workflow.definition, label=key))
         try:
@@ -261,10 +254,10 @@ def resolve_inputs(
     definition: WorkflowDefinition, supplied: Mapping[str, object]
 ) -> dict[str, object]:
     """Apply defaults and validate every launch input without coercion."""
-    issues: list[str] = []
+    issues = []
     unknown = supplied.keys() - definition.inputs.keys()
     issues.extend(f"unknown launch input {name!r}" for name in sorted(unknown))
-    resolved: dict[str, object] = {}
+    resolved = {}
     for input_id, item in definition.inputs.items():
         if input_id in supplied:
             value = supplied[input_id]

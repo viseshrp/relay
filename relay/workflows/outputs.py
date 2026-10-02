@@ -42,6 +42,7 @@ def _read_text(path: Path, reference: str) -> str:
 
 
 def _mapping_path(document: object, selector: DataPathSelectorValue) -> object:
+    """{``build``: {``ready``: True}} with path ``build.ready`` -> True."""
     value = document
     keys = selector.path.split(".")
     if any(not key for key in keys):
@@ -56,6 +57,7 @@ def _mapping_path(document: object, selector: DataPathSelectorValue) -> object:
 
 
 def _label(worktree: Path, selector: LabelSelector) -> str:
+    """The line ``RESULT: ready`` with label ``RESULT`` -> ``ready``."""
     reference = selector.label.artifact
     text = _read_text(_artifact(worktree, reference), reference)
     prefix = f"{selector.label.label}: "

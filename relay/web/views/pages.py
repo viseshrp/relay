@@ -48,6 +48,21 @@ def _nonnegative_int(
     return parsed
 
 
+def _page_limit(request: HttpRequest) -> int:
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    return limit
+
+
+def _page_parameters(request: HttpRequest) -> tuple[int, int]:
+    since = _nonnegative_int(
+        request.GET.get("since"), field="since", default=0, maximum=DATABASE_INTEGER_MAX
+    )
+    return since, _page_limit(request)
+
+
 @api_errors
 @owner_required
 @require_GET
@@ -80,7 +95,7 @@ def agents(request: HttpRequest) -> HttpResponse:
     del request
     registry = load_registry()
     observations = DjangoAgentStore().list_model_observations()
-    grouped: dict[str, list[dict[str, object]]] = {}
+    grouped = {}
     for item in observations:
         grouped.setdefault(item.agent_id, []).append(
             {
@@ -91,7 +106,7 @@ def agents(request: HttpRequest) -> HttpResponse:
                 "observed_at": item.observed_at.isoformat(),
             }
         )
-    rows: list[dict[str, object]] = []
+    rows = []
     for discovered in discover_agents(registry):
         metadata = (
             registry.agents.get(discovered.profile.registry_id)
@@ -144,10 +159,7 @@ def agents(request: HttpRequest) -> HttpResponse:
 @owner_required
 @require_GET
 def runs(request: HttpRequest) -> HttpResponse:
-    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
-    if limit == 0:
-        message = "limit must be at least 1."
-        raise ConfigError(message)
+    limit = _page_limit(request)
     status = request.GET.get("status")
     if status is not None and status not in {item.value for item in RunStatus}:
         message = "status is not a recognized run state."
@@ -175,16 +187,7 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
     if collection not in {"nodes", "interactions"}:
         message = "collection must be nodes or interactions."
         raise ConfigError(message)
-    since = _nonnegative_int(
-        request.GET.get("since"),
-        field="since",
-        default=0,
-        maximum=DATABASE_INTEGER_MAX,
-    )
-    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
-    if limit == 0:
-        message = "limit must be at least 1."
-        raise ConfigError(message)
+    since, limit = _page_parameters(request)
     run, next_value = DjangoReadStore().run_detail(
         canonical_uuid(run_id, resource="run"),
         collection=collection,
@@ -199,16 +202,7 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
 @require_GET
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
-    since = _nonnegative_int(
-        request.GET.get("since"),
-        field="since",
-        default=0,
-        maximum=DATABASE_INTEGER_MAX,
-    )
-    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
-    if limit == 0:
-        message = "limit must be at least 1."
-        raise ConfigError(message)
+    since, limit = _page_parameters(request)
     events, next_value = DjangoReadStore().page_events(run_id, since, limit)
     return JsonResponse({"events": events, "next": next_value})
 
@@ -217,16 +211,7 @@ def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
 @owner_required
 @require_GET
 def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
-    since = _nonnegative_int(
-        request.GET.get("since"),
-        field="since",
-        default=0,
-        maximum=DATABASE_INTEGER_MAX,
-    )
-    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=API_MAX_PAGE)
-    if limit == 0:
-        message = "limit must be at least 1."
-        raise ConfigError(message)
+    since, limit = _page_parameters(request)
     artifacts, next_value = DjangoReadStore().page_artifacts(
         canonical_uuid(run_id, resource="run"),
         since,

@@ -127,17 +127,17 @@ class CommandExecutor:
             {"exit_code": process.returncode, "duration_ms": duration_ms},
         )
         if stop_reason is not None:
+            if stop_reason is AttemptStopReason.CANCELED:
+                error_code = "canceled"
+            elif stop_reason is AttemptStopReason.INTERRUPTED:
+                error_code = "interrupted"
+            else:
+                error_code = "node_timeout"
             return ExecutionOutcome(
                 OutcomeKind.FAILED,
                 stop_reason=stop_reason,
                 exit_code=process.returncode,
-                error_code=(
-                    "canceled"
-                    if stop_reason is AttemptStopReason.CANCELED
-                    else "interrupted"
-                    if stop_reason is AttemptStopReason.INTERRUPTED
-                    else "node_timeout"
-                ),
+                error_code=error_code,
             )
         if process.returncode != 0:
             return ExecutionOutcome(
