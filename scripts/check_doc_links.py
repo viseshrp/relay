@@ -13,11 +13,11 @@ HEADING_PATTERN = re.compile(r"^#{1,6}\s+(.+?)\s*#*$", re.MULTILINE)
 
 
 def heading_slug(heading: str) -> str:
-    """Map ``HTTP and SSE`` to GitHub's ``http-and-sse`` anchor shape."""
+    """Map ``Install / upgrade`` to ``install--upgrade``, keeping each space."""
     lowered = heading.strip().lower()
     without_markup = re.sub(r"[`*_~]", "", lowered)
     without_punctuation = re.sub(r"[^\w\- ]", "", without_markup)
-    return re.sub(r"[ -]+", "-", without_punctuation).strip("-")
+    return without_punctuation.replace(" ", "-")
 
 
 def anchors(path: Path) -> set[str]:

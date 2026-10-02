@@ -24,7 +24,9 @@ assets.
 ## Hatch wheel hook
 
 `hatch_build.py` defines `CustomBuildHook(BuildHookInterface)`. The hook does
-nothing for a source-distribution target. For a wheel target it resolves npm
+nothing for a source-distribution target or an editable wheel (`version ==
+"editable"`). Before `relay up` from a checkout, run `npm --prefix frontend ci`
+and `npm --prefix frontend run build`. For a distributed wheel it resolves npm
 from `PATH`, including Windows `PATHEXT` entries such as `npm.cmd`, then runs
 these argument vectors with `shell=False` from `frontend/`:
 
@@ -67,7 +69,8 @@ evidence, and rejects bundled workflow or prompt templates. Relay ships only
 the blank files created by `relay init`; no example workflow or prompt enters
 a distribution.
 
-The CI jobs that build distributions install the pinned Node version first.
+The distribution jobs install Python dependencies in editable mode, then
+install the pinned Node version before building the source distribution and wheel.
 The release publication job downloads the already-built artifacts and does not
 rebuild them.
 

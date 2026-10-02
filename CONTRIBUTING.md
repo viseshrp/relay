@@ -42,8 +42,13 @@ must run without it.
    ```bash
    cd frontend
    npm ci
+   npm run build
    cd ..
    ```
+
+Editable Python installs skip the frontend build and need no Node runtime.
+Before running `relay up` from a checkout, build the browser application with
+the commands above. Rebuild it after changing frontend sources.
 
 ## Checks
 
@@ -66,6 +71,14 @@ For a frontend-only check, run:
 ```bash
 npm --prefix frontend run build
 ```
+
+The pre-commit license gate checks runtime dependencies against the allow-list
+in `pyproject.toml`. Run it directly with `uv run liccheck`. The pinned
+`agent-client-protocol` 0.12.1 and `huey` 3.4.0 omit license metadata, so the
+gate authorizes those exact releases based on their source licenses:
+[ACP Apache-2.0](https://github.com/agentclientprotocol/python-sdk/blob/0.12.1/LICENSE)
+and [Huey MIT](https://github.com/coleifer/huey/blob/3.4.0/LICENSE). Recheck the
+source license before changing either authorized version.
 
 `make check-dist` also asserts that the wheel contains compiled static assets,
 the source distribution contains its frontend build inputs, and neither
@@ -96,6 +109,20 @@ CLI help in the README is refreshed with:
 ```bash
 uv run cog -r README.md
 ```
+
+Run the applicable documentation checks before staging a documentation change:
+
+```bash
+uv run python scripts/check_doc_links.py README.md CONTRIBUTING.md docs/*.md
+uv run python scripts/check_transition_docs.py
+uv run python scripts/check_workflow_examples.py docs/workflows.md
+```
+
+The link check validates local targets and heading fragments. Run the transition
+check after editing `state.py` or the transition tables in `docs/execution.md`.
+Run the workflow-example check after editing the guide or workflow validation;
+it loads and validates tagged examples against their expected outcomes without
+executing their command nodes or agents.
 
 Do not edit `CHANGELOG.md` outside a release task.
 

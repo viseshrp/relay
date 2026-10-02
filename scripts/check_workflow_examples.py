@@ -1,4 +1,4 @@
-"""Execute every tagged workflow example in the durable workflow guide."""
+"""Load and validate every tagged workflow example in the durable guide."""
 
 from __future__ import annotations
 

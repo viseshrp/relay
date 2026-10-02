@@ -62,6 +62,9 @@ dev = [
     "ty",
     "vulture",
     "deptry",
+    "liccheck",
+    # liccheck imports pkg_resources, which newer setuptools no longer provides.
+    "setuptools<81",
     "cogapp",
     "twine",
     "hatch",
@@ -254,6 +257,36 @@ exclude = ["venv/", ".venv/"]
 exclude = ["venv/.*", ".venv/.*", "tests/.*"]
 # Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
 per_rule_ignores = { DEP002 = ["uvicorn"], DEP003 = ["hatchling"] }
+
+[tool.liccheck]
+authorized_licenses = [
+    "apache",
+    "apache 2.0",
+    "apache software license",
+    "bsd",
+    "bsd license",
+    "bsd-3-clause",
+    "isc",
+    "isc license",
+    "mit",
+    "mit license",
+    "python software foundation license",
+    "psf-2.0", # SPDX name for the already-authorized Python Software Foundation license.
+]
+unauthorized_licenses = [
+    "agpl",
+    "gpl",
+    "gpl v2",
+    "gpl v3",
+    "gnu affero general public license",
+    "gnu general public license",
+]
+dependencies = true
+
+[tool.liccheck.authorized_packages]
+# These pinned releases omit license metadata; their source licenses are verified.
+agent-client-protocol = "0.12.1" # Apache-2.0
+huey = "3.4.0" # MIT
 
 [tool.pre-commit.default_language_versions]
 python = "3.14"

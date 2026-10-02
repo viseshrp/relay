@@ -18,9 +18,9 @@ class CustomBuildHook(BuildHookInterface):
     PLUGIN_NAME: str = "custom"
 
     def initialize(self, version: str, build_data: BuildData) -> None:
-        """Build the Vite application only for a wheel target."""
-        del version
-        if self.target_name != "wheel":
+        """Build Vite for distributed wheels; editable checkouts build explicitly."""
+        # Hatch's editable build is a wheel target with version "editable".
+        if self.target_name != "wheel" or version == "editable":
             return
 
         root = Path(self.root)
