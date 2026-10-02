@@ -33,8 +33,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _render_error(error: RelayError) -> str:
-    """Render the shared envelope as stable, machine-readable CLI JSON."""
+    """`ConfigError('Bad host.')` -> JSON code/config_error, context/{}, message/Bad host."""
     return json.dumps(error.to_envelope(), sort_keys=True)
+
+
+def _unexpected_error(message: str) -> PersistenceError:
+    LOGGER.exception("Unhandled Relay administration failure")
+    return PersistenceError(message, next_action="Inspect the local Relay log before retrying.")
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -59,6 +64,13 @@ def init_command(context: click.Context) -> None:
     except ProjectDiscoveryError as error:
         click.echo(_render_error(error), err=True)
         context.exit(EXIT_NOT_A_REPOSITORY)
+    except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    except Exception:
+        error = _unexpected_error("Relay could not initialize the project.")
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
     if not result.created:
         click.echo(f"Relay is already initialized at {result.relay_root}.", err=True)
         context.exit(EXIT_ALREADY_INITIALIZED)
@@ -287,7 +299,18 @@ def doctor_command(context: click.Context) -> None:
                 "reason": row["reason"],
             }
         )
-    all_ready = all(bool(check["ok"]) for check in checks)
+    any_agent_ready = any(bool(agent["ready"]) for agent in agents)
+    core_ready = all(
+        bool(check["ok"]) for check in checks if not str(check["id"]).startswith("agent:")
+    )
+    checks.append(
+        {
+            "id": "agent_readiness",
+            "ok": any_agent_ready,
+            "code": "ok" if any_agent_ready else "agent_not_ready",
+        }
+    )
+    all_ready = core_ready and any_agent_ready
     click.echo(
         json.dumps(
             {
@@ -324,6 +347,10 @@ def project_list_command(context: click.Context) -> None:
     except RelayError as error:
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
+    except Exception:
+        error = _unexpected_error("Relay could not list registered projects.")
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
     click.echo(json.dumps({"projects": [asdict(record) for record in records]}, sort_keys=True))
 
 
@@ -347,6 +374,10 @@ def project_relink_command(context: click.Context, path: Path, newpath: Path) ->
         click.echo(_render_error(error), err=True)
         context.exit(EXIT_PROJECT_NOT_FOUND)
     except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    except Exception:
+        error = _unexpected_error("Relay could not relink the project.")
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
     click.echo(json.dumps({"project": asdict(record)}, sort_keys=True))
@@ -416,6 +447,10 @@ def data_clean_command(
             for key, value in result.items():
                 deleted[key] += value
     except RelayError as error:
+        click.echo(_render_error(error), err=True)
+        context.exit(error.cli_exit_code)
+    except Exception:
+        error = _unexpected_error("Relay could not clean the confirmed data.")
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
     click.echo(json.dumps({"deleted": deleted}, sort_keys=True))

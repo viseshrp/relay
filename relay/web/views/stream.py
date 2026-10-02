@@ -9,7 +9,6 @@ import json
 import logging
 import uuid
 
-from django.db import connections
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 
 from relay.constants import (
@@ -32,7 +31,7 @@ def _error(code: str, message: str, status: int) -> JsonResponse:
 
 
 def _cursor(request: HttpRequest) -> int:
-    raw = request.headers.get("Last-Event-ID", "0")
+    raw = request.headers.get("Last-Event-ID", request.GET.get("since", "0"))
     try:
         value = int(raw)
     except ValueError:
@@ -131,12 +130,10 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
         }
         data = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         yield f"id: {cursor}\nevent: error\ndata: {data}\n\n".encode()
-    finally:
-        await asyncio.to_thread(connections.close_all)
 
 
 async def run_stream(request: HttpRequest, run_id: str) -> StreamingHttpResponse | JsonResponse:
-    """Replay rows after `Last-Event-ID`, then follow new rows until terminal."""
+    """Replay after Last-Event-ID, or the initial `?since=17` cursor, then follow."""
     if request.method != "GET":
         response = _error(
             "method_not_allowed",
@@ -155,7 +152,7 @@ async def run_stream(request: HttpRequest, run_id: str) -> StreamingHttpResponse
     if after < 0:
         return _error(
             "config_error",
-            "Last-Event-ID must be within Relay's nonnegative database integer range.",
+            "The stream cursor must be within Relay's nonnegative database integer range.",
             400,
         )
     try:

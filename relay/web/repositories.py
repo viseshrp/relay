@@ -92,7 +92,7 @@ from relay.execution.state import (
 )
 from relay.execution.timing import duration_seconds
 from relay.paths import (
-    application_log_path,
+    application_log_files,
     artifacts_dir,
     safe_resolve,
     shutdown_marker_path,
@@ -1683,10 +1683,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                 deleted["runs"] = len(runs)
                 Run.objects.filter(pk__in=[run.pk for run in runs]).delete()
             if scope == "all":
-                log = application_log_path()
-                for path in (log, *(log.parent.glob(f"{log.name}.*"))):
+                for path in application_log_files():
                     if path.is_file():
-                        path.unlink()
+                        # Keep open append handlers attached on Linux and Windows.
+                        with path.open("r+b") as stream:
+                            stream.truncate(0)
                         deleted["logs"] += 1
         except (PermissionFlowError, PersistenceError, ProjectDiscoveryError):
             raise

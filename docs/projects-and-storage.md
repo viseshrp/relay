@@ -41,8 +41,14 @@ Relay creates these directories only when needed. POSIX directories use mode
 if other local accounts can access the profile.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
-`relay.db`, `huey.db`, `snapshots/`, `artifacts/`, `worktrees/`, and
-`registry-cache/`. The log root contains `relay.log` and supervisor logs.
+`relay.db`, `huey.db`, `artifacts/`, `worktrees/`, and `registry-cache/`.
+Snapshots are database rows. The log root contains one rotating
+`relay-{pid}.log` per supervisor, web, or consumer process, with up to three
+backups of 5 MB each. A `RELAY_LOG_PATH=/path/custom.log` override produces
+`/path/custom-{pid}.log` and its rotations. Separate files prevent concurrent
+processes from rotating the same open file. Diagnostic context such as run,
+attempt, path, and cursor appears as escaped JSON alongside the message and
+exception trace.
 
 ## Database and disk roles
 
@@ -55,6 +61,13 @@ wait for that reservation for up to five seconds; contention beyond that limit
 becomes a Relay persistence error. Transactions contain short database changes;
 Git subprocesses, network requests, and worktree cleanup run outside them.
 This follows [Django's SQLite transaction guidance](https://docs.djangoproject.com/en/5.2/ref/databases/#transactions-behavior).
+The Django SQLite `OPTIONS.init_command` applies WAL, foreign keys, and the
+busy timeout to each connection.
+
+The installation's Django secret key is written and flushed in a temporary
+file, then published through an atomic link that cannot overwrite another
+process's complete key. An incomplete or unreadable key returns a Relay
+persistence error without a polling retry loop.
 
 Snapshot text and event payloads stay in the database. Large artifact and diff
 bytes live under `artifacts/`; database rows store their retained paths,
@@ -90,6 +103,17 @@ an already registered destination, or two paths that resolve to the same
 location. Successful relinks append an audit row with both canonical paths and
 the timestamp.
 
+Each web process resolves and registers the single served project once.
+Later API reads reuse that identity without invoking Git or updating
+`last_opened_at` on every request.
+
+Unexpected failures in `relay init`, `relay project list`,
+`relay project relink`, or `relay data clean` produce the same JSON error
+envelope as other administration commands. The local log retains the trace.
+
+Static assets and retained artifact downloads use Python's built-in MIME
+tables, independent of operating-system registries and MIME files.
+
 ## Retention and deletion
 
 Run history remains until the owner confirms deletion. Project rows are
@@ -102,7 +126,10 @@ only copy of a diff, artifact, or snapshot without confirmation. Retained run
 branches require explicit cleanup even when a successful worktree is removed.
 Cleaning run records alone is rejected while its worktree, run branch, or
 retained attempt refs still exist. Clean worktrees, then Git refs, then records;
-`--all` applies that order and also removes Relay logs.
+`--all` applies that order and truncates Relay process logs, rotations, and any
+former shared `relay.log` in place. It keeps open append handlers attached, so
+active processes can continue logging after cleanup. Windows file-handle
+behavior remains unverified until exercised on Windows.
 
 Agent and command processes inherit the worker environment. Relay has no secret
 vault or output masking, so the database, artifact directory, and logs may

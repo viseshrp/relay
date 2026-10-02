@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
 import logging
-import mimetypes
 import os
 from pathlib import Path
 import re
@@ -15,6 +14,7 @@ import stat
 import tempfile
 
 from relay.errors import ArtifactPreservationError, GitError, PathSafetyError
+from relay.media import media_type_for
 from relay.paths import artifacts_dir, ensure_private_dir, safe_resolve
 
 from .commits import commits_between, current_head
@@ -102,7 +102,7 @@ def _record(
     size: int,
     kind: str,
 ) -> PreservedArtifact:
-    media_type = mimetypes.guess_type(retained.name)[0] or "application/octet-stream"
+    media_type = media_type_for(retained)
     return PreservedArtifact(name, source, str(retained), digest, size, media_type, kind)
 
 

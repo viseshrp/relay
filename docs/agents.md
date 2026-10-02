@@ -27,6 +27,11 @@ launch preflight. Relay reports permission and route failures together before
 running any node. Registry installation metadata is advisory; a registry fetch
 failure does not prevent installed agents from proving their routes.
 
+ACP authentication failures use the protocol's `auth_required` code. An
+adapter disconnect or early exit is a protocol failure; words such as `auth`
+or `config` in unrelated diagnostics do not decide the error category. Probe
+reports retain each failure's code and message separately.
+
 The attempt deadline, cancellation mailbox, and heartbeat cover initialization,
 model selection, prompt execution, and provider shutdown as one lifecycle.
 
@@ -137,6 +142,10 @@ Headless mode cannot pause for mid-run permission or elicitation input.
 Antigravity always has a print timeout. A node timeout such as `15m` becomes
 `--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
 five-minute default and passes `--print-timeout 5m` explicitly.
+
+The disposable `agy models` probe has a 15-second response limit and runs in
+its own process group. Relay stops that group before reporting a model-list
+timeout.
 
 The complete composed prompt must fit in 32 KiB of UTF-8. On Windows the
 command must also fit the 32,767 UTF-16-unit process limit, including its final

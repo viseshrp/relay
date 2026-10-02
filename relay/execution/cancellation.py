@@ -59,7 +59,9 @@ def _wait(process: subprocess.Popen[bytes] | subprocess.Popen[str], timeout: flo
     return True
 
 
-def signal_process_tree(process_id: int, *, force: bool = False) -> None:
+def signal_process_tree(
+    process_id: int, *, force: bool = False, graceful_signal: signal.Signals = signal.SIGTERM
+) -> None:
     """Signal a process group, or force-stop its Windows tree within a bound."""
     try:
         if os.name == "nt" and force:
@@ -74,7 +76,7 @@ def signal_process_tree(process_id: int, *, force: bool = False) -> None:
             # CREATE_NEW_PROCESS_GROUP permits a cooperative console break.
             os.kill(process_id, signal.CTRL_BREAK_EVENT)
         else:
-            os.killpg(process_id, signal.SIGKILL if force else signal.SIGTERM)
+            os.killpg(process_id, signal.SIGKILL if force else graceful_signal)
     except ProcessLookupError:
         return
 

@@ -161,8 +161,10 @@ event: agent.message
 data: {"id":17,"payload":{"text":"Done."},"source":"agent","ts":"...","type":"agent.message","version":1}
 ```
 
+The initial URL may contain `?since=17` when event pages already include ID 17.
 The client keeps the last received ID. Reconnecting with
-`Last-Event-ID: 17` returns only rows whose ID is greater than 17. Reads use the
+`Last-Event-ID: 17` returns only rows whose ID is greater than 17; the header
+takes precedence over the URL cursor. Reads use the
 indexed `(run, id)` order, at most 100 events per database batch, a 500 ms poll
 cadence while a run remains active, and frames no larger than 65,536 bytes.
 Provider and command output is split before persistence so visible bytes are
@@ -175,8 +177,9 @@ example, `agent.message\nignored` becomes `agent.message ignored`; ordinary
 event row.
 
 The stream closes after replaying all events for a terminal run. A dropped
-browser connection cancels the async generator and closes its database
-connections. Paginated history remains available at
+browser connection cancels the async generator. Django's ASGI request context
+closes the request's database connections in their owning executor thread.
+Paginated history remains available at
 `GET /api/runs/{id}/events`.
 
 ## Supervisor and shutdown
@@ -204,8 +207,12 @@ marker is recorded as `worker_lost` and fails the run instead.
 Runs already canceling retain that status and drain to `canceled` or `failed`,
 including after restart. Relay never reopens work canceled by the owner.
 
+Startup does not signal PIDs saved by an earlier Relay instance: after a crash
+or reboot a PID can belong to another program. Relay logs those unverified
+attempt IDs and PIDs for the owner to inspect.
+
 Relay removes the supervisor lease and shutdown marker only after a clean stop.
 If startup or shutdown reconciliation fails, retained state and the marker stay
 available for the next bounded reconciliation pass. Full trace context is in
-the platform-specific `relay.log` described in
+the platform-specific `relay-{pid}.log` files described in
 [Projects and storage](projects-and-storage.md#central-paths).

@@ -22,9 +22,11 @@ import webbrowser
 from relay.config import RelayConfig
 from relay.constants import (
     INSTANCE_HEARTBEAT_INTERVAL_SECONDS,
+    LOOPBACK_HOSTS,
     SHUTDOWN_TIMEOUT_SECONDS,
 )
 from relay.errors import ConfigError, PersistenceError, RelayError
+from relay.execution.cancellation import signal_process_tree
 from relay.execution.huey_app import enqueue_claim
 from relay.execution.reconcile import ReconcileStore, reconcile_once
 from relay.execution.recovery import RecoveryEvidenceStore, prepare_recovery_workspace
@@ -72,7 +74,7 @@ def _browser_url(host: str, port: int) -> str:
 
 def _validate_bind(host: str, port: int) -> None:
     """Fail before child creation when no loopback socket can own the address."""
-    if host not in {"127.0.0.1", "localhost", "::1"}:
+    if host not in LOOPBACK_HOSTS:
         message = "Relay may bind only to a loopback address."
         raise ConfigError(message)
     errors: list[OSError] = []
@@ -197,20 +199,14 @@ def _terminate_child(process: subprocess.Popen[bytes], *, graceful_signal: signa
     if process.poll() is not None:
         return
     with suppress(OSError, ProcessLookupError):
-        if os.name == "nt":
-            process.terminate()
-        else:
-            os.killpg(process.pid, graceful_signal)
+        signal_process_tree(process.pid, graceful_signal=graceful_signal)
 
 
 def _kill_child(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
     with suppress(OSError, ProcessLookupError):
-        if os.name == "nt":
-            process.kill()
-        else:
-            os.killpg(process.pid, signal.SIGKILL)
+        signal_process_tree(process.pid, force=True)
 
 
 def _force_attempt_processes(rows: tuple[tuple[str, int], ...]) -> None:
@@ -222,15 +218,7 @@ def _force_attempt_processes(rows: tuple[tuple[str, int], ...]) -> None:
             )
             continue
         try:
-            if os.name == "nt":
-                subprocess.run(  # noqa: S603
-                    ["taskkill", "/PID", str(process_id), "/T", "/F"],  # noqa: S607
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            else:
-                os.killpg(process_id, signal.SIGKILL)
+            signal_process_tree(process_id, force=True)
         except (OSError, subprocess.SubprocessError):
             LOGGER.exception(
                 "Attempt process-tree escalation failed",
@@ -294,9 +282,13 @@ def _startup_reconcile(store: SupervisorStore) -> None:
     orderly_shutdown = marker.exists()
     reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
     if orderly_shutdown:
-        # The singleton lease is already ours, so any process recorded by the
-        # prior marked instance is an orphan rather than a concurrent worker.
-        _force_attempt_processes(store.active_attempt_processes())
+        # A previous instance's PID may now identify an unrelated process.
+        # Retain diagnostics for the owner; this boot cannot prove ownership.
+        for attempt_id, process_id in store.active_attempt_processes():
+            LOGGER.warning(
+                "Skipping unverified process from a previous Relay instance",
+                extra={"attempt_id": attempt_id, "process_id": process_id},
+            )
         store.interrupt_active_attempts()
     resumed = resume_interrupted(
         store,

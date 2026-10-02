@@ -84,9 +84,29 @@ def registry_cache_dir(*, create: bool = False) -> Path:
     return ensure_private_dir(path) if create else path
 
 
+def _application_log_base() -> Path:
+    override = os.environ.get("RELAY_LOG_PATH")
+    return Path(override) if override else log_dir() / "relay.log"
+
+
 def application_log_path() -> Path:
-    """Return the main local log path."""
-    return log_dir() / "relay.log"
+    """Give each process its own file: `relay.log`, PID 42 -> `relay-42.log`."""
+    base = _application_log_base()
+    return base.with_name(f"{base.stem}-{os.getpid()}{base.suffix}")
+
+
+def application_log_files() -> tuple[Path, ...]:
+    """Include process files, rotations, and the former shared log for cleanup."""
+    base = _application_log_base()
+    return tuple(
+        dict.fromkeys(
+            (
+                base,
+                *base.parent.glob(f"{base.name}.*"),
+                *base.parent.glob(f"{base.stem}-*{base.suffix}*"),
+            )
+        )
+    )
 
 
 def shutdown_marker_path() -> Path:

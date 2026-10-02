@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import json
+import logging
 import os
 from pathlib import Path
 import socket
@@ -20,6 +21,8 @@ from relay.constants import (
 )
 from relay.errors import PersistenceError
 from relay.paths import data_dir, migration_lock_path
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MigrationLock:
@@ -124,6 +127,7 @@ def apply_migrations(*, verbosity: int = 0) -> None:
     except PersistenceError:
         raise
     except Exception:
+        LOGGER.exception("Relay database preparation failed")
         message = "Relay could not prepare its local database."
         raise PersistenceError(
             message,

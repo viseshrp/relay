@@ -63,6 +63,11 @@ where workflows are edited and runs are controlled. After saving a workflow,
 commit the `.relay/` change before launching it; Relay starts runs only from a
 clean Git snapshot.
 
+`relay doctor` reports all five agents and passes when its Git, database,
+packaged-asset, and registry checks pass and at least one supported agent is
+ready. Missing optional agents remain visible in the report. A failed core
+check or no ready agent returns exit code 6.
+
 ## Command reference
 
 <!-- [[[cog

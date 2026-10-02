@@ -59,7 +59,7 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/agents` | none | `200 {"agents":[...],"registry":...}` |
 | `POST /api/runs` | launch object below | `201 {"run_id":"..."}` |
 | `GET /api/runs` | optional query below | `200 {"runs":[...],"next":...}` |
-| `GET /api/runs/{id}` | `?collection=nodes|interactions&since=0&limit=200` | `200 {"run":...,"next":...}` |
+| `GET /api/runs/{id}` | `?collection=nodes\|interactions&since=0&limit=200` | `200 {"run":...,"next":...}` |
 | `GET /api/runs/{id}/events` | `?since=0&limit=100` | `200 {"events":[...],"next":...}` |
 | `GET /api/runs/{id}/artifacts` | `?since=0&limit=200` | `200 {"artifacts":[...],"next":...}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
@@ -89,7 +89,10 @@ is the last numeric event ID already consumed. Event pages are ordered by ID,
 contain at most 200 events and 1 MiB, and can be replayed without gaps by using
 each returned `next` value. Numeric event cursors must fit Relay's nonnegative
 database integer range. The live SSE route emits the same event shape and uses
-each event ID as its replay cursor.
+each event ID as its replay cursor. The initial connection may use
+`GET /api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
+`Last-Event-ID` takes precedence over `since`; omitting both starts at zero.
+Both cursors must fit the same nonnegative database integer range.
 
 Run detail pages one collection at a time. `collection=nodes` is the default;
 `collection=interactions` returns permission, elicitation, and wait records.
@@ -145,7 +148,8 @@ can retry after the active request finishes.
 active run. Reader worktrees are removed before their primary run worktree,
 and all worktrees are removed before branches. Run rows and their retained
 artifact directories are removed only for `runs` or `all`. `all` also removes
-the current Relay log files. Cleanup never changes the launch branch.
+the contents of Relay process logs and rotations by truncating them in place,
+so open append handlers can continue writing. Cleanup never changes the launch branch.
 
 ## Errors and limits
 

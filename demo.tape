@@ -12,7 +12,7 @@ Type "DEMO_ROOT=$(mktemp -d)"
 Enter
 Type "mkdir $DEMO_ROOT/repo && cd $DEMO_ROOT/repo"
 Enter
-Type "export XDG_DATA_HOME=$DEMO_ROOT/data XDG_CONFIG_HOME=$DEMO_ROOT/config"
+Type "export XDG_DATA_HOME=$DEMO_ROOT/data XDG_CONFIG_HOME=$DEMO_ROOT/config XDG_STATE_HOME=$DEMO_ROOT/state"
 Enter
 Type "git init -q -b main && git config user.name Relay-Demo && git config user.email relay-demo@example.invalid"
 Enter

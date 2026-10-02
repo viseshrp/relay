@@ -6,8 +6,9 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 
-from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS
+from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS, LOOPBACK_HOSTS
 from .errors import ConfigError
+from .execution.state import CleanupPolicy
 from .paths import global_prompts_dir, settings_path
 
 _ALLOWED_KEYS: set[str] = {
@@ -55,11 +56,11 @@ def _validate_config(raw: object) -> RelayConfig:
         message = "agent_preferences must be a list of non-empty strings."
         raise ConfigError(message)
     cleanup_policy = raw.get("cleanup_policy", "clean_on_success")
-    if cleanup_policy not in {"clean_on_success", "retain"}:
+    if cleanup_policy not in {policy.value for policy in CleanupPolicy}:
         message = "cleanup_policy must be clean_on_success or retain."
         raise ConfigError(message)
     host = raw.get("host", DEFAULT_HOST)
-    if host not in {"127.0.0.1", "localhost", "::1"}:
+    if host not in LOOPBACK_HOSTS:
         message = "Relay may bind only to a loopback address."
         raise ConfigError(message)
     port = raw.get("port", DEFAULT_PORT)

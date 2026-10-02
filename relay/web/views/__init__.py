@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from _thread import LockType
 from functools import wraps
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Concatenate, ParamSpec
 import uuid
@@ -22,6 +24,8 @@ from relay.projects.service import ProjectRecord, register_current_project
 
 P = ParamSpec("P")
 LOGGER = logging.getLogger(__name__)
+_PROJECT: tuple[Path, ProjectRecord] | None = None
+_PROJECT_GUARD: LockType = threading.Lock()
 
 
 def log_context_value(value: object) -> str:
@@ -149,14 +153,18 @@ def canonical_record_id(value: str, *, resource: str) -> str:
 
 
 def current_project() -> tuple[Path, ProjectRecord]:
-    """Resolve the one repository owned by this `relay up` process."""
+    """Register the one served repository once, including concurrent first reads."""
+    global _PROJECT
     from relay.web.repositories import DjangoProjectStore
 
-    start_override = os.environ.get("RELAY_PROJECT_ROOT")
-    start = Path(start_override) if start_override is not None else Path.cwd()
-    relay_root = discover_relay_root(start)
-    record = register_current_project(DjangoProjectStore(), relay_root.parent)
-    return relay_root, record
+    with _PROJECT_GUARD:
+        if _PROJECT is None:
+            start_override = os.environ.get("RELAY_PROJECT_ROOT")
+            start = Path(start_override) if start_override is not None else Path.cwd()
+            relay_root = discover_relay_root(start)
+            record = register_current_project(DjangoProjectStore(), relay_root.parent)
+            _PROJECT = relay_root, record
+        return _PROJECT
 
 
 __all__ = [

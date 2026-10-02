@@ -2,46 +2,73 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 import secrets
-import time
+import tempfile
 
-from relay.constants import API_MAX_PAGE_BYTES, DB_BUSY_TIMEOUT_MS
+from relay.constants import (
+    API_MAX_PAGE_BYTES,
+    APPLICATION_LOG_BACKUP_COUNT,
+    APPLICATION_LOG_MAX_BYTES,
+    DB_BUSY_TIMEOUT_MS,
+    LOOPBACK_HOSTS,
+    SECRET_KEY_TOKEN_BYTES,
+)
+from relay.errors import PersistenceError
 from relay.paths import application_log_path, data_dir, database_path, log_dir
 
 BASE_DIR = Path(__file__).resolve().parent
 
 
 def _read_or_create_secret_key() -> str:
-    """Persist one installation key without shipping a default credential."""
-    root = data_dir(create=True)
-    target = root / "django-secret-key"
-    for _attempt in range(10):
+    """Publish a complete key atomically; a stored `key + '\n'` reads as `key`."""
+    temporary = None
+    try:
+        root = data_dir(create=True)
+        target = root / "django-secret-key"
         try:
             key = target.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
-            key = secrets.token_urlsafe(48)
-            try:
-                descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                continue
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                stream.write(key)
+            # Same-directory hard linking publishes a fully flushed file without
+            # replacing another process's winner or exposing a partially written key.
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=root, prefix=".django-secret-", delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(secrets.token_urlsafe(SECRET_KEY_TOKEN_BYTES))
                 stream.flush()
                 os.fsync(stream.fileno())
-            return key
-        if len(key) >= 48:
-            return key
-        # A concurrent first start may own the file but not have flushed it yet.
-        time.sleep(0.01)
-    message = f"Relay could not read a complete secret key at {target}."
-    raise RuntimeError(message)
+            with contextlib.suppress(FileExistsError):
+                os.link(temporary, target)
+            key = target.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        message = "Relay could not prepare its installation secret key."
+        raise PersistenceError(
+            message, next_action="Check the Relay data directory permissions."
+        ) from None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                message = "Relay could not remove its temporary secret-key file."
+                raise PersistenceError(
+                    message, next_action="Inspect the Relay data directory."
+                ) from None
+    if len(key) < SECRET_KEY_TOKEN_BYTES:
+        message = f"Relay could not read a complete secret key at {target}."
+        raise PersistenceError(
+            message, next_action="Inspect the stored secret key before restarting."
+        )
+    return key
 
 
 SECRET_KEY: str = os.environ.get("RELAY_DJANGO_SECRET_KEY") or _read_or_create_secret_key()
 DEBUG = False
-ALLOWED_HOSTS: list[str] = ["127.0.0.1", "localhost", "[::1]"]
+# Django host validation expects brackets around IPv6, e.g. `::1` -> `[::1]`.
+ALLOWED_HOSTS: list[str] = [f"[{host}]" if ":" in host else host for host in sorted(LOOPBACK_HOSTS)]
 
 INSTALLED_APPS: list[str] = [
     "django.contrib.auth",
@@ -71,6 +98,10 @@ DATABASES: dict[str, dict[str, object]] = {
             "timeout": DB_BUSY_TIMEOUT_MS / 1_000,
             # Reserve the write lock before reads so writers honor the timeout.
             "transaction_mode": "IMMEDIATE",
+            "init_command": (
+                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; "
+                f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS};"
+            ),
         },
     }
 }
@@ -101,16 +132,16 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 CONN_MAX_AGE = 0
 
-log_override: str | None = os.environ.get("RELAY_LOG_PATH")
-resolved_log_path = Path(log_override) if log_override else application_log_path()
+resolved_log_path = application_log_path()
 resolved_log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-if log_override is None:
+if os.environ.get("RELAY_LOG_PATH") is None:
     log_dir(create=True)
 LOGGING: dict[str, object] = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "relay": {
+            "()": "relay.web.logging.ContextFormatter",
             "format": "{asctime} {levelname} {name} {message}",
             "style": "{",
         }
@@ -120,8 +151,8 @@ LOGGING: dict[str, object] = {
             "class": "logging.handlers.RotatingFileHandler",
             "filename": str(resolved_log_path),
             "formatter": "relay",
-            "maxBytes": 5_000_000,
-            "backupCount": 3,
+            "maxBytes": APPLICATION_LOG_MAX_BYTES,
+            "backupCount": APPLICATION_LOG_BACKUP_COUNT,
         }
     },
     "root": {"handlers": ["file"], "level": "INFO"},

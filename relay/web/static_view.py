@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import mimetypes
 from pathlib import Path
 
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_http_methods
+
+from relay.media import media_type_for
 
 STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
 
@@ -43,8 +44,7 @@ def serve_spa(request: HttpRequest, asset_path: str = "") -> FileResponse:
     path = requested or _asset("index.html")
     if path is None:
         raise Http404
-    media_type, _encoding = mimetypes.guess_type(path.name)
-    response = FileResponse(path.open("rb"), content_type=media_type or "application/octet-stream")
+    response = FileResponse(path.open("rb"), content_type=media_type_for(path))
     response["Cache-Control"] = (
         "public, max-age=31536000, immutable"
         if requested is not None and asset_path.startswith("assets/")
