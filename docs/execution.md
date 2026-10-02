@@ -35,8 +35,10 @@ target state already holds is a no-op.
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
 `canceled` node cannot satisfy the `all_succeeded` guard.
 Canceling runs keep their owner-cancel or fail-fast intent during shutdown.
-Their remaining attempts settle as canceled, then the run drains to `canceled`
-or `failed`; restart never reopens their nodes.
+Successful attempts keep their outputs and protected commits, and failed
+attempts keep their failure details. An interrupted attempt in a canceling run
+settles as canceled instead of reopening its node. The run drains to `canceled`
+or `failed`; restart never reopens canceled nodes.
 
 ### Nodes
 
@@ -203,8 +205,9 @@ to `pending` and have eligibility recomputed. If a separate concurrent failure
 remains, the run returns to `failed` after the selected rerun settles. This is a
 new attempt initiated by the owner, not an automatic retry.
 
-During orderly shutdown, attempts in canceling runs end as `canceled` and
-continue draining to the owner's canceled result or fail-fast failure.
+During orderly shutdown, interrupted attempts in canceling runs end as
+`canceled`. Successful and failed results keep their original outcome while
+the run drains to the owner's canceled result or fail-fast failure.
 Other active attempts end as `interrupted` and their nodes
 return to `pending`. Restart reconciliation validates retained inputs and
 artifacts, then creates new attempts. An unmarked stale heartbeat ends as

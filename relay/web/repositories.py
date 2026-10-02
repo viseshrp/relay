@@ -2770,8 +2770,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return
                 node = _related(attempt, "node_run", NodeRun)
                 run = _related(node, "run", Run)
-                # Shutdown cannot reopen work after owner cancellation or fail-fast.
-                if _string(run, "status") == RunStatus.CANCELING.value:
+                # Shutdown interruptions must not reopen canceled work. Preserve
+                # completed results, including a successful writer's protected head.
+                if (
+                    _string(run, "status") == RunStatus.CANCELING.value
+                    and outcome.kind is OutcomeKind.FAILED
+                    and outcome.stop_reason is AttemptStopReason.INTERRUPTED
+                ):
                     outcome = ExecutionOutcome(
                         OutcomeKind.FAILED,
                         stop_reason=AttemptStopReason.CANCELED,

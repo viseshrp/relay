@@ -207,8 +207,10 @@ attempt an `orderly_shutdown` cancellation request. On POSIX, Huey receives
 `SIGINT`, its graceful signal. On Windows, Relay does not depend on a console
 event that Huey 3.4.0 does not handle; workers observe the durable request and
 the parent terminates the consumer within the same bound. A process that misses
-the grace is force-stopped. Attempts in canceling runs settle as canceled;
-other in-flight attempts are recorded as interrupted.
+the grace is force-stopped. Interrupted attempts in canceling runs settle as
+canceled; other in-flight attempts are recorded as interrupted. Attempts that
+finish successfully keep their outputs and protected commits, and failed
+attempts keep their failure details.
 
 An orderly restart preserves attempt evidence before resetting a writer or
 removing a disposable reader worktree. It reopens each interrupted run and
