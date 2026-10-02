@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from _thread import LockType
+from collections.abc import Callable
 from functools import wraps
 import json
 import logging
 import os
-import threading
 from pathlib import Path
+import threading
 from typing import Concatenate, ParamSpec
 import uuid
 
