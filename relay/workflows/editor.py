@@ -17,7 +17,7 @@ from relay.errors import (
 )
 from relay.execution.state import DraftValidationState
 
-from .loader import load_workflow_text
+from .loader import load_workflow_text, workflow_key_parts
 from .validation import validate_loaded_workflow
 
 
@@ -51,29 +51,10 @@ def _digest(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
-def _workflow_key_parts(workflow_key: str) -> tuple[str, ...]:
-    """Normalize a POSIX workflow key without constructing a filesystem path.
-
-    For example, ``review`` becomes ``("review.yaml",)`` and
-    ``nested/review.yml`` remains ``("nested", "review.yml")``.
-    """
-    parts = workflow_key.split("/")
-    if not workflow_key or "\\" in workflow_key or any(part in {"", ".", ".."} for part in parts):
-        message = f"Workflow key {workflow_key!r} is not a relative POSIX key."
-        raise WorkflowValidationError(message, context={"workflow": workflow_key})
-    suffix = Path(parts[-1]).suffix
-    if suffix == "":
-        parts[-1] = f"{parts[-1]}.yaml"
-    elif suffix not in {".yaml", ".yml"}:
-        message = f"Workflow key {workflow_key!r} must name a YAML file."
-        raise WorkflowValidationError(message, context={"workflow": workflow_key})
-    return tuple(parts)
-
-
 def _path(relay_root: Path, workflow_key: str) -> Path:
     root = (relay_root / "workflows").resolve()
     current = root
-    parts = _workflow_key_parts(workflow_key)
+    parts = workflow_key_parts(workflow_key)
     for index, part in enumerate(parts):
         try:
             child = next((item for item in current.iterdir() if item.name == part), None)

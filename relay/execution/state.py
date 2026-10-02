@@ -259,13 +259,6 @@ RUN_TRANSITIONS: tuple[Transition, ...] = (
         "run.interrupted",
     ),
     Transition(
-        RunStatus.CANCELING,
-        "orderly_shutdown",
-        "shutdown_marker_set",
-        RunStatus.INTERRUPTED,
-        "run.interrupted",
-    ),
-    Transition(
         RunStatus.INTERRUPTED,
         "restart_reconcile",
         "snapshot_and_artifacts_valid",

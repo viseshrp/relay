@@ -28,13 +28,15 @@ target state already holds is a no-op.
 | `canceling` | `failure_drain_complete` | `failure_initiated_and_no_active_attempt` | `failed` | `run.failed` |
 | `running` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `paused_wait` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
-| `canceling` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `interrupted` | `restart_reconcile` | `snapshot_and_artifacts_valid` | `running` | `run.resumed` |
 | `failed` | `manual_rerun` | `owner_requested_failed_node` | `running` | `run.rerun` |
 <!-- relay-transitions:run:end -->
 
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
 `canceled` node cannot satisfy the `all_succeeded` guard.
+Canceling runs keep their owner-cancel or fail-fast intent during shutdown.
+Their remaining attempts settle as canceled, then the run drains to `canceled`
+or `failed`; restart never reopens their nodes.
 
 ### Nodes
 
@@ -184,12 +186,19 @@ to `pending` and have eligibility recomputed. If a separate concurrent failure
 remains, the run returns to `failed` after the selected rerun settles. This is a
 new attempt initiated by the owner, not an automatic retry.
 
-During orderly shutdown, active attempts end as `interrupted` and their nodes
+During orderly shutdown, attempts in canceling runs end as `canceled` and
+continue draining to the owner's canceled result or fail-fast failure.
+Other active attempts end as `interrupted` and their nodes
 return to `pending`. Restart reconciliation validates retained inputs and
 artifacts, then creates new attempts. An unmarked stale heartbeat ends as
 `worker_lost` and triggers fail-fast instead.
 
 ## Scheduling and worktree admission
+
+Unstarted stale dispatches are repaired for both `running` and `paused_wait`
+runs. An unrelated human wait does not prevent a writer's delivery repair.
+A routed wait timeout resumes the run only when no waiting or failed node
+remains, using the same guard as an owner answer.
 
 Each durable scheduling pass loads and compiles the graph once, then drains a
 bounded queue of direct data and control successors. A pass is O(V+E); within

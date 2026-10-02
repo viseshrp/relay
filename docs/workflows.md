@@ -285,7 +285,9 @@ nodes:
 A `subworkflow` runs another file synchronously inside the same run. The
 reference `child` resolves to `.relay/workflows/child.yaml`; `child.yml` or
 `nested/child.yaml` keeps its explicit suffix and relative path. Resolution
-cannot leave `.relay/workflows/`, and recursive references fail validation.
+uses relative POSIX keys on Linux and Windows: empty segments, backslashes,
+`.` and `..` are rejected. References cannot leave `.relay/workflows/`, and
+recursive references fail validation.
 Inputs are explicit. Each parent output names a child output as
 `<child-node>.<output>`. Relay evaluates parent expressions, applies the child
 input defaults, and validates the resulting values against the child's typed
@@ -319,9 +321,28 @@ nodes:
 
 ## Dependencies and expressions
 
-Relay compiles `needs` with Kahn's topological algorithm in `O(V + E)` time.
+Relay compiles data and control edges with Kahn's topological algorithm in
+`O(V + E)` time.
 All referenced dependency, branch, timeout, and exhausted targets must exist.
-The top-level graph and every loop body must be acyclic.
+The top-level graph and every loop body must be acyclic across both kinds of
+edge. A branch, timeout, or exhausted edge cannot point to its own source or
+back to an upstream node.
+
+<!-- relay-example: invalid control-cycle -->
+```yaml
+version: 1
+name: Cyclic branch
+nodes:
+  build:
+    type: command
+    run: [git, status]
+  choose:
+    type: condition
+    needs: [build]
+    expr: "${{ True }}"
+    branches:
+      "true": build
+```
 
 Expressions use the exact `${{ ... }}` wrapper. They can read only these
 mappings:

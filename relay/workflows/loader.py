@@ -90,11 +90,26 @@ def _subworkflow_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[Subworkf
             yield from _subworkflow_nodes(node.body)
 
 
+def workflow_key_parts(workflow_key: str) -> tuple[str, ...]:
+    """Parse a relative POSIX key: `review` -> (`review.yaml`,),
+    `nested/review.yml` -> (`nested`, `review.yml`); reject `nested\\review`.
+    """
+    parts = workflow_key.split("/")
+    if not workflow_key or "\\" in workflow_key or any(part in {"", ".", ".."} for part in parts):
+        message = f"Workflow key {workflow_key!r} is not a relative POSIX key."
+        raise WorkflowValidationError(message, context={"workflow": workflow_key})
+    suffix = Path(parts[-1]).suffix
+    if suffix == "":
+        parts[-1] = f"{parts[-1]}.yaml"
+    elif suffix not in {".yaml", ".yml"}:
+        message = f"Workflow key {workflow_key!r} must name a YAML file."
+        raise WorkflowValidationError(message, context={"workflow": workflow_key})
+    return tuple(parts)
+
+
 def resolve_workflow_path(workflows_root: Path, reference: str) -> Path:
-    """Resolve `review` to `review.yaml`, or preserve an explicit YAML suffix."""
-    relative = Path(reference)
-    if relative.suffix == "":
-        relative = relative.with_suffix(".yaml")
+    """Resolve `review` to `review.yaml`, or preserve `nested/review.yml`."""
+    relative = Path(*workflow_key_parts(reference))
     try:
         resolved = safe_resolve(workflows_root, relative)
     except PathSafetyError:

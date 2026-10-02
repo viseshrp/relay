@@ -188,18 +188,21 @@ children:
 2. Huey runs with thread workers and a 15-second shutdown timeout.
 
 Press Ctrl+C once to stop. Relay first writes a durable shutdown marker, closes
-new-run admission, marks active runs `interrupted`, and sends each active
+new-run admission, marks running and paused runs `interrupted`, and sends each active
 attempt an `orderly_shutdown` cancellation request. On POSIX, Huey receives
 `SIGINT`, its graceful signal. On Windows, Relay does not depend on a console
 event that Huey 3.4.0 does not handle; workers observe the durable request and
 the parent terminates the consumer within the same bound. A process that misses
-the grace is force-stopped, and its attempt is still recorded as interrupted.
+the grace is force-stopped. Attempts in canceling runs settle as canceled;
+other in-flight attempts are recorded as interrupted.
 
 An orderly restart preserves attempt evidence before resetting a writer or
 removing a disposable reader worktree. It reopens each interrupted run and
 creates a new attempt; it never resumes an old agent session or automatically
 retries a failed attempt. A worker process that dies without the shutdown
 marker is recorded as `worker_lost` and fails the run instead.
+Runs already canceling retain that status and drain to `canceled` or `failed`,
+including after restart. Relay never reopens work canceled by the owner.
 
 Relay removes the supervisor lease and shutdown marker only after a clean stop.
 If startup or shutdown reconciliation fails, retained state and the marker stay

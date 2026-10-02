@@ -40,7 +40,7 @@ def _expression_errors(node_id: str, node: NodeDefinition) -> list[str]:
     return errors
 
 
-def _control_targets(node: NodeDefinition) -> tuple[str, ...]:
+def control_targets(node: NodeDefinition) -> tuple[str, ...]:
     targets: list[str] = []
     if node.on_timeout is not None:
         targets.append(node.on_timeout)
@@ -55,6 +55,7 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
     """Validate and index a graph in O(V+E) time."""
     errors: list[str] = []
     downstream_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+    cycle_edges: dict[str, list[str]] = {node_id: [] for node_id in nodes}
     indegree: dict[str, int] = dict.fromkeys(nodes, 0)
     loop_bodies: dict[str, CompiledGraph] = {}
 
@@ -70,14 +71,14 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
                 errors.append(f"node {location}.{node_id}.needs references unknown node {needed!r}")
                 continue
             downstream_lists[needed].append(node_id)
-            indegree[node_id] += 1
-        for target in _control_targets(node):
+            cycle_edges[needed].append(node_id)
+        for target in control_targets(node):
             if target not in nodes:
                 errors.append(
                     f"node {location}.{node_id} references unknown control target {target!r}"
                 )
-        if isinstance(node, ConditionNode) and len(node.branches) != len(set(node.branches)):
-            errors.append(f"node {location}.{node_id} has duplicate branch labels")
+            else:
+                cycle_edges[node_id].append(target)
         if isinstance(node, LoopNode):
             try:
                 loop_bodies[node_id] = compile_graph(
@@ -86,12 +87,16 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
             except WorkflowValidationError as error:
                 errors.append(error.message)
 
+    # Data and control edges both order execution; a branch back upstream deadlocks.
+    for children in cycle_edges.values():
+        for child in children:
+            indegree[child] += 1
     ready = deque(node_id for node_id in nodes if indegree[node_id] == 0)
     order: list[str] = []
     while ready:
         node_id = ready.popleft()
         order.append(node_id)
-        for child in downstream_lists[node_id]:
+        for child in cycle_edges[node_id]:
             indegree[child] -= 1
             if indegree[child] == 0:
                 ready.append(child)
@@ -110,4 +115,4 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
     )
 
 
-__all__ = ["CompiledGraph", "compile_graph"]
+__all__ = ["CompiledGraph", "compile_graph", "control_targets"]

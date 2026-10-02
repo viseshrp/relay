@@ -1126,7 +1126,6 @@ class DjangoExecutionStore(DjangoAgentStore):
                         status__in=(
                             RunStatus.RUNNING.value,
                             RunStatus.PAUSED_WAIT.value,
-                            RunStatus.CANCELING.value,
                         )
                     )
                 )
@@ -2632,6 +2631,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return
                 node = _related(attempt, "node_run", NodeRun)
                 run = _related(node, "run", Run)
+                # Shutdown cannot reopen work after owner cancellation or fail-fast.
+                if _string(run, "status") == RunStatus.CANCELING.value:
+                    outcome = ExecutionOutcome(
+                        OutcomeKind.FAILED,
+                        stop_reason=AttemptStopReason.CANCELED,
+                        error_code=AttemptStopReason.CANCELED.value,
+                    )
                 node_status, node_event, stop_reason = self._finish_node_transition(node, outcome)
                 now = timezone.now()
                 _set_model_field(attempt, "status", AttemptStatus.TERMINAL.value)
@@ -2968,20 +2974,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                             node=node,
                             attempt=attempt,
                         )
-                        blocked = NodeRun.objects.filter(
-                            run=run,
-                            status__in=(NodeStatus.WAITING.value, NodeStatus.FAILED.value),
-                        ).exists()
-                        if not blocked and _string(run, "status") == RunStatus.PAUSED_WAIT.value:
-                            run_transition = transition_run(_string(run, "status"), "wait_answered")
-                            _set_model_field(run, "status", run_transition.status)
-                            run.save(update_fields=("status",))
-                            _append_event(
-                                run,
-                                run_transition.event,
-                                EventSource.RUN,
-                                {"status": run_transition.status},
-                            )
+                        self._resume_run_after_waits(run)
                 return True
         except DatabaseError:
             message = "Relay could not acknowledge the control request."
@@ -3139,19 +3132,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     self.finish_attempt(
                         _identifier(attempt), outcome, _string(attempt, "starting_head")
                     )
-                    if (
-                        isinstance(on_timeout, str)
-                        and _string(run, "status") == RunStatus.PAUSED_WAIT.value
-                    ):
-                        run_transition = transition_run(_string(run, "status"), "wait_answered")
-                        _set_model_field(run, "status", run_transition.status)
-                        run.save(update_fields=("status",))
-                        _append_event(
-                            run,
-                            run_transition.event,
-                            EventSource.RUN,
-                            {"status": run_transition.status},
-                        )
+                    if isinstance(on_timeout, str):
+                        self._resume_run_after_waits(run)
                         self._finish_run_if_terminal(run)
                     self.release_attempt_lock(_identifier(attempt))
                     expired += 1
@@ -3163,6 +3145,19 @@ class DjangoExecutionStore(DjangoAgentStore):
         else:
             return expired
 
+    def _resume_run_after_waits(self, run: Run) -> None:
+        """Resume only after all waits have settled without a failed node."""
+        if _string(run, "status") != RunStatus.PAUSED_WAIT.value:
+            return
+        if NodeRun.objects.filter(
+            run=run, status__in=(NodeStatus.WAITING.value, NodeStatus.FAILED.value)
+        ).exists():
+            return
+        transition = transition_run(_string(run, "status"), "wait_answered")
+        _set_model_field(run, "status", transition.status)
+        run.save(update_fields=("status",))
+        _append_event(run, transition.event, EventSource.RUN, {"status": transition.status})
+
     def orphaned_dispatch_tokens(self) -> tuple[str, ...]:
         cutoff = timezone.now() - timedelta(seconds=DISPATCH_ORPHAN_AFTER_SECONDS)
         try:
@@ -3171,7 +3166,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     state=DispatchState.DISPATCHED.value,
                     attempt__isnull=True,
                     node_run__status=NodeStatus.DISPATCHED.value,
-                    node_run__run__status=RunStatus.RUNNING.value,
+                    node_run__run__status__in=(
+                        RunStatus.RUNNING.value,
+                        RunStatus.PAUSED_WAIT.value,
+                    ),
                 )
                 .filter(
                     models.Q(enqueued_at__lte=cutoff)

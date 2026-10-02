@@ -19,7 +19,9 @@ Scalar = str | int | float | bool | None
 class StrictModel(BaseModel):
     """Base for versioned records that must reject unknown keys."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_by_name=True, validate_by_alias=True, strict=True
+    )
 
 
 class StringConstraints(StrictModel):
@@ -68,10 +70,9 @@ class EnumConstraints(StrictModel):
     @classmethod
     def validate_unique_values(cls, values: list[Scalar]) -> list[Scalar]:
         del cls
-        for index, value in enumerate(values):
-            if value in values[:index]:
-                message = "enum values must be unique"
-                raise ValueError(message)
+        if len(values) != len(set(values)):
+            message = "enum values must be unique"
+            raise ValueError(message)
         return values
 
 
