@@ -49,8 +49,12 @@ The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db` is the durable source for projects, drafts, editor leases, runs,
 snapshots, scoped nodes, attempts, dispatch claims, events, artifacts,
 interactions, control requests, agent observations, and run locks. SQLite uses
-foreign keys, WAL mode, and a five-second busy timeout. Contention beyond that
-limit becomes a Relay persistence error.
+foreign keys, WAL mode, and a five-second busy timeout. Transactions use
+`IMMEDIATE` mode to reserve the write lock before reading. Competing writers
+wait for that reservation for up to five seconds; contention beyond that limit
+becomes a Relay persistence error. Transactions contain short database changes;
+Git subprocesses, network requests, and worktree cleanup run outside them.
+This follows [Django's SQLite transaction guidance](https://docs.djangoproject.com/en/5.2/ref/databases/#transactions-behavior).
 
 Snapshot text and event payloads stay in the database. Large artifact and diff
 bytes live under `artifacts/`; database rows store their retained paths,

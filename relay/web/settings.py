@@ -67,7 +67,11 @@ DATABASES: dict[str, dict[str, object]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": database_override or str(database_path()),
-        "OPTIONS": {"timeout": DB_BUSY_TIMEOUT_MS / 1_000},
+        "OPTIONS": {
+            "timeout": DB_BUSY_TIMEOUT_MS / 1_000,
+            # Reserve the write lock before reads so writers honor the timeout.
+            "transaction_mode": "IMMEDIATE",
+        },
     }
 }
 
