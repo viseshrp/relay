@@ -2,15 +2,50 @@
 
 from __future__ import annotations
 
+from _thread import LockType
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 import logging
+import threading
 from typing import Protocol
 
 from relay.errors import DispatchError, RelayError
 
 LOGGER = logging.getLogger(__name__)
+_ADMISSION_GUARD: LockType = threading.Lock()
+_DEFERRED: dict[str, set[str]] = {}
+_NOTIFY: Callable[[str], object] | None = None
+
+
+def set_dispatch_notifier(notify: Callable[[str], object]) -> None:
+    """Install the single consumer's enqueue callback."""
+    global _NOTIFY
+    _NOTIFY = notify
+
+
+def defer_dispatch(run_id: str, token: str) -> None:
+    """Remember an unstarted busy token until this run releases admission."""
+    with _ADMISSION_GUARD:
+        _DEFERRED.setdefault(run_id, set()).add(token)
+
+
+def notify_dispatch(token: str) -> None:
+    """Wake an unstarted or suspended token; durable repair covers enqueue loss."""
+    if _NOTIFY is not None:
+        try:
+            _NOTIFY(token)
+        except Exception:
+            LOGGER.exception("Deferred dispatch enqueue failed", extra={"claim_token": token})
+
+
+def release_admission(run_id: str) -> None:
+    """Wake only claims deferred by this run's readers/writer gate."""
+    with _ADMISSION_GUARD:
+        tokens = _DEFERRED.pop(run_id, ())
+    for token in tokens:
+        notify_dispatch(token)
 
 
 class ClaimDisposition(str, Enum):
@@ -46,6 +81,7 @@ class ClaimedAttempt:
     writes: bool
     starting_head: str
     recorded_head: str
+    deadline_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

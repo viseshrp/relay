@@ -8,6 +8,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
+from relay.constants import CONTROL_IDEMPOTENCY_KEY_MAX_CHARS
 from relay.execution.state import (
     AttemptStatus,
     AttemptStopReason,
@@ -236,6 +237,7 @@ class NodeAttempt(RelayModel):
     agent_version: models.TextField = models.TextField(blank=True)
     model_value: models.TextField = models.TextField(blank=True)
     config_ids: models.JSONField = models.JSONField(default=dict)
+    deadline_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
     starting_head: models.CharField = models.CharField(max_length=40)
     ending_head: models.CharField = models.CharField(max_length=40, null=True, blank=True)
     started_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
@@ -308,6 +310,9 @@ class RunEvent(RelayModel):
     )
     ts: models.DateTimeField = models.DateTimeField(default=timezone.now)
     type: models.TextField = models.TextField()
+    idempotency_key: models.CharField = models.CharField(
+        max_length=CONTROL_IDEMPOTENCY_KEY_MAX_CHARS, null=True, blank=True
+    )
     version: models.PositiveSmallIntegerField = models.PositiveSmallIntegerField(default=1)
     source: models.CharField = models.CharField(max_length=16, choices=EventSource.choices())
     payload: models.JSONField = models.JSONField(default=dict)
@@ -319,7 +324,10 @@ class RunEvent(RelayModel):
 
     class Meta:
         indexes: ClassVar[list[models.Index]] = [
-            models.Index(fields=("run", "id"), name="relay_event_run_id_idx")
+            models.Index(fields=("run", "id"), name="relay_event_run_id_idx"),
+            models.Index(
+                fields=("run", "type", "idempotency_key"), name="relay_event_control_key_idx"
+            ),
         ]
 
 

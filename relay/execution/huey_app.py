@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _thread import LockType
 import logging
 import os
 from pathlib import Path
@@ -15,17 +16,24 @@ from huey import SqliteHuey, signals
 from relay.constants import DB_BUSY_TIMEOUT_MS, RECONCILE_INTERVAL_SECONDS
 from relay.paths import artifacts_dir, data_dir, huey_database_path, shutdown_marker_path
 
+from .dispatch import set_dispatch_notifier
 from .reconcile import ReconcileResult, reconcile_once
 from .runner import AttemptExecutor, run_claim_token
-from .scheduler import SchedulingStore, dispatch_ready_nodes
+from .scheduler import SchedulingChange, SchedulingStore, dispatch_ready_nodes
 
 LOGGER = logging.getLogger(__name__)
+_SCHEDULE_GUARD: LockType = threading.Lock()
+_SCHEDULE_CURSOR: int | None = None
 
 
 class ActiveSchedulingStore(SchedulingStore, Protocol):
     """Scheduler adapter that can enumerate the bounded active-run set."""
 
     def active_run_ids(self) -> tuple[str, ...]: ...
+
+    def latest_event_id(self) -> int: ...
+
+    def scheduling_changes(self, after: int) -> tuple[int, tuple[SchedulingChange, ...]]: ...
 
 
 def _database_path() -> Path:
@@ -71,6 +79,7 @@ def run_node_attempt(claim_token: str) -> None:
     from relay.web.repositories import DjangoExecutionStore
 
     store = DjangoExecutionStore()
+    set_dispatch_notifier(enqueue_claim)
     run_claim_token(
         store,
         claim_token,
@@ -78,7 +87,7 @@ def run_node_attempt(claim_token: str) -> None:
         _executors(),
         artifact_root=artifacts_dir(create=True),
     )
-    _advance_active_runs(store)
+    _advance_changed_runs(store)
 
 
 def enqueue_claim(claim_token: str) -> object:
@@ -86,10 +95,31 @@ def enqueue_claim(claim_token: str) -> object:
     return run_node_attempt(claim_token)
 
 
-def _advance_active_runs(store: ActiveSchedulingStore) -> None:
-    """Schedule newly eligible work after a durable state change."""
-    for run_id in store.active_run_ids():
-        dispatch_ready_nodes(store, run_id, enqueue_claim)
+def _advance_changed_runs(store: ActiveSchedulingStore) -> None:
+    """Initialize at consumer startup, then follow committed node changes."""
+    global _SCHEDULE_CURSOR
+    with _SCHEDULE_GUARD:
+        if _SCHEDULE_CURSOR is None:
+            cursor = store.latest_event_id()
+            for run_id in store.active_run_ids():
+                dispatch_ready_nodes(store, run_id, enqueue_claim)
+            _SCHEDULE_CURSOR = cursor
+        cursor, changes = store.scheduling_changes(_SCHEDULE_CURSOR)
+        affected = {}
+        for change in changes:
+            if change.node_id is None:
+                affected[change.run_id] = None
+            elif change.run_id not in affected:
+                affected[change.run_id] = [change.node_id]
+            else:
+                existing = affected[change.run_id]
+                if existing is not None:
+                    existing.append(change.node_id)
+        for run_id, nodes in affected.items():
+            dispatch_ready_nodes(
+                store, run_id, enqueue_claim, tuple(nodes) if nodes is not None else None
+            )
+        _SCHEDULE_CURSOR = cursor
 
 
 def reconcile_dispatch() -> ReconcileResult:
@@ -98,12 +128,13 @@ def reconcile_dispatch() -> ReconcileResult:
     from relay.web.repositories import DjangoExecutionStore
 
     store = DjangoExecutionStore()
+    set_dispatch_notifier(enqueue_claim)
     result = reconcile_once(
         store,
         enqueue_claim,
         orderly_shutdown=shutdown_marker_path().exists(),
     )
-    _advance_active_runs(store)
+    _advance_changed_runs(store)
     return result
 
 

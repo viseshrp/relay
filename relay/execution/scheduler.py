@@ -11,8 +11,8 @@ from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
 from relay.execution.machine import transition_node
 from relay.workflows.expressions import evaluate_expression
-from relay.workflows.graph import CompiledGraph, compile_graph
-from relay.workflows.schema import ConditionNode, LoopNode, NodeDefinition
+from relay.workflows.graph import CompiledGraph
+from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import node_scope, parse_scope_path
 
 from .state import NodeStatus
@@ -49,10 +49,24 @@ class RunSchedule:
     entry_point: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class SchedulingChange:
+    """A committed event affecting one run's eligibility."""
+
+    run_id: str
+    node_id: str | None
+
+
 class SchedulingStore(DispatchStore, Protocol):
     """Persistence operations used by event-driven top-level scheduling."""
 
-    def load_run_schedule(self, run_id: str) -> RunSchedule: ...
+    def run_graph(self, run_id: str) -> CompiledGraph: ...
+
+    def reachable_run_nodes(self, run_id: str, entry_root: str | None) -> frozenset[str]: ...
+
+    def load_run_schedule(
+        self, run_id: str, node_ids: tuple[str, ...] | None = None
+    ) -> RunSchedule: ...
 
     def transition_scope_node(self, node_run_id: str, action: str) -> None: ...
 
@@ -104,29 +118,11 @@ def downstream_scope_candidates(
     )
 
 
-def _control_targets(node: NodeDefinition) -> tuple[str, ...]:
-    targets = [node.on_timeout] if node.on_timeout is not None else []
-    if isinstance(node, ConditionNode):
-        targets.extend(node.branches.values())
-    if isinstance(node, LoopNode):
-        targets.append(node.exhausted)
-    return tuple(targets)
-
-
 def activation_sources(
-    nodes: Mapping[str, NodeDefinition],
-) -> tuple[dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]]:
-    """Index condition, loop-exhaustion, and timeout control edges in O(V+E)."""
-    incoming_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    outgoing_lists: dict[str, list[str]] = {node_id: [] for node_id in nodes}
-    for source_id, node in nodes.items():
-        for target in _control_targets(node):
-            incoming_lists[target].append(source_id)
-            outgoing_lists[source_id].append(target)
-    return (
-        {node_id: tuple(values) for node_id, values in incoming_lists.items()},
-        {node_id: tuple(values) for node_id, values in outgoing_lists.items()},
-    )
+    graph: CompiledGraph,
+) -> tuple[Mapping[str, tuple[str, ...]], Mapping[str, tuple[str, ...]]]:
+    """Reuse the control indexes compiled with the dependency graph."""
+    return graph.activators, graph.control_downstream
 
 
 def entry_node_for_scope(entry_point: str | None, parent_scope: str | None) -> str | None:
@@ -161,18 +157,35 @@ def reachable_node_ids(
     return frozenset(reachable)
 
 
-def advance_run_schedule(store: SchedulingStore, run_id: str) -> tuple[str, ...]:
-    """Derive top-level readiness in O(V+E), then return ready row ids."""
-    schedule = store.load_run_schedule(run_id)
-    definitions = {node_id: row.definition for node_id, row in schedule.nodes.items()}
-    graph = compile_graph(definitions)
-    incoming, control_downstream = activation_sources(definitions)
+def advance_run_schedule(
+    store: SchedulingStore, run_id: str, changed_node_ids: tuple[str, ...] | None = None
+) -> tuple[str, ...]:
+    """Initialize once, then evaluate only changed nodes and direct successors."""
+    graph = store.run_graph(run_id)
+    incoming, control_downstream = activation_sources(graph)
+    seeds = None
+    if changed_node_ids is not None:
+        seeds = tuple(
+            dict.fromkeys(
+                candidate
+                for node_id in changed_node_ids
+                if node_id in graph.nodes
+                for candidate in (
+                    node_id,
+                    *(
+                        path.removeprefix("root.")
+                        for path in downstream_scope_candidates(graph, None, node_id)
+                    ),
+                    *control_downstream[node_id],
+                )
+            )
+        )
+    schedule = store.load_run_schedule(run_id, seeds)
+    if schedule.run_metadata.get("status") not in {"running", "paused_wait"}:
+        return ()
+    rows = dict(schedule.nodes)
     entry_root = entry_node_for_scope(schedule.entry_point, None)
-    reachable = (
-        reachable_node_ids(entry_root, graph, control_downstream)
-        if entry_root is not None
-        else frozenset(definitions)
-    )
+    reachable = store.reachable_run_nodes(run_id, entry_root)
     statuses = {node_id: row.status for node_id, row in schedule.nodes.items()}
     terminal = {
         NodeStatus.SUCCEEDED.value,
@@ -180,22 +193,48 @@ def advance_run_schedule(store: SchedulingStore, run_id: str) -> tuple[str, ...]
         NodeStatus.FAILED.value,
         NodeStatus.CANCELED.value,
     }
-    queue = deque(graph.topological_order)
-    queued = set(graph.topological_order)
+    if seeds is None:
+        seeds = tuple(
+            dict.fromkeys(
+                (
+                    *(path.removeprefix("root.") for path in initial_scope_candidates(graph, None)),
+                    *(
+                        node_id
+                        for node_id, row in rows.items()
+                        if row.status == NodeStatus.READY.value or node_id not in reachable
+                    ),
+                )
+            )
+        )
+    queue = deque(seeds)
+    queued = set(seeds)
+    ready_ids = []
+    propagated = set()
 
     def enqueue_candidates(node_id: str) -> None:
         # Every terminal node can wake only its direct data and control successors.
         for candidate in (*graph.downstream[node_id], *control_downstream[node_id]):
-            if statuses[candidate] == NodeStatus.PENDING.value and candidate not in queued:
+            if candidate not in queued and candidate not in propagated:
                 queue.append(candidate)
                 queued.add(candidate)
 
     while queue:
         node_id = queue.popleft()
         queued.remove(node_id)
-        if statuses[node_id] != NodeStatus.PENDING.value:
+        required = (*graph.dependencies[node_id], *incoming[node_id], node_id)
+        if any(name not in rows for name in required):
+            extra = store.load_run_schedule(run_id, (node_id,))
+            rows.update(extra.nodes)
+            statuses.update({name: item.status for name, item in extra.nodes.items()})
+        row = rows[node_id]
+        if statuses[node_id] == NodeStatus.READY.value:
+            ready_ids.append(row.node_run_id)
             continue
-        row = schedule.nodes[node_id]
+        if statuses[node_id] != NodeStatus.PENDING.value:
+            if statuses[node_id] in terminal and node_id not in propagated:
+                propagated.add(node_id)
+                enqueue_candidates(node_id)
+            continue
         action: str | None = None
         if node_id not in reachable:
             action = "dependencies_unreachable"
@@ -205,18 +244,14 @@ def advance_run_schedule(store: SchedulingStore, run_id: str) -> tuple[str, ...]
         else:
             activators = incoming[node_id]
             if activators:
-                selected = any(
-                    schedule.nodes[source].selected_branch == node_id for source in activators
-                )
+                selected = any(rows[source].selected_branch == node_id for source in activators)
                 complete = all(statuses[source] in terminal for source in activators)
                 if complete and not selected:
                     action = "dependencies_unreachable"
                 elif not selected:
                     continue
             if action is None:
-                dependencies = {
-                    needed: schedule.nodes[needed] for needed in graph.dependencies[node_id]
-                }
+                dependencies = {needed: rows[needed] for needed in graph.dependencies[node_id]}
                 eligibility = evaluate_eligibility(
                     row.definition,
                     {needed: statuses[needed] for needed in dependencies},
@@ -236,27 +271,25 @@ def advance_run_schedule(store: SchedulingStore, run_id: str) -> tuple[str, ...]
         transition = transition_node(statuses[node_id], action)
         store.transition_scope_node(row.node_run_id, action)
         statuses[node_id] = transition.status
+        if transition.status == NodeStatus.READY.value:
+            ready_ids.append(row.node_run_id)
         if transition.status in terminal:
             enqueue_candidates(node_id)
 
-    ready = tuple(
-        schedule.nodes[node_id].node_run_id
-        for node_id in graph.topological_order
-        if statuses[node_id] == NodeStatus.READY.value
-    )
     store.settle_run(run_id)
-    return ready
+    return tuple(dict.fromkeys(ready_ids))
 
 
 def dispatch_ready_nodes(
     store: SchedulingStore,
     run_id: str,
     enqueue: Callable[[str], object],
+    changed_node_ids: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
     """Commit and enqueue each newly ready node without waiting for execution."""
     return tuple(
         dispatch_node(store, node_run_id, enqueue)
-        for node_run_id in advance_run_schedule(store, run_id)
+        for node_run_id in advance_run_schedule(store, run_id, changed_node_ids)
     )
 
 

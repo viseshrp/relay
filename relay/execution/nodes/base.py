@@ -7,13 +7,11 @@ from collections import deque
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-import time
 from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
 
-from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS, CONTROL_POLL_INTERVAL_SECONDS
-from relay.errors import NodeExecutionError, PersistenceError
+from relay.errors import NodeExecutionError
 from relay.execution.dispatch import dispatch_node
 from relay.execution.machine import transition_node
 from relay.execution.runner import AttemptContext, OutcomeKind, run_claim_token
@@ -118,7 +116,7 @@ class SynchronousScopeRunner:
             inputs,
             loop_index,
         )
-        incoming, control_downstream = activation_sources(nodes)
+        incoming, control_downstream = activation_sources(graph)
         entry_value = context.attempt.run_metadata.get("entry_point")
         entry_point = entry_value if isinstance(entry_value, str) else None
         entry_node = entry_node_for_scope(entry_point, parent_scope)
@@ -206,39 +204,23 @@ class SynchronousScopeRunner:
                     record.node_run_id,
                     lambda _claim_token: None,
                 )
-                heartbeat_due = time.monotonic() + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-                while True:
-                    outcome = run_claim_token(
-                        context.runtime,
-                        token,
-                        context.attempt.worker_id,
-                        executors,
-                        heartbeat_owners=(
-                            (context.attempt.attempt_id, context.attempt.worker_id),
-                            *context.heartbeat_owners,
-                        ),
-                        inherited_deadline=context.deadline_at,
-                    )
-                    record = context.runtime.scope_node_record(
-                        context.attempt.run_id, record.node_run_id
-                    )
-                    records[node_id] = record
-                    if outcome is not None and outcome.kind is not OutcomeKind.WAITING:
-                        break
-                    if record.status in terminal:
-                        break
-                    context.runtime.resolve_human_wait_controls()
-                    context.runtime.expire_human_waits()
-                    now = time.monotonic()
-                    if now >= heartbeat_due:
-                        if not context.heartbeat():
-                            message = "The enclosing scope lost its durable worker ownership."
-                            raise PersistenceError(
-                                message,
-                                context={"node": context.attempt.scope_path},
-                            )
-                        heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-                    time.sleep(CONTROL_POLL_INTERVAL_SECONDS)
+                if context.timed_out():
+                    return NestedScopeResult(OutcomeKind.FAILED, {}, "node_timeout")
+                run_claim_token(
+                    context.runtime,
+                    token,
+                    context.attempt.worker_id,
+                    executors,
+                    heartbeat_owners=(
+                        (context.attempt.attempt_id, context.attempt.worker_id),
+                        *context.heartbeat_owners,
+                    ),
+                    inherited_deadline=context.deadline_at,
+                )
+                record = context.runtime.scope_node_record(
+                    context.attempt.run_id, record.node_run_id
+                )
+                records[node_id] = record
 
             if record.status in {NodeStatus.FAILED.value, NodeStatus.CANCELED.value}:
                 return NestedScopeResult(

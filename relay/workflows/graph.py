@@ -21,6 +21,8 @@ class CompiledGraph:
     dependencies: Mapping[str, tuple[str, ...]]
     downstream: Mapping[str, tuple[str, ...]]
     loop_bodies: Mapping[str, CompiledGraph]
+    activators: Mapping[str, tuple[str, ...]]
+    control_downstream: Mapping[str, tuple[str, ...]]
 
 
 def _expression_errors(node_id: str, node: NodeDefinition) -> list[str]:
@@ -58,6 +60,8 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
     cycle_edges: dict[str, list[str]] = {node_id: [] for node_id in nodes}
     indegree: dict[str, int] = dict.fromkeys(nodes, 0)
     loop_bodies: dict[str, CompiledGraph] = {}
+    incoming: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+    controls: dict[str, list[str]] = {node_id: [] for node_id in nodes}
 
     for node_id, node in nodes.items():
         errors.extend(_expression_errors(f"{location}.{node_id}", node))
@@ -79,6 +83,8 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
                 )
             else:
                 cycle_edges[node_id].append(target)
+                incoming[target].append(node_id)
+                controls[node_id].append(target)
         if isinstance(node, LoopNode):
             try:
                 loop_bodies[node_id] = compile_graph(
@@ -112,6 +118,8 @@ def compile_graph(nodes: Mapping[str, NodeDefinition], *, location: str = "root"
         dependencies={node_id: tuple(node.needs) for node_id, node in nodes.items()},
         downstream={node_id: tuple(children) for node_id, children in downstream_lists.items()},
         loop_bodies=loop_bodies,
+        activators={node_id: tuple(values) for node_id, values in incoming.items()},
+        control_downstream={node_id: tuple(values) for node_id, values in controls.items()},
     )
 
 

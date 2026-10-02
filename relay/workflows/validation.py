@@ -175,7 +175,7 @@ def validate_loaded_workflow(root: LoadedWorkflow, relay_root: Path) -> Validate
         graph = compile_graph(root.definition.nodes)
     except WorkflowValidationError as error:
         issues.append(error.message)
-        graph = CompiledGraph({}, (), {}, {}, {})
+        graph = CompiledGraph({}, (), {}, {}, {}, {}, {})
 
     subworkflow_graphs: dict[str, CompiledGraph] = {}
     for key, workflow in subworkflows.items():

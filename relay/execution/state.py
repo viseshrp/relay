@@ -326,6 +326,20 @@ NODE_TRANSITIONS: tuple[Transition, ...] = (
         "node.running",
     ),
     Transition(
+        NodeStatus.RUNNING,
+        "scope_waiting",
+        "child_wait_or_admission_deferred",
+        NodeStatus.WAITING,
+        "node.waiting",
+    ),
+    Transition(
+        NodeStatus.WAITING,
+        "scope_ready",
+        "child_settled_or_admission_available",
+        NodeStatus.DISPATCHED,
+        "node.dispatched",
+    ),
+    Transition(
         NodeStatus.WAITING,
         "timeout_routed",
         "on_timeout_declared",

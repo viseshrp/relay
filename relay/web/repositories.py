@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from functools import lru_cache
 from hashlib import sha256
 import json
 import logging
@@ -48,6 +49,9 @@ from relay.execution.dispatch import (
     ClaimDisposition,
     ClaimedAttempt,
     ClaimResult,
+    defer_dispatch,
+    notify_dispatch,
+    release_admission,
 )
 from relay.execution.launch import LaunchRequest
 from relay.execution.locks import decide_admission
@@ -60,7 +64,12 @@ from relay.execution.machine import (
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resume import RecoveryTarget
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
-from relay.execution.scheduler import RunSchedule, ScheduledNode
+from relay.execution.scheduler import (
+    RunSchedule,
+    ScheduledNode,
+    SchedulingChange,
+    reachable_node_ids,
+)
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
     AttemptStatus,
@@ -81,6 +90,7 @@ from relay.execution.state import (
     RunStatus,
     WorktreeState,
 )
+from relay.execution.timing import duration_seconds
 from relay.paths import (
     application_log_path,
     artifacts_dir,
@@ -98,6 +108,7 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text
 from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import (
@@ -130,6 +141,26 @@ from .models import (
 
 ModelT = TypeVar("ModelT", bound=models.Model)
 LOGGER = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=RECONCILE_MAX_ITEMS)
+def _compiled_run_graph(run_id: str) -> CompiledGraph:
+    """Compile each immutable snapshot once while its run stays in the cache."""
+    snapshot = RunSnapshot.objects.get(run_id=run_id)
+    loaded = load_workflow_text(
+        _string(snapshot, "workflow_yaml"), source=Path(f"snapshot:{run_id}")
+    )
+    return compile_graph(loaded.definition.nodes)
+
+
+@lru_cache(maxsize=RECONCILE_MAX_ITEMS)
+def _reachable_run_nodes(run_id: str, entry_root: str | None) -> frozenset[str]:
+    graph = _compiled_run_graph(run_id)
+    return (
+        reachable_node_ids(entry_root, graph, graph.control_downstream)
+        if entry_root is not None
+        else frozenset(graph.nodes)
+    )
 
 
 class DjangoAgentStore:
@@ -884,11 +915,13 @@ def _append_event(
     attempt: NodeAttempt | None = None,
     sensitivity: EventSensitivity = EventSensitivity.NORMAL,
 ) -> RunEvent:
+    key = payload.get("idempotency_key")
     return RunEvent.objects.create(
         run=run,
         node_run=node,
         attempt=attempt,
         type=event_type,
+        idempotency_key=key if isinstance(key, str) else None,
         version=1,
         source=source.value,
         payload=dict(payload),
@@ -1234,6 +1267,10 @@ class DjangoExecutionStore(DjangoAgentStore):
         try:
             attempt_ids = list(
                 NodeAttempt.objects.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value)
+                .exclude(
+                    status=AttemptStatus.WAITING.value,
+                    node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                )
                 .filter(status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value))
                 .order_by("started_at", "pk")
                 .values_list("pk", flat=True)
@@ -1443,19 +1480,40 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not retain the failed launch state."
             raise PersistenceError(message, context={"run": run_id}) from None
 
-    def load_run_schedule(self, run_id: str) -> RunSchedule:
+    def run_graph(self, run_id: str) -> CompiledGraph:
+        """Reuse this immutable run's bounded cached graph."""
+        try:
+            return _compiled_run_graph(run_id)
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not load the immutable scheduling graph."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def reachable_run_nodes(self, run_id: str, entry_root: str | None) -> frozenset[str]:
+        return _reachable_run_nodes(run_id, entry_root)
+
+    def load_run_schedule(
+        self, run_id: str, node_ids: tuple[str, ...] | None = None
+    ) -> RunSchedule:
         try:
             run = Run.objects.select_related("snapshot").get(pk=run_id)
             snapshot = _related(run, "snapshot", RunSnapshot)
-            loaded = load_workflow_text(
-                _string(snapshot, "workflow_yaml"),
-                source=Path(f"snapshot:{run_id}"),
+            graph = self.run_graph(run_id)
+            required = (
+                set(graph.nodes)
+                if node_ids is None
+                else {
+                    name
+                    for node_id in node_ids
+                    for name in (node_id, *graph.dependencies[node_id], *graph.activators[node_id])
+                }
             )
             rows = {
                 _string(node, "node_id"): node
-                for node in NodeRun.objects.filter(run=run, parent_scope_path__isnull=True)
+                for node in NodeRun.objects.filter(
+                    run=run, parent_scope_path__isnull=True, node_id__in=required
+                )
             }
-            if set(rows) != set(loaded.definition.nodes):
+            if set(rows) != required:
                 _reject_schedule_mismatch(run_id)
             scheduled = {
                 node_id: ScheduledNode(
@@ -1466,7 +1524,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     _mapping(rows[node_id], "outputs"),
                     (value if isinstance((value := rows[node_id].selected_branch), str) else None),
                 )
-                for node_id, definition in loaded.definition.nodes.items()
+                for node_id in required
+                for definition in (graph.nodes[node_id],)
             }
             return RunSchedule(
                 run_id,
@@ -1477,6 +1536,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     "workflow_key": _string(run, "workflow_key"),
                     "source_commit": _string(run, "source_commit"),
                     "run_branch": _string(run, "run_branch"),
+                    "status": _string(run, "status"),
                 },
                 run.entry_point if isinstance(run.entry_point, str) else None,
             )
@@ -1485,6 +1545,46 @@ class DjangoExecutionStore(DjangoAgentStore):
         except (DatabaseError, ObjectDoesNotExist):
             message = "Relay could not load durable scheduling state."
             raise PersistenceError(message, context={"run": run_id}) from None
+
+    def scheduling_changes(self, after: int) -> tuple[int, tuple[SchedulingChange, ...]]:
+        """Read only newly committed scheduling events through the primary-key index."""
+        try:
+            upper = RunEvent.objects.aggregate(value=Max("id"))["value"] or after
+            events = list(
+                RunEvent.objects.filter(
+                    id__gt=after,
+                    id__lte=upper,
+                    type__in=(
+                        "run.started",
+                        "run.rerun",
+                        "run.resumed",
+                        "node.ready",
+                        "node.succeeded",
+                        "node.failed",
+                        "node.canceled",
+                        "node.skipped",
+                        "node.pending",
+                    ),
+                    node_run__parent_scope_path__isnull=True,
+                    run__status__in=(RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value),
+                )
+                .order_by("id")
+                .values_list("id", "run_id", "node_run__node_id")[:RECONCILE_MAX_ITEMS]
+            )
+            cursor = events[-1][0] if len(events) == RECONCILE_MAX_ITEMS else upper
+            return cursor, tuple(
+                SchedulingChange(str(run_id), node_id) for _, run_id, node_id in events
+            )
+        except DatabaseError:
+            message = "Relay could not read scheduling changes."
+            raise PersistenceError(message) from None
+
+    def latest_event_id(self) -> int:
+        try:
+            return RunEvent.objects.aggregate(value=Max("id"))["value"] or 0
+        except DatabaseError:
+            message = "Relay could not read the scheduling cursor."
+            raise PersistenceError(message) from None
 
     def settle_run(self, run_id: str) -> None:
         try:
@@ -1776,7 +1876,12 @@ class DjangoExecutionStore(DjangoAgentStore):
             with transaction.atomic():
                 node = NodeRun.objects.select_for_update().select_related("run").get(pk=node_run_id)
                 run = _related(node, "run", Run)
-                transition = transition_node(_string(node, "status"), "dispatch")
+                resuming = _string(node, "status") == NodeStatus.WAITING.value and _string(
+                    node, "node_type"
+                ) in {NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                transition = transition_node(
+                    _string(node, "status"), "scope_ready" if resuming else "dispatch"
+                )
                 if not transition.changed:
                     existing = (
                         DispatchClaim.objects.filter(
@@ -1792,14 +1897,30 @@ class DjangoExecutionStore(DjangoAgentStore):
                     if existing is None:
                         _missing_dispatch_claim()
                     return _string(existing, "claim_token")
-                token = uuid.uuid4().hex
+                existing = (
+                    DispatchClaim.objects.filter(
+                        node_run=node, attempt__status=AttemptStatus.WAITING.value
+                    )
+                    .order_by("-created_at")
+                    .first()
+                    if resuming
+                    else None
+                )
+                if resuming and existing is None:
+                    _missing_dispatch_claim()
+                token = (
+                    _string(existing, "claim_token") if existing is not None else uuid.uuid4().hex
+                )
                 _set_model_field(node, "status", transition.status)
                 node.save(update_fields=("status",))
-                DispatchClaim.objects.create(
-                    node_run=node,
-                    claim_token=token,
-                    state=DispatchState.DISPATCHED.value,
-                )
+                if existing is not None:
+                    _set_model_field(existing, "state", DispatchState.DISPATCHED.value)
+                    _set_model_field(existing, "enqueued_at", None)
+                    existing.save(update_fields=("state", "enqueued_at"))
+                else:
+                    DispatchClaim.objects.create(
+                        node_run=node, claim_token=token, state=DispatchState.DISPATCHED.value
+                    )
                 _append_event(
                     run,
                     transition.event,
@@ -1865,6 +1986,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     .values_list("mode", flat=True),
                 )
                 if needs_lock and not decision.allowed:
+                    defer_dispatch(_identifier(run), claim_token)
                     return ClaimResult(ClaimDisposition.BUSY)
 
                 scope_path = _string(node, "scope_path")
@@ -1890,24 +2012,71 @@ class DjangoExecutionStore(DjangoAgentStore):
                         else DriverKind.ACP.value
                     )
 
-                maximum = NodeAttempt.objects.filter(node_run=node).aggregate(
-                    value=Max("attempt_number")
-                )["value"]
-                attempt_number = (maximum if isinstance(maximum, int) else 0) + 1
                 now = timezone.now()
                 starting_head = _string(run, "recorded_head")
-                attempt = NodeAttempt.objects.create(
-                    node_run=node,
-                    attempt_number=attempt_number,
-                    status=AttemptStatus.RUNNING.value,
-                    worker_id=worker_id,
-                    driver_kind=driver_kind,
-                    agent_id=selected_agent,
-                    model_value=model_value,
-                    starting_head=starting_head,
-                    started_at=now,
-                    heartbeat_at=now,
-                )
+                existing_attempt = claim.attempt
+                resuming = isinstance(existing_attempt, NodeAttempt)
+                if resuming:
+                    if (
+                        not isinstance(existing_attempt, NodeAttempt)
+                        or _string(existing_attempt, "status") != AttemptStatus.WAITING.value
+                    ):
+                        return ClaimResult(ClaimDisposition.IGNORED)
+                    attempt = existing_attempt
+                    attempt_number = _integer(attempt, "attempt_number")
+                    starting_head = _string(attempt, "starting_head")
+                    _set_model_field(attempt, "worker_id", worker_id)
+                    _set_model_field(attempt, "status", AttemptStatus.RUNNING.value)
+                    _set_model_field(attempt, "heartbeat_at", now)
+                    attempt.save(update_fields=("worker_id", "status", "heartbeat_at"))
+                else:
+                    maximum = NodeAttempt.objects.filter(node_run=node).aggregate(
+                        value=Max("attempt_number")
+                    )["value"]
+                    attempt_number = (maximum if isinstance(maximum, int) else 0) + 1
+                    timeout = frozen.get("timeout")
+                    seconds = duration_seconds(timeout) if isinstance(timeout, str) else None
+                    deadline = now + timedelta(seconds=seconds) if seconds is not None else None
+                    # Descendants inherit persisted deadlines, including after a yielded wait.
+                    scopes = parse_scope_path(scope_path)
+                    for depth in range(1, len(scopes)):
+                        ancestor = "root." + ".".join(part.render() for part in scopes[:depth])
+                        ancestor = (
+                            ancestor.rsplit("#", maxsplit=1)[0]
+                            if scopes[depth - 1].iteration is not None
+                            else ancestor
+                        )
+                        ancestor_deadline = (
+                            NodeAttempt.objects.filter(
+                                node_run__run=run,
+                                node_run__scope_path=ancestor,
+                                status__in=(
+                                    AttemptStatus.RUNNING.value,
+                                    AttemptStatus.WAITING.value,
+                                ),
+                            )
+                            .values_list("deadline_at", flat=True)
+                            .first()
+                        )
+                        if isinstance(ancestor_deadline, datetime):
+                            deadline = (
+                                min(deadline, ancestor_deadline)
+                                if deadline is not None
+                                else ancestor_deadline
+                            )
+                    attempt = NodeAttempt.objects.create(
+                        node_run=node,
+                        attempt_number=attempt_number,
+                        status=AttemptStatus.RUNNING.value,
+                        worker_id=worker_id,
+                        driver_kind=driver_kind,
+                        agent_id=selected_agent,
+                        model_value=model_value,
+                        starting_head=starting_head,
+                        started_at=now,
+                        heartbeat_at=now,
+                        deadline_at=deadline,
+                    )
                 if needs_lock:
                     RunLock.objects.create(
                         run=run,
@@ -1937,20 +2106,21 @@ class DjangoExecutionStore(DjangoAgentStore):
                     node=node,
                     attempt=attempt,
                 )
-                _append_event(
-                    run,
-                    "attempt.started",
-                    EventSource.ATTEMPT,
-                    {
-                        "scope_path": scope_path,
-                        "attempt_number": attempt_number,
-                        "driver_kind": driver_kind,
-                        "agent_id": selected_agent,
-                        "model_value": model_value,
-                    },
-                    node=node,
-                    attempt=attempt,
-                )
+                if not resuming:
+                    _append_event(
+                        run,
+                        "attempt.started",
+                        EventSource.ATTEMPT,
+                        {
+                            "scope_path": scope_path,
+                            "attempt_number": attempt_number,
+                            "driver_kind": driver_kind,
+                            "agent_id": selected_agent,
+                            "model_value": model_value,
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
                 record = ClaimedAttempt(
                     claim_token=claim_token,
                     attempt_id=_identifier(attempt),
@@ -1973,6 +2143,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                     writes=writes,
                     starting_head=starting_head,
                     recorded_head=starting_head,
+                    deadline_at=attempt.deadline_at
+                    if isinstance(attempt.deadline_at, datetime)
+                    else None,
                 )
                 return ClaimResult(ClaimDisposition.CLAIMED, record)
         except PersistenceError:
@@ -2362,11 +2535,49 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return
                 node = _related(attempt, "node_run", NodeRun)
                 run = _related(node, "run", Run)
-                transition = transition_node(_string(node, "status"), "interaction_requested")
+                structural = _string(node, "node_type") in {
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                }
+                transition = transition_node(
+                    _string(node, "status"),
+                    "scope_waiting" if structural else "interaction_requested",
+                )
                 _set_model_field(attempt, "status", AttemptStatus.WAITING.value)
                 attempt.save(update_fields=("status",))
                 _set_model_field(node, "status", transition.status)
                 node.save(update_fields=("status",))
+                if structural:
+                    _append_event(
+                        run,
+                        transition.event,
+                        EventSource.NODE,
+                        {
+                            "scope_path": _string(node, "scope_path"),
+                            "node_type": _string(node, "node_type"),
+                            "status": transition.status,
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
+                    # A child can settle just before its parent publishes waiting.
+                    descendants = NodeRun.objects.filter(
+                        run=run, scope_path__startswith=_string(node, "scope_path") + "."
+                    )
+                    if _string(node, "node_type") == NodeType.LOOP.value:
+                        descendants = NodeRun.objects.filter(
+                            run=run, scope_path__startswith=_string(node, "scope_path") + "#"
+                        ).exclude(node_type=NodeType.LOOP.value, attempts__isnull=True)
+                    if not descendants.filter(
+                        status__in=(
+                            NodeStatus.RUNNING.value,
+                            NodeStatus.WAITING.value,
+                            NodeStatus.DISPATCHED.value,
+                        )
+                    ).exists():
+                        token = self.create_dispatch(_identifier(node))
+                        transaction.on_commit(lambda: notify_dispatch(token))
+                    return
                 prompt = _mapping(node, "frozen_def").get("prompt", "Owner input required.")
                 interaction = HumanInteraction.objects.create(
                     run=run,
@@ -2731,7 +2942,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                             EventSource.RUN,
                             {"status": run_transition.status},
                         )
+                self._resume_run_after_waits(run)
                 self._finish_run_if_terminal(run)
+                self._wake_enclosing_scope(node, run)
         except PersistenceError:
             raise
         except (DatabaseError, IntegrityError):
@@ -2740,10 +2953,44 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def release_attempt_lock(self, attempt_id: str) -> None:
         try:
+            run_id = (
+                RunLock.objects.filter(attempt_id=attempt_id)
+                .values_list("run_id", flat=True)
+                .first()
+            )
             RunLock.objects.filter(attempt_id=attempt_id).delete()
+            if run_id is not None:
+                transaction.on_commit(lambda: release_admission(str(run_id)))
         except DatabaseError:
             message = "Relay could not release the attempt's worktree lock."
             raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def close_heartbeat_connections(self) -> None:
+        """Close only connections owned by the current heartbeat thread."""
+        from django.db import connections
+
+        connections.close_all()
+
+    def _wake_enclosing_scope(self, node: NodeRun, run: Run) -> None:
+        if _string(run, "status") not in {RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value}:
+            return
+        parent_scope = _string(node, "scope_path").rsplit(".", maxsplit=1)[0]
+        if parent_scope == "root":
+            return
+        parent_scope = (
+            parent_scope.rsplit("#", maxsplit=1)[0]
+            if "#" in parent_scope.rsplit(".", maxsplit=1)[-1]
+            else parent_scope
+        )
+        parent = NodeRun.objects.filter(
+            run=run,
+            scope_path=parent_scope,
+            status=NodeStatus.WAITING.value,
+            node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+        ).first()
+        if parent is not None:
+            token = self.create_dispatch(_identifier(parent))
+            transaction.on_commit(lambda: notify_dispatch(token))
 
     def _attempt_is_current(self, attempt: NodeAttempt) -> bool:
         node = _related(attempt, "node_run", NodeRun)
@@ -3048,7 +3295,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     state=ControlState.PENDING.value,
                     kind__in=(ControlKind.WAIT_ANSWER.value, ControlKind.CANCEL.value),
                     attempt__status=AttemptStatus.WAITING.value,
-                    attempt__node_run__node_type=NodeType.HUMAN_WAIT.value,
+                    attempt__node_run__node_type__in=(
+                        NodeType.HUMAN_WAIT.value,
+                        NodeType.LOOP.value,
+                        NodeType.SUBWORKFLOW.value,
+                    ),
                 )
                 .order_by("created_at")
                 .values_list("attempt_id", flat=True)[:RECONCILE_MAX_ITEMS]
@@ -3158,6 +3409,34 @@ class DjangoExecutionStore(DjangoAgentStore):
         run.save(update_fields=("status",))
         _append_event(run, transition.event, EventSource.RUN, {"status": transition.status})
 
+    def expire_scope_waits(self) -> int:
+        """Enforce enclosing deadlines even while a scope owns no worker."""
+        try:
+            with transaction.atomic():
+                attempts = list(
+                    NodeAttempt.objects.select_for_update()
+                    .filter(
+                        status=AttemptStatus.WAITING.value,
+                        node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                        deadline_at__lte=timezone.now(),
+                    )
+                    .order_by("deadline_at")[:RECONCILE_MAX_ITEMS]
+                )
+                for attempt in attempts:
+                    self.finish_attempt(
+                        _identifier(attempt),
+                        ExecutionOutcome(
+                            OutcomeKind.FAILED,
+                            stop_reason=AttemptStopReason.TIMEOUT,
+                            error_code="node_timeout",
+                        ),
+                        _string(attempt, "starting_head"),
+                    )
+                return len(attempts)
+        except DatabaseError:
+            message = "Relay could not expire suspended scope deadlines."
+            raise PersistenceError(message) from None
+
     def orphaned_dispatch_tokens(self) -> tuple[str, ...]:
         cutoff = timezone.now() - timedelta(seconds=DISPATCH_ORPHAN_AFTER_SECONDS)
         try:
@@ -3223,7 +3502,8 @@ class DjangoExecutionStore(DjangoAgentStore):
             node = _related(attempt, "node_run", NodeRun)
             if (
                 not orderly_shutdown
-                and _string(node, "node_type") == NodeType.HUMAN_WAIT.value
+                and _string(node, "node_type")
+                in {NodeType.HUMAN_WAIT.value, NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
                 and _string(attempt, "status") == AttemptStatus.WAITING.value
             ):
                 return None
@@ -3311,11 +3591,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                 duplicate = RunEvent.objects.filter(
                     run=run,
                     type="run.canceling",
-                    payload__idempotency_key=idempotency_key,
+                    idempotency_key=idempotency_key,
                 ).exists()
                 if duplicate:
                     return ControlResult.ALREADY_APPLIED
                 status = _string(run, "status")
+                if status in {RunStatus.PENDING.value, RunStatus.INTERRUPTED.value}:
+                    return ControlResult.STALE
                 if status in {
                     RunStatus.SUCCEEDED.value,
                     RunStatus.FAILED.value,
@@ -3416,7 +3698,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             duplicate = RunEvent.objects.filter(
                 run=run,
                 type="run.rerun",
-                payload__idempotency_key=idempotency_key,
+                idempotency_key=idempotency_key,
             ).exists()
             if duplicate:
                 return None
@@ -3509,7 +3791,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 duplicate = RunEvent.objects.filter(
                     run=run,
                     type__in=("run.rerun", "run.resumed"),
-                    payload__idempotency_key=idempotency_key,
+                    idempotency_key=idempotency_key,
                 ).exists()
                 if duplicate:
                     return False

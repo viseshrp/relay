@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 import logging
 from pathlib import Path
+import threading
 import time
 from typing import Protocol, TypeAlias
 
+from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, RelayError
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import current_head, validate_reader_result, validate_writer_result
@@ -185,6 +189,37 @@ class RunnerStore(AttemptRuntime, Protocol):
 
     def release_attempt_lock(self, attempt_id: str) -> None: ...
 
+    def close_heartbeat_connections(self) -> None: ...
+
+
+@contextmanager
+def _heartbeat_lease(
+    store: RunnerStore, claim: ClaimedAttempt, owners: HeartbeatOwners
+) -> Iterator[None]:
+    """Renew ownership while subprocess, output, Git, and preservation work runs."""
+    stop = threading.Event()
+
+    def renew() -> None:
+        try:
+            while not stop.wait(ATTEMPT_HEARTBEAT_INTERVAL_SECONDS):
+                for attempt_id, worker_id in ((claim.attempt_id, claim.worker_id), *owners):
+                    if not store.heartbeat_attempt(attempt_id, worker_id):
+                        return
+        except Exception:
+            LOGGER.exception(
+                "Attempt heartbeat renewal failed", extra={"attempt_id": claim.attempt_id}
+            )
+        finally:
+            store.close_heartbeat_connections()
+
+    thread = threading.Thread(target=renew, name="relay-attempt-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
+
 
 def _uses_git(node_type: str) -> bool:
     return node_type in {NodeType.AGENT.value, NodeType.COMMAND.value}
@@ -252,6 +287,26 @@ def execute_attempt(
     inherited_deadline: float | None = None,
 ) -> ExecutionOutcome:
     """Execute once, preserve evidence, persist terminal state, then release admission."""
+    with _heartbeat_lease(store, claim, heartbeat_owners):
+        return _execute_attempt(
+            store,
+            claim,
+            executor,
+            artifact_root=artifact_root,
+            heartbeat_owners=heartbeat_owners,
+            inherited_deadline=inherited_deadline,
+        )
+
+
+def _execute_attempt(
+    store: RunnerStore,
+    claim: ClaimedAttempt,
+    executor: AttemptExecutor,
+    *,
+    artifact_root: Path | None,
+    heartbeat_owners: HeartbeatOwners,
+    inherited_deadline: float | None,
+) -> ExecutionOutcome:
     worktree = Path(claim.primary_worktree)
     ephemeral_reader = False
     worktree_assigned = False
@@ -263,6 +318,11 @@ def execute_attempt(
             timeout_value if isinstance(timeout_value, str) else None,
             inherited_deadline,
         )
+        if claim.deadline_at is not None:
+            durable_deadline = time.monotonic() + max(
+                0.0, (claim.deadline_at - datetime.now(timezone.utc)).total_seconds()
+            )
+            deadline = min(deadline, durable_deadline) if deadline is not None else durable_deadline
         context = AttemptContext(
             claim,
             worktree,

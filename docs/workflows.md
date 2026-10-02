@@ -282,7 +282,9 @@ nodes:
 
 ## Subworkflow nodes
 
-A `subworkflow` runs another file synchronously inside the same run. The
+A `subworkflow` runs another file inside the same run. Child execution is inline
+while work is runnable. A nested human wait releases the worker; answering it
+resumes the same parent attempt from durable child state. The
 reference `child` resolves to `.relay/workflows/child.yaml`; `child.yml` or
 `nested/child.yaml` keeps its explicit suffix and relative path. Resolution
 uses relative POSIX keys on Linux and Windows: empty segments, backslashes,

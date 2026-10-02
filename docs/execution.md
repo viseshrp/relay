@@ -51,6 +51,8 @@ or `failed`; restart never reopens their nodes.
 | `dispatched` | `attempt_started` | `claim_won_and_gate_acquired` | `running` | `node.running` |
 | `running` | `interaction_requested` | `interaction_created` | `waiting` | `node.waiting` |
 | `waiting` | `interaction_answered` | `control_applied` | `running` | `node.running` |
+| `running` | `scope_waiting` | `child_wait_or_admission_deferred` | `waiting` | `node.waiting` |
+| `waiting` | `scope_ready` | `child_settled_or_admission_available` | `dispatched` | `node.dispatched` |
 | `waiting` | `timeout_routed` | `on_timeout_declared` | `succeeded` | `node.succeeded` |
 | `running` | `complete` | `outputs_and_commit_valid` | `succeeded` | `node.succeeded` |
 | `running` | `fail` | `attempt_failed` | `failed` | `node.failed` |
@@ -65,6 +67,11 @@ or `failed`; restart never reopens their nodes.
 | `failed` | `rerun` | `owner_requested` | `ready` | `node.ready` |
 | `canceled` | `recompute` | `canceled_only_by_fail_fast` | `pending` | `node.pending` |
 <!-- relay-transitions:node:end -->
+
+Loop-iteration rows such as `root.build#2` are structural summaries, not
+executable nodes. They own no attempt or dispatch and do not use the node
+transition table. Their `waiting`, `failed`, or `succeeded` status reflects the
+child scope; resuming that scope may replace its waiting or failed summary.
 
 ### Human interactions
 
@@ -121,6 +128,10 @@ Human-wait nodes have no subprocess. Their attempt stays durable while the run
 is paused. A deadline takes the declared `on_timeout` edge; without that edge,
 the node fails with `timeout`.
 
+Worker ownership is renewed throughout command-output retention, commit
+validation, evidence preservation, and reader-worktree removal. These phases
+can outlast the stale-attempt threshold without being mistaken for worker loss.
+
 ## Node execution
 
 | Type | Runtime behavior |
@@ -147,9 +158,12 @@ Loop and subworkflow child graphs execute inline in the enclosing consumer
 thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
 default single worker. Each child heartbeat also renews its bounded chain of
 enclosing attempts, so a long child cannot make its owning loop or subworkflow
-look abandoned. A nested human wait still owns no subprocess: the enclosing
-scope checks the durable mailbox at the fixed control cadence until the answer
-or deadline settles the child node.
+look abandoned. When a child waits for the owner or for worktree admission,
+the parent scope yields its worker. A child settlement redispatches the same
+parent attempt, which reads the saved child rows and continues without repeating
+successful children. Suspended scopes retain their original durable deadline;
+reconciliation enforces it while no worker is held. Only the child human wait
+creates an owner interaction.
 
 ## Nested scope example
 
@@ -200,10 +214,12 @@ runs. An unrelated human wait does not prevent a writer's delivery repair.
 A routed wait timeout resumes the run only when no waiting or failed node
 remains, using the same guard as an owner answer.
 
-Each durable scheduling pass loads and compiles the graph once, then drains a
-bounded queue of direct data and control successors. A pass is O(V+E); within
-that pass, a terminal update enqueues only O(outdegree) candidates. Loop and
-subworkflow expansion is bounded before execution.
+Consumer startup initializes each active run once in O(V+E). Compiled immutable
+graphs are cached in a bounded cache. Later committed node changes schedule
+only their run and direct data/control successors, loading candidate rows and
+their dependencies instead of walking every active graph. A terminal change
+starts with O(outdegree) candidates; skipped successors propagate through their
+own edges. Loop and subworkflow expansion is bounded before execution.
 
 Nodes that do not touch Git state need no worktree gate. Git-backed read-only
 nodes may run together, each in a detached ephemeral worktree at the run's
@@ -211,6 +227,10 @@ recorded commit. A writer acquires the exclusive run lock and uses the primary
 worktree. A reader worktree is removed before its node advances. A writer lock
 is released only after commit validation, evidence preservation, and the new
 recorded HEAD are durable.
+A released gate immediately enqueues that run's deferred, unstarted tokens
+through the single consumer. Stale-dispatch reconciliation remains the repair
+path after enqueue loss or consumer restart. Nested admission waits yield their
+worker and remain bounded by the enclosing deadline.
 
 One Huey consumer process uses thread workers on Linux, Windows, and macOS. The
 default is one worker; a configured count permits read-only parallelism while

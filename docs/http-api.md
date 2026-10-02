@@ -101,6 +101,11 @@ record ID, so loading another page cannot duplicate an item.
 
 ## Controls
 
+Run cancel and rerun keys are stored in an indexed event column; duplicate
+requests do not scan event payloads. Canceling a run still preparing its
+worktree (`pending`) or awaiting restart reconciliation (`interrupted`) returns
+`stale` (409). Retry with a new key after preparation or reconciliation finishes.
+
 | Method and path | JSON body |
 | --- | --- |
 | `POST /api/runs/{id}/cancel` | `{"idempotency_key":"cancel-1"}` |

@@ -43,6 +43,8 @@ class ReconcileStore(Protocol):
 
     def expire_human_waits(self) -> int: ...
 
+    def expire_scope_waits(self) -> int: ...
+
     def reap_stale_attempts(self, *, orderly_shutdown: bool) -> AttemptRecovery: ...
 
 
@@ -65,6 +67,7 @@ def reconcile_once(
             LOGGER.exception("Dispatch reconciliation enqueue failed", extra={"claim_token": token})
     human_controls = store.resolve_human_wait_controls()
     expired_waits = store.expire_human_waits()
+    store.expire_scope_waits()
     controls = store.recover_control_claims()
     attempts = store.reap_stale_attempts(orderly_shutdown=orderly_shutdown)
     return ReconcileResult(enqueued, failures, human_controls, expired_waits, controls, attempts)
