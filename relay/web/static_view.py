@@ -26,7 +26,7 @@ def _asset_catalog() -> dict[str, Path]:
     return catalog
 
 
-_STATIC_ASSETS = _asset_catalog()
+_STATIC_ASSETS: dict[str, Path] = _asset_catalog()
 
 
 def _asset(path: str) -> Path | None:

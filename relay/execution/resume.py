@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _thread import LockType
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -10,7 +11,7 @@ from typing import Protocol
 
 from relay.execution.control import ControlResult, valid_idempotency_key
 
-_RERUN_GUARD = threading.Lock()
+_RERUN_GUARD: LockType = threading.Lock()
 _ACTIVE_RERUNS: set[str] = set()
 
 

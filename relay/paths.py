@@ -10,7 +10,7 @@ from platformdirs import PlatformDirs
 from .constants import APP_NAME
 from .errors import PathSafetyError
 
-_DIRS = PlatformDirs(appname=APP_NAME, appauthor=False, roaming=False)
+_DIRS: PlatformDirs = PlatformDirs(appname=APP_NAME, appauthor=False, roaming=False)
 
 
 def ensure_private_dir(path: Path) -> Path:

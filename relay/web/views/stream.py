@@ -24,7 +24,7 @@ from ..models import Run, RunEvent
 from . import log_context_value
 
 LOGGER = logging.getLogger(__name__)
-_TERMINAL = {item.value for item in TERMINAL_RUN_STATUSES}
+_TERMINAL: set[str] = {item.value for item in TERMINAL_RUN_STATUSES}
 
 
 def _error(code: str, message: str, status: int) -> JsonResponse:

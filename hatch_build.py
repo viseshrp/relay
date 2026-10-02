@@ -15,7 +15,7 @@ BuildData: TypeAlias = dict[str, Any]
 class CustomBuildHook(BuildHookInterface):
     """Compile deterministic static assets before Hatch collects the wheel."""
 
-    PLUGIN_NAME = "custom"
+    PLUGIN_NAME: str = "custom"
 
     def initialize(self, version: str, build_data: BuildData) -> None:
         """Build the Vite application only for a wheel target."""

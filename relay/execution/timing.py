@@ -6,7 +6,7 @@ import time
 
 from relay.errors import NodeExecutionError
 
-_DURATION_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3_600.0}
+_DURATION_UNITS: dict[str, float] = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3_600.0}
 
 
 def duration_seconds(value: str | None) -> float | None:

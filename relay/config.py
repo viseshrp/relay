@@ -10,7 +10,7 @@ from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS
 from .errors import ConfigError
 from .paths import global_prompts_dir, settings_path
 
-_ALLOWED_KEYS = {
+_ALLOWED_KEYS: set[str] = {
     "agent_preferences",
     "cleanup_policy",
     "host",
