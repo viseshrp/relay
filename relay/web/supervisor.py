@@ -422,9 +422,13 @@ def run_supervisor(
                     with suppress(subprocess.TimeoutExpired):
                         web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
                 else:
-                    _write_shutdown_marker(instance_id)
-                    store.request_orderly_shutdown(instance_id)
-                    _shutdown_children(store, web, consumer)
+                    try:
+                        _write_shutdown_marker(instance_id)
+                        store.request_orderly_shutdown(instance_id)
+                    finally:
+                        # A lost lease or failed marker write must not leave
+                        # child processes running after their parent exits.
+                        _shutdown_children(store, web, consumer)
                     clean_shutdown = True
         finally:
             if clean_shutdown:

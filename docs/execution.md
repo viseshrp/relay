@@ -213,6 +213,11 @@ return to `pending`. Restart reconciliation validates retained inputs and
 artifacts, then creates new attempts. An unmarked stale heartbeat ends as
 `worker_lost` and triggers fail-fast instead.
 
+The supervisor stops its web and worker children even if it loses its lease
+or cannot persist shutdown intent. A marker written before a persistence
+failure stays available for restart reconciliation. The supervisor releases
+its own lease after child cleanup and reports a shutdown failure.
+
 ## Scheduling and worktree admission
 
 Unstarted stale dispatches are repaired for both `running` and `paused_wait`
