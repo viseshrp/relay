@@ -142,7 +142,9 @@ def test_acp_non_text_content_is_preserved_without_private_metadata() -> None:
             },
         }
     ).update
-    (event,) = normalize_acp_update(update)
+    events = normalize_acp_update(update)
+    assert len(events) == 1
+    event = events[0]
     assert event.event_type == "agent.provider_event"
     content = event.payload["content"]
     assert (content["type"], content["data"], content["mimeType"]) == (
@@ -173,7 +175,9 @@ def test_acp_tool_progress_retains_the_result_state(status: str, expected: str) 
             },
         }
     ).update
-    (event,) = normalize_acp_update(update)
+    events = normalize_acp_update(update)
+    assert len(events) == 1
+    event = events[0]
     assert event.event_type == expected
     assert event.payload["tool"] == "tool-1"
     assert json.loads(event.payload["summary"])["raw_output"] == {"ok": True}
@@ -189,7 +193,9 @@ def test_acp_plan_updates_retain_owner_visible_entries() -> None:
             },
         }
     ).update
-    (event,) = normalize_acp_update(update)
+    events = normalize_acp_update(update)
+    assert len(events) == 1
+    event = events[0]
     assert (event.event_type, event.payload) == (
         "agent.plan",
         {"plan": [{"content": "Review", "priority": "medium", "status": "pending"}]},
@@ -200,7 +206,9 @@ def test_acp_configuration_updates_keep_the_public_configuration() -> None:
     update = schema.SessionNotification.model_validate(
         {"sessionId": "s", "update": {"sessionUpdate": "config_option_update", "configOptions": []}}
     ).update
-    (event,) = normalize_acp_update(update)
+    events = normalize_acp_update(update)
+    assert len(events) == 1
+    event = events[0]
     assert event.event_type == "agent.provider_event"
     assert event.payload["update"]["configOptions"] == []
 
@@ -233,12 +241,14 @@ def test_unrecognized_acp_updates_do_not_emit_an_event() -> None:
 def test_antigravity_updates_map_to_the_owner_event_vocabulary(
     raw: dict[str, object], expected: str
 ) -> None:
-    (event,) = normalize_antigravity_event(raw)
+    events = normalize_antigravity_event(raw)
+    assert len(events) == 1
+    event = events[0]
     assert event.event_type == expected
 
 
 def test_antigravity_result_events_exclude_response_and_structured_output() -> None:
-    (event,) = normalize_antigravity_event(
+    events = normalize_antigravity_event(
         {
             "event": "result",
             "result": {
@@ -249,6 +259,8 @@ def test_antigravity_result_events_exclude_response_and_structured_output() -> N
             },
         }
     )
+    assert len(events) == 1
+    event = events[0]
     assert event.payload == {"status": "SUCCESS", "duration_seconds": 1.0}
 
 
