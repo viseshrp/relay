@@ -183,6 +183,7 @@ class RelayAcpClient:
     model_config_id: str | None
     drift_error: RelayError | None
     control_stop: str | None
+    interaction_lock: asyncio.Lock
 
     agent: acp.Agent | None
 
@@ -201,6 +202,7 @@ class RelayAcpClient:
         self.model_config_id = None
         self.drift_error = None
         self.control_stop = None
+        self.interaction_lock = asyncio.Lock()
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -215,32 +217,40 @@ class RelayAcpClient:
         del kwargs
         if self.context is None or session_id != self.session_id:
             raise RequestError.invalid_request()
-        safe_options = tuple(
-            {"id": option.option_id, "name": option.name, "kind": option.kind} for option in options
-        )
-        await asyncio.to_thread(
-            self.context.attempt.runtime.request_agent_interaction,
-            self.context.attempt.attempt.attempt_id,
-            InteractionKind.PERMISSION.value,
-            tool_call.title or "The agent requests permission to use a tool.",
-            safe_options,
-        )
-        control = await self._wait_for_control(
-            (ControlKind.PERMISSION_ANSWER.value, ControlKind.CANCEL.value)
-        )
-        if control.kind == ControlKind.CANCEL.value:
-            await self._cancel_session()
-            return schema.RequestPermissionResponse(
-                outcome=schema.DeniedOutcome(outcome="cancelled")
+        # ACP dispatches requests concurrently; the mailbox owns one unanswered
+        # interaction at a time. Hold the lock through the matching answer.
+        async with self.interaction_lock:
+            if self.control_stop is not None:
+                return schema.RequestPermissionResponse(
+                    outcome=schema.DeniedOutcome(outcome="cancelled")
+                )
+            safe_options = tuple(
+                {"id": option.option_id, "name": option.name, "kind": option.kind}
+                for option in options
             )
-        decision = control.payload.get("decision")
-        option_ids = {option.option_id for option in options}
-        if not isinstance(decision, str) or decision not in option_ids:
-            message = "The permission answer does not name an offered ACP option."
-            raise PermissionFlowError(message)
-        return schema.RequestPermissionResponse(
-            outcome=schema.AllowedOutcome(outcome="selected", optionId=decision)
-        )
+            await asyncio.to_thread(
+                self.context.attempt.runtime.request_agent_interaction,
+                self.context.attempt.attempt.attempt_id,
+                InteractionKind.PERMISSION.value,
+                tool_call.title or "The agent requests permission to use a tool.",
+                safe_options,
+            )
+            control = await self._wait_for_control(
+                (ControlKind.PERMISSION_ANSWER.value, ControlKind.CANCEL.value)
+            )
+            if control.kind == ControlKind.CANCEL.value:
+                await self._cancel_session()
+                return schema.RequestPermissionResponse(
+                    outcome=schema.DeniedOutcome(outcome="cancelled")
+                )
+            decision = control.payload.get("decision")
+            option_ids = {option.option_id for option in options}
+            if not isinstance(decision, str) or decision not in option_ids:
+                message = "The permission answer does not name an offered ACP option."
+                raise PermissionFlowError(message)
+            return schema.RequestPermissionResponse(
+                outcome=schema.AllowedOutcome(outcome="selected", optionId=decision)
+            )
 
     async def session_update(
         self,
@@ -317,27 +327,31 @@ class RelayAcpClient:
         del kwargs
         if self.context is None:
             raise RequestError.invalid_request()
-        mode_payload = mode.model_dump(mode="json", by_alias=True)
-        await asyncio.to_thread(
-            self.context.attempt.runtime.request_agent_interaction,
-            self.context.attempt.attempt.attempt_id,
-            InteractionKind.ELICITATION.value,
-            message,
-            ({"mode": mode_payload},),
-        )
-        control = await self._wait_for_control(
-            (ControlKind.ELICITATION_ANSWER.value, ControlKind.CANCEL.value)
-        )
-        if control.kind == ControlKind.CANCEL.value:
-            await self._cancel_session()
-            return schema.CancelElicitationResponse(action="cancel")
-        value = control.payload.get("value")
-        if value is None:
-            return schema.DeclineElicitationResponse(action="decline")
-        if not isinstance(value, dict):
-            message = "An ACP form elicitation answer must be a JSON object."
-            raise PermissionFlowError(message)
-        return schema.AcceptElicitationResponse(action="accept", content=value)
+        # Form and URL requests share the permission mailbox and its ordering.
+        async with self.interaction_lock:
+            if self.control_stop is not None:
+                return schema.CancelElicitationResponse(action="cancel")
+            mode_payload = mode.model_dump(mode="json", by_alias=True)
+            await asyncio.to_thread(
+                self.context.attempt.runtime.request_agent_interaction,
+                self.context.attempt.attempt.attempt_id,
+                InteractionKind.ELICITATION.value,
+                message,
+                ({"mode": mode_payload},),
+            )
+            control = await self._wait_for_control(
+                (ControlKind.ELICITATION_ANSWER.value, ControlKind.CANCEL.value)
+            )
+            if control.kind == ControlKind.CANCEL.value:
+                await self._cancel_session()
+                return schema.CancelElicitationResponse(action="cancel")
+            value = control.payload.get("value")
+            if value is None:
+                return schema.DeclineElicitationResponse(action="decline")
+            if not isinstance(value, dict):
+                message = "An ACP form elicitation answer must be a JSON object."
+                raise PermissionFlowError(message)
+            return schema.AcceptElicitationResponse(action="accept", content=value)
 
     async def complete_elicitation(self, elicitation_id: str, **kwargs: object) -> None:
         del elicitation_id, kwargs
@@ -762,6 +776,7 @@ class AcpDriver:
                         ):
                             requested_stop = cancel_stop_reason(control).value
                     if requested_stop is not None:
+                        client.control_stop = requested_stop
                         stop_deadline = now + CANCELLATION_GRACE_SECONDS
                         if self.connection is not None and self.session_id is not None:
                             with suppress(Exception):

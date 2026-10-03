@@ -75,7 +75,13 @@ Relay always services permission requests and form or URL elicitations through
 the browser-backed durable mailbox. The request contains only the tool title,
 offered option IDs, names, and kinds; provider-private request fields are not
 persisted. The response goes only to the worker that owns the exact attempt and
-session. A stale or duplicate answer cannot reach a later attempt. Cancel asks
+session. A stale or duplicate answer cannot reach a later attempt.
+Concurrent permission and elicitation callbacks from one ACP session are
+queued in arrival order. Relay opens the next durable interaction only after
+the current answer is applied, keeping each answer attached to its own request.
+Cancel or timeout rejects queued requests without opening another interaction.
+
+Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to
 stop. On Windows it uses a console break followed by `taskkill /T /F` when
