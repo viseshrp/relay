@@ -413,6 +413,61 @@ node's required retained artifacts. Relay preserves each file and its SHA-256
 hash before removing an attempt worktree. An `exists` selector is only a
 boolean check: `false` is a valid output, so that path is not a required file.
 
+### Required handoffs and automatic gates
+
+An agent can finish its turn after reporting a blocker. A dependency in `needs`
+waits for the node's execution result; it does not check that the agent completed
+the requested work. Declare a required artifact with a `label`, `json_path`, or
+`yaml_path` selector before handing work to the next node. A missing artifact or
+field then fails the producer and blocks its dependents automatically. An
+`exists` selector alone does not enforce this requirement.
+
+Use a condition to advance on an explicit verification result. This example
+expects the report to contain exactly `Ready: Yes` or `Ready: No`. Keep generated
+reports in an ignored repository path when they must remain uncommitted; writer
+nodes still have to leave Git clean.
+
+<!-- relay-example: valid required-handoff -->
+```yaml
+version: 1
+name: Required report and readiness gate
+nodes:
+  verify:
+    type: agent
+    writes: true
+    allow_no_commit: true
+    prompts:
+      - local: prompts/review.md
+    outputs:
+      ready:
+        label:
+          artifact: report.md
+          label: Ready
+  gate:
+    type: condition
+    needs: [verify]
+    expr: "${{ needs.verify.outputs.ready == 'Yes' }}"
+    branches:
+      "true": proceed
+      "false": blocked
+  proceed:
+    type: command
+    needs: [gate]
+    run: [python, -c, "print('Verification passed')"]
+  blocked:
+    type: human_wait
+    needs: [gate]
+    prompt: Review the failed verification before deciding the next step.
+```
+
+For handoffs without a stable field, add a command node that validates the
+required files and exits nonzero when a file is missing or empty. If those files
+are ignored and shared between phases, that command needs `writes: true` and
+`allow_no_commit: true` to use the primary worktree. Read-only nodes use separate
+worktrees and cannot see another node's uncommitted files. Reserve `human_wait`
+for decisions that require an owner, rather than checks a command or condition
+can perform.
+
 ## Scope paths
 
 Every runtime node has an unambiguous scope path:
