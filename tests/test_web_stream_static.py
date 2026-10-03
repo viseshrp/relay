@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
+from typing import NoReturn
 
 from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
 from django.core.exceptions import RequestDataTooBig
-from django.db import connections
+from django.db import connection, connections
 from django.http import HttpRequest, HttpResponse
 from django.test import AsyncClient, RequestFactory
 import pytest
@@ -203,9 +205,29 @@ def test_the_served_project_is_registered_once(
     project: RelayProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
-
     first_root, first = current_project()
-    second_root, second = current_project()
+
+    def unexpected_query(
+        execute: Callable[..., object],
+        sql: str,
+        params: object,
+        many: bool,
+        context: dict[str, object],
+    ) -> NoReturn:
+        del execute, sql, params, many, context
+        message = "Resolving the served project again must not access the database."
+        raise AssertionError(message)
+
+    def unexpected_subprocess(*args: object, **kwargs: object) -> NoReturn:
+        del args, kwargs
+        message = "Resolving the served project again must not repeat Git discovery."
+        raise AssertionError(message)
+
+    # Observe both external boundaries; equal cached objects alone cannot prove
+    # that a later request avoided registration and its last_opened_at update.
+    monkeypatch.setattr("relay.vcs.git.subprocess.run", unexpected_subprocess)
+    with connection.execute_wrapper(unexpected_query):
+        second_root, second = current_project()
 
     assert first_root == second_root == project.relay_root.resolve()
-    assert first is second
+    assert first == second
