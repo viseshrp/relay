@@ -53,8 +53,10 @@ that line and retains the three most recent stopped-process log sets that have
 records, including their rotations. Files for live or unverifiable PIDs are
 retained; a reused PID can therefore keep an older set until that process
 exits. Files without the line, such as the former shared `relay.log` or logs
-from earlier builds, are left for manual cleanup. Windows process queries and
-log retention remain unverified on Windows.
+from earlier builds, are left for manual cleanup. The
+[2026-10-03 Windows CI run](https://github.com/viseshrp/relay/actions/runs/37129432298)
+verified retention with a live process, a stopped process, and foreign files
+on Python 3.10 through 3.14.
 A `RELAY_LOG_PATH=/path/custom.log` override produces
 `/path/custom-{pid}.log` and its rotations. A shared override directory is
 safe because Relay changes only the files it marked. Separate files prevent
@@ -142,8 +144,8 @@ retained attempt refs still exist. Clean worktrees, then Git refs, then records;
 rotations in place, keeping each file's `Relay process log` line. Files without
 that line, including the former shared `relay.log`, are left alone. Open
 append handlers stay attached, so active processes can continue logging after
-cleanup. Windows file-handle behavior remains unverified until exercised on
-Windows.
+cleanup. The same Windows CI run verified that an open append handler writes
+to the cleared file after cleanup on Python 3.10 through 3.14.
 
 Agent and command processes inherit the worker environment. Relay has no secret
 vault or output masking, so the database, artifact directory, and logs may

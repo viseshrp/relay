@@ -193,8 +193,11 @@ Agent cancellation asks the protocol session to stop, then Relay terminates the
 whole process tree after the fixed grace period. Command cancellation uses the
 same bounded process-tree stop: an isolated group receives a graceful signal,
 then `SIGKILL` on Linux or `taskkill /T /F` on Windows if needed. The force
-command and final exit wait are bounded. Windows process-tree behavior remains
-unverified until exercised on Windows. Evidence preservation precedes worktree removal
+command and final exit wait are bounded. The
+[2026-10-03 Windows CI run](https://github.com/viseshrp/relay/actions/runs/37129432298)
+verified the force-stop fallback for an uncooperative subprocess on Python
+3.10 through 3.14. Live agent descendant-tree shutdown remains unverified.
+Evidence preservation precedes worktree removal
 and lock release.
 
 An owner may rerun one failed node after Relay preserves its evidence and resets

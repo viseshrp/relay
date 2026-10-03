@@ -99,8 +99,8 @@ an unadvertised request fails rather than acquiring wider access.
 ## Install and authentication ownership
 
 The official ACP registry supplies adapter package versions and installation
-metadata. On 2026-09-16 UTC it reported Codex adapter 1.12.0, Claude adapter
-0.78.0, GitHub Copilot CLI 1.0.83, and Cursor 2026.09.10. These observations are
+metadata. On 2026-10-03 UTC it reported Codex adapter 2.1.1, Claude adapter
+0.85.1, GitHub Copilot CLI 1.0.91, and Cursor 2026.10.01. These observations are
 dated, not permanent pins. `relay doctor` refreshes registry metadata with a
 bounded request, displays installation guidance, and never runs a package
 manager.
@@ -200,19 +200,24 @@ the target operating system, a disposable model probe, and an end-to-end
 worktree run. Source review and command discovery do not substitute for that
 evidence.
 
-| Agent | Local status on 2026-09-16 UTC | Certification status |
+| Agent | Exact version and model on 2026-10-03 UTC | Certification status on macOS arm64 |
 | --- | --- | --- |
-| Codex | `codex-cli 0.145.0` present; `codex-acp` adapter absent | Blocked on registry adapter installation and live authenticated probe. |
-| Claude Code | `claude` and ACP adapter absent | Blocked on binary and credentials. |
-| GitHub Copilot CLI | CLI absent | Blocked on binary and credentials. |
-| Cursor CLI | CLI absent | Blocked on binary and credentials. |
-| Antigravity | `agy` absent | Blocked on binary and credentials. |
+| Codex | `codex-acp` 2.1.1; `gpt-6-luna` | Passed an authenticated writer workflow. |
+| Claude Code | `claude-agent-acp` 0.85.1 and `claude` 2.1.288; `haiku` | Model selection passed; the writer attempt failed with `agent_auth_error`. |
+| GitHub Copilot CLI | `copilot` 1.0.91; `auto` | Passed a writer workflow with a mailbox-delivered permission answer. |
+| Cursor CLI | `cursor-agent` 2026.10.01-e373342 | Fresh model preflight failed with `agent_auth_error`. |
+| Antigravity | `agy` 1.2.16; `gemini-3.8-flash-low` | Passed a native stdin writer workflow with `auto_approve`. |
 
-The registry endpoint and all five install links above returned HTTP 200 on
-2026-09-16 UTC. The current registry document passed Relay's structural validation.
-The ACP SDK pin, Codex and Claude adapter sources, and Antigravity's headless
-documentation were reviewed for the commands, model selection, stream format,
-permission behavior, and timeout described here. Missing live prerequisites
-remain explicit gaps; Relay does not claim five-agent or cross-platform
-certification from this machine. The sanitized local record and selected
-registry fixture are under [`certification/`](../certification/README.md).
+The successful runs verified the writer's committed bytes, declared artifact
+hash, protected head, process cleanup, and successful worktree removal. No live
+ACP attempt required client-mediated file or terminal methods. Copilot's
+literal selector value `auto` was advertised and confirmed; its concrete
+backend model was not identified.
+
+Claude's model menu is available without authentication, so model selection
+alone does not certify its account. Claude and Cursor await their own CLI
+sign-in. Live provider behavior on Linux and Windows, cancellation, model
+drift, elicitation, timeouts, and Antigravity soft denies remain unverified.
+The five-agent Definition of Done remains unmet. The sanitized results and
+fresh validated registry fixture are under
+[`certification/`](../certification/README.md).

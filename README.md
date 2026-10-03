@@ -16,11 +16,13 @@ loopback-only web application.
 
 ## Status
 
-Relay Phase 1 is implemented but unreleased. Live certification remains
-environment-dependent; the current five-agent gaps are recorded in
-[`certification/`](certification/README.md). The persistence, workflow, CLI,
-HTTP, SSE, and artifact formats become versioned contracts at the first
-release.
+Relay Phase 1 is implemented but unreleased. Codex, GitHub Copilot CLI, and
+Antigravity passed live writer-workflow certification on macOS arm64 on
+2026-10-03. Claude Code and Cursor CLI are installed but await authentication;
+the five-agent Definition of Done remains unmet. Exact versions, results, and
+platform limits are recorded in [`certification/`](certification/README.md).
+The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
+contracts at the first release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
 Redis, Postgres, automatic retries, model fallback, automatic merge, or
