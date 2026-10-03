@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -286,6 +287,7 @@ def test_evidence_preservation_retains_bytes_and_integrity_metadata(
 def test_untracked_symlinks_preserve_the_link_target_text(repository: Path, tmp_path: Path) -> None:
     link = repository / "link.txt"
     symlink_or_skip(link, repository / "README.md")
+    target_text = os.readlink(link)
     result = preserve_attempt_evidence(
         repository,
         repository,
@@ -296,7 +298,7 @@ def test_untracked_symlinks_preserve_the_link_target_text(repository: Path, tmp_
     )
     retained = next(file for file in result.files if file.name == "link.txt")
     assert retained.kind == "untracked_symlink_target"
-    assert Path(retained.retained_path).read_text(encoding="utf-8") == str(repository / "README.md")
+    assert Path(retained.retained_path).read_text(encoding="utf-8") == target_text
 
 
 @pytest.mark.parametrize(
