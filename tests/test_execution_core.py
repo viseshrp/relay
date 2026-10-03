@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import logging
 
+from django.db import connections
 import pytest
 
 from relay.errors import (
@@ -30,6 +32,7 @@ from relay.execution.dispatch import (
     release_admission,
     set_dispatch_notifier,
 )
+from relay.execution.launch import LaunchRequest, launch_workflow
 from relay.execution.locks import decide_admission
 from relay.execution.machine import (
     TransitionResult,
@@ -48,10 +51,11 @@ from relay.execution.scheduler import (
 )
 from relay.execution.state import AttemptStopReason, ControlKind, LockMode, Transition
 from relay.execution.timing import attempt_deadline, duration_seconds, remaining_seconds
+from relay.web.models import DispatchClaim
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text
 from relay.workflows.schema import NodeDefinition
-from tests.support import Clock
+from tests.support import Clock, InlineEngine, RelayProject
 
 GUARDED: Mapping[str, NodeDefinition] = load_workflow_text(
     "version: 1\nname: S\nnodes:\n"
@@ -261,18 +265,36 @@ class _DispatchStore:
         del claim_token
 
 
-def test_dispatch_commits_the_claim_before_enqueuing_its_token() -> None:
-    store = _DispatchStore()
-    queue = []
-
-    token = dispatch_node(store, "n1", queue.append)
-
-    assert (token, store.created, queue, store.enqueued) == (
-        "token-n1",
-        ["token-n1"],
-        ["token-n1"],
-        ["token-n1"],
+def test_launch_commits_the_claim_before_enqueuing_its_token(
+    project: RelayProject, engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "dispatch",
+        "version: 1\nname: Dispatch\nnodes:\n  work: {type: command, run: [git, status]}\n",
     )
+    observed = []
+
+    def read_committed_claim(token: str) -> tuple[str, str]:
+        try:
+            claim = DispatchClaim.objects.get(claim_token=token)
+            return str(claim.state), str(claim.node_run.status)
+        finally:
+            connections.close_all()
+
+    def enqueue(token: str) -> None:
+        # A separate connection must see the claim before a consumer can receive it.
+        with ThreadPoolExecutor(max_workers=1) as reader:
+            observed.append(reader.submit(read_committed_claim, token).result(timeout=10))
+
+    launch_workflow(
+        engine.store,
+        project.relay_root,
+        project.project_id,
+        LaunchRequest("dispatch", {}, None, "retain", None, (), "owner"),
+        enqueue,
+    )
+
+    assert observed == [("dispatched", "dispatched")]
 
 
 def test_an_enqueue_failure_becomes_a_dispatch_error() -> None:

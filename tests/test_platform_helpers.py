@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 import json
 import logging
 import os
@@ -270,6 +271,50 @@ def test_the_installation_secret_key_is_published_once(monkeypatch: pytest.Monke
     assert (paths.data_dir() / "django-secret-key").read_text(
         encoding="utf-8"
     ).strip() == first.stdout.strip()
+    assert not list(paths.data_dir().glob(".django-secret-*"))
+
+
+def test_concurrent_startups_share_one_complete_installation_secret_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RELAY_DJANGO_SECRET_KEY")
+    source = (
+        "import secrets, sys\n"
+        "def generated_key(size: int) -> str:\n"
+        "    print('ready', flush=True)\n"
+        "    sys.stdin.readline()\n"
+        "    return sys.argv[1] * size\n"
+        "secrets.token_urlsafe = generated_key\n"
+        "from relay.web.settings import SECRET_KEY\n"
+        "print(SECRET_KEY, flush=True)\n"
+    )
+    with ExitStack() as processes:
+        children = [
+            processes.enter_context(
+                subprocess.Popen(  # noqa: S603
+                    [sys.executable, "-c", source, marker],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+            for marker in ("a", "b", "c", "d")
+        ]
+        # Every child reaches key generation before any can publish its candidate.
+        for child in children:
+            assert child.stdout is not None
+            assert child.stdout.readline() == "ready\n"
+        for child in children:
+            assert child.stdin is not None
+            child.stdin.write("publish\n")
+            child.stdin.flush()
+        results = [child.communicate(timeout=10) for child in children]
+        assert [child.returncode for child in children] == [0, 0, 0, 0]
+
+    keys = {stdout.strip() for stdout, _stderr in results}
+    assert len(keys) == 1
+    assert (paths.data_dir() / "django-secret-key").read_text(encoding="utf-8").strip() in keys
     assert not list(paths.data_dir().glob(".django-secret-*"))
 
 
