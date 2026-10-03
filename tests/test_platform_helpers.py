@@ -100,6 +100,23 @@ def test_clearing_preserves_ownership_and_other_tools_files(log_base: Path) -> N
     assert (folder / "app-20261002.log").read_bytes() == b"another tool\n"
 
 
+def test_clearing_logs_preserves_a_live_append_handle(log_base: Path) -> None:
+    path = paths.application_log_path()
+    handler = OwnedRotatingFileHandler(str(path), delay=True)
+    try:
+        handler.emit(logging.LogRecord("relay.test", logging.WARNING, "", 0, "before", (), None))
+
+        assert paths.clear_application_logs() == 1
+
+        handler.emit(logging.LogRecord("relay.test", logging.WARNING, "", 0, "after", (), None))
+        assert path.read_text(encoding="utf-8").splitlines() == [
+            APPLICATION_LOG_OWNERSHIP_LINE,
+            "after",
+        ]
+    finally:
+        handler.close()
+
+
 def test_a_missing_log_directory_has_no_relay_logs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
