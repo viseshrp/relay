@@ -203,21 +203,21 @@ evidence.
 | Agent | Exact version and model on 2026-10-03 UTC | Certification status on macOS arm64 |
 | --- | --- | --- |
 | Codex | `codex-acp` 2.1.1; `gpt-6-luna` | Passed an authenticated writer workflow. |
-| Claude Code | `claude-agent-acp` 0.85.1 and `claude` 2.1.288; `haiku` | Model selection passed; the writer attempt failed with `agent_auth_error`. |
+| Claude Code | `claude-agent-acp` 0.85.1 and `claude` 2.1.288; `haiku` | Passed a writer workflow with mailbox-delivered permission answers. |
 | GitHub Copilot CLI | `copilot` 1.0.91; `auto` | Passed a writer workflow with a mailbox-delivered permission answer. |
-| Cursor CLI | `cursor-agent` 2026.10.01-e373342 | Fresh model preflight failed with `agent_auth_error`. |
+| Cursor CLI | `cursor-agent` 2026.10.01-e373342; `default[]` | Passed a writer workflow with a mailbox-delivered permission answer. |
 | Antigravity | `agy` 1.2.16; `gemini-3.8-flash-low` | Passed a native stdin writer workflow with `auto_approve`. |
 
 The successful runs verified the writer's committed bytes, declared artifact
 hash, protected head, process cleanup, and successful worktree removal. No live
 ACP attempt required client-mediated file or terminal methods. Copilot's
-literal selector value `auto` was advertised and confirmed; its concrete
-backend model was not identified.
+`auto` and Cursor's `default[]` were advertised and confirmed literal selectors;
+their concrete backend models were not identified.
 
 Claude's model menu is available without authentication, so model selection
-alone does not certify its account. Claude and Cursor await their own CLI
-sign-in. Live provider behavior on Linux and Windows, cancellation, model
-drift, elicitation, timeouts, and Antigravity soft denies remain unverified.
-The five-agent Definition of Done remains unmet. The sanitized results and
-fresh validated registry fixture are under
+alone does not certify its account. Its certified writer run followed native
+CLI sign-in. All five agents passed the macOS certification bar. Live provider
+behavior on Linux and Windows, cancellation, model drift, elicitation,
+timeouts, and Antigravity soft denies remain unverified. The sanitized results,
+completed sign-in screenshots, and fresh validated registry fixture are under
 [`certification/`](../certification/README.md).

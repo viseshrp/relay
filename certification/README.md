@@ -17,26 +17,29 @@ worktree through `clean_on_success`.
 | Agent | Exact command version and model value | Result |
 | --- | --- | --- |
 | Codex | `codex-acp` 2.1.1; `gpt-6-luna` | Certified. ACP completed the prompt before SIGTERM stopped the adapter; the attempt stayed succeeded. |
-| Claude Code | `claude-agent-acp` 0.85.1 and `claude` 2.1.288; `haiku` | Model selection succeeded, but the real writer attempt failed with `agent_auth_error`. |
+| Claude Code | `claude-agent-acp` 0.85.1 and `claude` 2.1.288; `haiku` | Certified with one-use permission answers delivered through Relay's durable mailbox. |
 | GitHub Copilot CLI | `copilot` 1.0.91; `auto` | Certified. A one-use permission answer traveled through Relay's durable mailbox to the live ACP request. |
-| Cursor CLI | `cursor-agent` 2026.10.01-e373342 | Fresh model preflight failed with `agent_auth_error`; no run was created. |
+| Cursor CLI | `cursor-agent` 2026.10.01-e373342; `default[]` | Certified with a one-use permission answer delivered through Relay's durable mailbox. |
 | Antigravity | `agy` 1.2.16; `gemini-3.8-flash-low` | Certified with `auto_approve` and the native stdin stream. |
 
-Copilot advertised and confirmed the literal ACP value `auto`. That proves
-Relay preserved the selected value; it does not identify the concrete backend
-model Copilot chose. Antigravity proves native model-list membership and an
-explicit `--model` argument rather than ACP configuration confirmation.
+Copilot and Cursor advertised and confirmed the literal ACP values `auto` and
+`default[]`, respectively. These values do not identify the concrete backend
+models the providers chose. Antigravity proves native model-list membership
+and an explicit `--model` argument rather than ACP configuration confirmation.
 
 No certified ACP attempt required client-mediated file or terminal methods.
 Codex and Claude probes advertised session deletion that SDK 0.12.1 cannot
 perform; provider-owned probe history may remain. Retained ACP session IDs in
 attempt records are diagnostic metadata, not resumable Relay sessions.
 
-Claude and Cursor still need their own account sign-in. The five-agent
-Definition of Done remains unmet. Live agent execution on Linux and Windows,
-live cancellation, model drift, elicitation, provider timeout paths, and
-Antigravity's `respect_settings` soft-deny notice remain unverified. Passing
-offline CI on those operating systems does not certify a live provider.
+All five agents meet the certification bar below on this macOS arm64 host.
+Claude and Cursor completed native CLI account sign-in before their successful
+runs. The sanitized [Claude](2026-10-03-claude-sign-in.png) and
+[Cursor](2026-10-03-cursor-sign-in.png) screenshots show the completed browser
+handoffs. Live agent execution on Linux and Windows, live cancellation, model
+drift, elicitation, provider timeout paths, and Antigravity's `respect_settings`
+soft-deny notice remain unverified. Passing offline CI on those operating
+systems does not certify a live provider.
 
 The current registry fixture is
 [`fixtures/registry-2026-10-03.json`](fixtures/registry-2026-10-03.json). Relay

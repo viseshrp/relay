@@ -16,11 +16,11 @@ loopback-only web application.
 
 ## Status
 
-Relay Phase 1 is implemented but unreleased. Codex, GitHub Copilot CLI, and
-Antigravity passed live writer-workflow certification on macOS arm64 on
-2026-10-03. Claude Code and Cursor CLI are installed but await authentication;
-the five-agent Definition of Done remains unmet. Exact versions, results, and
-platform limits are recorded in [`certification/`](certification/README.md).
+Relay Phase 1 is implemented but unreleased. All five supported agents passed
+authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
+Live provider execution on Linux and Windows remains unverified. Exact
+versions, model selectors, artifact hashes, cleanup results, and remaining
+verification limits are recorded in [`certification/`](certification/README.md).
 The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.
 
