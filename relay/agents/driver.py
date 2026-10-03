@@ -96,7 +96,7 @@ async def _bounded_probe(
         return await asyncio.wait_for(
             driver.probe_models(requirements, cwd), timeout=AGENT_PROBE_TIMEOUT_SECONDS
         )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         message = (
             f"Agent {agent_id!r} did not complete its probe in "
             f"{AGENT_PROBE_TIMEOUT_SECONDS:g} seconds."

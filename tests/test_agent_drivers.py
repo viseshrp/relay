@@ -279,7 +279,9 @@ def test_antigravity_attempts_use_the_documented_headless_arguments(
 ) -> None:
     context = replace(agent_context, permission_profile="auto_approve")
     events, result = execute(AntigravityDriver(PROFILES["antigravity"], context.command), context)
-    assert result.succeeded
+    assert result.succeeded, [
+        event.payload for event in events if event.event_type == "agent.stderr"
+    ]
     assert any(
         event.event_type == "agent.message" and event.payload["text"] == "Ready: Yes"
         for event in events

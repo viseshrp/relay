@@ -119,12 +119,12 @@ async def terminate_async_process_tree(process: asyncio.subprocess.Process) -> N
                 raise
         try:
             await asyncio.wait_for(process.wait(), timeout=CANCELLATION_GRACE_SECONDS)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             await asyncio.to_thread(signal_process_tree, process.pid, force=True)
         else:
             return
         await asyncio.wait_for(process.wait(), timeout=PROCESS_EXIT_GRACE_SECONDS)
-    except (OSError, subprocess.SubprocessError, TimeoutError):
+    except (OSError, subprocess.SubprocessError, asyncio.TimeoutError):
         message = "Relay could not stop the attempt process tree within its deadline."
         raise CancellationError(
             message, next_action="Inspect the retained worktree and local process before cleanup."

@@ -507,7 +507,7 @@ async def _finish_stdio(
     try:
         try:
             await asyncio.wait_for(process.wait(), timeout=PROCESS_EXIT_GRACE_SECONDS)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             await terminate_async_process_tree(process)
     finally:
         if process.returncode is None:
@@ -742,7 +742,7 @@ class AcpDriver:
         heartbeat_due = time.monotonic() + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
         try:
             while not lifecycle.done() or not queue.empty():
-                with suppress(TimeoutError):
+                with suppress(asyncio.TimeoutError):
                     yield await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
                 now = time.monotonic()
                 if requested_stop is None:

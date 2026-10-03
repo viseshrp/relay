@@ -215,7 +215,7 @@ async def _drain_raw_events(
     while any(not task.done() for task in readers) or not queue.empty():
         try:
             kind, value = await asyncio.wait_for(queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             continue
         if kind == "stderr_raw" and isinstance(value, str):
             yield AgentEvent("agent.stderr", {"text": value})
@@ -251,7 +251,7 @@ class AntigravityDriver:
                 stdout, _stderr = await asyncio.wait_for(
                     asyncio.shield(communication), timeout=_MODEL_LIST_TIMEOUT_SECONDS
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 await terminate_async_process_tree(process)
                 await communication
                 message = "Antigravity did not return its model list within 15 seconds."
@@ -358,7 +358,7 @@ class AntigravityDriver:
                     kind, value = await asyncio.wait_for(
                         queue.get(), timeout=CONTROL_POLL_INTERVAL_SECONDS
                     )
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     kind, value = "", None
                 if kind.endswith("_done"):
                     completed_streams += 1
