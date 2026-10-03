@@ -163,6 +163,16 @@ def agy_main(arguments: list[str]) -> None:
         return
     trace({"argv": arguments})
     model = arguments[arguments.index("--model") + 1]
+    if mode == "stdin-backpressure":
+        for _index in range(512):
+            write_line("startup diagnostics " + "e" * 1_024, stderr=True)
+    message = json.loads(sys.stdin.readline())
+    trace({"input": message})
+    if message.get("event") != "user" or not isinstance(message.get("message"), dict):
+        raise SystemExit(2)
+    if sys.stdin.read():
+        raise SystemExit(2)
+    trace({"input_closed": True})
     emit({"event": "init", "init": {"model": "other" if mode == "drift" else model}})
     if mode == "malformed":
         write_line("{")
@@ -204,6 +214,9 @@ def agy_main(arguments: list[str]) -> None:
 
 
 def main() -> None:
+    # The protocol uses UTF-8 even when a Windows console defaults to a code page.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     if "--version" in sys.argv:
         trace({"version_probe": True})
         write_line("fake-agent 1.2.3")

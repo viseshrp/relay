@@ -131,8 +131,23 @@ or operating-system credential store. Relay emits no product telemetry.
 Relay executes Antigravity as:
 
 ```text
-agy -p <composed prompt> --output-format stream-json --model <exact value> --print-timeout <duration>
+agy --input-format stream-json --output-format stream-json
+    --model <exact value> --print-timeout <duration>
 ```
+
+Relay sends one UTF-8 JSON line to stdin and closes the pipe:
+
+```json
+{"event":"user","message":{"content":"Review.\nNext."}}
+```
+
+The content contains the ordered prompt files followed by the three Relay JSON
+sections. JSON escaping preserves newlines, quotes and Unicode without passing
+the prompt through a Windows batch command line. The
+[headless stdin contract](https://antigravity.google/docs/cli/headless/#stream-prompts-from-stdin)
+allows EOF immediately after the final prompt; Antigravity completes that turn,
+emits its result and exits. Relay drains stdout and stderr while writing stdin
+so startup diagnostics cannot block prompt delivery.
 
 The `auto_approve` permission profile adds
 `--dangerously-skip-permissions`; `respect_settings` does not. Auto-approval
@@ -160,7 +175,10 @@ command must also fit the 32,767 UTF-16-unit process limit, including its final
 NUL, or the smaller 8,191-character limit when the executable is a `.cmd` or
 `.bat` shim. Relay checks the quoted command and wrapper allowance before
 starting it. Oversized input raises `node_execution_error` with guidance to
-reduce prompt files, inputs, or upstream output. Prompts continue to use `-p`.
+reduce prompt files, inputs, or upstream output. The command-line limit applies
+only to the executable, adapter arguments, model and flags; the prompt travels
+through stdin. An oversized command reports the same code with guidance to
+shorten its arguments or model value.
 
 Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
 using a bounded queue that applies pipe backpressure. JSON parsing holds at

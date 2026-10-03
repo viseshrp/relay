@@ -82,9 +82,8 @@ def _timeout_value(context: AgentExecutionContext) -> str:
     return context.node.timeout or f"{DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS // 60}m"
 
 
-def _argv(context: AgentExecutionContext) -> tuple[str, ...]:
-    """Keep the composed prompt in `-p`, rejecting oversized platform arguments."""
-    prompt = _prompt(context)
+def _argv(context: AgentExecutionContext, prompt: str) -> tuple[str, ...]:
+    """Bound the stdin prompt separately from the platform command line."""
     if len(prompt.encode("utf-8")) > ANTIGRAVITY_PROMPT_MAX_BYTES:
         message = "The composed Antigravity prompt exceeds Relay's 32 KiB UTF-8 limit."
         raise NodeExecutionError(
@@ -93,8 +92,8 @@ def _argv(context: AgentExecutionContext) -> tuple[str, ...]:
     values = [
         context.command.executable,
         *context.command.args,
-        "-p",
-        prompt,
+        "--input-format",
+        "stream-json",
         "--output-format",
         "stream-json",
         "--model",
@@ -117,9 +116,26 @@ def _argv(context: AgentExecutionContext) -> tuple[str, ...]:
         if size > limit:
             message = "The Antigravity command exceeds the Windows command-line limit."
             raise NodeExecutionError(
-                message, next_action="Reduce prompt files, inputs, or upstream output."
+                message, next_action="Shorten the agent command arguments or exact model value."
             )
     return tuple(values)
+
+
+async def _send_prompt(process: asyncio.subprocess.Process, prompt: str) -> None:
+    """Send `Review.\nNext.` as one JSON content string with an escaped newline."""
+    stream = process.stdin
+    if stream is None:
+        message = "Antigravity's prompt input pipe is unavailable."
+        raise AgentProtocolError(message)
+    frame = {"event": "user", "message": {"content": prompt}}
+    payload = (json.dumps(frame, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        stream.write(payload)
+        await stream.drain()
+    finally:
+        # EOF ends the documented streaming session after this single turn.
+        stream.close()
+    await stream.wait_closed()
 
 
 def _inside_worktree(target: str, worktree: Path) -> str | None:
@@ -330,19 +346,24 @@ class AntigravityDriver:
         requested_stop = None
         readers = ()
         stopper = None
+        sender = None
         try:
-            arguments = _argv(context)
+            prompt = _prompt(context)
+            arguments = _argv(context, prompt)
             # agy reports failures as ERROR plus free text, without a documented
             # timeout code. Enforce its advertised print ceiling locally as well.
             print_deadline = attempt_deadline(_timeout_value(context), context.attempt.deadline_at)
             print_limit = duration_seconds(_timeout_value(context))
             command = AgentCommand(arguments[0], arguments[1:])
-            process = await spawn_process(command.argv(), context.cwd, input_pipe=False)
+            process = await spawn_process(command.argv(), context.cwd)
             self.process = process
             readers = (
                 asyncio.create_task(_read_lines(process.stdout, "stdout", queue)),
                 asyncio.create_task(_read_lines(process.stderr, "stderr", queue)),
             )
+            # Feed stdin alongside both drains: a provider may write startup
+            # diagnostics before reading a prompt larger than the pipe buffer.
+            sender = asyncio.create_task(_send_prompt(process, prompt))
             await asyncio.to_thread(
                 context.attempt.runtime.record_agent_session,
                 context.attempt.attempt.attempt_id,
@@ -457,9 +478,13 @@ class AntigravityDriver:
                             message, context={"node": context.attempt.attempt.scope_path}
                         )
                     heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+                if requested_stop is None and sender.done():
+                    await sender
             await asyncio.gather(*readers)
             if stopper is not None:
                 await stopper
+            if requested_stop is None:
+                await sender
             await process.wait()
             required = set(declared_output_artifacts(context.node.outputs).values())
             denied_required = any(
@@ -527,6 +552,10 @@ class AntigravityDriver:
             )
             raise mapped from None
         finally:
+            if sender is not None:
+                if not sender.done():
+                    sender.cancel()
+                await asyncio.gather(sender, return_exceptions=True)
             if readers:
                 for reader in readers:
                     if not reader.done():

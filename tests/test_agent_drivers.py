@@ -289,9 +289,34 @@ def test_antigravity_attempts_use_the_documented_headless_arguments(
     arguments = next(message["argv"] for message in fake_agents.messages() if "argv" in message)
     assert arguments[arguments.index("--model") + 1] == "m1"
     assert arguments[arguments.index("--output-format") + 1] == "stream-json"
+    assert arguments[arguments.index("--input-format") + 1] == "stream-json"
     assert arguments[arguments.index("--print-timeout") + 1] == "5m"
     assert "--dangerously-skip-permissions" in arguments
-    assert "Relay inputs" in arguments[arguments.index("-p") + 1]
+    assert "-p" not in arguments
+    inputs = [message["input"] for message in fake_agents.messages() if "input" in message]
+    assert len(inputs) == 1
+    assert "Relay inputs" in inputs[0]["message"]["content"]
+    assert {"input_closed": True} in fake_agents.messages()
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+@pytest.mark.parametrize("prompt", ['First line\n"Second" line', "é😀 %&|<>()^!", "\t" * 16_000])
+def test_antigravity_stdin_preserves_prompt_text_while_draining_startup_output(
+    agent_context: AgentExecutionContext,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+) -> None:
+    monkeypatch.setenv("FAKE_AGY_MODE", "stdin-backpressure")
+    claim = replace(agent_context.attempt.attempt, prompt_contents=(prompt,))
+    context = replace(agent_context, attempt=replace(agent_context.attempt, attempt=claim))
+    events, result = execute(AntigravityDriver(PROFILES["antigravity"], context.command), context)
+    assert result.succeeded
+    inputs = [message["input"] for message in fake_agents.messages() if "input" in message]
+    assert len(inputs) == 1
+    assert inputs[0]["message"]["content"].startswith(prompt + "\n\n--- Relay inputs")
+    assert any(event.event_type == "agent.stderr" for event in events)
+    assert {"input_closed": True} in fake_agents.messages()
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
@@ -384,12 +409,7 @@ def test_oversized_antigravity_prompts_fail_before_starting_a_process(
 def test_windows_batch_argument_limits_are_enforced_before_spawning(
     agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    claim = replace(agent_context.attempt.attempt, prompt_contents=("😀" * 5_000,))
-    context = replace(
-        agent_context,
-        attempt=replace(agent_context.attempt, attempt=claim),
-        command=AgentCommand("fake.cmd"),
-    )
+    context = replace(agent_context, command=AgentCommand("fake.cmd", ("😀" * 5_000,)))
     monkeypatch.setattr(antigravity_driver, "os", SimpleNamespace(name="nt"))
     driver = AntigravityDriver(PROFILES["antigravity"], context.command)
     with pytest.raises(NodeExecutionError):
