@@ -1,0 +1,10 @@
+{
+  // Table columns keep each row together even when it exceeds prose width.
+  "MD013": {
+    "tables": false
+  },
+  // The changelog uses this literal marker for its unreleased version.
+  "MD033": {
+    "allowed_elements": ["Unreleased"]
+  }
+}

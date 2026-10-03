@@ -66,6 +66,16 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
+The Markdown hook checks every supplied file. Its `--` delimiter ends the
+list of disabled rules before file names. [Markdown configuration](.markdownlint.jsonc)
+keeps the 80-column limit for prose and code, permits wider table rows, and
+allows the changelog's literal `<Unreleased>` marker. Duplicate headings
+remain allowed. Run the hook directly with:
+
+```bash
+uv run pre-commit run markdownlint --all-files
+```
+
 For a frontend-only check, run:
 
 ```bash
