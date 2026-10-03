@@ -139,3 +139,7 @@ cython_debug/
 
 # local tests
 local-test/
+
+# Frontend dependencies and generated wheel assets
+frontend/node_modules/
+relay/static/
