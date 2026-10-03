@@ -213,8 +213,8 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
               style={{ top: (start + offset) * OUTPUT_ROW_HEIGHT, height: OUTPUT_ROW_HEIGHT }}
             >
               <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                <Chip size="small" label={event.type} />
-                <Typography variant="caption" color="text.secondary">
+                <Chip size="small" className="event-type" label={event.type} />
+                <Typography variant="caption" color="text.secondary" className="event-meta">
                   #{event.id} · {new Date(event.ts).toLocaleTimeString()}
                 </Typography>
                 <Button size="small" color="inherit" onClick={() => setExpanded({ event, text })}>

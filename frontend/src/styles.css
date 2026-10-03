@@ -134,6 +134,16 @@ body {
   box-sizing: border-box;
 }
 
+/* Light-theme chip and caption colors are unreadable on the dark output panel. */
+.output-row .event-type {
+  background-color: #374151;
+  color: #f3f4f6;
+}
+
+.output-row .event-meta {
+  color: #9ca3af;
+}
+
 .output-text {
   color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
