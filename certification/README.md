@@ -34,8 +34,8 @@ attempt records are diagnostic metadata, not resumable Relay sessions.
 
 All five agents meet the certification bar below on this macOS arm64 host.
 Claude and Cursor completed native CLI account sign-in before their successful
-runs. The sanitized [Claude](2026-10-03-claude-sign-in.png) and
-[Cursor](2026-10-03-cursor-sign-in.png) screenshots show the completed browser
+runs. The sanitized [Claude](2026-10-03-claude-sign-in.jpg) and
+[Cursor](2026-10-03-cursor-sign-in.jpg) screenshots show the completed browser
 handoffs. Live agent execution on Linux and Windows, live cancellation, model
 drift, elicitation, provider timeout paths, and Antigravity's `respect_settings`
 soft-deny notice remain unverified. Passing offline CI on those operating
