@@ -30,6 +30,10 @@ to change that effort.
 - [ ] Show the current stage, completed work, and next action in plain language
   above the graph and logs. Make waiting and failed stages easy to find without
   reading internal node names or zooming around the graph.
+- [ ] Draw dependency and control-flow connections in the run monitor using
+  the run's captured workflow and runtime scopes. Arrange nodes by their
+  connections so branches and stage order are readable; the current run view
+  displays nodes without edges.
 - [ ] At a human review gate, show the review documents or diff, the required
   review steps, and the expected response beside the response field. Keep human
   approval distinct from automated checks and agent permission requests.
