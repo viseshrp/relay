@@ -1,4 +1,5 @@
 import type { JsonValue, RunEvent } from "./types";
+import { stageLabel } from "./navigation";
 
 export interface ActivityMessage {
   id: number;
@@ -28,6 +29,10 @@ function readableOutput(event: RunEvent, toolNames: Map<string, string>, owner: 
     const toolId = typeof event.payload.tool_call_id === "string" ? `${owner}:${event.payload.tool_call_id}` : "";
     let title = typeof event.payload.tool === "string" ? event.payload.tool : "Tool";
     if (toolId && title === event.payload.tool_call_id) title = toolNames.get(toolId) ?? "Tool";
+    // Older Claude events stored toolu_01ABC as a title. Show "Execute" (or
+    // "Tool") instead; the original identifier stays in Advanced diagnostics.
+    if (/^toolu_[A-Za-z0-9]+$/.test(title)) title = "Tool";
+    if (title === "Tool" && typeof summary?.kind === "string") title = stageLabel(summary.kind);
     if (toolId && title !== "Tool") toolNames.set(toolId, title);
     const content = summary?.content;
     const text = Array.isArray(content) ? content.flatMap((item) => {
@@ -42,7 +47,9 @@ function readableOutput(event: RunEvent, toolNames: Map<string, string>, owner: 
     const input = record(native?.parameters ?? summary?.raw_input);
     const command = input?.command ?? input?.CommandLine ?? input?.path ?? input?.file_path;
     const status = summary?.status ?? summary?.state;
-    return `${title}${typeof status === "string" ? ` · ${status}` : ""}${typeof command === "string" ? `\n${command}` : ""}${visible ? `\n${visible}` : ""}`;
+    if (title === "Tool" && !status && !command && !visible) return null;
+    // A title "git status" with the same command shows it once, not twice.
+    return `${title}${typeof status === "string" ? ` · ${status}` : ""}${typeof command === "string" && command !== title ? `\n${command}` : ""}${visible ? `\n${visible}` : ""}`;
   }
   if (event.type === "agent.plan" && Array.isArray(event.payload.plan)) {
     return event.payload.plan.flatMap((item) => {

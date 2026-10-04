@@ -170,6 +170,8 @@ The Runs tab lists history for the selected project. The header shows the
 current stages, progress, and next action. Pending requests appear before the
 graph; failed steps have Show step and Retry step controls. Stage buttons
 focus the graph on that step at a readable scale.
+Interaction updates refresh the current step state after event replay, so a
+waiting stage stays labeled **Needs your input** when a historical stream opens.
 
 The graph uses captured dependencies and control targets, so editing today's
 workflow cannot redraw a past run's connections. Connected rows show stage
@@ -183,6 +185,8 @@ The monitor combines the SSE stream with paginated database reads:
   attempt, stage, and stdout/stderr boundaries stay separate. Split tool JSON
   is assembled before readable summaries are shown. For example, `"Hello "` plus
   `"world\n"` becomes `"Hello world\n"` within one message;
+  opaque tool IDs remain in diagnostics, and duplicate command titles appear
+  once. For example, a `git status` title and command show one `git status`;
 - original events and complete provider payloads remain available under
   Advanced diagnostics and saved files;
 - event history loads forward by the last durable event ID, then starts its

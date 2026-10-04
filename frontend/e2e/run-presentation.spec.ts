@@ -43,6 +43,15 @@ test("native Antigravity tools show the command and output without raw JSON", ()
   expect(messages[0].text).toBe("run_command · DONE\ngit status --short\n M app.py\n");
 });
 
+test("legacy tool summaries omit opaque IDs and duplicate command titles", () => {
+  const messages = activityMessages([
+    event(1, "agent.tool_call", { tool: "git status", summary: '{"raw_input":{"command":"git status"}}' }),
+    event(2, "agent.tool_call", { tool: "toolu_01ABC", summary: '{}' }),
+    event(3, "agent.tool_result", { tool: "toolu_01ABC", summary: '{"kind":"execute","status":"completed","content":[{"text":"clean"}]}' }),
+  ]);
+  expect(messages.map((message) => message.text)).toEqual(["git status", "Execute · completed\nclean"]);
+});
+
 function node(scope_path: string, dependencies: string[] = [], parent_scope: string | null = null): RunNode {
   return { id: scope_path, scope_path, node_id: scope_path.split(".").at(-1)!, node_type: "command", status: "succeeded", writes: false, loop_index: null, dependencies, controls: [], parent_scope, selected_branch: null };
 }

@@ -56,6 +56,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.goto(href!);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Owner review · Needs your input", exact: true })).toBeVisible();
   const detail = (await (await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`)).json()).run;
   expect(detail.status).toBe("paused_wait");
   expect(detail.interactions).toHaveLength(1);

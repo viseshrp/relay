@@ -422,13 +422,16 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       if (batch.length === 0) return;
       setEvents((current) => mergeEvents(current, batch));
       setDetail((current) => batch.reduce(applyStateEvent, current));
-      if (batch.some((item) => item.type === "node.created")) {
+      const interactionChanged = batch.some((item) => item.type === "attempt.ended"
+        || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
+      // Interaction records change node state without always emitting node.waiting.
+      // Read the current state after replay so old node.running events cannot undo a pause.
+      if (interactionChanged || batch.some((item) => item.type === "node.created")) {
         void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );
       }
-      if (batch.some((item) => item.type === "attempt.ended"
-        || item.type.endsWith(".requested") || item.type.endsWith(".answered"))) {
+      if (interactionChanged) {
         void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );
