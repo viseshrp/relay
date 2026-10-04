@@ -138,10 +138,12 @@ Run detail pages one collection at a time. `collection=nodes` is the default;
 Both use the last numeric record ID as `since`. Stable run and snapshot
 metadata accompanies every page. Node pages are monitor summaries; complete
 provider and command output remains available through the event history.
-Run detail also includes `event_cursor`, the highest event ID observed before
-reading its state. The browser retains older replayed output but applies state
-changes only after this lower bound. An old terminal event cannot close a
-stream for a run that was later retried.
+Run detail also includes `event_cursor`, the highest event ID read in the same
+database statement as its run status, before the node or interaction page.
+The browser retains older replayed output but applies state changes only after
+this lower bound, including events fetched during initial loading. Before
+closing a terminal stream, it confirms the current run state. An old terminal
+event cannot close a stream for a run that was later retried.
 Run metadata includes the registered `project`. Each node includes captured
 `dependencies` (scope paths), `controls` (`target` and `label`), and
 `parent_scope`. These fields come from that run's frozen node definitions,

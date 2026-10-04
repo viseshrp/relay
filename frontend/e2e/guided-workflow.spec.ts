@@ -65,7 +65,8 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   const frames = [
     { id: detail.event_cursor - 3, type: "node.running", payload: { scope_path: scope, status: "running" } },
     { id: detail.event_cursor - 2, type: "run.failed", payload: { status: "failed" } },
-    { id: detail.event_cursor + 1, type: "command.stdout", payload: { scope_path: scope, attempt_number: 1, chunk: "New output after an old failed attempt.\n" } },
+    { id: detail.event_cursor + 1, type: "run.failed", payload: { status: "failed" } },
+    { id: detail.event_cursor + 2, type: "command.stdout", payload: { scope_path: scope, attempt_number: 1, chunk: "New output after an old failed attempt.\n" } },
   ].map((item) => ({ ...item, version: 1, source: "system", ts: new Date().toISOString() }));
   await page.route(stream, (route) => route.fulfill({ contentType: "text/event-stream", body: frames.map((item) => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join("") }));
   await page.reload();
@@ -133,4 +134,49 @@ test("permission requests send owner feedback through the same agent session", a
   await page.getByRole("button", { name: "Send response and continue" }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
   await expect(page.locator(".activity-text").filter({ hasText: "ready" })).toBeVisible();
+});
+
+test("a review completed during initial loading updates progress before the stream opens", async ({ page }) => {
+  expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
+  expect((await post(page, "/api/workflows", {
+    key: "loading-review", holder,
+    yaml: stringify({ version: 1, name: "Loading review", nodes: { review: { type: "human_wait", prompt: "Respond REVIEWED." } } }),
+  })).ok()).toBeTruthy();
+  const launched = await post(page, "/api/runs", { workflow_key: "loading-review", inputs: {} });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const { run_id: runId } = await launched.json();
+  let pending: { id: string; attempt_id: string } | undefined;
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`);
+    pending = (await response.json()).run.interactions[0];
+    return pending !== undefined;
+  }).toBeTruthy();
+  let releaseDetails!: () => void;
+  let capturedDetails!: () => void;
+  const released = new Promise<void>((resolve) => { releaseDetails = resolve; });
+  const captured = new Promise<void>((resolve) => { capturedDetails = resolve; });
+  let snapshots = 0;
+  await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
+    if (snapshots >= 2) { await route.continue(); return; }
+    const response = await route.fetch();
+    const body = await response.json();
+    snapshots += 1;
+    if (snapshots === 2) capturedDetails();
+    await released;
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(`**/api/runs/${runId}/events?*`, async (route) => {
+    await captured;
+    expect((await post(page, `/api/attempts/${pending!.attempt_id}/wait`, {
+      interaction_id: pending!.id, idempotency_key: "loading-review-answer", value: "REVIEWED",
+    })).ok()).toBeTruthy();
+    await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("succeeded");
+    releaseDetails();
+    await route.continue();
+  });
+  await page.goto(`/?view=runs&run=${runId}`);
+  await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review · Complete", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeHidden();
 });

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 
 from django.contrib.auth.models import User
+from django.db import connection, transaction
 from django.http import HttpResponse
 from django.test import Client
 import pytest
 
 from relay.agents.models import ModelObservation
 from relay.constants import DATABASE_INTEGER_MAX
-from relay.web.models import Artifact, HumanInteraction, Run
+from relay.web.models import Artifact, HumanInteraction, Run, RunEvent
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
 from tests.support import FakeAgents, InlineEngine, RelayProject, fake_executable, run_status
 
@@ -154,6 +156,42 @@ def test_run_detail_keeps_a_state_cursor_separate_from_replayed_output(
     assert detail["event_cursor"] == max(event["id"] for event in events)
     assert detail["status"] == "paused_wait"
     assert detail["nodes"][0]["status"] == "waiting"
+
+
+def test_run_status_and_replay_cursor_agree_when_a_retry_commits_during_the_read(
+    owner: Client, waiting_run: tuple[str, int]
+) -> None:
+    run_id, _attempt_id = waiting_run
+    advanced = False
+
+    def commit_retry_before_read(
+        execute: Callable[..., object],
+        sql: str,
+        params: object,
+        many: bool,
+        context: dict[str, object],
+    ) -> object:
+        nonlocal advanced
+        if not advanced and sql.startswith("SELECT") and f'FROM "{Run._meta.db_table}"' in sql:
+            advanced = True
+            # A worker finishes and retries before the run row is read. Its old
+            # terminal event must already be covered by the returned cursor.
+            with transaction.atomic():
+                RunEvent.objects.create(
+                    run_id=run_id, type="run.failed", source="run", payload={"status": "failed"}
+                )
+                Run.objects.filter(pk=run_id).update(status="running")
+                RunEvent.objects.create(
+                    run_id=run_id, type="run.resumed", source="run", payload={"status": "running"}
+                )
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(commit_retry_before_read):
+        detail = owner.get(f"/api/runs/{run_id}").json()["run"]
+
+    assert advanced
+    assert detail["status"] == "running"
+    assert detail["event_cursor"] == RunEvent.objects.filter(run_id=run_id).latest("id").pk
 
 
 def test_stale_interaction_answer_cannot_answer_the_current_review(

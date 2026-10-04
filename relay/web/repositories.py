@@ -18,6 +18,7 @@ import uuid
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, models, transaction
 from django.db.models import Max
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from relay.agents.models import ModelObservation
@@ -841,20 +842,23 @@ class DjangoReadStore:
         """Read one bounded node or interaction page plus stable run metadata."""
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            # Capture a lower bound before reading state. Replayed events at or
-            # below this ID must not roll the browser back to an older state.
-            event_cursor = (
-                RunEvent.objects.filter(run_id=run_id)
-                .order_by("-id")
-                .values_list("id", flat=True)
-                .first()
-            )
+            # Read the run and its cursor in one statement. A retry committed
+            # before this read cannot leave its old terminal event above the cursor.
+            latest_event = RunEvent.objects.filter(run_id=run_id).order_by("-id").values("id")[:1]
             run = _require_run(
-                Run.objects.select_related("snapshot", "project").filter(pk=run_id).first(), run_id
+                Run.objects.select_related("snapshot", "project")
+                .annotate(
+                    read_event_cursor=Coalesce(
+                        models.Subquery(latest_event), 0, output_field=models.BigIntegerField()
+                    )
+                )
+                .filter(pk=run_id)
+                .first(),
+                run_id,
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
-            result["event_cursor"] = int(event_cursor or 0)
+            result["event_cursor"] = _integer(run, "read_event_cursor")
             result["project"] = asdict(_record(_related(run, "project", Project)))
             result["snapshot"] = {
                 "relay_version": _string(snapshot, "relay_version"),

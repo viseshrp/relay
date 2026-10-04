@@ -175,6 +175,9 @@ waiting stage stays labeled **Needs your input** when a historical stream opens.
 The captured state cursor prevents replayed progress from replacing current
 progress. Older terminal events remain in history and cannot close a retried
 run's live stream.
+Steps that finish during initial loading update progress before live updates
+start. The browser confirms the current run state before treating a stream as
+finished, so a recent retry can keep receiving updates.
 
 The graph uses captured dependencies and control targets, so editing today's
 workflow cannot redraw a past run's connections. Connected rows show stage

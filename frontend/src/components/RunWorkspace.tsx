@@ -362,15 +362,40 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     return run;
   }, [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun]);
 
+  const applyLiveUpdates = useCallback((batch: RunEvent[]) => {
+    // Historical output stays visible; progress starts at the loaded state cursor.
+    const live = batch.filter((item) => item.id > stateAfter.current);
+    setDetail((current) => live.reduce(applyStateEvent, current));
+    const interactionChanged = live.some((item) => item.type === "attempt.ended"
+      || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
+    if (interactionChanged || live.some((item) => item.type === "node.created")) {
+      void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
+        setError(errorMessage(caught)),
+      );
+    }
+    if (interactionChanged) {
+      void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
+        setError(errorMessage(caught)),
+      );
+      void loadLinkedRequest().catch((caught: unknown) => setError(errorMessage(caught)));
+    }
+    if (batch.some((item) => item.type === "artifact.preserved")) {
+      void loadArtifacts(0, "refresh").catch((caught: unknown) =>
+        setError(errorMessage(caught)),
+      );
+    }
+  }, [loadArtifacts, loadDetailCollection, loadLinkedRequest]);
+
   const loadEvents = useCallback(async (since = 0) => {
-    if (selectedRun === null) return;
+    if (selectedRun === null) return [];
     const response = await api<{ events: RunEvent[]; next: number | null }>(
       `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=100`,
     );
-    if (currentRun.current !== selectedRun) return;
+    if (currentRun.current !== selectedRun) return [];
     eventAfter.current = Math.max(eventAfter.current, response.events.at(-1)?.id ?? 0);
     setEvents((current) => (since === 0 ? response.events : mergeEvents(current, response.events)));
     setEventCursor(response.next);
+    return response.events;
   }, [selectedRun]);
 
   useEffect(() => {
@@ -397,10 +422,16 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setEventCursor(null);
     if (selectedRun === null) return;
     void Promise.all([refreshDetail(true), loadEvents()])
-      .then(() => { if (!disposed) setStreamRun(selectedRun); })
+      .then(([, history]) => {
+        if (disposed) return;
+        // A step may finish between the state read and the history response.
+        // Apply those events before the stream starts after their final ID.
+        applyLiveUpdates(history);
+        setStreamRun(selectedRun);
+      })
       .catch((caught: unknown) => { if (!disposed) setError(errorMessage(caught)); });
     return () => { disposed = true; };
-  }, [loadEvents, refreshDetail, selectedRun]);
+  }, [applyLiveUpdates, loadEvents, refreshDetail, selectedRun]);
 
   useEffect(() => {
     if (detail === null || detail.id !== selectedRun) return;
@@ -419,6 +450,23 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     );
     let incoming: RunEvent[] = [];
     let frame: number | null = null;
+    let disposed = false;
+    let completionCheck: Promise<void> | null = null;
+    const checkCompletion = () => {
+      if (completionCheck !== null) return;
+      // A replayed terminal event may precede a retry. Confirm current state
+      // before closing, including when the server ends a terminal stream.
+      completionCheck = loadDetailCollection("nodes", 0, "refresh")
+        .then((run) => {
+          if (disposed || currentRun.current !== selectedRun) return;
+          if (TERMINAL_RUNS.has(run.status)) {
+            source.close();
+            setStreamState("complete");
+          }
+        })
+        .catch((caught: unknown) => { if (!disposed) setError(errorMessage(caught)); })
+        .finally(() => { completionCheck = null; });
+    };
     const flush = () => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
@@ -426,39 +474,17 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       incoming = [];
       if (batch.length === 0) return;
       setEvents((current) => mergeEvents(current, batch));
-      // Historical output remains visible; current state starts at the loaded snapshot.
-      const live = batch.filter((item) => item.id > stateAfter.current);
-      setDetail((current) => live.reduce(applyStateEvent, current));
-      const interactionChanged = live.some((item) => item.type === "attempt.ended"
-        || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
-      // Interaction records change node state without always emitting node.waiting.
-      // Read the current state after replay so old node.running events cannot undo a pause.
-      if (interactionChanged || live.some((item) => item.type === "node.created")) {
-        void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
-          setError(errorMessage(caught)),
-        );
-      }
-      if (interactionChanged) {
-        void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
-          setError(errorMessage(caught)),
-        );
-        void loadLinkedRequest().catch((caught: unknown) => setError(errorMessage(caught)));
-      }
-      if (batch.some((item) => item.type === "artifact.preserved")) {
-        void loadArtifacts(0, "refresh").catch((caught: unknown) =>
-          setError(errorMessage(caught)),
-        );
-      }
+      applyLiveUpdates(batch);
+      if (batch.some((item) => item.id > stateAfter.current && item.type.startsWith("run.")
+        && typeof item.payload.status === "string" && TERMINAL_RUNS.has(item.payload.status))) checkCompletion();
     };
     setStreamState("connecting");
     source.onopen = () => setStreamState("live");
     const receive = (event: Event) => {
       if (!(event instanceof MessageEvent)) {
-        if (TERMINAL_RUNS.has(previousRunStatus.current ?? "")) {
-          flush();
-          source.close();
-          setStreamState("complete");
-        } else setStreamState("reconnecting");
+        flush();
+        setStreamState("reconnecting");
+        checkCompletion();
         return;
       }
       try {
@@ -473,8 +499,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
         const status = item.payload.status;
         if (item.id > stateAfter.current && item.type.startsWith("run.") && typeof status === "string" && TERMINAL_RUNS.has(status)) {
           flush();
-          source.close();
-          setStreamState("complete");
         }
       } catch {
         setError("Relay received an invalid event frame.");
@@ -483,10 +507,11 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     for (const type of EVENT_TYPES) source.addEventListener(type, receive);
     source.addEventListener("error", receive);
     return () => {
+      disposed = true;
       if (frame !== null) cancelAnimationFrame(frame);
       source.close();
     };
-  }, [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun, streamEpoch, streamRun]);
+  }, [applyLiveUpdates, loadDetailCollection, selectedRun, streamEpoch, streamRun]);
 
   async function cancelRun() {
     if (selectedRun === null) return;
