@@ -14,8 +14,10 @@ git status --porcelain=v1 --untracked-files=all
 
 Staged changes and code changes stop launch. Exact workflow and local prompt
 files validated for this launch may have unstaged edits or be untracked;
-their current bytes are captured in the immutable snapshot. Other `.relay`
-files receive no exemption. Root workflow documents such as `REVIEW.md`,
+their current bytes are captured in the immutable snapshot. The two untracked
+files created by `relay init` may also remain when their bytes still match the
+blank workflow and empty prompt. Edited unused starter files, staged starter
+files, and other `.relay` files stop launch. Root workflow documents such as `REVIEW.md`,
 `WALKTHROUGH.md`, and `DRAFT_PLAN.md` may remain unstaged or untracked. Relay
 does not add Git exclusions, stage these files, or commit them. Existing owner
 documents stay in place. Symlinks and staged report changes still stop launch.

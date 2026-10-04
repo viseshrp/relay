@@ -21,6 +21,10 @@ worktree root:
 `prompt.md` is empty. Relay does not copy workflow steps, prompt text, or other
 templates. A second `relay init` leaves the directory unchanged and exits with
 status 2. Running outside Git exits with status 3.
+The untouched, untracked starter files do not block the first launch of a newly
+created workflow. Relay leaves them in place and never stages or commits them.
+Edited unused starter files and staged files still require the owner to resolve
+their Git changes before launch.
 
 From a subdirectory, Relay walks upward to the nearest `.relay/` directory but
 never above the containing Git worktree.

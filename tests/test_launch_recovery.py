@@ -19,11 +19,82 @@ from relay.errors import (
 )
 from relay.execution.recovery import prepare_recovery_workspace
 from relay.execution.resume import RecoveryTarget
+from relay.projects.service import initialize_project, register_current_project
 from relay.vcs.cleanliness import status_porcelain
 from relay.vcs.commits import current_head
 from relay.web.models import Artifact, NodeRun, Run
-from relay.web.repositories import DjangoExecutionStore, DjangoReadStore
-from tests.support import InlineEngine, RelayProject
+from relay.web.repositories import DjangoExecutionStore, DjangoProjectStore, DjangoReadStore
+from tests.support import InlineEngine, RelayProject, git, init_repository, run_status
+
+
+@pytest.fixture
+def uncommitted_initial_project(tmp_path: Path) -> RelayProject:
+    repository = init_repository(tmp_path / "new-project")
+    initialized = initialize_project(repository)
+    record = register_current_project(DjangoProjectStore(), repository)
+    return RelayProject(repository, initialized.relay_root, record.id)
+
+
+@pytest.mark.parametrize("line_ending", [b"\n", b"\r\n"])
+def test_first_launch_preserves_untracked_untouched_initial_files(
+    uncommitted_initial_project: RelayProject, engine: InlineEngine, line_ending: bytes
+) -> None:
+    project = uncommitted_initial_project
+    starter = project.relay_root / "workflows/workflow.yaml"
+    starter.write_bytes(starter.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", line_ending))
+    workflow = project.write(
+        ".relay/workflows/first.yaml",
+        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    initial = {
+        path: path.read_bytes()
+        for path in (
+            project.relay_root / "prompts/prompt.md",
+            project.relay_root / "workflows/workflow.yaml",
+        )
+    }
+
+    run_id = engine.launch(project, "first")
+    engine.drain(run_id)
+
+    assert run_status(run_id) == "succeeded"
+    assert workflow.exists()
+    assert all(path.read_bytes() == content for path, content in initial.items())
+    assert git(project.repository, "diff", "--cached", "--name-only") == ""
+    assert len(status_porcelain(project.repository)) == 3
+
+
+@pytest.mark.parametrize("relative", ["prompts/prompt.md", "workflows/workflow.yaml"])
+def test_unused_initial_files_with_owner_edits_still_block_first_launch(
+    uncommitted_initial_project: RelayProject, engine: InlineEngine, relative: str
+) -> None:
+    project = uncommitted_initial_project
+    project.write(".relay/" + relative, "Owner's uncommitted content\n")
+    project.write(
+        ".relay/workflows/first.yaml",
+        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+
+    with pytest.raises(DirtyRepositoryError):
+        engine.launch(project, "first")
+
+    assert not Run.objects.exists()
+
+
+def test_staged_initial_files_still_block_first_launch(
+    uncommitted_initial_project: RelayProject, engine: InlineEngine
+) -> None:
+    project = uncommitted_initial_project
+    project.write(
+        ".relay/workflows/first.yaml",
+        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    git(project.repository, "add", ".relay/prompts/prompt.md")
+
+    with pytest.raises(DirtyRepositoryError):
+        engine.launch(project, "first")
+
+    assert not Run.objects.exists()
 
 
 def test_launch_preserves_owner_reports_and_snapshots_an_uncommitted_workflow(

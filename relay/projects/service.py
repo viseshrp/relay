@@ -15,6 +15,10 @@ from .discovery import git_root
 from .identity import ProjectIdentity, canonical_path, identify_project
 
 _BLANK_WORKFLOW = f"version: {SCHEMA_VERSION}\nname: Blank workflow\nnodes: {{}}\n"
+INITIAL_PROJECT_FILES = (
+    ("workflows/workflow.yaml", _BLANK_WORKFLOW),
+    ("prompts/prompt.md", ""),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +62,8 @@ def initialize_project(start: Path | None = None) -> InitializationResult:
         prompts = temporary / "prompts"
         workflows.mkdir()
         prompts.mkdir()
-        (workflows / "workflow.yaml").write_text(_BLANK_WORKFLOW, encoding="utf-8")
-        (prompts / "prompt.md").write_text("", encoding="utf-8")
+        for relative, text in INITIAL_PROJECT_FILES:
+            (temporary / relative).write_text(text, encoding="utf-8")
         try:
             temporary.replace(target)
         except FileExistsError:
