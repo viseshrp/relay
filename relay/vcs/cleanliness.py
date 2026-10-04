@@ -80,10 +80,12 @@ def execution_changes(
             index += 1
         path = git_root / name
         allowed = name in documents or name in snapshot_files
-        if path.is_file() and not path.is_symlink():
-            if allowed and state in {"??", " M"}:
+        allowed_change = allowed and state in {"??", " M"}
+        initial_change = state == "??" and name in initial_files
+        if (allowed_change or initial_change) and path.is_file() and not path.is_symlink():
+            if allowed_change:
                 continue
-            if state == "??" and name in initial_files and path.resolve().is_relative_to(git_root):
+            if initial_change and path.resolve().is_relative_to(git_root):
                 # Untracked, untouched init placeholders are safe to leave in place.
                 # Read only enough to detect any owner edit, including appended bytes.
                 try:
