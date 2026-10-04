@@ -22,6 +22,21 @@ Tools that expose no separate effort selector retain Provider default.
 Antigravity includes effort in its exact model slug; choose another exact model
 to change that effort.
 
+## Run navigation
+
+- [ ] Explain the workflow editor and run monitor in the navigation. Show the
+  selected project, workflow, and run together so the owner can identify the
+  work being inspected.
+- [ ] Show the current stage, completed work, and next action in plain language
+  above the graph and logs. Make waiting and failed stages easy to find without
+  reading internal node names or zooming around the graph.
+- [ ] At a human review gate, show the review documents or diff, the required
+  review steps, and the expected response beside the response field. Keep human
+  approval distinct from automated checks and agent permission requests.
+- [ ] Provide links to a specific run and its pending interaction. Preserve
+  that selection across reloads so opening the app returns to the intended
+  stage instead of the default workflow editor.
+
 ## Workflow handoffs
 
 - [ ] Create and save new workflows through Relay without manually adding a
