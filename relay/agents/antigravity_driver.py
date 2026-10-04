@@ -42,6 +42,7 @@ from relay.execution.state import ControlKind
 from relay.execution.timing import attempt_deadline, duration_seconds
 from relay.vcs.commits import current_head
 
+from .configuration import native_configuration, validate_native_requirement
 from .events import AgentEvent, normalize_antigravity_event
 from .mapping import map_agent_exception
 from .models import (
@@ -101,7 +102,15 @@ def _argv(context: AgentExecutionContext, prompt: str) -> tuple[str, ...]:
         "--print-timeout",
         _timeout_value(context),
     ]
-    if context.permission_profile == "auto_approve":
+    validate_native_requirement(
+        native_configuration(context.agent_id, context.model_value),
+        ProbeRequirement(context.model_value, context.effort, context.permission_mode),
+    )
+    if context.effort is not None:
+        values.extend(("--effort", context.effort))
+    if context.permission_mode in {"accept-edits", "plan"}:
+        values.extend(("--mode", context.permission_mode))
+    if (context.permission_mode or context.permission_profile) == "auto_approve":
         values.append("--dangerously-skip-permissions")
     if os.name == "nt":
         # CreateProcess counts UTF-16 units, including the terminating NUL.
@@ -299,6 +308,9 @@ class AntigravityDriver:
                 for value, name in rows
             )
             advertised = {value for value, _name in rows}
+            configurations = {
+                value: native_configuration(self.profile.agent_id, value) for value in advertised
+            }
             failures = {
                 requirement.model_value: (
                     ProbeFailure(
@@ -310,15 +322,34 @@ class AntigravityDriver:
                 for requirement in requirements
                 if requirement.model_value not in advertised
             }
+            confirmed_requirements = set()
+            requirement_failures = {}
+            for requirement in requirements:
+                if requirement.model_value not in advertised:
+                    requirement_failures[requirement] = failures[requirement.model_value]
+                    continue
+                try:
+                    validate_native_requirement(
+                        configurations[requirement.model_value], requirement
+                    )
+                except Exception as error:
+                    mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
+                    requirement_failures[requirement] = ProbeFailure.from_error(mapped)
+                    failures[requirement.model_value] = ProbeFailure.from_error(mapped)
+                else:
+                    confirmed_requirements.add(requirement)
             return ProbeResult(
                 self.profile.agent_id,
                 observations,
                 frozenset(
                     requirement.model_value
                     for requirement in requirements
-                    if requirement.model_value in advertised
+                    if requirement in confirmed_requirements
                 ),
                 failures,
+                configurations=configurations,
+                confirmed_requirements=frozenset(confirmed_requirements),
+                requirement_failures=requirement_failures,
             )
         except Exception as error:
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)

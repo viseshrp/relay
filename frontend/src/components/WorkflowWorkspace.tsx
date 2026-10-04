@@ -24,7 +24,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, errorMessage, RelayApiError } from "../api";
-import type { AgentsResponse, JsonScalar, WorkflowDocumentResponse, WorkflowDraft } from "../types";
+import type { AgentOptions, AgentsResponse, JsonScalar, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
   canonicalYaml,
   flowElements,
@@ -35,6 +35,7 @@ import {
   type WorkflowNodeValue,
 } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
+import { AgentConfiguration } from "./AgentConfiguration";
 
 const YamlEditor = lazy(() =>
   import("./YamlEditor").then((module) => ({ default: module.YamlEditor })),
@@ -231,6 +232,37 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     );
   }
 
+  function setAgentOption(agentId: string, field: keyof AgentOptions, value: string) {
+    if (selectedNode === null) return;
+    mutate((document, workflow) => {
+      const current = { ...workflow.nodes[selectedNode].agent_options };
+      const options = { ...current[agentId] };
+      if (value === "") delete options[field];
+      else options[field] = value;
+      if (Object.keys(options).length === 0) delete current[agentId];
+      else current[agentId] = options;
+      if (Object.keys(current).length === 0) document.deleteIn(["nodes", selectedNode, "agent_options"]);
+      else document.setIn(["nodes", selectedNode, "agent_options"], current);
+    });
+  }
+
+  function setAgentModel(model: string) {
+    if (selectedNode === null) return;
+    mutate((document, workflow) => {
+      if (model === "") document.deleteIn(["nodes", selectedNode, "model"]);
+      else document.setIn(["nodes", selectedNode, "model"], model);
+      const current = { ...workflow.nodes[selectedNode].agent_options };
+      for (const [agentId, options] of Object.entries(current)) {
+        const remaining = { ...options };
+        delete remaining.effort;
+        if (Object.keys(remaining).length === 0) delete current[agentId];
+        else current[agentId] = remaining;
+      }
+      if (Object.keys(current).length === 0) document.deleteIn(["nodes", selectedNode, "agent_options"]);
+      else document.setIn(["nodes", selectedNode, "agent_options"], current);
+    });
+  }
+
   async function persistSave(canonical: string) {
     if (loadedKey === null) return;
     setBusy(true);
@@ -301,6 +333,13 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     new Set(agents?.agents.flatMap((agent) => agent.models.map((model) => model.value)) ?? []),
   ).sort();
   const inputDefinitions = parsed.value?.inputs ?? {};
+  const candidateIds = Array.from(new Set([
+    ...(definition?.agents ?? []),
+    ...(parsed.value?.agents ?? []),
+    ...(agents?.preferences ?? []),
+  ]));
+  const effectiveModel = (typeof definition?.model === "string" ? definition.model : "")
+    || launchModel || parsed.value?.model || "";
 
   return (
     <Stack spacing={2}>
@@ -406,12 +445,31 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 />
               )}
               {definition.type === "agent" && (
-                <TextField
-                  size="small"
-                  label="Exact model override"
-                  value={typeof definition.model === "string" ? definition.model : ""}
-                  onChange={(event) => setNodeField("model", event.target.value)}
-                />
+                <>
+                  <TextField
+                    size="small"
+                    label="Exact model override"
+                    value={typeof definition.model === "string" ? definition.model : ""}
+                    onChange={(event) => setAgentModel(event.target.value)}
+                    slotProps={{ htmlInput: { list: "relay-model-options" } }}
+                  />
+                  <FormControl size="small">
+                    <InputLabel id="agent-tools-label" shrink>Agent tools</InputLabel>
+                    <Select
+                      multiple
+                      labelId="agent-tools-label"
+                      label="Agent tools"
+                      displayEmpty
+                      notched
+                      renderValue={(selected) => selected.length === 0 ? "Workflow and owner preferences"
+                        : selected.map((id) => agents?.agents.find((agent) => agent.id === id)?.display_name ?? id).join(", ")}
+                      value={definition.agents ?? []}
+                      onChange={(event) => setNodeField("agents", event.target.value)}
+                    >
+                      {agents?.agents.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.display_name}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                </>
               )}
               {definition.type === "command" && (
                 <TextField
@@ -466,6 +524,21 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 />
               )}
             </Box>
+            {definition.type === "agent" && candidateIds.map((agentId) => {
+              const agent = agents?.agents.find((item) => item.id === agentId);
+              return agent ? (
+                <AgentConfiguration
+                  key={`${selectedNode}-${agentId}`}
+                  agent={agent}
+                  model={effectiveModel}
+                  options={definition.agent_options?.[agentId] ?? {}}
+                  onChange={(field, value) => setAgentOption(agentId, field, value)}
+                />
+              ) : null;
+            })}
+            {definition.type === "agent" && candidateIds.length === 0 && (
+              <Typography variant="body2" color="text.secondary">Select an agent tool to configure its effort and permission mode.</Typography>
+            )}
           </Stack>
         </Paper>
       )}

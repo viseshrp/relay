@@ -205,6 +205,13 @@ class NodeBase(StrictModel):
         return needs
 
 
+class AgentOptions(StrictModel):
+    """Optional provider values; absence preserves the provider's defaults."""
+
+    effort: str | None = Field(default=None, min_length=1)
+    permission_mode: str | None = Field(default=None, min_length=1)
+
+
 class AgentNode(NodeBase):
     """A coding-agent attempt using an exact model route."""
 
@@ -216,6 +223,7 @@ class AgentNode(NodeBase):
     model: str | None = None
     agents: list[str] = Field(default_factory=list)
     permission_profile: str | None = None
+    agent_options: dict[str, AgentOptions] = Field(default_factory=dict)
 
 
 class CommandNode(NodeBase):

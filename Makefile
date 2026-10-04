@@ -66,6 +66,10 @@ test-local: ## Run tests in current Python environment using uv
 	@echo "🚀 Testing code locally"
 	uv run python -m pytest -rvx tests --cov --cov-config=pyproject.toml --cov-report html:coverage-html
 
+.PHONY: test-frontend
+test-frontend: ## Run browser tests against isolated storage and fake agent processes
+	cd frontend && npm run test:e2e
+
 .PHONY: build
 build: clean ## Build package using uv
 	@echo "🚀 Building project"

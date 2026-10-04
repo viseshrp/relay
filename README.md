@@ -160,7 +160,8 @@ into the launch branch.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the Python and frontend setup,
 focused checks, and packaging workflow.
 
-Planned work is tracked in the [Relay TODO list](docs/todo.md).
+The [Relay TODO list](docs/todo.md) records the agent configuration feature
+checklist.
 
 ## Changelog
 

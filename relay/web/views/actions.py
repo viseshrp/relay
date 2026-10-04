@@ -10,6 +10,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.http.response import HttpResponseBase
 from django.views.decorators.http import require_GET, require_POST
 
+from relay.agents.driver import probe_agent_configuration
 from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
 from relay.execution.cancellation import request_cancellation
@@ -30,7 +31,12 @@ from ..auth import (
     owner_required,
     owner_username,
 )
-from ..repositories import DjangoExecutionStore, DjangoProjectStore, DjangoWorkflowStore
+from ..repositories import (
+    DjangoAgentStore,
+    DjangoExecutionStore,
+    DjangoProjectStore,
+    DjangoWorkflowStore,
+)
 from . import (
     api_errors,
     canonical_record_id,
@@ -43,6 +49,21 @@ from . import (
 )
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+@api_errors
+@owner_required
+@require_POST
+def agent_configuration(request: HttpRequest, agent_id: str) -> HttpResponse:
+    body = json_body(request)
+    relay_root, _project = current_project()
+    configuration = probe_agent_configuration(
+        agent_id,
+        required_text(body, "model"),
+        relay_root.parent,
+        observation_store=DjangoAgentStore(),
+    )
+    return JsonResponse(asdict(configuration))
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> JsonResponse:

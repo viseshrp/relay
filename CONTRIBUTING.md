@@ -82,6 +82,22 @@ For a frontend-only check, run:
 npm --prefix frontend run build
 ```
 
+Browser tests use Chromium, the built application, the real HTTP API, and real
+ACP subprocess exchanges with deterministic test providers. Install the browser
+once, then run:
+
+```bash
+npm --prefix frontend exec playwright install chromium
+make test-frontend
+```
+
+The test server creates a temporary Git repository, owner, database, and storage
+directories. It uses an inline dispatch consumer and never invokes installed
+provider accounts or reads owner state. Tests cover provider defaults, per-tool
+overrides, save and reload, model-dependent choices, failures and retries, and
+the configuration received by the executing worker. The browser-test CI job
+runs on Linux and gates package publication alongside Python and quality checks.
+
 The pre-commit license gate checks runtime dependencies against the allow-list
 in `pyproject.toml`. Run it directly with `uv run liccheck`. The pinned
 `agent-client-protocol` 0.12.1 and `huey` 3.4.0 omit license metadata, so the

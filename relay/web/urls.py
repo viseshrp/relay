@@ -18,6 +18,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
     path("api/workflows/<path:key>", pages.workflow, name="workflow"),
     path("api/agents", pages.agents, name="agents"),
+    path(
+        "api/agents/<str:agent_id>/configuration",
+        actions.agent_configuration,
+        name="agent-configuration",
+    ),
     path("api/runs", actions.runs_collection, name="runs"),
     path("api/runs/<str:run_id>", pages.run_detail, name="run-detail"),
     path("api/runs/<str:run_id>/stream", stream.run_stream, name="run-stream"),

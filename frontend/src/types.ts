@@ -48,6 +48,7 @@ export interface AgentRecord {
 
 export interface AgentsResponse {
   agents: AgentRecord[];
+  preferences: string[];
   registry: {
     source_url: string;
     fetched_at: string;
@@ -55,6 +56,26 @@ export interface AgentsResponse {
     stale: boolean;
     warning: string | null;
   };
+}
+
+export interface AgentOptions {
+  effort?: string;
+  permission_mode?: string;
+}
+
+export interface ConfigurationSelector {
+  config_id: string;
+  name: string;
+  current_value: string;
+  choices: Array<{ value: string; name: string; description: string | null }>;
+  transport: "config_option" | "session_mode" | "native";
+}
+
+export interface AgentConfiguration {
+  agent_id: string;
+  model_value: string;
+  effort: ConfigurationSelector | null;
+  permission_mode: ConfigurationSelector | null;
 }
 
 export interface RunSummary {

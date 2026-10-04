@@ -73,7 +73,8 @@ inputs:
 
 An `agent` node receives ordered static prompts plus launch inputs, run
 metadata, and named upstream outputs as separate values. It may set an exact
-`model`, an ordered `agents` preference, a `permission_profile`, declared
+`model`, an ordered `agents` preference, per-tool `agent_options`, a legacy
+`permission_profile`, declared
 `outputs`, and `writes: true`. A writing node may set `allow_no_commit: true`
 when a verified no-op is a successful outcome. Relay does not append previous
 transcripts.
@@ -89,12 +90,30 @@ nodes:
     type: agent
     prompts:
       - local: prompts/review.md
+    agent_options:
+      codex:
+        effort: high
+        permission_mode: workspace-write
     outputs:
       ready:
         label:
           artifact: report.md
           label: Ready
 ```
+
+`agent_options` is keyed by agent ID. Each tool accepts optional `effort` and
+`permission_mode` strings, using the exact values advertised for the selected
+model. Omit either key to use that provider's default; `Provider default` is a
+browser label, never a serialized value. Empty strings and unknown option
+fields are invalid. The editor removes a key when the owner returns its
+dropdown to Provider default and removes empty option mappings.
+
+Launch preflight checks each candidate's own overrides after selecting the
+exact model. A candidate must confirm every requested value before its route
+is frozen. Two nodes can use the same model with different effort or mode
+values. The worker applies the frozen values in a fresh session before sending
+the prompt and rejects unsupported or changed values. Existing workflows that
+omit `agent_options` continue to use provider defaults.
 
 This invalid workflow attempts to leave the project prompt root.
 

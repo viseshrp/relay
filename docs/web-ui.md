@@ -67,6 +67,21 @@ A command argument field transforms the JSON string
 `["python", "-m", "pytest"]` into the equivalent YAML `run` sequence. Invalid
 JSON stays in the field and is not applied to the document.
 
+Agent nodes show the effective tools from node, workflow, and owner preferences.
+The Agent tools field adds node preferences in selection order. Each tool has
+an Effort dropdown for the selected exact model and a Permission mode dropdown.
+Both start at **Provider default**, leaving the override absent from YAML and
+provider requests. Choosing a value saves it under the node's per-tool
+`agent_options`; choosing Provider default removes it.
+
+Choices come from a fresh disposable tool session after model selection. While
+loading, the dropdowns are disabled. A failed read shows an error and Retry.
+Changing the node's model override resets effort and loads its new choices.
+Unsupported saved values stay visible for correction and fail launch preflight.
+A tool without a separate selector offers only Provider default. Native
+Antigravity effort is included in the exact model slug; choose another exact
+model to change it. See [Coding agents](agents.md#effort-and-permission-modes).
+
 Canvas changes use canonical YAML formatting. Explicit Save compares the
 canonical text with the editor text and asks before normalizing collection
 style or spacing. For example, `nodes: {}` stays a valid compact empty mapping,

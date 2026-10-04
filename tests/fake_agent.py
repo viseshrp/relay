@@ -54,6 +54,46 @@ class WireAgent:
     authenticated: bool = False
     pending_prompt: int | str | None = None
     selected: str = "m1"
+    effort: str = "high"
+    permission_mode: str = "ask"
+    model_selections: int = 0
+
+    def configuration(self) -> list[dict[str, object]]:
+        options = [selector(self.selected)]
+        if not self.mode.startswith("configuration"):
+            return options
+        efforts = ["low", "high"] if self.selected == "m1" else ["low", "medium"]
+        if self.effort not in efforts:
+            self.effort = efforts[-1]
+        effort = {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "type": "select",
+            "currentValue": self.effort,
+            "options": [
+                {"value": value, "name": value.capitalize(), "description": f"Use {value} effort."}
+                for value in efforts
+            ],
+        }
+        if self.mode != "configuration-no-categories":
+            effort["category"] = "thought_level"
+        if self.mode == "configuration-grouped":
+            effort["options"] = [
+                {"group": "efforts", "name": "Efforts", "options": effort["options"]}
+            ]
+        options.append(effort)
+        if self.mode != "configuration-legacy":
+            options.append(
+                {
+                    "id": "mode",
+                    "name": "Permission mode",
+                    "category": "mode",
+                    "type": "select",
+                    "currentValue": self.permission_mode,
+                    "options": [{"value": "ask", "name": "Ask"}, {"value": "auto", "name": "Auto"}],
+                }
+            )
+        return options
 
     def reply(self, request_id: object, result: object) -> None:
         emit({"jsonrpc": "2.0", "id": request_id, "result": result})
@@ -96,36 +136,89 @@ class WireAgent:
             if self.mode == "auth" and not self.authenticated:
                 self.error(request_id, RequestError.auth_required())
             else:
-                options = [] if self.mode == "no-selector" else [selector()]
-                self.reply(request_id, {"sessionId": "scratch-session", "configOptions": options})
+                self.selected, self.effort, self.permission_mode = "m1", "high", "ask"
+                options = [] if self.mode == "no-selector" else self.configuration()
+                result = {"sessionId": "scratch-session", "configOptions": options}
+                if self.mode == "configuration-legacy":
+                    result["modes"] = {
+                        "currentModeId": "ask",
+                        "availableModes": [
+                            {"id": "ask", "name": "Ask"},
+                            {"id": "auto", "name": "Auto"},
+                        ],
+                    }
+                self.reply(request_id, result)
         elif method == "authenticate":
             self.authenticated = True
             self.reply(request_id, {})
         elif method == "session/set_config_option":
-            if self.mode == "reject":
+            config_id = params.get("configId")
+            if self.mode == "reject" or (
+                self.mode == "configuration-reject" and config_id != "model"
+            ):
                 self.error(request_id, RequestError.invalid_params())
             else:
                 requested = params.get("value")
-                self.selected = requested if isinstance(requested, str) else "m1"
-                self.reply(
-                    request_id,
-                    {
-                        "configOptions": [
-                            selector("m2" if self.mode == "wrong-selection" else self.selected)
-                        ]
-                    },
-                )
+                if config_id == "model":
+                    self.selected = requested if isinstance(requested, str) else "m1"
+                    self.model_selections += 1
+                elif config_id == "reasoning_effort":
+                    self.effort = requested if isinstance(requested, str) else "high"
+                elif config_id == "mode":
+                    self.permission_mode = requested if isinstance(requested, str) else "ask"
+                if self.mode == "configuration-wrong" and config_id != "model":
+                    self.effort, self.permission_mode = "high", "ask"
+                if self.mode == "configuration-model-drift" and config_id != "model":
+                    self.selected = "m2"
+                configuration = self.configuration()
+                if self.mode == "wrong-selection":
+                    configuration = [selector("m2")]
+                elif (
+                    self.mode == "configuration-default-reject"
+                    and config_id == "model"
+                    and self.model_selections == 1
+                ):
+                    configuration[0] = selector("m2")
+                elif self.mode == "configuration-drop-mode" and config_id == "reasoning_effort":
+                    configuration = [item for item in configuration if item["id"] != "mode"]
+                self.reply(request_id, {"configOptions": configuration})
+        elif method == "session/set_mode":
+            self.permission_mode = str(params.get("modeId"))
+            self.update(
+                {"sessionUpdate": "current_mode_update", "currentModeId": self.permission_mode}
+            )
+            self.reply(request_id, {})
         elif method == "session/prompt":
             if self.mode == "drift":
                 self.update(
                     {"sessionUpdate": "config_option_update", "configOptions": [selector("m2")]}
                 )
+            elif self.mode == "configuration-late-effort-drift":
+                self.effort = "high"
+                self.update(
+                    {"sessionUpdate": "config_option_update", "configOptions": self.configuration()}
+                )
+            elif self.mode == "configuration-late-mode-drift":
+                self.update({"sessionUpdate": "current_mode_update", "currentModeId": "ask"})
             self.update(
                 {
                     "sessionUpdate": "agent_message_chunk",
                     "content": {"type": "text", "text": "ready"},
                 }
             )
+            if self.mode.startswith("configuration"):
+                self.update(
+                    {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": (
+                                f"config: model={self.selected};effort={self.effort};"
+                                f"mode={self.permission_mode}"
+                            ),
+                        },
+                    }
+                )
             if self.mode == "hold":
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
             else:
@@ -159,7 +252,8 @@ def agy_main(arguments: list[str]) -> None:
         if mode == "models-empty":
             write_line("Available models\nMODEL NAME\n---")
             return
-        write_line("Available models\nMODEL NAME\n---\nm1 Model One\nm2 Model Two")
+        extra = "\ngemini-test-low Gemini Test (Low)" if mode == "configuration" else ""
+        write_line("Available models\nMODEL NAME\n---\nm1 Model One\nm2 Model Two" + extra)
         return
     trace({"argv": arguments})
     model = arguments[arguments.index("--model") + 1]

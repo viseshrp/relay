@@ -9,7 +9,14 @@ from pathlib import Path
 from relay.errors import WorkflowValidationError
 
 from .loader import LoadedWorkflow, resolve_workflow_path
-from .schema import AgentNode, LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
+from .schema import (
+    AgentNode,
+    AgentOptions,
+    LoopNode,
+    NodeDefinition,
+    SubworkflowNode,
+    WorkflowDefinition,
+)
 from .scope import loop_iteration_scope, node_scope
 from .validation import ValidatedWorkflow
 
@@ -22,10 +29,15 @@ class RouteRequirement:
     model_value: str
     effective_agent_order: tuple[str, ...]
     permission_profile: str | None = field(default=None, kw_only=True)
+    agent_options: Mapping[str, AgentOptions] = field(default_factory=dict, kw_only=True)
 
     def to_dict(self) -> dict[str, object]:
         result = asdict(self)
         result.pop("permission_profile")
+        result.pop("agent_options")
+        for name in ("effort", "permission_mode"):
+            if result.get(name) is None:
+                result.pop(name, None)
         return result
 
 
@@ -34,6 +46,8 @@ class RouteEntry(RouteRequirement):
     """A preflight-proven agent selection persisted in a run snapshot."""
 
     selected_agent: str
+    effort: str | None = field(default=None, kw_only=True)
+    permission_mode: str | None = field(default=None, kw_only=True)
 
 
 def effective_agent_order(*preference_lists: Sequence[str]) -> tuple[str, ...]:
@@ -83,7 +97,13 @@ def _routes_for_nodes(
             if not agents:
                 message = f"Agent node {scope} has no candidate agents."
                 raise WorkflowValidationError(message, context={"node": scope})
-            yield RouteRequirement(scope, model, agents, permission_profile=node.permission_profile)
+            yield RouteRequirement(
+                scope,
+                model,
+                agents,
+                permission_profile=node.permission_profile,
+                agent_options=node.agent_options,
+            )
         elif isinstance(node, LoopNode):
             for iteration in range(1, node.max_iterations + 1):
                 loop_scope = loop_iteration_scope(parent_scope, node_id, iteration)
@@ -143,6 +163,15 @@ def serialize_route_table(entries: Iterable[RouteRequirement]) -> dict[str, dict
             "model_value": entry.model_value,
             "effective_agent_order": list(entry.effective_agent_order),
             **({"selected_agent": entry.selected_agent} if isinstance(entry, RouteEntry) else {}),
+            **(
+                {
+                    name: value
+                    for name in ("effort", "permission_mode")
+                    if (value := getattr(entry, name, None)) is not None
+                }
+                if isinstance(entry, RouteEntry)
+                else {}
+            ),
         }
         for entry in entries
     }

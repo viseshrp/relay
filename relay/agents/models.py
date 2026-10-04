@@ -74,6 +74,38 @@ class ProbeRequirement:
     """Exact value one candidate must advertise and select for launch."""
 
     model_value: str
+    effort: str | None = None
+    permission_mode: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigurationChoice:
+    """An exact provider value and its display text."""
+
+    value: str
+    name: str
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigurationSelector:
+    """One provider-advertised selector for a particular model."""
+
+    config_id: str
+    name: str
+    current_value: str
+    choices: tuple[ConfigurationChoice, ...]
+    transport: Literal["config_option", "session_mode", "native"] = "config_option"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConfiguration:
+    """Advisory choices obtained after selecting the exact model."""
+
+    agent_id: str
+    model_value: str
+    effort: ConfigurationSelector | None = None
+    permission_mode: ConfigurationSelector | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +134,9 @@ class ProbeResult:
     failures: Mapping[str, ProbeFailure] = field(default_factory=dict)
     cleanup_warning: str | None = None
     general_error: ProbeFailure | None = None
+    configurations: Mapping[str, AgentConfiguration] = field(default_factory=dict)
+    confirmed_requirements: frozenset[ProbeRequirement] = field(default_factory=frozenset)
+    requirement_failures: Mapping[ProbeRequirement, ProbeFailure] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +149,8 @@ class AgentExecutionContext:
     model_value: str
     permission_profile: str
     command: AgentCommand
+    effort: str | None = None
+    permission_mode: str | None = None
 
     @property
     def cwd(self) -> Path:

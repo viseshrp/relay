@@ -154,6 +154,12 @@ class AgentProtocolError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_BAD_GATEWAY
 
 
+class AgentConfigurationError(RelayError):
+    error_code: ClassVar[str] = "agent_configuration_error"
+    cli_exit_code: ClassVar[int] = constants.EXIT_MODEL_ERROR
+    http_status: ClassVar[int] = constants.HTTP_UNPROCESSABLE_CONTENT
+
+
 class PermissionFlowError(RelayError):
     error_code: ClassVar[str] = "permission_flow_error"
     cli_exit_code: ClassVar[int] = constants.EXIT_PERMISSION_FLOW_ERROR

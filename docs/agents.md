@@ -8,11 +8,12 @@ create a vendor account, or store provider credentials.
 ## Exact-model routing
 
 A workflow `model` is an exact, case-sensitive value advertised by the selected
-agent. It is not a Relay alias. Before a run is created, Relay opens one
-disposable session per candidate agent, reads that session's model values, sets
-the requested value, and requires the complete returned configuration to name
-the same current value. A cached observation may populate the launch form but
-never authorizes a run.
+agent. It is not a Relay alias. Before a run is created, Relay probes each
+candidate agent, reads its model values, sets the requested value, and requires
+the complete returned configuration to name the same current value. Distinct
+override combinations use fresh disposable sessions so an earlier selection
+cannot change a later probe's provider defaults. A cached observation may
+populate the launch form but never authorizes a run.
 
 For example, requested value `gpt-5.3-codex` matches only an option whose value
 is exactly `gpt-5.3-codex`; a display label such as `GPT 5.3 Codex` and a value
@@ -26,6 +27,40 @@ An explicit `permission_profile` must be supported by the candidate agent at
 launch preflight. Relay reports permission and route failures together before
 running any node. Registry installation metadata is advisory; a registry fetch
 failure does not prevent installed agents from proving their routes.
+
+## Effort and permission modes
+
+The editor loads each tool's supported choices after selecting the exact model.
+ACP effort comes from its `thought_level` selector, with known option IDs as a
+fallback for adapters that omit categories. Permission modes use the `mode`
+selector or the legacy session-mode menu when no corresponding selector is
+available. Provider labels, exact values, descriptions, and ordering are
+preserved. Model selection can change the effort menu, as described by the
+[ACP configuration contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
+
+Both controls initially show **Provider default**. Reading the choices does
+not write an override. An explicit selection is stored under that node's
+`agent_options.<agent-id>.effort` or `.permission_mode`. Returning to Provider
+default removes that key. A tool that advertises no separate selector shows
+only Provider default. The editor resets effort when its model override changes
+and retains the tool's permission-mode override for fresh validation.
+
+ACP launch probes and workers apply permission mode before effort, require the
+complete response to confirm the requested values, and keep exact-model proof
+through every change. Unsupported choices fail before a run is created. A
+configuration update that changes an explicit override cancels the attempt.
+Defaults never cause an effort or mode setter call.
+
+Antigravity offers `respect_settings`, `accept-edits`, `plan`, and `auto_approve`.
+The middle two pass the exact value with `--mode`; only `auto_approve` adds
+`--dangerously-skip-permissions`. An explicit native mode takes precedence over
+the legacy `permission_profile`. Its advertised
+model slugs include effort, so Relay offers the effort already identified by
+that exact slug. Explicitly choosing it passes `--effort`; selecting a different
+effort requires a different exact model. Relay rejects an effort override that
+would silently switch the model. The
+[native headless interface](https://antigravity.google/docs/cli/headless/)
+documents the effort flag and permission policy.
 
 ACP authentication failures use the protocol's `auth_required` code. An
 adapter disconnect or early exit is a protocol failure; words such as `auth`

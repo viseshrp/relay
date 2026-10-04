@@ -27,6 +27,7 @@ from relay.constants import (
 )
 from relay.errors import (
     AgentAuthError,
+    AgentConfigurationError,
     AgentProtocolError,
     ModelSelectionRejectedError,
     ModelSelectorError,
@@ -43,10 +44,12 @@ from relay.execution.cancellation import (
 from relay.execution.control import ClaimedControl, cancel_stop_reason
 from relay.execution.state import ControlKind, InteractionKind
 
+from .configuration import acp_configuration, require_choice
 from .events import AgentEvent, normalize_acp_update
 from .mapping import map_agent_exception
 from .models import (
     AgentCommand,
+    AgentConfiguration,
     AgentExecutionContext,
     AgentProfile,
     AgentResult,
@@ -119,6 +122,73 @@ def _selected_value(
     return match.current_value if match is not None else None
 
 
+async def _select_model(
+    connection: acp.ClientSideConnection,
+    profile: AgentProfile,
+    session_id: str,
+    options: Sequence[SessionConfigOption],
+    model_value: str,
+) -> tuple[list[SessionConfigOption], str]:
+    selector = _model_selector(options, profile)
+    if model_value not in {value for value, _name in _model_options(selector)}:
+        message = f"Exact model {model_value!r} is not advertised by {profile.agent_id!r}."
+        raise ModelUnavailableError(message, context={"agent": profile.agent_id})
+    try:
+        selected = await connection.set_config_option(selector.id, session_id, model_value)
+    except RequestError as error:
+        if error.code == _AUTH_REQUIRED_CODE:
+            raise
+        message = f"Agent {profile.agent_id!r} rejected exact model {model_value!r}."
+        raise ModelSelectionRejectedError(message, context={"agent": profile.agent_id}) from None
+    if selected is None or _selected_value(selected.config_options, selector.id) != model_value:
+        message = f"Agent {profile.agent_id!r} did not confirm exact model {model_value!r}."
+        raise ModelSelectionRejectedError(message, context={"agent": profile.agent_id})
+    return selected.config_options, selector.id
+
+
+async def _apply_overrides(
+    connection: acp.ClientSideConnection,
+    profile: AgentProfile,
+    session_id: str,
+    options: list[SessionConfigOption],
+    modes: schema.SessionModeState | None,
+    requirement: ProbeRequirement,
+    model_config_id: str,
+) -> dict[str, str]:
+    config_ids = {"model": model_config_id}
+    expected = {model_config_id: requirement.model_value}
+    # Mode changes can change the effort menu, so resolve effort afterwards.
+    for field in ("permission_mode", "effort"):
+        value = getattr(requirement, field)
+        if value is None:
+            continue
+        configuration = acp_configuration(profile.agent_id, requirement.model_value, options, modes)
+        selector = require_choice(configuration, field, value)
+        try:
+            if selector.transport == "session_mode":
+                await connection.set_session_mode(session_id, value)
+            else:
+                selected = await connection.set_config_option(selector.config_id, session_id, value)
+                if selected is None:
+                    message = f"Agent {profile.agent_id!r} did not confirm {field} {value!r}."
+                    raise AgentConfigurationError(message)
+                options = selected.config_options
+                expected[selector.config_id] = value
+        except RequestError as error:
+            if error.code == _AUTH_REQUIRED_CODE:
+                raise
+            message = f"Agent {profile.agent_id!r} rejected {field} {value!r}."
+            raise AgentConfigurationError(message, context={"agent": profile.agent_id}) from None
+        for config_id, selected_value in expected.items():
+            if _selected_value(options, config_id) != selected_value:
+                message = f"Agent {profile.agent_id!r} changed a requested configuration value."
+                raise AgentConfigurationError(
+                    message, context={"agent": profile.agent_id, "option": field}
+                )
+        config_ids[field] = selector.config_id
+    return config_ids
+
+
 def _capabilities(profile: AgentProfile) -> schema.ClientCapabilities:
     methods = profile.required_client_methods
     return schema.ClientCapabilities(
@@ -181,6 +251,8 @@ class RelayAcpClient:
     session_id: str | None
     expected_model: str | None
     model_config_id: str | None
+    expected_options: dict[str, str]
+    expected_mode: str | None
     drift_error: RelayError | None
     control_stop: str | None
     interaction_lock: asyncio.Lock
@@ -200,6 +272,8 @@ class RelayAcpClient:
         self.session_id = None
         self.expected_model = None
         self.model_config_id = None
+        self.expected_options = {}
+        self.expected_mode = None
         self.drift_error = None
         self.control_stop = None
         self.interaction_lock = asyncio.Lock()
@@ -273,6 +347,25 @@ class RelayAcpClient:
                     context={"agent": self.profile.agent_id},
                 )
                 await self._cancel_session()
+        if isinstance(update, schema.ConfigOptionUpdate):
+            for config_id, value in self.expected_options.items():
+                if _selected_value(update.config_options, config_id) != value:
+                    self.drift_error = AgentConfigurationError(
+                        "The agent changed away from a requested configuration value.",
+                        context={"agent": self.profile.agent_id, "option": config_id},
+                    )
+                    await self._cancel_session()
+                    break
+        if (
+            isinstance(update, schema.CurrentModeUpdate)
+            and self.expected_mode is not None
+            and update.current_mode_id != self.expected_mode
+        ):
+            self.drift_error = AgentConfigurationError(
+                "The agent changed away from the requested permission mode.",
+                context={"agent": self.profile.agent_id},
+            )
+            await self._cancel_session()
         if self.event_queue is not None:
             for event in normalize_acp_update(update):
                 await self.event_queue.put(event)
@@ -540,6 +633,7 @@ class AcpDriver:
     session_id: str | None
 
     agent_version: str
+    config_ids: dict[str, str]
 
     def __init__(self, profile: AgentProfile, command: AgentCommand) -> None:
         self.profile = profile
@@ -549,13 +643,14 @@ class AcpDriver:
         self.process = None
         self.session_id = None
         self.agent_version = ""
+        self.config_ids = {}
 
     async def probe_models(
         self,
         requirements: tuple[ProbeRequirement, ...],
         cwd: Path,
     ) -> ProbeResult:
-        """Open one disposable session and prove every requested exact value."""
+        """Prove exact models and overrides without contaminating provider defaults."""
         client = RelayAcpClient(None, self.profile)
         cleanup_warning = None
         session_id = None
@@ -566,6 +661,7 @@ class AcpDriver:
                     connection, initialized, cwd, allow_authentication=False
                 )
                 session_id = new_session.session_id
+                session_ids = [session_id]
                 client.session_id = session_id
                 options = new_session.config_options or []
                 selector = _model_selector(options, self.profile)
@@ -584,43 +680,55 @@ class AcpDriver:
                     )
                     for value, name in _model_options(selector)
                 )
-                advertised = {item.model_value for item in observations}
                 confirmed = set()
+                confirmed_requirements = set()
                 failures = {}
-                for requirement in requirements:
-                    if requirement.model_value not in advertised:
-                        error = ModelUnavailableError(
-                            f"Exact model {requirement.model_value!r} is not advertised by "
-                            f"{self.profile.agent_id!r}.",
-                            context={"agent": self.profile.agent_id},
+                requirement_failures = {}
+                configurations: dict[str, AgentConfiguration] = {}
+                has_overrides = any(
+                    item.effort is not None or item.permission_mode is not None
+                    for item in requirements
+                )
+                for index, requirement in enumerate(requirements):
+                    if index and has_overrides:
+                        new_session = await _new_session(
+                            connection, initialized, cwd, allow_authentication=False
                         )
-                        failures[requirement.model_value] = ProbeFailure.from_error(error)
-                        continue
+                        session_id = new_session.session_id
+                        session_ids.append(session_id)
+                        client.session_id = session_id
+                        options = new_session.config_options or []
                     try:
-                        selected = await connection.set_config_option(
-                            selector.id, session_id, requirement.model_value
+                        options, config_id = await _select_model(
+                            connection, self.profile, session_id, options, requirement.model_value
                         )
-                    except Exception:
-                        error = ModelSelectionRejectedError(
-                            f"Agent {self.profile.agent_id!r} rejected exact model "
-                            f"{requirement.model_value!r}.",
-                            context={"agent": self.profile.agent_id},
+                        configurations[requirement.model_value] = acp_configuration(
+                            self.profile.agent_id,
+                            requirement.model_value,
+                            options,
+                            new_session.modes,
                         )
-                        failures[requirement.model_value] = ProbeFailure.from_error(error)
+                        await _apply_overrides(
+                            connection,
+                            self.profile,
+                            session_id,
+                            options,
+                            new_session.modes,
+                            requirement,
+                            config_id,
+                        )
+                    except Exception as error:
+                        mapped = (
+                            error
+                            if isinstance(error, RelayError)
+                            else map_agent_exception(error, agent_id=self.profile.agent_id)
+                        )
+                        failure = ProbeFailure.from_error(mapped)
+                        failures[requirement.model_value] = failure
+                        requirement_failures[requirement] = failure
                         continue
-                    if (
-                        selected is None
-                        or _selected_value(selected.config_options, selector.id)
-                        != requirement.model_value
-                    ):
-                        error = ModelSelectionRejectedError(
-                            f"Agent {self.profile.agent_id!r} did not confirm exact model "
-                            f"{requirement.model_value!r}.",
-                            context={"agent": self.profile.agent_id},
-                        )
-                        failures[requirement.model_value] = ProbeFailure.from_error(error)
-                    else:
-                        confirmed.add(requirement.model_value)
+                    confirmed.add(requirement.model_value)
+                    confirmed_requirements.add(requirement)
                 agent_capabilities = initialized.agent_capabilities
                 capabilities = (
                     agent_capabilities.session_capabilities
@@ -628,14 +736,15 @@ class AcpDriver:
                     else None
                 )
                 if capabilities is not None and capabilities.close is not None:
-                    try:
-                        await connection.close_session(session_id)
-                    except Exception:
-                        LOGGER.exception(
-                            "ACP probe session close failed",
-                            extra={"agent_id": self.profile.agent_id},
-                        )
-                        cleanup_warning = "The ACP probe session may not have closed cleanly."
+                    for disposable_session in session_ids:
+                        try:
+                            await connection.close_session(disposable_session)
+                        except Exception:
+                            LOGGER.exception(
+                                "ACP probe session close failed",
+                                extra={"agent_id": self.profile.agent_id},
+                            )
+                            cleanup_warning = "The ACP probe session may not have closed cleanly."
                 if capabilities is not None and capabilities.delete is not None:
                     suffix = " The pinned ACP SDK exposes no supported delete-session call."
                     cleanup_warning = (
@@ -647,6 +756,9 @@ class AcpDriver:
                     frozenset(confirmed),
                     failures,
                     cleanup_warning,
+                    configurations=configurations,
+                    confirmed_requirements=frozenset(confirmed_requirements),
+                    requirement_failures=requirement_failures,
                 )
         except Exception as error:
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
@@ -679,29 +791,32 @@ class AcpDriver:
             )
             self.session_id = new_session.session_id
             client.session_id = self.session_id
-            selector = _model_selector(new_session.config_options or [], self.profile)
-            client.model_config_id = selector.id
+            options, model_config_id = await _select_model(
+                connection,
+                self.profile,
+                self.session_id,
+                new_session.config_options or [],
+                context.model_value,
+            )
+            config_ids = await _apply_overrides(
+                connection,
+                self.profile,
+                self.session_id,
+                options,
+                new_session.modes,
+                ProbeRequirement(context.model_value, context.effort, context.permission_mode),
+                model_config_id,
+            )
+            self.config_ids = config_ids
+            client.model_config_id = model_config_id
             client.expected_model = context.model_value
-            if context.model_value not in {value for value, _name in _model_options(selector)}:
-                message = f"Exact model {context.model_value!r} is no longer advertised."
-                raise ModelUnavailableError(message, context={"agent": self.profile.agent_id})
-            try:
-                selected = await connection.set_config_option(
-                    selector.id, self.session_id, context.model_value
-                )
-            except RequestError as error:
-                if error.code == _AUTH_REQUIRED_CODE:
-                    raise
-                message = f"Agent {self.profile.agent_id!r} rejected the snapshotted model."
-                raise ModelSelectionRejectedError(
-                    message, context={"agent": self.profile.agent_id}
-                ) from None
-            if (
-                selected is None
-                or _selected_value(selected.config_options, selector.id) != context.model_value
-            ):
-                message = f"Agent {self.profile.agent_id!r} rejected the snapshotted model."
-                raise ModelSelectionRejectedError(message, context={"agent": self.profile.agent_id})
+            client.expected_mode = context.permission_mode
+            client.expected_options = {
+                config_ids[field]: value
+                for field in ("effort", "permission_mode")
+                if (value := getattr(context, field)) is not None
+                and config_ids[field] != "session/mode"
+            }
             self.agent_version = (
                 initialized.agent_info.version if initialized.agent_info is not None else ""
             )
@@ -711,7 +826,7 @@ class AcpDriver:
                 process_id=process.pid,
                 session_id=self.session_id,
                 agent_version=self.agent_version,
-                config_ids={"model": selector.id},
+                config_ids=config_ids,
             )
             response = await connection.prompt(self.session_id, _prompt_blocks(context))
             if client.drift_error is not None:
@@ -832,7 +947,7 @@ class AcpDriver:
                 process_id=None,
                 session_id=self.session_id,
                 agent_version=self.agent_version,
-                config_ids={"model": client.model_config_id or ""},
+                config_ids=self.config_ids or {"model": client.model_config_id or ""},
             )
 
     async def cancel(self) -> None:

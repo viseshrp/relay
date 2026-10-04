@@ -56,13 +56,25 @@ renews it; another holder gets `409` until expiry.
 
 | Method and path | Request | Success |
 | --- | --- | --- |
-| `GET /api/agents` | none | `200 {"agents":[...],"registry":...}` |
+| `GET /api/agents` | none | `200 {"agents":[...],"preferences":[...],"registry":...}` |
+| `POST /api/agents/{agent-id}/configuration` | `{"model":"exact-value"}` | `200` configuration object below |
 | `POST /api/runs` | launch object below | `201 {"run_id":"..."}` |
 | `GET /api/runs` | optional query below | `200 {"runs":[...],"next":...}` |
 | `GET /api/runs/{id}` | `?collection=nodes\|interactions&since=0&limit=200` | `200 {"run":...,"next":...}` |
 | `GET /api/runs/{id}/events` | `?since=0&limit=100` | `200 {"events":[...],"next":...}` |
 | `GET /api/runs/{id}/artifacts` | `?since=0&limit=200` | `200 {"artifacts":[...],"next":...}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
+
+Configuration discovery requires owner authentication and CSRF protection. It
+probes only the named installed tool, proves the exact model, and returns
+`agent_id`, `model_value`, `effort`, and `permission_mode`. Each selector contains
+`config_id`, `name`, `current_value`, ordered `choices` with `value`, `name`, and
+`description`, and a `transport`. An unavailable selector is `null`.
+The response is advisory; reading it creates no run and sets no effort or mode.
+Unsupported explicit values produce `agent_configuration_error` with HTTP 422
+during launch preflight. Existing model and authentication errors keep their
+public codes. Saved node options are described in
+[Workflows](workflows.md#agent-nodes).
 
 A launch body has this shape:
 

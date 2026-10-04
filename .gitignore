@@ -143,3 +143,5 @@ local-test/
 # Frontend dependencies and generated wheel assets
 frontend/node_modules/
 relay/static/
+frontend/test-results/
+frontend/playwright-report/

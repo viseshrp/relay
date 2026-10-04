@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET
 
 from relay.agents.discovery import discover_agents
 from relay.agents.registry import load_registry
+from relay.config import load_config
 from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX
 from relay.errors import ConfigError
 from relay.execution.state import RunStatus
@@ -144,6 +145,7 @@ def agents(request: HttpRequest) -> HttpResponse:
     return JsonResponse(
         {
             "agents": rows,
+            "preferences": list(load_config().agent_preferences),
             "registry": {
                 "source_url": registry.source_url,
                 "fetched_at": registry.fetched_at.isoformat(),

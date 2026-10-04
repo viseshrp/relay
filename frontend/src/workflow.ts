@@ -1,10 +1,14 @@
 import type { Edge, Node } from "@xyflow/react";
 import { type Document, parseDocument } from "yaml";
 
+import type { AgentOptions } from "./types";
+
 export interface WorkflowNodeValue {
   type: string;
   needs?: string[];
   writes?: boolean;
+  agents?: string[];
+  agent_options?: Record<string, AgentOptions>;
   [key: string]: unknown;
 }
 
