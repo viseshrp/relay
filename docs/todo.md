@@ -41,6 +41,17 @@ to change that effort.
   that selection across reloads so opening the app returns to the intended
   stage instead of the default workflow editor.
 
+## Run output
+
+- [ ] Join streamed agent text and command output into readable messages or
+  lines instead of a separate card for every fragment. Preserve ordering and
+  boundaries between nodes, attempts, messages, and output streams, and show
+  which node and agent produced the output.
+- [ ] Show readable messages and tool summaries by default. Keep raw provider
+  JSON and low-level events in an optional diagnostics view, with the original
+  events available for inspection. Make ongoing output readable without
+  opening a full-text dialog for each fragment.
+
 ## Workflow handoffs
 
 - [ ] Create and save new workflows through Relay without manually adding a
