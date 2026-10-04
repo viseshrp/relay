@@ -53,17 +53,23 @@ Run these commands from a clean Git repository:
 
 ```bash
 relay init
-git add .relay
-git commit -m "Add blank Relay workflow"
 relay doctor
 relay up
 ```
 
 `relay init` creates only `.relay/workflows/workflow.yaml` and
-`.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser,
-where workflows are edited and runs are controlled. After saving a workflow,
-commit the `.relay/` change before launching it; Relay starts runs only from a
-clean Git snapshot.
+`.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser.
+In **Workflows**, choose **New workflow**, add stages and instructions, save,
+and start work. **Runs** shows progress, readable output, and requests for your
+input.
+
+Relay captures the exact saved workflow and instruction files for each run;
+they do not need a Git commit before launch. Untouched initialization files
+and supported generated planning and review documents may stay untracked.
+Staged changes and unrelated edits still block launch. Commit workflow files
+when you want to share them; Relay leaves owner documents unstaged and
+uncommitted. See [Git and artifacts](docs/git-and-artifacts.md#clean-launch)
+for the launch rules.
 
 `relay doctor` reports all five agents and passes when its Git, database,
 packaged-asset, and registry checks pass and at least one supported agent is
@@ -152,8 +158,10 @@ worker environment. Relay does not mask environment values or manage agent
 credentials, so prompts, output, logs, and commands may contain sensitive
 data.
 
-Relay refuses to launch from a dirty repository. It never merges a run branch
-into the launch branch.
+Relay rejects staged changes and unrelated edits before launch. Validated
+workflow sources and supported generated documents follow the
+[launch rules](docs/git-and-artifacts.md#clean-launch). Relay never merges a
+run branch into the launch branch.
 
 ## Development
 
