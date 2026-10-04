@@ -215,7 +215,8 @@ changes, and binary files remain listed, with Git metadata under **File details*
 including whitespace and Git headers. Source text is never executed or rendered
 as HTML. For example, `<img src=x>` in an added line displays those characters.
 Reports remain plain text. All previews are bounded to 256 KiB. A truncated diff
-shows a warning, and its counts cover only the displayed changes. Download full
+shows a warning. Counts and messages about absent text changes apply only to
+the preview; a file may have further changes beyond it. Download full
 reports when a preview is truncated; inspect the retained branch under Advanced
 diagnostics for a full large diff. Relay does not guess or submit the approval
 response.

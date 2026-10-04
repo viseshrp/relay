@@ -151,6 +151,12 @@ test("truncated changes remain explicitly partial in the expanded view", async (
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
 });
 
+test("a preview cut before a file's lines does not claim the file has no changes", async ({ page }) => {
+  await review(page, "diff-review-partial-header", "diff --git a/app.ts b/app.ts\nindex 1234567..abcdef0 100644\n--- a/app.ts\n+++ b/app.ts\n", true);
+  await expect(page.getByText("No text changes in this preview.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("partial preview");
+});
+
 test("file selection and long lines stay inside a narrow review screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await review(page, "diff-review-narrow", patch.replace("+new", `+${"long code ".repeat(80)}`));

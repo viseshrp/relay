@@ -20,7 +20,7 @@ function LineText({ line }: { line: DiffLine | null }) {
 function FilePatch({ file, split }: { file: DiffFile; split: boolean }) {
   const hunks = useMemo(() => file.hunks.map((hunk) => ({ ...hunk, rows: split ? splitDiffLines(hunk.lines) : [] })), [file, split]);
   if (file.binary) return <p className="diff-empty">Binary file. A text comparison is unavailable.</p>;
-  if (file.hunks.length === 0) return <p className="diff-empty">{file.status === "Renamed" ? "File renamed without text changes." : "No text changes in this file."}</p>;
+  if (file.hunks.length === 0) return <p className="diff-empty">{file.status === "Renamed" ? "File renamed. No text changes in this preview." : "No text changes in this preview."}</p>;
   return <table className={`diff-table ${split ? "diff-table-split" : "diff-table-inline"}`} aria-label={`Changes in ${fileName(file)}`}>
     <colgroup>{split ? <><col className="diff-number-col" /><col className="diff-code-col" /><col className="diff-number-col" /><col className="diff-code-col" /></> : <><col className="diff-number-col" /><col className="diff-number-col" /><col className="diff-marker-col" /><col /></>}</colgroup>
     <thead><tr>{split ? <><th colSpan={2} scope="colgroup">Before</th><th colSpan={2} scope="colgroup">After</th></> : <><th scope="col">Before</th><th scope="col">After</th><th colSpan={2} scope="colgroup">Changes</th></>}</tr></thead>
