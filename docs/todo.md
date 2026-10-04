@@ -22,6 +22,17 @@ Tools that expose no separate effort selector retain Provider default.
 Antigravity includes effort in its exact model slug; choose another exact model
 to change that effort.
 
+## Guided app experience
+
+- [ ] Make Relay intuitive for first-time users. Guide them through choosing a
+  project and workflow, starting work, reviewing requests, and resuming a run.
+  Use everyday language and clear next actions so common tasks do not require
+  understanding YAML, internal node names, JSON, or status codes.
+- [ ] Keep advanced configuration and diagnostics in clearly labeled optional
+  views. Explain what actions do and what happens next before starting,
+  stopping, or approving work. Preserve explicit human review and permission
+  decisions.
+
 ## Run navigation
 
 - [ ] Explain the workflow editor and run monitor in the navigation. Show the
