@@ -110,6 +110,9 @@ The consumer atomically claims a still-dispatched token, acquires admission, and
 creates one `NodeAttempt` in the same Relay transaction. Duplicate tokens exit
 without another attempt. A bounded reconciliation pass re-enqueues old,
 unclaimed dispatches. It never re-enqueues a claim once an attempt began.
+Concurrent scheduling passes recheck the node inside the Relay transaction.
+If another caller already started, finished, or canceled it, the stale dispatch
+does nothing. Duplicate deliveries of an existing claim still create one attempt.
 `run_node_attempt` is declared with `retries=0`; Relay does not retry a failed,
 lost, timed-out, canceled, or soft-denied attempt.
 
@@ -234,6 +237,10 @@ only their run and direct data/control successors, loading candidate rows and
 their dependencies instead of walking every active graph. A terminal change
 starts with O(outdegree) candidates; skipped successors propagate through their
 own edges. Loop and subworkflow expansion is bounded before execution.
+Eligibility changes apply only while the locked node is still `pending`. A
+concurrent pass uses the current status instead of applying an old decision;
+if the node already succeeded, it loads the committed outputs before considering
+successors. These checks do not add transitions to the tables above.
 
 Nodes that do not touch Git state need no worktree gate. Git-backed read-only
 nodes may run together, each in a detached ephemeral worktree at the run's

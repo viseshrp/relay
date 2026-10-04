@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import logging
+from threading import Event
 
 from django.db import connections
 import pytest
@@ -43,6 +44,8 @@ from relay.execution.machine import (
     transition_run,
 )
 from relay.execution.scheduler import (
+    RunSchedule,
+    dispatch_ready_nodes,
     downstream_scope_candidates,
     entry_node_for_scope,
     evaluate_eligibility,
@@ -51,11 +54,12 @@ from relay.execution.scheduler import (
 )
 from relay.execution.state import AttemptStopReason, ControlKind, LockMode, Transition
 from relay.execution.timing import attempt_deadline, duration_seconds, remaining_seconds
-from relay.web.models import DispatchClaim
+from relay.web.models import DispatchClaim, NodeAttempt, NodeRun, RunEvent
+from relay.web.repositories import DjangoExecutionStore
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text
 from relay.workflows.schema import NodeDefinition
-from tests.support import Clock, InlineEngine, RelayProject
+from tests.support import Clock, InlineEngine, RelayProject, node_statuses, run_status
 
 GUARDED: Mapping[str, NodeDefinition] = load_workflow_text(
     "version: 1\nname: S\nnodes:\n"
@@ -303,6 +307,94 @@ def test_an_enqueue_failure_becomes_a_dispatch_error() -> None:
 
     with pytest.raises(DispatchError):
         dispatch_node(_DispatchStore(), "n1", broken)
+
+
+def test_a_stale_scheduling_pass_uses_a_concurrent_workers_outputs(
+    project: RelayProject, engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "concurrent",
+        "version: 1\nname: Concurrent\nnodes:\n"
+        "  first: {type: command, run: [git, status]}\n"
+        "  report:\n    type: command\n    needs: [first]\n    run: [git, status]\n"
+        "    outputs: {present: {exists: README.md}}\n"
+        "  check:\n    type: command\n    needs: [report]\n    run: [git, status]\n"
+        '    if: "${{ needs.report.outputs.present }}"\n',
+    )
+    run_id = engine.launch(project, "concurrent")
+    engine.run_token(engine.tokens.popleft())
+    captured = Event()
+    advanced = Event()
+
+    class PausedScheduleStore(DjangoExecutionStore):
+        def load_run_schedule(
+            self, run_id: str, node_ids: tuple[str, ...] | None = None
+        ) -> RunSchedule:
+            schedule = super().load_run_schedule(run_id, node_ids)
+            if not captured.is_set():
+                captured.set()
+                if not advanced.wait(timeout=10):
+                    message = "The competing scheduler did not release its captured snapshot."
+                    raise AssertionError(message)
+            return schedule
+
+    def schedule_from_old_rows() -> tuple[str, ...]:
+        try:
+            return dispatch_ready_nodes(PausedScheduleStore(), run_id, engine.tokens.append)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as scheduler:
+        stale = scheduler.submit(schedule_from_old_rows)
+        try:
+            assert captured.wait(timeout=10)
+            dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
+            engine.run_token(engine.tokens.popleft())
+        finally:
+            advanced.set()
+        stale.result(timeout=10)
+    engine.drain(run_id)
+
+    assert run_status(run_id) == "succeeded"
+    assert node_statuses(run_id)["root.check"] == "succeeded"
+    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 3
+    assert DispatchClaim.objects.filter(node_run__run_id=run_id).count() == 3
+    assert RunEvent.objects.filter(run_id=run_id, type="node.ready").count() == 3
+
+
+@pytest.mark.parametrize("status", ["running", "succeeded", "canceled"])
+def test_a_stale_dispatch_cannot_restart_an_advanced_node(
+    project: RelayProject, engine: InlineEngine, status: str
+) -> None:
+    project.write_workflow(
+        "advanced",
+        "version: 1\nname: Advanced\nnodes:\n  work: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(project, "advanced")
+    if status == "running":
+        engine.store.claim_dispatch(engine.tokens.popleft(), "other-worker")
+    elif status == "succeeded":
+        engine.drain(run_id)
+    else:
+        engine.store.request_run_cancellation(run_id, "cancel")
+    node = NodeRun.objects.get(run_id=run_id, node_id="work")
+    before = (
+        NodeAttempt.objects.filter(node_run=node).count(),
+        DispatchClaim.objects.filter(node_run=node).count(),
+        RunEvent.objects.filter(run_id=run_id).count(),
+    )
+    enqueued = []
+
+    assert dispatch_node(engine.store, str(node.pk), enqueued.append) is None
+
+    node.refresh_from_db()
+    assert node.status == status
+    assert not enqueued
+    assert before == (
+        NodeAttempt.objects.filter(node_run=node).count(),
+        DispatchClaim.objects.filter(node_run=node).count(),
+        RunEvent.objects.filter(run_id=run_id).count(),
+    )
 
 
 def test_a_relay_error_from_the_queue_is_not_wrapped() -> None:

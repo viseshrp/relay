@@ -274,6 +274,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
+  const stateAfter = useRef(0);
   const eventAfter = useRef(0);
   const previousRunStatus = useRef<string | null>(null);
 
@@ -349,12 +350,15 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const refreshDetail = useCallback(async (reset = false): Promise<RunDetail | null> => {
     if (selectedRun === null) return null;
     const mode: PageMode = reset ? "replace" : "refresh";
-    const [run] = await Promise.all([
+    const [run, interactions] = await Promise.all([
       loadDetailCollection("nodes", 0, mode),
       loadDetailCollection("interactions", 0, mode),
       loadArtifacts(0, mode),
       loadLinkedRequest(),
     ]);
+    if (reset && currentRun.current === selectedRun) {
+      stateAfter.current = Math.min(run.event_cursor ?? 0, interactions.event_cursor ?? 0);
+    }
     return run;
   }, [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun]);
 
@@ -377,6 +381,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     let disposed = false;
     currentRun.current = selectedRun;
     eventAfter.current = 0;
+    stateAfter.current = 0;
     previousRunStatus.current = null;
     setStreamRun(null);
     setDetail(null);
@@ -421,12 +426,14 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       incoming = [];
       if (batch.length === 0) return;
       setEvents((current) => mergeEvents(current, batch));
-      setDetail((current) => batch.reduce(applyStateEvent, current));
-      const interactionChanged = batch.some((item) => item.type === "attempt.ended"
+      // Historical output remains visible; current state starts at the loaded snapshot.
+      const live = batch.filter((item) => item.id > stateAfter.current);
+      setDetail((current) => live.reduce(applyStateEvent, current));
+      const interactionChanged = live.some((item) => item.type === "attempt.ended"
         || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
       // Interaction records change node state without always emitting node.waiting.
       // Read the current state after replay so old node.running events cannot undo a pause.
-      if (interactionChanged || batch.some((item) => item.type === "node.created")) {
+      if (interactionChanged || live.some((item) => item.type === "node.created")) {
         void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );
@@ -464,7 +471,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
         // growing history for each replayed event.
         if (frame === null) frame = requestAnimationFrame(flush);
         const status = item.payload.status;
-        if (item.type.startsWith("run.") && typeof status === "string" && TERMINAL_RUNS.has(status)) {
+        if (item.id > stateAfter.current && item.type.startsWith("run.") && typeof status === "string" && TERMINAL_RUNS.has(status)) {
           flush();
           source.close();
           setStreamState("complete");

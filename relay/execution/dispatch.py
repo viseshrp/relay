@@ -95,7 +95,7 @@ class ClaimResult:
 class DispatchStore(Protocol):
     """Persistence operations needed by the Huey dispatch adapter."""
 
-    def create_dispatch(self, node_run_id: str) -> str: ...
+    def create_dispatch(self, node_run_id: str) -> str | None: ...
 
     def mark_dispatch_enqueued(self, claim_token: str) -> None: ...
 
@@ -108,9 +108,11 @@ def dispatch_node(
     store: DispatchStore,
     node_run_id: str,
     enqueue: Callable[[str], object],
-) -> str:
+) -> str | None:
     """Commit durable intent, enqueue only the token, then record enqueue time."""
     token = store.create_dispatch(node_run_id)
+    if token is None:
+        return None
     try:
         enqueue(token)
         store.mark_dispatch_enqueued(token)

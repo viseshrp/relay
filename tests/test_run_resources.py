@@ -128,7 +128,8 @@ def test_command_temporary_and_profile_storage_disappears_after_execution(
 def test_a_finished_owned_process_releases_descendants_and_keeps_unrelated_processes(
     tmp_path: Path,
 ) -> None:
-    # A socket acknowledgement proves the child is running; EOF proves it stopped.
+    # A socket acknowledgement proves the child is running; EOF or a Windows
+    # connection reset proves the owned process was stopped.
     # No sleep or PID-liveness guess is needed on either platform.
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -164,7 +165,13 @@ def test_a_finished_owned_process_releases_descendants_and_keeps_unrelated_proce
                     await process.stdin.drain()
                     await asyncio.wait_for(process.wait(), timeout=10)
                     release_process_group(process.pid)
-                    assert await asyncio.to_thread(connection.recv, 1) == b""
+                    try:
+                        closed = await asyncio.to_thread(connection.recv, 1)
+                    except ConnectionResetError:
+                        if os.name != "nt":
+                            raise
+                    else:
+                        assert closed == b""
                     assert unrelated.poll() is None
 
             try:

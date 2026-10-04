@@ -841,11 +841,20 @@ class DjangoReadStore:
         """Read one bounded node or interaction page plus stable run metadata."""
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
+            # Capture a lower bound before reading state. Replayed events at or
+            # below this ID must not roll the browser back to an older state.
+            event_cursor = (
+                RunEvent.objects.filter(run_id=run_id)
+                .order_by("-id")
+                .values_list("id", flat=True)
+                .first()
+            )
             run = _require_run(
                 Run.objects.select_related("snapshot", "project").filter(pk=run_id).first(), run_id
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            result["event_cursor"] = int(event_cursor or 0)
             result["project"] = asdict(_record(_related(run, "project", Project)))
             result["snapshot"] = {
                 "relay_version": _string(snapshot, "relay_version"),
@@ -1944,7 +1953,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             _mapping(snapshot, "subworkflows"),
         )
 
-    def create_dispatch(self, node_run_id: str) -> str:
+    def create_dispatch(self, node_run_id: str) -> str | None:
         try:
             with transaction.atomic():
                 node = NodeRun.objects.select_for_update().select_related("run").get(pk=node_run_id)
@@ -1952,6 +1961,16 @@ class DjangoExecutionStore(DjangoAgentStore):
                 resuming = _string(node, "status") == NodeStatus.WAITING.value and _string(
                     node, "node_type"
                 ) in {NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                if _string(node, "status") in {
+                    NodeStatus.RUNNING.value,
+                    NodeStatus.SUCCEEDED.value,
+                    NodeStatus.SKIPPED.value,
+                    NodeStatus.FAILED.value,
+                    NodeStatus.CANCELED.value,
+                } or (_string(node, "status") == NodeStatus.WAITING.value and not resuming):
+                    # Scheduling reads can precede another caller's claim or cancel.
+                    # An advanced node must never gain a second dispatch or regress.
+                    return None
                 transition = transition_node(
                     _string(node, "status"), "scope_ready" if resuming else "dispatch"
                 )
@@ -2476,14 +2495,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                 context={"run": run_id, "node": node_run_id},
             ) from None
 
-    def transition_scope_node(self, node_run_id: str, action: str) -> None:
+    def transition_scope_node(
+        self, node_run_id: str, action: str, *, expected_status: str | None = None
+    ) -> str:
         try:
             with transaction.atomic():
                 node = NodeRun.objects.select_for_update().select_related("run").get(pk=node_run_id)
                 run = _related(node, "run", Run)
-                transition = transition_node(_string(node, "status"), action)
+                current = _string(node, "status")
+                if expected_status is not None and current != expected_status:
+                    return current
+                transition = transition_node(current, action)
                 if not transition.changed:
-                    return
+                    return current
                 _set_model_field(node, "status", transition.status)
                 node.save(update_fields=("status",))
                 _append_event(
@@ -2497,6 +2521,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     },
                     node=node,
                 )
+                return transition.status
         except PersistenceError:
             raise
         except (DatabaseError, ObjectDoesNotExist):
@@ -2642,7 +2667,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         )
                     ).exists():
                         token = self.create_dispatch(_identifier(node))
-                        transaction.on_commit(lambda: notify_dispatch(token))
+                        if token is not None:
+                            transaction.on_commit(lambda: notify_dispatch(token))
                     return
                 prompt = _mapping(node, "frozen_def").get("prompt", "Owner input required.")
                 interaction = HumanInteraction.objects.create(
@@ -3063,7 +3089,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         ).first()
         if parent is not None:
             token = self.create_dispatch(_identifier(parent))
-            transaction.on_commit(lambda: notify_dispatch(token))
+            if token is not None:
+                transaction.on_commit(lambda: notify_dispatch(token))
 
     def _attempt_is_current(self, attempt: NodeAttempt) -> bool:
         node = _related(attempt, "node_run", NodeRun)

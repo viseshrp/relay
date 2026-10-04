@@ -31,7 +31,7 @@ function readableOutput(event: RunEvent, toolNames: Map<string, string>, owner: 
     if (toolId && title === event.payload.tool_call_id) title = toolNames.get(toolId) ?? "Tool";
     // Older Claude events stored toolu_01ABC as a title. Show "Execute" (or
     // "Tool") instead; the original identifier stays in Advanced diagnostics.
-    if (/^toolu_[A-Za-z0-9]+$/.test(title)) title = "Tool";
+    if (/^(?:toolu_[A-Za-z0-9]+|exec-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i.test(title)) title = "Tool";
     if (title === "Tool" && typeof summary?.kind === "string") title = stageLabel(summary.kind);
     if (toolId && title !== "Tool") toolNames.set(toolId, title);
     const content = summary?.content;

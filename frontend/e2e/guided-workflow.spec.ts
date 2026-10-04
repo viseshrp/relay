@@ -60,6 +60,20 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   const detail = (await (await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`)).json()).run;
   expect(detail.status).toBe("paused_wait");
   expect(detail.interactions).toHaveLength(1);
+  const stream = `**/api/runs/${runId}/stream?since=*`;
+  const scope = detail.interactions[0].scope_path;
+  const frames = [
+    { id: detail.event_cursor - 3, type: "node.running", payload: { scope_path: scope, status: "running" } },
+    { id: detail.event_cursor - 2, type: "run.failed", payload: { status: "failed" } },
+    { id: detail.event_cursor + 1, type: "command.stdout", payload: { scope_path: scope, attempt_number: 1, chunk: "New output after an old failed attempt.\n" } },
+  ].map((item) => ({ ...item, version: 1, source: "system", ts: new Date().toISOString() }));
+  await page.route(stream, (route) => route.fulfill({ contentType: "text/event-stream", body: frames.map((item) => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join("") }));
+  await page.reload();
+  await expect(page.getByText("New output after an old failed attempt.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Owner review · Needs your input", exact: true })).toBeVisible();
+  await page.unroute(stream);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("guided-review.png"), fullPage: true });
   await page.getByLabel("Your response", { exact: true }).fill("AGREE");
   await page.getByRole("button", { name: "Send response and continue" }).click();

@@ -139,7 +139,9 @@ class AttemptRuntime(DispatchStore, Protocol):
 
     def scope_node_record(self, run_id: str, node_run_id: str) -> ScopeNodeRecord: ...
 
-    def transition_scope_node(self, node_run_id: str, action: str) -> None: ...
+    def transition_scope_node(
+        self, node_run_id: str, action: str, *, expected_status: str | None = None
+    ) -> str: ...
 
     def record_loop_iteration(
         self,

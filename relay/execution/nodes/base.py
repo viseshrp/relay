@@ -13,7 +13,6 @@ from pydantic import TypeAdapter, ValidationError
 
 from relay.errors import NodeExecutionError
 from relay.execution.dispatch import dispatch_node
-from relay.execution.machine import transition_node
 from relay.execution.runner import AttemptContext, OutcomeKind, run_claim_token
 from relay.execution.scheduler import (
     activation_sources,
@@ -137,9 +136,14 @@ class SynchronousScopeRunner:
 
         def apply_action(node_id: str, action: str) -> None:
             record = records[node_id]
-            transition = transition_node(record.status, action)
-            context.runtime.transition_scope_node(record.node_run_id, action)
-            records[node_id] = replace(record, status=transition.status)
+            status = context.runtime.transition_scope_node(
+                record.node_run_id, action, expected_status=NodeStatus.PENDING.value
+            )
+            records[node_id] = (
+                context.runtime.scope_node_record(context.attempt.run_id, record.node_run_id)
+                if status == NodeStatus.SUCCEEDED.value
+                else replace(record, status=status)
+            )
 
         from . import node_executors
 
@@ -193,17 +197,18 @@ class SynchronousScopeRunner:
                 )
                 if context.timed_out():
                     return NestedScopeResult(OutcomeKind.FAILED, {}, "node_timeout")
-                run_claim_token(
-                    context.runtime,
-                    token,
-                    context.attempt.worker_id,
-                    executors,
-                    heartbeat_owners=(
-                        (context.attempt.attempt_id, context.attempt.worker_id),
-                        *context.heartbeat_owners,
-                    ),
-                    inherited_deadline=context.deadline_at,
-                )
+                if token is not None:
+                    run_claim_token(
+                        context.runtime,
+                        token,
+                        context.attempt.worker_id,
+                        executors,
+                        heartbeat_owners=(
+                            (context.attempt.attempt_id, context.attempt.worker_id),
+                            *context.heartbeat_owners,
+                        ),
+                        inherited_deadline=context.deadline_at,
+                    )
                 record = context.runtime.scope_node_record(
                     context.attempt.run_id, record.node_run_id
                 )

@@ -9,7 +9,6 @@ from typing import Protocol
 
 from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
-from relay.execution.machine import transition_node
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.graph import CompiledGraph
 from relay.workflows.schema import NodeDefinition
@@ -68,7 +67,9 @@ class SchedulingStore(DispatchStore, Protocol):
         self, run_id: str, node_ids: tuple[str, ...] | None = None
     ) -> RunSchedule: ...
 
-    def transition_scope_node(self, node_run_id: str, action: str) -> None: ...
+    def transition_scope_node(
+        self, node_run_id: str, action: str, *, expected_status: str | None = None
+    ) -> str: ...
 
     def settle_run(self, run_id: str) -> None: ...
 
@@ -268,12 +269,17 @@ def advance_run_schedule(
                 action = eligibility.action
         if action is None:
             continue
-        transition = transition_node(statuses[node_id], action)
-        store.transition_scope_node(row.node_run_id, action)
-        statuses[node_id] = transition.status
-        if transition.status == NodeStatus.READY.value:
+        status = store.transition_scope_node(
+            row.node_run_id, action, expected_status=NodeStatus.PENDING.value
+        )
+        statuses[node_id] = status
+        if status == NodeStatus.SUCCEEDED.value:
+            # A concurrent worker may have completed this stale pending row.
+            # Load its committed outputs before evaluating its successors.
+            rows.update(store.load_run_schedule(run_id, (node_id,)).nodes)
+        if status == NodeStatus.READY.value:
             ready_ids.append(row.node_run_id)
-        if transition.status in terminal:
+        if status in terminal:
             enqueue_candidates(node_id)
 
     store.settle_run(run_id)
@@ -288,8 +294,9 @@ def dispatch_ready_nodes(
 ) -> tuple[str, ...]:
     """Commit and enqueue each newly ready node without waiting for execution."""
     return tuple(
-        dispatch_node(store, node_run_id, enqueue)
+        token
         for node_run_id in advance_run_schedule(store, run_id, changed_node_ids)
+        if (token := dispatch_node(store, node_run_id, enqueue)) is not None
     )
 
 

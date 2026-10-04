@@ -172,6 +172,9 @@ graph; failed steps have Show step and Retry step controls. Stage buttons
 focus the graph on that step at a readable scale.
 Interaction updates refresh the current step state after event replay, so a
 waiting stage stays labeled **Needs your input** when a historical stream opens.
+The captured state cursor prevents replayed progress from replacing current
+progress. Older terminal events remain in history and cannot close a retried
+run's live stream.
 
 The graph uses captured dependencies and control targets, so editing today's
 workflow cannot redraw a past run's connections. Connected rows show stage

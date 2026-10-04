@@ -145,6 +145,17 @@ def test_pending_interaction_reads_and_target_links_do_not_return_old_answers(
     assert rows[0]["status"] == "answered"
 
 
+def test_run_detail_keeps_a_state_cursor_separate_from_replayed_output(
+    owner: Client, waiting_run: tuple[str, int]
+) -> None:
+    run_id, _attempt_id = waiting_run
+    detail = owner.get(f"/api/runs/{run_id}").json()["run"]
+    events = owner.get(f"/api/runs/{run_id}/events?limit=200").json()["events"]
+    assert detail["event_cursor"] == max(event["id"] for event in events)
+    assert detail["status"] == "paused_wait"
+    assert detail["nodes"][0]["status"] == "waiting"
+
+
 def test_stale_interaction_answer_cannot_answer_the_current_review(
     owner: Client, waiting_run: tuple[str, int]
 ) -> None:

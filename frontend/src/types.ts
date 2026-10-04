@@ -140,6 +140,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  event_cursor: number;
   project: ProjectRecord;
   snapshot: {
     relay_version: string;

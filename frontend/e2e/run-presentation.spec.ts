@@ -48,8 +48,9 @@ test("legacy tool summaries omit opaque IDs and duplicate command titles", () =>
     event(1, "agent.tool_call", { tool: "git status", summary: '{"raw_input":{"command":"git status"}}' }),
     event(2, "agent.tool_call", { tool: "toolu_01ABC", summary: '{}' }),
     event(3, "agent.tool_result", { tool: "toolu_01ABC", summary: '{"kind":"execute","status":"completed","content":[{"text":"clean"}]}' }),
+    event(4, "agent.tool_result", { tool: "exec-12345678-1234-1234-1234-123456789abc", summary: '{"status":"completed"}' }),
   ]);
-  expect(messages.map((message) => message.text)).toEqual(["git status", "Execute · completed\nclean"]);
+  expect(messages.map((message) => message.text)).toEqual(["git status", "Execute · completed\nclean", "Tool · completed"]);
 });
 
 function node(scope_path: string, dependencies: string[] = [], parent_scope: string | null = null): RunNode {
