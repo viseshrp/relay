@@ -1,23 +1,15 @@
-/** Read Git's unified patch in linear time; do not compute a second diff. */
-export type DiffLine = {
-  kind: "context" | "added" | "removed";
-  text: string;
-  before: number | null;
-  after: number | null;
-  noNewline?: boolean;
-};
-export type DiffHunk = { heading: string; lines: DiffLine[] };
+/** Index file metadata in linear time, retaining the patch for the diff renderer. */
 export type DiffFile = {
   before: string;
   after: string;
   status: "Modified" | "Added" | "Deleted" | "Renamed" | "Copied";
   binary: boolean;
   metadata: string[];
-  hunks: DiffHunk[];
+  patch: string;
+  hasHunks: boolean;
   additions: number;
   removals: number;
 };
-export type SplitLine = { before: DiffLine | null; after: DiffLine | null };
 
 function gitPath(value: string): string {
   if (!value.startsWith('"') || !value.endsWith('"')) return value;
@@ -64,76 +56,37 @@ function headerPaths(value: string): [string, string] {
 
 export function parseGitDiff(text: string): DiffFile[] {
   const files: DiffFile[] = [];
-  let file: DiffFile | undefined;
-  let hunk: DiffHunk | undefined;
-  let before = 0;
-  let after = 0;
-  // Splitting only at LF preserves tabs, blank lines, and CR bytes in file content.
-  // "+\tconst x = 1;\r\n" becomes added text "\tconst x = 1;\r".
-  const lines = text.split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      const [oldPath, newPath] = headerPaths(line.slice("diff --git ".length));
-      file = { before: oldPath, after: newPath, status: "Modified", binary: false, metadata: [], hunks: [], additions: 0, removals: 0 };
-      files.push(file); hunk = undefined;
-      continue;
+  // Split only before actual Git headers; "+diff --git ..." remains source text.
+  // Each patch retains exact tabs, CR bytes, blank lines, and its final newline.
+  for (const patch of text.split(/(?=^diff --git )/m)) {
+    if (!patch.startsWith("diff --git ")) continue;
+    const lines = patch.split("\n");
+    const [before, after] = headerPaths(lines[0].slice("diff --git ".length));
+    const file: DiffFile = { before, after, status: "Modified", binary: false, metadata: [], patch, hasHunks: false, additions: 0, removals: 0 };
+    if (lines.at(-1) === "") lines.pop();
+    for (const line of lines.slice(1)) {
+      if (line.startsWith("@@ ")) { file.hasHunks = true; continue; }
+      // In a hunk, "+++value" is an added source line, not a file header.
+      // Count only supplied lines so truncated previews never invent changes.
+      if (file.hasHunks) {
+        if (line.startsWith("+")) file.additions++;
+        else if (line.startsWith("-")) file.removals++;
+        continue;
+      }
+      if (line.startsWith("--- ")) file.before = patchPath(line.slice("--- ".length));
+      else if (line.startsWith("+++ ")) file.after = patchPath(line.slice("+++ ".length));
+      else {
+        file.metadata.push(line);
+        if (line.startsWith("new file mode ")) file.status = "Added";
+        else if (line.startsWith("deleted file mode ")) file.status = "Deleted";
+        else if (line.startsWith("rename from ")) { file.status = "Renamed"; file.before = gitPath(line.slice("rename from ".length)); }
+        else if (line.startsWith("rename to ")) file.after = gitPath(line.slice("rename to ".length));
+        else if (line.startsWith("copy from ")) { file.status = "Copied"; file.before = gitPath(line.slice("copy from ".length)); }
+        else if (line.startsWith("copy to ")) file.after = gitPath(line.slice("copy to ".length));
+        else if (line.startsWith("Binary files ") || line === "GIT binary patch") file.binary = true;
+      }
     }
-    if (!file) continue;
-    const header = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
-    if (header) {
-      before = Number(header[1]); after = Number(header[2]);
-      hunk = { heading: line, lines: [] }; file.hunks.push(hunk);
-      continue;
-    }
-    if (hunk) {
-      // Strip the diff marker only: "+  return x;" -> "  return x;".
-      // A source line beginning "++" or "--" is content, not a file header.
-      const content = line.slice(1);
-      if (line.startsWith("+")) {
-        hunk.lines.push({ kind: "added", text: content, before: null, after: after++ }); file.additions++;
-      } else if (line.startsWith("-")) {
-        hunk.lines.push({ kind: "removed", text: content, before: before++, after: null }); file.removals++;
-      } else if (line.startsWith(" ")) {
-        hunk.lines.push({ kind: "context", text: content, before: before++, after: after++ });
-      } else if (line.startsWith("\\ ") && hunk.lines.length > 0) {
-        hunk.lines[hunk.lines.length - 1].noNewline = true;
-      } else if (line !== "") file.metadata.push(line);
-      continue;
-    }
-    if (line.startsWith("--- ")) file.before = patchPath(line.slice("--- ".length));
-    else if (line.startsWith("+++ ")) file.after = patchPath(line.slice("+++ ".length));
-    else {
-      file.metadata.push(line);
-      if (line.startsWith("new file mode ")) file.status = "Added";
-      else if (line.startsWith("deleted file mode ")) file.status = "Deleted";
-      else if (line.startsWith("rename from ")) { file.status = "Renamed"; file.before = gitPath(line.slice("rename from ".length)); }
-      else if (line.startsWith("rename to ")) file.after = gitPath(line.slice("rename to ".length));
-      else if (line.startsWith("copy from ")) { file.status = "Copied"; file.before = gitPath(line.slice("copy from ".length)); }
-      else if (line.startsWith("copy to ")) file.after = gitPath(line.slice("copy to ".length));
-      else if (line.startsWith("Binary files ") || line === "GIT binary patch") file.binary = true;
-    }
+    files.push(file);
   }
   return files;
-}
-
-export function splitDiffLines(lines: DiffLine[]): SplitLine[] {
-  const rows: SplitLine[] = [];
-  let removed: DiffLine[] = [];
-  let added: DiffLine[] = [];
-  function flush() {
-    // Adjacent "-old", "+new" share a row. Extra lines keep an empty opposite cell.
-    // This aligns Git's replacement blocks by position without a quadratic re-diff.
-    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
-      rows.push({ before: removed[index] ?? null, after: added[index] ?? null });
-    }
-    removed = []; added = [];
-  }
-  for (const line of lines) {
-    if (line.kind === "context") { flush(); rows.push({ before: line, after: line }); }
-    else if (line.kind === "removed") { if (added.length > 0) flush(); removed.push(line); }
-    else added.push(line);
-  }
-  flush();
-  return rows;
 }

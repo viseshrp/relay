@@ -2,9 +2,19 @@ import {
   Alert, Button, Checkbox, Dialog, DialogContent, DialogTitle,
   FormControlLabel, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { parseGitDiff, splitDiffLines, type DiffFile, type DiffLine } from "../diff";
+import { parseGitDiff, type DiffFile } from "../diff";
+
+// Load the highlighter only when a review contains text changes.
+const HighlightedDiff = lazy(() => import("./HighlightedDiff"));
+
+class DiffRenderBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) { console.error("Unable to display the code comparison", error); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
 
 function fileName(file: DiffFile) { return file.status === "Deleted" ? file.before : file.after; }
 function Counts({ added, removed }: { added: number; removed: number }) {
@@ -12,32 +22,22 @@ function Counts({ added, removed }: { added: number; removed: number }) {
     <span className="diff-add-count">+{added}</span><span className="diff-remove-count">−{removed}</span>
   </span>;
 }
-function LineText({ line }: { line: DiffLine | null }) {
-  return line && <><span className="diff-code-text">{line.text || "\u00a0"}</span>
-    {line.noNewline && <span className="diff-newline-note">No newline at end of file</span>}
-  </>;
-}
-function FilePatch({ file, split }: { file: DiffFile; split: boolean }) {
-  const hunks = useMemo(() => file.hunks.map((hunk) => ({ ...hunk, rows: split ? splitDiffLines(hunk.lines) : [] })), [file, split]);
+function FilePatch({ file, split, wrap }: { file: DiffFile; split: boolean; wrap: boolean }) {
   if (file.binary) return <p className="diff-empty">Binary file. A text comparison is unavailable.</p>;
-  if (file.hunks.length === 0) return <p className="diff-empty">{file.status === "Renamed" ? "File renamed. No text changes in this preview." : "No text changes in this preview."}</p>;
-  return <table className={`diff-table ${split ? "diff-table-split" : "diff-table-inline"}`} aria-label={`Changes in ${fileName(file)}`}>
-    <colgroup>{split ? <><col className="diff-number-col" /><col className="diff-code-col" /><col className="diff-number-col" /><col className="diff-code-col" /></> : <><col className="diff-number-col" /><col className="diff-number-col" /><col className="diff-marker-col" /><col /></>}</colgroup>
-    <thead><tr>{split ? <><th colSpan={2} scope="colgroup">Before</th><th colSpan={2} scope="colgroup">After</th></> : <><th scope="col">Before</th><th scope="col">After</th><th colSpan={2} scope="colgroup">Changes</th></>}</tr></thead>
-    <tbody>{hunks.map((hunk, index) => <Fragment key={index}>
-      <tr className="diff-hunk"><td colSpan={4}>{hunk.heading}</td></tr>
-      {split ? hunk.rows.map((row, offset) => <tr key={offset}>
-        <td className={`diff-number diff-${row.before?.kind ?? "empty"}`}>{row.before?.before}</td>
-        <td className={`diff-code diff-${row.before?.kind ?? "empty"}`}><span className="diff-sr-label">{row.before?.kind === "removed" ? "Removed: " : ""}</span><LineText line={row.before} /></td>
-        <td className={`diff-number diff-${row.after?.kind ?? "empty"}`}>{row.after?.after}</td>
-        <td className={`diff-code diff-${row.after?.kind ?? "empty"}`}><span className="diff-sr-label">{row.after?.kind === "added" ? "Added: " : ""}</span><LineText line={row.after} /></td>
-      </tr>) : hunk.lines.map((line, offset) => <tr key={offset} className={`diff-${line.kind}`}>
-        <td className="diff-number">{line.before}</td><td className="diff-number">{line.after}</td>
-        <td className="diff-marker" aria-label={line.kind === "context" ? "Unchanged" : line.kind === "added" ? "Added" : "Removed"}>{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}</td>
-        <td className="diff-code"><LineText line={line} /></td>
-      </tr>)}
-    </Fragment>)}</tbody>
-  </table>;
+  if (!file.hasHunks) return <p className="diff-empty">{file.status === "Renamed" ? "File renamed. No text changes in this preview." : "No text changes in this preview."}</p>;
+  const fallback = <>
+    <Alert severity="info">This comparison could not be displayed. Review the original patch below.</Alert>
+    <pre className="diff-original">{file.patch}</pre>
+  </>;
+  return <DiffRenderBoundary fallback={fallback}>
+    <Suspense fallback={<p className="diff-empty" role="status">Loading code comparison…</p>}>
+      {split && (file.status === "Added" || file.status === "Deleted"
+        // New and deleted files have only one side in the rendered comparison.
+        ? <div className="diff-column-labels diff-column-single"><span>{file.status === "Added" ? "After" : "Before"}</span></div>
+        : <div className="diff-column-labels"><span>Before</span><span>After</span></div>)}
+      <HighlightedDiff patch={file.patch} split={split} wrap={wrap} fallback={fallback} />
+    </Suspense>
+  </DiffRenderBoundary>;
 }
 
 export function DiffViewer({ text, truncated }: { text: string; truncated: boolean }) {
@@ -82,7 +82,7 @@ export function DiffViewer({ text, truncated }: { text: string; truncated: boole
       <section className="diff-file-panel" aria-label={`File ${fileName(file)}`} key={selectedIndex}>
         <div className="diff-file-heading"><strong>{fileName(file)}</strong><Counts added={file.additions} removed={file.removals} /></div>
         {(file.status === "Renamed" || file.status === "Copied") && <p className="diff-file-origin">{file.status} from {file.before}</p>}
-        <div className={`diff-scroll ${wrap ? "diff-wrap" : ""}`} tabIndex={0} role="region" aria-label={`Scrollable changes in ${fileName(file)}`}><FilePatch file={file} split={layout === "split"} /></div>
+        <div className="diff-scroll" tabIndex={0} role="region" aria-label={`Scrollable changes in ${fileName(file)}`}><FilePatch file={file} split={layout === "split"} wrap={wrap} /></div>
         <details className="diff-file-details"><summary>File details</summary><pre>{file.metadata.join("\n")}</pre></details>
       </section>
     </div>}

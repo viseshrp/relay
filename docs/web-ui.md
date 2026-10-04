@@ -205,22 +205,25 @@ The monitor combines the SSE stream with paginated database reads:
 At a human review, instructions and the response requested by the workflow
 appear beside retained reports and the committed source-to-run-head diff.
 Choose a file in the changes viewer to see its additions, removals, and line
-numbers. **Inline** shows edits in one column; **Side by side** compares the
-before and after columns. **Wrap lines** keeps long code inside the viewer;
-turn it off to scroll horizontally. **Full screen** gives the comparison more
-space without submitting or clearing your review response. Closing it returns
-keyboard focus to **Full screen**. Renames, mode
-changes, and binary files remain listed, with Git metadata under **File details**.
+numbers. Syntax coloring helps distinguish code, and stronger highlights mark
+changed words within edited lines. **Inline** shows edits in one column;
+**Side by side** compares the before and after columns. **Wrap lines** keeps
+long code inside the viewer; turn it off to scroll horizontally. Added and
+deleted files show their single available column. **Full screen** gives the
+comparison more space without submitting or clearing your review response.
+Closing it returns keyboard focus to **Full screen**. Renames, mode changes,
+and binary files remain listed, with Git metadata under **File details**.
 
 **Show original patch** keeps the complete preview available as literal text,
 including whitespace and Git headers. Source text is never executed or rendered
 as HTML. For example, `<img src=x>` in an added line displays those characters.
-Reports remain plain text. All previews are bounded to 256 KiB. A truncated diff
-shows a warning. Counts and messages about absent text changes apply only to
-the preview; a file may have further changes beyond it. Download full
-reports when a preview is truncated; inspect the retained branch under Advanced
-diagnostics for a full large diff. Relay does not guess or submit the approval
-response.
+If a patch ends inside a hunk or the comparison cannot load, its original text
+appears with a notice. Reports remain plain text. All previews are bounded to
+256 KiB. A truncated diff shows a warning. Counts and messages about absent text
+changes apply only to the preview; a file may have further changes beyond it.
+Download full reports when a preview is truncated; inspect the retained branch
+under Advanced diagnostics for a full large diff. Relay does not guess or
+submit the approval response.
 
 Tool permission requests require an explicit offered decision. Simple agent
 forms have typed fields; complex forms retain a JSON fallback. Optional

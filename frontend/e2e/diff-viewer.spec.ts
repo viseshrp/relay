@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
-import { parseGitDiff, splitDiffLines } from "../src/diff";
+import { parseGitDiff } from "../src/diff";
 
 const patch = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -16,30 +16,23 @@ const patch = [
   "+<img src=x onerror=alert(1)>", "",
 ].join("\n");
 
-test("unified patches preserve source text and line numbers across separate hunks", () => {
+test("file indexing preserves source text and counts across separate hunks", () => {
   const files = parseGitDiff(patch);
   expect(files.map((file) => [file.after, file.status, file.additions, file.removals])).toEqual([
     ["src/app.ts", "Modified", 3, 2], ["my file.ts", "Added", 1, 0],
   ]);
-  expect(files[0].hunks[0].lines.map((line) => [line.kind, line.before, line.after, line.text])).toEqual([
-    ["context", 3, 3, "context"], ["removed", 4, null, "old"], ["added", null, 4, "new"],
-    ["added", null, 5, "\t  kept indentation\r"], ["context", 5, 6, ""], ["context", 6, 7, "tail"],
-  ]);
-  expect(files[0].hunks[1].lines).toEqual([
-    { kind: "removed", before: 20, after: null, text: "--starts with two dashes" },
-    { kind: "added", before: null, after: 21, text: "++starts with two pluses", noNewline: true },
-  ]);
-  expect(files[1].hunks[0].lines[0].after).toBe(1);
+  expect(files.every((file) => file.hasHunks)).toBeTruthy();
+  expect(files.map((file) => file.patch).join("")).toBe(patch);
+  expect(files[0].patch).toContain("+\t  kept indentation\r\n \n");
+  expect(files[0].patch).toContain("@@ -20 +21 @@\n---starts with two dashes\n+++starts with two pluses\n\\ No newline at end of file\n");
 });
 
-test("split rows preserve every change and leave excess additions or removals unpaired", () => {
-  const lines = parseGitDiff("diff --git a/a b/a\n@@ -1,4 +1,4 @@\n-a\n-b\n+c\n context\n-d\n+e\n+f\n")[0].hunks[0].lines;
-  const rows = splitDiffLines(lines);
-  expect(rows.map((row) => [row.before?.text ?? null, row.after?.text ?? null])).toEqual([
-    ["a", "c"], ["b", null], ["context", "context"], ["d", "e"], [null, "f"],
-  ]);
-  expect(rows.flatMap((row) => row.before ? [row.before] : [])).toEqual(lines.filter((line) => line.kind !== "added"));
-  expect(rows.flatMap((row) => row.after ? [row.after] : [])).toEqual(lines.filter((line) => line.kind !== "removed"));
+test("source text containing Git headers stays inside its file", () => {
+  const original = "diff --git a/a b/a\n@@ -1 +1,2 @@\n context\n+diff --git a/b b/b\n";
+  const files = parseGitDiff(original);
+  expect(files).toHaveLength(1);
+  expect(files[0].patch).toBe(original);
+  expect(files[0].additions).toBe(1);
 });
 
 test("renames, copies, deleted, empty, mode-only, and binary files stay visible without hunks", () => {
@@ -78,7 +71,8 @@ test("empty, unrecognized, and partial patches do not invent missing changes", (
   expect(parseGitDiff("a patch in an unsupported format")).toEqual([]);
   const files = parseGitDiff("diff --git a/a b/a\n@@ -1,99 +1,99 @@\n context\n+part");
   expect(files[0].additions).toBe(1);
-  expect(files[0].hunks[0].lines.at(-1)?.text).toBe("part");
+  expect(files[0].hasHunks).toBeTruthy();
+  expect(files[0].patch.endsWith("+part")).toBeTruthy();
 });
 
 async function post(page: Page, path: string, data: object = {}) {
@@ -114,21 +108,27 @@ test("review switches files and layouts, expands, and preserves an unsent respon
   const runId = await review(page, "diff-review-layout", patch);
   const files = page.getByRole("navigation", { name: "Changed files" });
   await expect(files.getByRole("button")).toHaveCount(2);
-  await expect(page.getByRole("table", { name: "Changes in src/app.ts" })).toBeVisible();
-  await expect(page.locator(".diff-table-inline .diff-added")).toHaveCount(3);
+  const comparison = page.locator("diffs-container");
+  await expect(comparison.locator('[data-diff-type="single"]')).toBeVisible();
+  await expect(comparison.locator('[data-code] [data-line][data-line-type="change-addition"]')).toHaveCount(3);
+  await expect(comparison.locator('[data-code] [data-line="21"]')).toContainText("++starts with two pluses");
   await page.getByLabel("Your response", { exact: true }).fill("Still reviewing — do not send.");
   await files.getByRole("button", { name: "my file.ts", exact: false }).click();
-  await expect(page.getByRole("table", { name: "Changes in my file.ts" })).toBeVisible();
-  await expect(page.locator(".diff-code-text")).toHaveText("<img src=x onerror=alert(1)>");
+  await expect(page.getByRole("region", { name: "Scrollable changes in my file.ts" })).toBeVisible();
+  await expect(comparison.locator("[data-code] [data-line]")).toHaveText("<img src=x onerror=alert(1)>");
   await expect(page.locator(".diff-viewer img")).toHaveCount(0);
   await page.getByRole("button", { name: "Side by side", exact: true }).click();
-  await expect(page.locator(".diff-table-split")).toBeVisible();
+  await expect(comparison.locator('[data-diff-type="single"]')).toBeVisible();
+  await expect(page.locator(".diff-column-labels")).toHaveText("After");
+  await files.getByRole("button", { name: "src/app.ts", exact: false }).click();
+  await expect(comparison.locator('[data-diff-type="split"]')).toBeVisible();
+  await files.getByRole("button", { name: "my file.ts", exact: false }).click();
   await page.getByRole("checkbox", { name: "Wrap lines" }).uncheck();
-  await expect(page.locator(".diff-scroll")).not.toHaveClass(/diff-wrap/);
+  await expect(comparison.locator('[data-overflow="scroll"]')).toBeVisible();
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Committed code changes" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("table", { name: "Changes in my file.ts" })).toBeVisible();
+  await expect(dialog.locator('diffs-container [data-diff-type="single"]')).toBeVisible();
   await dialog.getByRole("button", { name: "Show original patch" }).click();
   expect(await dialog.locator(".diff-original").textContent()).toBe(patch);
   await page.screenshot({ path: testInfo.outputPath("diff-full-screen.png"), fullPage: true });
@@ -165,9 +165,41 @@ test("file selection and long lines stay inside a narrow review screen", async (
   await page.getByRole("button", { name: "Side by side", exact: true }).click();
   expect(await page.locator(".diff-viewer").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
   const scroll = page.getByRole("region", { name: "Scrollable changes in src/app.ts" });
+  await expect(scroll.locator('[data-overflow="wrap"]')).toBeVisible();
   expect(await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy();
   await page.getByRole("checkbox", { name: "Wrap lines" }).uncheck();
-  expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBeTruthy();
+  await expect(scroll.locator('[data-overflow="scroll"]')).toBeVisible();
+  expect(await scroll.locator("[data-code]").evaluateAll((elements) => elements.some((element) => element.scrollWidth > element.clientWidth))).toBeTruthy();
+});
+
+test("code has syntax coloring and word-level highlights in both layouts", async ({ page }) => {
+  await review(page, "diff-review-highlight", "diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-const count = 1;\n+const count = 2;\n");
+  const comparison = page.locator("diffs-container");
+  await expect(comparison.locator('[data-line-type="change-addition"] [data-diff-span]')).toHaveText("2");
+  await expect(comparison.locator('[data-line-type="change-deletion"] [data-diff-span]')).toHaveText("1");
+  await expect(comparison.locator('[data-code] span[style*="color:"]')).not.toHaveCount(0);
+  await page.getByRole("button", { name: "Side by side", exact: true }).click();
+  await expect(comparison.locator('[data-diff-type="split"]')).toBeVisible();
+  await expect(comparison.locator('[data-line-type="change-addition"] [data-diff-span]')).toHaveText("2");
+});
+
+test("a preview ending inside a hunk preserves every byte in its fallback", async ({ page }) => {
+  const original = "diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1,3 +1,3 @@\n context\n-old\n+\tpart";
+  await review(page, "diff-review-cut-hunk", original, true);
+  await expect(page.getByRole("alert").filter({ hasText: "could not be displayed" })).toBeVisible();
+  expect(await page.locator(".diff-original").textContent()).toBe(original);
+  await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
+});
+
+test("a viewer load failure leaves the patch and review response available", async ({ page }) => {
+  await page.route("**/assets/HighlightedDiff-*.js", (route) => route.abort());
+  await review(page, "diff-review-load-failure", patch);
+  await expect(page.getByRole("alert").filter({ hasText: "could not be displayed" })).toBeVisible();
+  expect(await page.locator(".diff-original").textContent()).toBe(parseGitDiff(patch)[0].patch);
+  await page.getByLabel("Your response", { exact: true }).fill("Comparison unavailable; still reviewing.");
+  await page.getByRole("button", { name: "Full screen", exact: true }).click();
+  await page.getByRole("button", { name: "Close full screen" }).click();
+  await expect(page.getByLabel("Your response", { exact: true })).toHaveValue("Comparison unavailable; still reviewing.");
 });
 
 test("unsupported patches retain their original text as an inert fallback", async ({ page }) => {
