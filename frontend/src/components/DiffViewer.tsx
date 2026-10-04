@@ -2,7 +2,7 @@ import {
   Alert, Button, Checkbox, Dialog, DialogContent, DialogTitle,
   FormControlLabel, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { parseGitDiff, splitDiffLines, type DiffFile, type DiffLine } from "../diff";
 
@@ -47,6 +47,13 @@ export function DiffViewer({ text, truncated }: { text: string; truncated: boole
   const [wrap, setWrap] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [raw, setRaw] = useState(false);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const wasExpanded = useRef(false);
+  useEffect(() => {
+    // The inline button is replaced by the dialog, so focus its replacement on close.
+    if (!expanded && wasExpanded.current) expandButton.current?.focus();
+    wasExpanded.current = expanded;
+  }, [expanded]);
   const titleId = useId();
   const selectedIndex = Math.min(selected, Math.max(0, files.length - 1));
   const file = files[selectedIndex];
@@ -60,7 +67,7 @@ export function DiffViewer({ text, truncated }: { text: string; truncated: boole
           <ToggleButton value="inline">Inline</ToggleButton><ToggleButton value="split">Side by side</ToggleButton>
         </ToggleButtonGroup>
         <FormControlLabel className="diff-wrap-toggle" label="Wrap lines" control={<Checkbox size="small" checked={wrap} onChange={(event) => setWrap(event.target.checked)} />} />
-        <Button size="small" variant="outlined" onClick={() => setExpanded(!expanded)}>{expanded ? "Close full screen" : "Full screen"}</Button>
+        <Button ref={expandButton} size="small" variant="outlined" onClick={() => setExpanded(!expanded)}>{expanded ? "Close full screen" : "Full screen"}</Button>
       </div>
     </div>
     <p className="diff-legend"><span>− Removed</span><span>+ Added</span><span>Line numbers show before and after.</span></p>

@@ -134,6 +134,7 @@ test("review switches files and layouts, expands, and preserves an unsent respon
   await page.screenshot({ path: testInfo.outputPath("diff-full-screen.png"), fullPage: true });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeFocused();
   await expect(page.getByLabel("Your response", { exact: true })).toHaveValue("Still reviewing — do not send.");
   await expect(page.getByRole("button", { name: "Side by side" })).toHaveAttribute("aria-pressed", "true");
   const response = (await (await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`)).json()).run;
@@ -148,6 +149,7 @@ test("truncated changes remain explicitly partial in the expanded view", async (
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("partial preview");
   await page.getByRole("button", { name: "Close full screen" }).click();
+  await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeFocused();
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
 });
 

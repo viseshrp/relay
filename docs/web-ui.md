@@ -208,7 +208,8 @@ Choose a file in the changes viewer to see its additions, removals, and line
 numbers. **Inline** shows edits in one column; **Side by side** compares the
 before and after columns. **Wrap lines** keeps long code inside the viewer;
 turn it off to scroll horizontally. **Full screen** gives the comparison more
-space without submitting or clearing your review response. Renames, mode
+space without submitting or clearing your review response. Closing it returns
+keyboard focus to **Full screen**. Renames, mode
 changes, and binary files remain listed, with Git metadata under **File details**.
 
 **Show original patch** keeps the complete preview available as literal text,
