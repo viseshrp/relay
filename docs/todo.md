@@ -30,9 +30,10 @@ to change that effort.
 - [ ] Handle generated planning and review documents without requiring manual
   Git exclusions before launch. Preserve existing documents and keep them
   unstaged and uncommitted unless the owner explicitly requests otherwise.
-- [ ] Retain required verification documents as inspectable Relay artifacts.
-  Use the existing artifact selectors and check required verdicts inside the
-  workflow before advancing. Preserve actual human review and approval gates.
+- [ ] Warn when required report handoffs use only `exists` outputs. Relay
+  already retains files declared with `label`, `json_path`, or `yaml_path`.
+  Guide workflow authors to those selectors and automatic verdict checks,
+  while preserving actual human review and approval gates.
 - [ ] Accept owner feedback while an agent is paused and resume it through
   Relay, without manually editing prompt files or restarting a worker.
 - [ ] Clean up run-owned temporary files, browser profiles, and processes
