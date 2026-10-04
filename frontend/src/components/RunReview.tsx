@@ -7,6 +7,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { stageLabel } from "../navigation";
 import type { ArtifactRecord, JsonValue, RunInteraction } from "../types";
+import { DiffViewer } from "./DiffViewer";
 
 function object(value: JsonValue | undefined): Record<string, JsonValue> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -52,9 +53,9 @@ export function ReviewEvidence({ runId, artifacts }: { runId: string; artifacts:
     {error && <Alert severity="error">{error}</Alert>}
     {opened && !preview && !error && <Typography>Loading review material…</Typography>}
     {preview && <>
-      {preview.previewable === false ? <Typography>This file needs to be downloaded to view it.</Typography>
+      {selection === "changes" ? <DiffViewer key={runId} text={preview.text} truncated={preview.truncated} /> : preview.previewable === false ? <Typography>This file needs to be downloaded to view it.</Typography>
         : <Typography component="pre" className="review-preview">{preview.text || "No committed code changes yet."}</Typography>}
-      {preview.truncated && <Alert severity="info">{selection === "changes" ? "This preview shows the beginning of a large diff. Review the full diff on the run branch shown in Advanced diagnostics before responding." : "This preview shows the beginning of a large document. Download the complete document before reviewing it."}</Alert>}
+      {preview.truncated && selection !== "changes" && <Alert severity="info">This preview shows the beginning of a large document. Download the complete document before reviewing it.</Alert>}
       {selection !== "changes" && <Button component="a" href={`/api/artifacts/${selection}`} download>Download complete document</Button>}
     </>}
     {documents.length === 0 && <Typography variant="body2">No report files were retained. Read the workflow's instructions and review the committed changes.</Typography>}

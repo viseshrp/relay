@@ -204,9 +204,21 @@ The monitor combines the SSE stream with paginated database reads:
 
 At a human review, instructions and the response requested by the workflow
 appear beside retained reports and the committed source-to-run-head diff.
-Text previews are bounded to 256 KiB and shown as inert text. Download full
-reports when a preview is truncated; inspect the retained branch for a full
-large diff. Relay does not guess or submit the approval response.
+Choose a file in the changes viewer to see its additions, removals, and line
+numbers. **Inline** shows edits in one column; **Side by side** compares the
+before and after columns. **Wrap lines** keeps long code inside the viewer;
+turn it off to scroll horizontally. **Full screen** gives the comparison more
+space without submitting or clearing your review response. Renames, mode
+changes, and binary files remain listed, with Git metadata under **File details**.
+
+**Show original patch** keeps the complete preview available as literal text,
+including whitespace and Git headers. Source text is never executed or rendered
+as HTML. For example, `<img src=x>` in an added line displays those characters.
+Reports remain plain text. All previews are bounded to 256 KiB. A truncated diff
+shows a warning, and its counts cover only the displayed changes. Download full
+reports when a preview is truncated; inspect the retained branch under Advanced
+diagnostics for a full large diff. Relay does not guess or submit the approval
+response.
 
 Tool permission requests require an explicit offered decision. Simple agent
 forms have typed fields; complex forms retain a JSON fallback. Optional
