@@ -9,11 +9,13 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+from unittest.mock import Mock
 import uuid
 
 import pytest
 
-from relay.errors import PathSafetyError
+from relay.errors import PathSafetyError, PersistenceError
+from relay.execution import resources
 from relay.execution.cancellation import release_process_group, spawn_process
 from relay.execution.resources import allocate_attempt_resources, cleanup_run_resources
 from tests.support import InlineEngine, RelayProject, symlink_or_skip
@@ -68,6 +70,90 @@ def test_a_changed_ownership_token_prevents_attempt_cleanup() -> None:
     marker.write_text(json.dumps(owner), encoding="utf-8")
     allocation.cleanup()
     assert allocation.directory.exists()
+
+
+@pytest.mark.parametrize("record", [b"not JSON", b"[]", b"\xff"])
+def test_cleanup_preserves_an_unreadable_ownership_record(record: bytes) -> None:
+    allocation = allocate_attempt_resources(str(uuid.uuid4()), "1")
+    marker = allocation.directory / ".relay-resource-owner.json"
+    original = marker.read_bytes()
+    marker.write_bytes(record)
+    try:
+        assert cleanup_run_resources(allocation.run_id) == 0
+        assert allocation.directory.is_dir()
+    finally:
+        marker.write_bytes(original)
+        allocation.cleanup()
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [("version", 0), ("run", "foreign"), ("token", None), ("token", "invalid")],
+)
+def test_cleanup_preserves_an_allocation_with_a_foreign_or_invalid_identity(
+    field: str, replacement: int | str | None
+) -> None:
+    allocation = allocate_attempt_resources(str(uuid.uuid4()), "1")
+    marker = allocation.directory / ".relay-resource-owner.json"
+    original = marker.read_bytes()
+    owner = json.loads(original)
+    owner[field] = replacement
+    marker.write_text(json.dumps(owner), encoding="utf-8")
+    try:
+        assert cleanup_run_resources(allocation.run_id) == 0
+        assert allocation.directory.is_dir()
+    finally:
+        marker.write_bytes(original)
+        allocation.cleanup()
+
+
+def test_cleanup_preserves_an_allocation_without_an_ownership_record() -> None:
+    allocation = allocate_attempt_resources(str(uuid.uuid4()), "1")
+    marker = allocation.directory / ".relay-resource-owner.json"
+    original = marker.read_bytes()
+    marker.unlink()
+    try:
+        assert cleanup_run_resources(allocation.run_id) == 0
+        assert allocation.directory.is_dir()
+    finally:
+        marker.write_bytes(original)
+        allocation.cleanup()
+
+
+def test_cleanup_of_an_already_removed_allocation_is_idempotent() -> None:
+    allocation = allocate_attempt_resources(str(uuid.uuid4()), "1")
+    allocation.cleanup()
+    allocation.cleanup()
+    assert cleanup_run_resources(allocation.run_id) == 0
+
+
+@pytest.mark.parametrize("run_id", ["invalid", "../outside"])
+def test_resource_allocation_rejects_an_invalid_run_identifier(run_id: str) -> None:
+    with pytest.raises(PathSafetyError):
+        allocate_attempt_resources(run_id, "1")
+
+
+def test_temporary_allocation_failure_exposes_a_relay_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with monkeypatch.context() as scoped:
+        scoped.setattr(resources.tempfile, "mkdtemp", Mock(side_effect=PermissionError))
+        with pytest.raises(PersistenceError):
+            allocate_attempt_resources(str(uuid.uuid4()), "1")
+
+
+def test_cleanup_failure_retains_the_owned_allocation_for_a_later_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allocation = allocate_attempt_resources(str(uuid.uuid4()), "1")
+    with monkeypatch.context() as scoped:
+        scoped.setattr(resources.shutil, "rmtree", Mock(side_effect=PermissionError))
+        with pytest.raises(PersistenceError) as failure:
+            allocation.cleanup()
+    assert failure.value.context == {"run": allocation.run_id}
+    assert allocation.directory.is_dir()
+    allocation.cleanup()
+    assert not allocation.directory.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
