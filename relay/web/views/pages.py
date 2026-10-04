@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import asdict
 
 from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
@@ -10,11 +11,16 @@ from django.views.decorators.http import require_GET
 from relay.agents.discovery import discover_agents
 from relay.agents.registry import load_registry
 from relay.config import load_config
-from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX
-from relay.errors import ConfigError
+from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX, REVIEW_PREVIEW_MAX_BYTES
+from relay.errors import ConfigError, RelayError
 from relay.execution.state import RunStatus
 from relay.projects.service import list_registered_projects
-from relay.workflows.editor import read_workflow_document
+from relay.workflows.editor import (
+    list_workflow_documents,
+    read_workflow_document,
+    workflow_handoff_warnings,
+)
+from relay.workflows.loader import load_workflow_text, load_workflow_tree
 
 from ..auth import owner_required
 from ..repositories import (
@@ -76,15 +82,46 @@ def projects(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def project_context(request: HttpRequest) -> HttpResponse:
+    _root, project = current_project(request)
+    return JsonResponse({"project": asdict(project)})
+
+
+@api_errors
+@owner_required
+@require_GET
+def workflows(request: HttpRequest) -> HttpResponse:
+    relay_root, project = current_project(request)
+    return JsonResponse(
+        {"workflows": list_workflow_documents(relay_root), "project": asdict(project)}
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def workflow(request: HttpRequest, key: str) -> HttpResponse:
-    del request
-    relay_root, project = current_project()
+    relay_root, project = current_project(request)
     document = read_workflow_document(DjangoWorkflowStore(), relay_root, project.id, key)
+    try:
+        loaded = load_workflow_text(document.yaml, source=relay_root / "workflows" / key)
+        warnings = workflow_handoff_warnings(loaded.definition.nodes)
+        # Child files are loaded once, even when the workflow invokes them repeatedly.
+        with suppress(RelayError):
+            for child_key, child in load_workflow_tree(loaded, relay_root / "workflows").items():
+                warnings.extend(
+                    {**warning, "workflow_key": child_key}
+                    for warning in workflow_handoff_warnings(child.definition.nodes)
+                )
+    except RelayError:
+        warnings = []
     return JsonResponse(
         {
             "yaml": document.yaml,
             "draft": document.draft,
             "base_hash": document.base_hash,
+            "project": asdict(project),
+            "warnings": warnings,
         }
     )
 
@@ -190,11 +227,16 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
         message = "collection must be nodes or interactions."
         raise ConfigError(message)
     since, limit = _page_parameters(request)
+    target = request.GET.get("interaction")
     run, next_value = DjangoReadStore().run_detail(
         canonical_uuid(run_id, resource="run"),
         collection=collection,
         since=since,
         limit=limit,
+        pending_only=request.GET.get("pending") == "true",
+        interaction_id=canonical_record_id(target, resource="interaction")
+        if target is not None
+        else None,
     )
     return JsonResponse({"run": run, "next": next_value})
 
@@ -231,6 +273,45 @@ def artifact(request: HttpRequest, artifact_id: str) -> FileResponse:
         canonical_record_id(artifact_id, resource="artifact")
     )
     return FileResponse(path.open("rb"), as_attachment=True, filename=name, content_type=media_type)
+
+
+@api_errors
+@owner_required
+@require_GET
+def artifact_preview(request: HttpRequest, artifact_id: str) -> HttpResponse:
+    del request
+    path, name, _media_type = DjangoReadStore().artifact_file(
+        canonical_record_id(artifact_id, resource="artifact")
+    )
+    try:
+        with path.open("rb") as stream:
+            content = stream.read(REVIEW_PREVIEW_MAX_BYTES + 1)
+        # Decode an incomplete final UTF-8 character only when the preview was bounded.
+        text = content[:REVIEW_PREVIEW_MAX_BYTES].decode(
+            "utf-8", errors="ignore" if len(content) > REVIEW_PREVIEW_MAX_BYTES else "strict"
+        )
+        previewable = "\0" not in text
+    except UnicodeError:
+        text, previewable = "", False
+    except OSError:
+        message = "The retained document could not be opened."
+        raise ConfigError(message) from None
+    return JsonResponse(
+        {
+            "name": name,
+            "text": text if previewable else "",
+            "previewable": previewable,
+            "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
+        }
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_changes(request: HttpRequest, run_id: str) -> HttpResponse:
+    del request
+    return JsonResponse(DjangoReadStore().run_changes(canonical_uuid(run_id, resource="run")))
 
 
 @api_errors

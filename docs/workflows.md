@@ -444,7 +444,8 @@ field then fails the producer and blocks its dependents automatically. An
 Use a condition to advance on an explicit verification result. This example
 expects the report to contain exactly `Ready: Yes` or `Ready: No`. Keep generated
 reports in an ignored repository path when they must remain uncommitted; writer
-nodes still have to leave Git clean.
+nodes still have to leave code and the Git index clean. Root workflow reports
+can remain unstaged; see [Git checks](git-and-artifacts.md#clean-launch).
 
 <!-- relay-example: valid required-handoff -->
 ```yaml

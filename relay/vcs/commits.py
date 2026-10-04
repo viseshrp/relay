@@ -7,7 +7,7 @@ from pathlib import Path
 
 from relay.errors import CommitValidationError, GitError
 
-from .cleanliness import status_porcelain
+from .cleanliness import execution_changes, status_porcelain
 from .git import git_stdout, run_git
 
 
@@ -54,7 +54,7 @@ def validate_writer_result(
     allow_no_commit: bool = False,
 ) -> CommitResult:
     """Require a clean descendant HEAD, or an explicitly allowed no-op."""
-    changes = status_porcelain(worktree)
+    changes = execution_changes(worktree)
     if changes:
         message = "A writing node finished with uncommitted worktree changes."
         raise CommitValidationError(

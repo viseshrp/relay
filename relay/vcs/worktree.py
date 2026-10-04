@@ -41,6 +41,19 @@ def reader_worktree_path(primary: Path, attempt_id: str) -> Path:
     return primary / f"r-{_component(attempt_id, label='attempt id')}"
 
 
+def require_project_worktree(repository: Path, worktree: Path) -> None:
+    """Stop execution if a checkout is no longer bound to its run's repository."""
+    expected = git_stdout(repository, ["rev-parse", "--git-common-dir"])
+    actual = git_stdout(worktree, ["rev-parse", "--git-common-dir"])
+    root = git_stdout(worktree, ["rev-parse", "--show-toplevel"])
+    # Relative common directories, e.g. ".git", resolve against their own checkout.
+    if (repository / expected).resolve() != (worktree / actual).resolve() or Path(
+        root
+    ).resolve() != worktree.resolve():
+        message = "The run checkout belongs to a different project. Execution has been stopped."
+        raise WorktreeError(message, context={"project": str(repository)})
+
+
 def _resolve_commit(repository: Path, commit: str) -> str:
     return git_stdout(repository, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
 
@@ -156,6 +169,7 @@ __all__ = [
     "create_reader_worktree",
     "reader_worktree_path",
     "remove_worktree",
+    "require_project_worktree",
     "reset_worktree",
     "run_branch",
     "run_worktree_path",

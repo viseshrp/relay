@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from functools import lru_cache
 from hashlib import sha256
@@ -10,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import tempfile
 from typing import NamedTuple, NoReturn, TypeVar
 import uuid
 
@@ -30,6 +32,7 @@ from relay.constants import (
     EVENT_MAX_PAYLOAD_BYTES,
     INSTANCE_STALE_AFTER_SECONDS,
     RECONCILE_MAX_ITEMS,
+    REVIEW_PREVIEW_MAX_BYTES,
 )
 from relay.errors import (
     ConfigError,
@@ -62,6 +65,7 @@ from relay.execution.machine import (
     transition_run,
 )
 from relay.execution.reconcile import AttemptRecovery
+from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import RecoveryTarget
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.scheduler import (
@@ -101,7 +105,7 @@ from relay.paths import (
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import PreservationResult
-from relay.vcs.git import git_stdout, run_git
+from relay.vcs.git import git_stdout, run_git, run_git_to_file
 from relay.vcs.worktree import (
     reader_worktree_path,
     remove_worktree,
@@ -336,6 +340,14 @@ class DjangoProjectStore:
         except DatabaseError:
             message = "Relay could not list registered projects."
             raise PersistenceError(message) from None
+
+    def get_project(self, project_id: str) -> ProjectRecord:
+        """Resolve an explicitly selected project without changing the process default."""
+        try:
+            return _record(_project_by_id(project_id))
+        except DatabaseError:
+            message = "Relay could not read the selected project."
+            raise PersistenceError(message, context={"project": project_id}) from None
 
     def relink(self, old_path: str, identity: ProjectIdentity) -> ProjectRecord:
         try:
@@ -647,6 +659,21 @@ def _run_record(run: Run) -> dict[str, object]:
 
 def _node_record(node: NodeRun) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
+    frozen = _mapping(node, "frozen_def")
+    scope = _string(node, "scope_path")
+    # root.build#2.check + needs ["plan"] becomes root.build#2.plan, never root.plan.
+    parent = scope.rsplit(".", 1)[0]
+    needs = frozen.get("needs", [])
+    branches = frozen.get("branches", {})
+    controls = [
+        {"target": f"{parent}.{target}", "label": label}
+        for label, target in (branches.items() if isinstance(branches, dict) else ())
+        if isinstance(label, str) and isinstance(target, str)
+    ]
+    for field, label in (("on_timeout", "Time limit"), ("exhausted", "Iteration limit")):
+        target = frozen.get(field)
+        if isinstance(target, str):
+            controls.append({"target": f"{parent}.{target}", "label": label})
     return {
         "id": _identifier(node),
         "scope_path": _string(node, "scope_path"),
@@ -656,6 +683,11 @@ def _node_record(node: NodeRun) -> dict[str, object]:
         "writes": _boolean(node, "writes"),
         "selected_branch": node.selected_branch,
         "loop_index": node.loop_index,
+        "parent_scope": node.parent_scope_path,
+        "dependencies": [f"{parent}.{needed}" for needed in needs if isinstance(needed, str)]
+        if isinstance(needs, list)
+        else [],
+        "controls": controls,
     }
 
 
@@ -727,6 +759,38 @@ def _bounded_page(
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
+    def run_changes(self, run_id: str) -> dict[str, object]:
+        """Preview committed changes from the source commit to the protected run head."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("project").filter(pk=run_id).first(), run_id
+            )
+            project = _related(run, "project", Project)
+            with tempfile.TemporaryFile(mode="w+b") as output:
+                run_git_to_file(
+                    Path(_string(project, "git_root")),
+                    [
+                        "diff",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        _string(run, "source_commit"),
+                        _string(run, "recorded_head"),
+                        "--",
+                    ],
+                    output,
+                )
+                output.seek(0)
+                content = output.read(REVIEW_PREVIEW_MAX_BYTES + 1)
+            return {
+                "text": content[:REVIEW_PREVIEW_MAX_BYTES].decode("utf-8", errors="replace"),
+                "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
+                "source_commit": _string(run, "source_commit"),
+                "recorded_head": _string(run, "recorded_head"),
+            }
+        except DatabaseError:
+            message = "Relay could not read the run's committed changes."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
     def list_runs(
         self,
         *,
@@ -771,15 +835,18 @@ class DjangoReadStore:
         collection: str,
         since: int,
         limit: int,
+        pending_only: bool = False,
+        interaction_id: str | None = None,
     ) -> tuple[dict[str, object], int | None]:
         """Read one bounded node or interaction page plus stable run metadata."""
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             run = _require_run(
-                Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+                Run.objects.select_related("snapshot", "project").filter(pk=run_id).first(), run_id
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            result["project"] = asdict(_record(_related(run, "project", Project)))
             result["snapshot"] = {
                 "relay_version": _string(snapshot, "relay_version"),
                 "runtime_versions": _mapping(snapshot, "runtime_versions"),
@@ -796,11 +863,14 @@ class DjangoReadStore:
                 )
                 records, more = _bounded_page(nodes, bounded, _node_record, byte_budget=byte_budget)
             else:
-                interactions = list(
-                    HumanInteraction.objects.select_related("node_run", "attempt")
-                    .filter(run=run, pk__gt=since)
-                    .order_by("pk")[: bounded + 1]
+                query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
+                    run=run, pk__gt=since
                 )
+                if pending_only:
+                    query = query.filter(status=InteractionStatus.PENDING.value)
+                if interaction_id is not None:
+                    query = query.filter(pk=interaction_id)
+                interactions = list(query.order_by("pk")[: bounded + 1])
                 records, more = _bounded_page(
                     interactions, bounded, _interaction_record, byte_budget=byte_budget
                 )
@@ -990,6 +1060,12 @@ def _interaction_accepts_payload(
     interaction: HumanInteraction,
 ) -> bool:
     """Validate an answer against the exact pending interaction it targets."""
+    if "interaction_id" in payload and payload["interaction_id"] != _identifier(interaction):
+        return False
+    if "feedback" in payload:
+        feedback = payload["feedback"]
+        if not isinstance(feedback, str) or not feedback.strip():
+            return False
     if kind == ControlKind.PERMISSION_ANSWER.value:
         decision = payload.get("decision")
         request = _mapping(interaction, "request_payload")
@@ -1617,6 +1693,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                             _reject_run_with_git_state(_identifier(run))
                 artifact_root = artifacts_dir()
                 for run in runs:
+                    eligible = frozenset(
+                        str(value)
+                        for value in NodeAttempt.objects.filter(
+                            node_run__run=run, ended_at__isnull=False
+                        ).values_list("pk", flat=True)
+                    )
+                    cleanup_run_resources(_identifier(run), eligible_attempts=eligible)
                     directory = safe_resolve(artifact_root, _identifier(run))
                     if directory.is_dir():
                         shutil.rmtree(directory)
@@ -1650,6 +1733,63 @@ class DjangoExecutionStore(DjangoAgentStore):
                 "Relay could not persist worktree cleanup failure",
                 extra={"run": run_id},
             )
+
+    def clean_run_resources(self, run_id: str) -> int:
+        """Clean scratch folders only for already finished attempts of a terminal run."""
+        try:
+            run = _require_run(Run.objects.filter(pk=run_id).first(), run_id)
+            if _string(run, "status") not in {
+                RunStatus.SUCCEEDED.value,
+                RunStatus.FAILED.value,
+                RunStatus.CANCELED.value,
+            }:
+                message = "Temporary resources cannot be cleaned while this run is active."
+                raise PermissionFlowError(message)
+            # A concurrent retry receives new attempt IDs and cannot enter this set.
+            eligible = frozenset(
+                str(value)
+                for value in NodeAttempt.objects.filter(
+                    node_run__run=run, ended_at__isnull=False
+                ).values_list("pk", flat=True)
+            )
+            removed = cleanup_run_resources(run_id, eligible_attempts=eligible)
+            with transaction.atomic():
+                current = Run.objects.filter(pk=run_id).first()
+                if current is not None:
+                    _append_event(
+                        current,
+                        "resource.cleanup_succeeded",
+                        EventSource.SYSTEM,
+                        {"removed": removed},
+                    )
+        except DatabaseError:
+            message = "Relay could not clean the run's temporary resources."
+            raise PersistenceError(message) from None
+        else:
+            return removed
+
+    def _cleanup_terminal_resources(self, run_id: str) -> None:
+        try:
+            self.clean_run_resources(run_id)
+        except RelayError:
+            LOGGER.exception("Finished run scratch cleanup failed", extra={"run": run_id})
+            try:
+                with transaction.atomic():
+                    run = Run.objects.filter(pk=run_id).first()
+                    if run is not None:
+                        _append_event(
+                            run,
+                            "resource.cleanup_failed",
+                            EventSource.SYSTEM,
+                            {
+                                "message": "Temporary resources could not be removed. "
+                                "Retry cleanup from the run's advanced view."
+                            },
+                        )
+            except DatabaseError:
+                LOGGER.exception(
+                    "Relay could not record scratch cleanup failure", extra={"run": run_id}
+                )
 
     def _cleanup_successful_run(self, run_id: str) -> None:
         """Remove one successful primary worktree after its transaction commits."""
@@ -1778,6 +1918,9 @@ class DjangoExecutionStore(DjangoAgentStore):
             "source_commit": _string(run, "source_commit"),
             "run_branch": _string(run, "run_branch"),
             "scope_path": scope_path,
+            "project_id": _foreign_key_text(run, "project"),
+            "project_path": _string(_related(run, "project", Project), "canonical_path"),
+            "worktree_path": _string(run, "worktree_path"),
         }
         if isinstance(run.entry_point, str):
             metadata["entry_point"] = run.entry_point
@@ -2747,6 +2890,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         ):
             run_id = _identifier(run)
             transaction.on_commit(lambda: self._cleanup_successful_run(run_id))
+        run_id = _identifier(run)
+        transaction.on_commit(lambda: self._cleanup_terminal_resources(run_id))
 
     def finish_attempt(
         self,

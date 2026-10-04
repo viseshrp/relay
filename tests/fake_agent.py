@@ -57,6 +57,7 @@ class WireAgent:
     effort: str = "high"
     permission_mode: str = "ask"
     model_selections: int = 0
+    prompt_count: int = 0
 
     def configuration(self) -> list[dict[str, object]]:
         options = [selector(self.selected)]
@@ -116,6 +117,10 @@ class WireAgent:
         params = message.get("params")
         params = params if isinstance(params, dict) else {}
         trace(message)
+        if request_id == "owner-permission" and "result" in message:
+            self.reply(self.pending_prompt, {"stopReason": "end_turn"})
+            self.pending_prompt = None
+            return
         if method == "initialize":
             if self.mode == "stderr":
                 sys.stderr.write("e" * 1_000_000)
@@ -189,6 +194,25 @@ class WireAgent:
             )
             self.reply(request_id, {})
         elif method == "session/prompt":
+            self.prompt_count += 1
+            if self.mode == "feedback" and self.prompt_count == 1:
+                self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
+                emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "owner-permission",
+                        "method": "session/request_permission",
+                        "params": {
+                            "sessionId": "scratch-session",
+                            "toolCall": {"toolCallId": "read", "title": "Inspect project"},
+                            "options": [
+                                {"optionId": "allow", "name": "Allow once", "kind": "allow_once"},
+                                {"optionId": "deny", "name": "Deny once", "kind": "reject_once"},
+                            ],
+                        },
+                    }
+                )
+                return
             if self.mode == "drift":
                 self.update(
                     {"sessionUpdate": "config_option_update", "configOptions": [selector("m2")]}

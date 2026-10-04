@@ -6,6 +6,25 @@ from typing import Final
 APP_NAME: Final = "relay"
 SCHEMA_VERSION: Final = 1
 RUN_BRANCH_PREFIX: Final = "relay/run/"
+# Root-level workflow documents remain owner files, even when a run produces them.
+WORKFLOW_DOCUMENT_NAMES: Final = frozenset(
+    {
+        "DRAFT_PLAN.md",
+        "INITIAL_OPUS_PLANNING_PROMPT.md",
+        "FEATURE_SPEC_AND_PLAN.md",
+        "EXECUTION_PROMPT.md",
+        "PLAN_CRITIQUE.md",
+        "OPUS_PLAN_REVISION_REQUEST.md",
+        "PLAN_REVISION_SUMMARY.md",
+        "PLAN_REVISION_VERIFICATION.md",
+        "REVIEW.md",
+        "WALKTHROUGH.md",
+        "REVIEW_FIX_PROMPT.md",
+        "REVIEW_FIX_VERIFICATION.md",
+        "FOLLOWUP.md",
+        "TEST_AUDIT.md",
+    }
+)
 
 EXIT_ALREADY_INITIALIZED: Final = 2
 EXIT_NOT_A_REPOSITORY: Final = 3
@@ -45,6 +64,8 @@ MAX_LOOP_ITERATIONS: Final = 100
 MAX_EXPANDED_NODES: Final = 10_000
 API_MAX_PAGE: Final = 200
 API_MAX_PAGE_BYTES: Final = 1_048_576
+# Leave room for JSON escaping and metadata around a review document or Git diff.
+REVIEW_PREVIEW_MAX_BYTES: Final = API_MAX_PAGE_BYTES // 4
 SSE_MAX_BATCH: Final = 100
 SSE_MAX_FRAME_BYTES: Final = 65_536
 EVENT_MAX_PAYLOAD_BYTES: Final = 65_536

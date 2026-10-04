@@ -12,9 +12,19 @@ Before creating a run, Relay executes the equivalent of:
 git status --porcelain=v1 --untracked-files=all
 ```
 
-Any staged, tracked, or untracked record stops launch. Commit, move, or remove
-the change and start again. Relay repeats cleanliness checks around every node
-attempt. A clean dashboard or an unchanged `HEAD` does not replace this check.
+Staged changes and code changes stop launch. Exact workflow and local prompt
+files validated for this launch may have unstaged edits or be untracked;
+their current bytes are captured in the immutable snapshot. Other `.relay`
+files receive no exemption. Root workflow documents such as `REVIEW.md`,
+`WALKTHROUGH.md`, and `DRAFT_PLAN.md` may remain unstaged or untracked. Relay
+does not add Git exclusions, stage these files, or commit them. Existing owner
+documents stay in place. Symlinks and staged report changes still stop launch.
+
+These report exemptions apply to writing-node cleanliness too, so a report
+can be preserved and passed to the next stage without a documentation commit.
+Read-only nodes still fail for any worktree modification. Unrelated code
+changes remain errors. A clean dashboard or unchanged `HEAD` does not replace
+the Git checks.
 
 ## Run branch and primary worktree
 
@@ -29,6 +39,11 @@ The branch starts at the full source commit selected during launch. Relay
 passes every Git command as an argument vector with `shell=False`; no shell
 quoting or platform-specific command string is involved. A pre-existing branch
 or worktree path is treated as a collision rather than reused.
+
+Before executing each attempt, Relay checks that its primary checkout belongs
+to the registered Git repository. A mismatched checkout fails the attempt
+before the agent or command runs, and normal fail-fast scheduling stops its
+downstream work. Agent context identifies the project and assigned checkout.
 
 The run branch remains after success, failure, cancellation, and worktree
 cleanup. Relay has no automatic merge. The owner decides whether and how to
@@ -64,7 +79,8 @@ it is intended to change the repository.
 Agents and writing commands commit their own work. After a writing node ends,
 Relay requires all of these conditions:
 
-1. The primary worktree has no staged, tracked, or untracked changes.
+1. The primary worktree has no staged or code changes; unstaged root workflow
+   documents are retained as described above.
 2. Ending `HEAD` descends from the attempt's recorded starting `HEAD`.
 3. At least one commit exists in that range.
 

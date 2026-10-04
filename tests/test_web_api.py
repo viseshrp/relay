@@ -15,9 +15,209 @@ from relay.agents.models import ModelObservation
 from relay.constants import DATABASE_INTEGER_MAX
 from relay.web.models import Artifact, HumanInteraction, Run
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
-from tests.support import InlineEngine, RelayProject, fake_executable, run_status
+from tests.support import FakeAgents, InlineEngine, RelayProject, fake_executable, run_status
 
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
+
+
+@pytest.mark.usefixtures("served", "database_threads")
+def test_model_menu_discovers_one_tool_without_starting_a_run(
+    owner: Client, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex")
+    response = post(owner, "/api/agents/codex/models", {})
+    assert response.status_code == 200
+    assert response.json()["models"] == [
+        {"value": "m1", "name": "Model One"},
+        {"value": "m2", "name": "Model Two"},
+    ]
+    assert not Run.objects.exists()
+    assert not any(message.get("method") == "session/prompt" for message in fake_agents.messages())
+
+
+def test_workflow_creation_in_the_selected_project_never_replaces_an_existing_file(
+    owner: Client,
+    served: RelayProject,
+    tmp_path: Path,
+) -> None:
+    from tests.support import create_project
+
+    other = create_project(tmp_path / "other")
+    path = f"/api/workflows?project={other.project_id}"
+    body = {"key": "nested/review", "holder": "creator"}
+    response = post(owner, path, body)
+    assert response.status_code == 201
+    saved = other.relay_root / "workflows" / "nested" / "review.yaml"
+    original = saved.read_bytes()
+    assert not (served.relay_root / "workflows" / "nested" / "review.yaml").exists()
+    assert post(owner, path, body).status_code == 409
+    assert saved.read_bytes() == original
+    inventory = owner.get(f"/api/workflows?project={other.project_id}").json()
+    assert inventory["project"]["id"] == other.project_id
+    assert any(item["key"] == "nested/review.yaml" for item in inventory["workflows"])
+
+
+@pytest.mark.parametrize("key", ["../escape", "nested\\escape", "/escape", "NUL", "a:b", "COM¹"])
+def test_creating_a_workflow_rejects_paths_outside_its_project(
+    owner: Client,
+    served: RelayProject,
+    key: str,
+) -> None:
+    response = post(owner, "/api/workflows", {"key": key, "holder": "creator"})
+    assert response.status_code == 422
+    assert not (served.repository.parent / "escape.yaml").exists()
+
+
+@pytest.mark.usefixtures("served")
+def test_launch_rejects_a_workflow_bound_to_another_selected_project(owner: Client) -> None:
+    response = post(
+        owner,
+        "/api/runs",
+        {
+            "workflow_key": "workflow",
+            "inputs": {},
+            "project_id": "different-project",
+        },
+    )
+    assert (response.status_code, response.json()["code"]) == (400, "config_error")
+    assert not Run.objects.exists()
+
+
+def test_run_connections_use_captured_definitions_after_the_workflow_changes(
+    owner: Client,
+    served: RelayProject,
+    engine: InlineEngine,
+) -> None:
+    served.write_workflow(
+        "connected",
+        "version: 1\nname: Connected\nnodes:\n"
+        "  first: {type: human_wait, prompt: Review, deadline: 1h, on_timeout: end}\n"
+        "  end: {type: command, needs: [first], run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "connected")
+    served.write_workflow("connected", "version: 1\nname: Changed\nnodes: {}\n")
+    detail = owner.get(f"/api/runs/{run_id}").json()["run"]
+    nodes = {node["node_id"]: node for node in detail["nodes"]}
+    assert nodes["end"]["dependencies"] == ["root.first"]
+    assert nodes["first"]["controls"] == [{"target": "root.end", "label": "Time limit"}]
+    assert detail["project"]["id"] == served.project_id
+
+
+def test_boolean_handoffs_warn_without_changing_the_workflow(
+    owner: Client,
+    served: RelayProject,
+) -> None:
+    text = (
+        "version: 1\nname: Report\nnodes:\n"
+        "  report: {type: command, run: [git, status], outputs: {ready: {exists: REVIEW.md}}}\n"
+    )
+    served.write_workflow("report", text)
+    response = owner.get("/api/workflows/report").json()
+    assert response["warnings"][0]["artifact"] == "REVIEW.md"
+    assert response["yaml"] == text
+
+
+def test_child_workflow_report_warnings_keep_the_source_workflow_key(
+    owner: Client, served: RelayProject
+) -> None:
+    served.write_workflow(
+        "child",
+        "version: 1\nname: Child\nnodes:\n"
+        "  report: {type: command, run: [git, status], outputs: {ready: {exists: REVIEW.md}}}\n",
+    )
+    served.write_workflow(
+        "parent",
+        "version: 1\nname: Parent\nnodes:\n  child: {type: subworkflow, workflow: child}\n",
+    )
+    assert owner.get("/api/workflows/parent").json()["warnings"][0]["workflow_key"] == "child.yaml"
+
+
+def test_pending_interaction_reads_and_target_links_do_not_return_old_answers(
+    owner: Client, waiting_run: tuple[str, int]
+) -> None:
+    run_id, _attempt_id = waiting_run
+    interaction = HumanInteraction.objects.get(run_id=run_id)
+    path = f"/api/runs/{run_id}?collection=interactions"
+    assert len(owner.get(f"{path}&pending=true").json()["run"]["interactions"]) == 1
+    HumanInteraction.objects.filter(pk=interaction.pk).update(status="answered")
+    assert owner.get(f"{path}&pending=true").json()["run"]["interactions"] == []
+    rows = owner.get(f"{path}&interaction={interaction.pk}").json()["run"]["interactions"]
+    assert rows[0]["status"] == "answered"
+
+
+def test_stale_interaction_answer_cannot_answer_the_current_review(
+    owner: Client, waiting_run: tuple[str, int]
+) -> None:
+    _run_id, attempt_id = waiting_run
+    response = post(
+        owner,
+        f"/api/attempts/{attempt_id}/wait",
+        {"idempotency_key": "wrong-request", "interaction_id": "999999", "value": "yes"},
+    )
+    assert response.status_code == 422
+    assert HumanInteraction.objects.get(attempt_id=attempt_id).status == "pending"
+
+
+def test_review_previews_are_bounded_and_leave_original_artifacts_downloadable(
+    owner: Client, finished_run: str
+) -> None:
+    artifact = Artifact.objects.filter(attempt__node_run__run_id=finished_run).first()
+    assert artifact is not None
+    retained, _name, _media = DjangoReadStore().artifact_file(str(artifact.pk))
+    assert owner.get(f"/api/artifacts/{artifact.pk}/preview").json()["text"] == retained.read_text()
+    changes = owner.get(f"/api/runs/{finished_run}/changes").json()
+    assert changes["text"] == "" and changes["truncated"] is False
+
+
+def test_temporary_cleanup_refuses_active_runs_and_keeps_unmarked_files(
+    owner: Client, finished_run: str, waiting_run: tuple[str, int]
+) -> None:
+    from relay.execution.resources import allocate_attempt_resources
+    from relay.web.models import NodeAttempt
+
+    attempt_id = str(NodeAttempt.objects.get(node_run__run_id=finished_run).pk)
+    resource = allocate_attempt_resources(finished_run, attempt_id)
+    unrelated = resource.directory.parent / "personal-note.txt"
+    unrelated.write_text("Keep", encoding="utf-8")
+    assert (
+        post(owner, f"/api/runs/{waiting_run[0]}/resources/clean", {"confirm": True}).status_code
+        == 409
+    )
+    response = post(owner, f"/api/runs/{finished_run}/resources/clean", {"confirm": True})
+    assert response.status_code == 200 and response.json()["removed"] == 1
+    assert unrelated.read_text(encoding="utf-8") == "Keep"
+
+
+def test_instruction_editor_keeps_project_paths_and_rejects_stale_saves(
+    owner: Client, served: RelayProject, workflow_base: str
+) -> None:
+    del workflow_base
+    url = "/api/workflows/workflow/prompt"
+    body = {
+        "holder": "tab-1",
+        "reference": "prompts/ui/check.md",
+        "text": "Review the API.\n",
+        "base_hash": None,
+    }
+    response = post(owner, url, body)
+    assert response.status_code == 200
+    assert (served.relay_root / "prompts/ui/check.md").read_text() == body["text"]
+    loaded = owner.get(f"{url}?reference=prompts/ui/check.md").json()
+    assert loaded["text"] == body["text"]
+    assert post(owner, url, {**body, "text": "Overwrite."}).status_code == 409
+    assert (
+        post(
+            owner, url, {**body, "text": "Inspect callers.\n", "base_hash": loaded["base_hash"]}
+        ).status_code
+        == 200
+    )
+    assert post(owner, url, {**body, "reference": "../../outside.md"}).status_code == 400
+    assert not (served.repository.parent / "outside.md").exists()
+
+
+def test_a_workflow_named_create_can_still_be_opened(owner: Client, served: RelayProject) -> None:
+    served.write_workflow("create", "version: 1\nname: Create\nnodes: {}\n")
+    assert owner.get("/api/workflows/create").status_code == 200
 
 
 def post(client: Client, url: str, body: dict[str, object]) -> HttpResponse:

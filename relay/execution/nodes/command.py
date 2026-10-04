@@ -14,7 +14,11 @@ from relay.constants import (
     CONTROL_POLL_INTERVAL_SECONDS,
 )
 from relay.errors import NodeExecutionError, PersistenceError
-from relay.execution.cancellation import terminate_process_tree
+from relay.execution.cancellation import (
+    owned_process_argv,
+    release_process_group,
+    terminate_process_tree,
+)
 from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
@@ -37,10 +41,12 @@ def _launch(
     stderr: IO[bytes],
 ) -> subprocess.Popen[bytes]:
     environment = os.environ.copy()
+    if context.resources is not None:
+        environment.update(context.resources.environment())
     environment.update(node.env)
     try:
         return subprocess.Popen(  # noqa: S603
-            list(node.run),
+            owned_process_argv(node.run),
             cwd=context.worktree,
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -115,6 +121,9 @@ class CommandExecutor:
             try:
                 stop_reason = _wait(context, process, timeout)
             finally:
+                if process.poll() is None:
+                    terminate_process_tree(process)
+                release_process_group(process.pid)
                 context.runtime.record_attempt_process(context.attempt.attempt_id, None)
             emit_output_stream(context, stdout, "command.stdout")
             emit_output_stream(context, stderr, "command.stderr")

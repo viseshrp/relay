@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 import logging
@@ -17,10 +17,11 @@ from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, RelayError
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import current_head, validate_reader_result, validate_writer_result
-from relay.vcs.worktree import create_reader_worktree, remove_worktree
+from relay.vcs.worktree import create_reader_worktree, remove_worktree, require_project_worktree
 
 from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
+from .resources import AttemptResources, allocate_attempt_resources
 from .state import AttemptStopReason, EventSensitivity, EventSource, NodeType
 from .timing import attempt_deadline, remaining_seconds
 
@@ -43,6 +44,7 @@ class AttemptContext:
     runtime: RunnerStore
     heartbeat_owners: HeartbeatOwners = ()
     deadline_at: float | None = None
+    resources: AttemptResources | None = None
 
     def heartbeat(self) -> bool:
         """Renew this attempt and every enclosing synchronous-scope owner."""
@@ -225,6 +227,7 @@ def _uses_git(node_type: str) -> bool:
 
 def _assigned_worktree(claim: ClaimedAttempt) -> tuple[Path, bool]:
     primary = Path(claim.primary_worktree)
+    require_project_worktree(Path(claim.project_path), primary)
     if not _uses_git(claim.node_type) or claim.writes:
         return primary, False
     reader, _commit = create_reader_worktree(
@@ -286,14 +289,58 @@ def execute_attempt(
 ) -> ExecutionOutcome:
     """Execute once, preserve evidence, persist terminal state, then release admission."""
     with _heartbeat_lease(store, claim, heartbeat_owners):
-        return _execute_attempt(
-            store,
-            claim,
-            executor,
-            artifact_root=artifact_root,
-            heartbeat_owners=heartbeat_owners,
-            inherited_deadline=inherited_deadline,
-        )
+        try:
+            resources = (
+                allocate_attempt_resources(claim.run_id, claim.attempt_id)
+                if _uses_git(claim.node_type)
+                else None
+            )
+        except RelayError as error:
+            # Allocation failures finish the claimed attempt instead of leaving it running.
+            outcome = _failure(error)
+            store.finish_attempt(claim.attempt_id, outcome, claim.starting_head)
+            store.mark_dispatch_consumed(claim.claim_token)
+            store.release_attempt_lock(claim.attempt_id)
+            return outcome
+        if resources is not None:
+            claim = replace(
+                claim,
+                run_metadata={
+                    **claim.run_metadata,
+                    "temporary_directory": str(resources.directory / "temp"),
+                    "browser_profile_directory": str(resources.directory / "browser-profiles"),
+                },
+            )
+        try:
+            return _execute_attempt(
+                store,
+                claim,
+                executor,
+                artifact_root=artifact_root,
+                heartbeat_owners=heartbeat_owners,
+                inherited_deadline=inherited_deadline,
+                resources=resources,
+            )
+        finally:
+            if resources is not None:
+                try:
+                    resources.cleanup()
+                except RelayError:
+                    LOGGER.exception(
+                        "Temporary run resource cleanup failed",
+                        extra={"run": claim.run_id, "attempt": claim.attempt_id},
+                    )
+                    # A diagnostic write must not replace the already persisted outcome.
+                    with suppress(RelayError):
+                        store.append_attempt_event(
+                            claim.attempt_id,
+                            "resource.cleanup_failed",
+                            EventSource.SYSTEM,
+                            {
+                                "message": "Temporary resources were retained. "
+                                "Retry their cleanup after this run finishes."
+                            },
+                        )
 
 
 def _execute_attempt(
@@ -304,6 +351,7 @@ def _execute_attempt(
     artifact_root: Path | None,
     heartbeat_owners: HeartbeatOwners,
     inherited_deadline: float | None,
+    resources: AttemptResources | None,
 ) -> ExecutionOutcome:
     worktree = Path(claim.primary_worktree)
     ephemeral_reader = False
@@ -327,6 +375,7 @@ def _execute_attempt(
             store,
             heartbeat_owners=heartbeat_owners,
             deadline_at=deadline,
+            resources=resources,
         )
         if context.timed_out() and claim.node_type != NodeType.HUMAN_WAIT.value:
             outcome = _timeout_failure()

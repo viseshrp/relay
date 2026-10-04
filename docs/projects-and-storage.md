@@ -41,7 +41,7 @@ Relay creates these directories only when needed. POSIX directories use mode
 if other local accounts can access the profile.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
-`relay.db`, `huey.db`, `artifacts/`, `worktrees/`, and `registry-cache/`.
+`relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and `registry-cache/`.
 Snapshots are database rows. Each process that emits a diagnostic, including
 a CLI command, writes a rotating `relay-{pid}.log` with up to three backups
 of 5 MB each. Quiet commands create no empty log file. Every log file Relay
@@ -120,6 +120,43 @@ the timestamp.
 Each web process resolves and registers the single served project once.
 Later API reads reuse that identity without invoking Git or updating
 `last_opened_at` on every request.
+
+The browser project chooser can open another registered repository or
+initialize a blank `.relay` surface in a local Git worktree. Selected-project
+requests identify that project explicitly; selection does not replace the
+served default or another browser's project. Before an attempt starts, Relay
+checks the assigned checkout's Git common directory against the registered
+repository and rejects a mismatch before running the tool.
+
+## Run-owned resources
+
+Agent and command attempts get private scratch storage under
+`resources/<run-uuid>/attempt-<random>/`. Each allocation has a versioned owner
+marker naming its run, attempt, and random token. The child environment points
+`TMPDIR`, `TMP`, and `TEMP` at its `temp` directory and exposes a separate
+`RELAY_BROWSER_PROFILE_DIR`. Agent run metadata identifies both directories.
+A tool that starts a disposable browser should use that profile directory;
+Relay never redirects or deletes the owner's personal browser profile.
+
+Completion removes only the allocation Relay created. Terminal-run cleanup
+also removes marked allocations for ended attempts and can be retried from
+the run's advanced view. A replaced directory, symlinked marker, wrong run,
+or mismatched token is not followed. Inner links are unlinked without deleting
+their targets. Unmarked files are preserved, including during confirmed run
+record deletion. Worktrees, retained evidence, provider credentials, and other
+Relay runs use separate storage and remain outside temporary cleanup.
+
+On POSIX, each command or agent runs in a new process group; Relay stops its
+remaining descendants when the lifecycle ends. On Windows, a launcher joins
+an unnamed Job Object before creating the target. Its non-inheritable job
+handle uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so surviving descendants stop
+when the launcher exits. No cleanup scans personal browser processes or acts
+on a PID saved by an earlier Relay instance. See Microsoft's
+[Job Objects documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+
+Files created outside the supplied temporary and profile folders remain
+outside Relay's ownership. Cleanup failures are logged and reported as run
+events; they do not replace a completed attempt's result.
 
 Unexpected failures in `relay init`, `relay project list`,
 `relay project relink`, or `relay data clean` produce the same JSON error

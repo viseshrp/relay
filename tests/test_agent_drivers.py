@@ -70,6 +70,49 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     )
 
 
+@pytest.mark.parametrize("decision", ["allow", "deny"])
+def test_paused_acp_feedback_continues_the_same_exact_model_session(
+    agent_context: AgentExecutionContext,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+    decision: str,
+) -> None:
+    from tests.test_agent_controls import answer_when_requested
+
+    fake_agents.install("codex", mode="feedback")
+    answer_when_requested(
+        agent_context,
+        monkeypatch,
+        "permission_answer",
+        {
+            "decision": decision,
+            "feedback": "Review the error paths before finishing.",
+        },
+    )
+    driver = AcpDriver(PROFILES["codex"], agent_context.command)
+    events, result = execute(driver, agent_context)
+    assert result.succeeded
+    answer = next(
+        message["result"]
+        for message in fake_agents.messages()
+        if message.get("id") == "owner-permission"
+    )
+    assert answer["outcome"] == {"outcome": "selected", "optionId": decision}
+    prompts = [
+        message["params"]
+        for message in fake_agents.messages()
+        if message.get("method") == "session/prompt"
+    ]
+    assert len(prompts) == 2
+    assert prompts[0]["sessionId"] == prompts[1]["sessionId"]
+    assert prompts[1]["prompt"] == [
+        {"type": "text", "text": "Review the error paths before finishing."}
+    ]
+    assert [
+        event.payload["turn"] for event in events if event.event_type == "agent.turn_started"
+    ] == [1, 2]
+
+
 def test_single_profile_discovery_does_not_probe_unrequested_agents(
     fake_agents: FakeAgents,
 ) -> None:

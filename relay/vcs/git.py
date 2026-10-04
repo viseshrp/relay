@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import subprocess
-from typing import BinaryIO
+from typing import IO
 
 from relay.errors import GitError
 
@@ -99,7 +99,7 @@ def run_git_bytes(
 def run_git_to_file(
     repository: Path,
     arguments: Sequence[str],
-    output: BinaryIO,
+    output: IO[bytes],
 ) -> None:
     """Stream potentially large Git output to a file instead of memory."""
     try:

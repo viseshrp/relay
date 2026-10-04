@@ -11,7 +11,12 @@ import subprocess
 
 import pytest
 
-from relay.errors import ArtifactPreservationError, WorkflowValidationError, WorktreeError
+from relay.errors import (
+    ArtifactPreservationError,
+    DirtyRepositoryError,
+    WorkflowValidationError,
+    WorktreeError,
+)
 from relay.execution.recovery import prepare_recovery_workspace
 from relay.execution.resume import RecoveryTarget
 from relay.vcs.cleanliness import status_porcelain
@@ -19,6 +24,39 @@ from relay.vcs.commits import current_head
 from relay.web.models import Artifact, NodeRun, Run
 from relay.web.repositories import DjangoExecutionStore, DjangoReadStore
 from tests.support import InlineEngine, RelayProject
+
+
+def test_launch_preserves_owner_reports_and_snapshots_an_uncommitted_workflow(
+    project: RelayProject,
+    engine: InlineEngine,
+) -> None:
+    from relay.web.models import RunSnapshot
+
+    report = project.repository / "REVIEW.md"
+    report.write_text("Owner's review\n", encoding="utf-8")
+    workflow = project.relay_root / "workflows" / "new.yaml"
+    text = "version: 1\nname: New\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    workflow.write_text(text, encoding="utf-8")
+    run_id = engine.launch(project, "new")
+    engine.drain(run_id)
+    assert RunSnapshot.objects.get(run_id=run_id).workflow_yaml == text
+    assert report.read_text(encoding="utf-8") == "Owner's review\n"
+    assert set(status_porcelain(project.repository)) == {
+        "?? REVIEW.md",
+        "?? .relay/workflows/new.yaml",
+    }
+
+
+def test_launch_still_rejects_uncommitted_code_beside_owner_reports(
+    project: RelayProject,
+    engine: InlineEngine,
+) -> None:
+    (project.repository / "REVIEW.md").write_text("Review\n", encoding="utf-8")
+    (project.repository / "code.py").write_text("unfinished\n", encoding="utf-8")
+    with pytest.raises(DirtyRepositoryError):
+        engine.launch(project, "workflow")
+    assert not Run.objects.exists()
+
 
 ENTRY_WORKFLOW = """version: 1
 name: Midstream

@@ -10,7 +10,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.http.response import HttpResponseBase
 from django.views.decorators.http import require_GET, require_POST
 
-from relay.agents.driver import probe_agent_configuration
+from relay.agents.driver import probe_agent_configuration, probe_agent_models
 from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
 from relay.execution.cancellation import request_cancellation
@@ -20,8 +20,16 @@ from relay.execution.recovery import prepare_recovery_workspace
 from relay.execution.resume import rerun_failed_node
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import CleanupPolicy, ControlKind
-from relay.projects.service import register_current_project, relink_project
-from relay.workflows.editor import autosave_workflow_draft, save_workflow_document
+from relay.projects.service import initialize_project, register_current_project, relink_project
+from relay.workflows.editor import (
+    autosave_workflow_draft,
+    create_workflow_document,
+    read_prompt_document,
+    read_workflow_document,
+    save_prompt_document,
+    save_workflow_document,
+)
+from relay.workflows.loader import workflow_key_parts
 
 from ..auth import (
     auth_state,
@@ -56,7 +64,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 @require_POST
 def agent_configuration(request: HttpRequest, agent_id: str) -> HttpResponse:
     body = json_body(request)
-    relay_root, _project = current_project()
+    relay_root, _project = current_project(request)
     configuration = probe_agent_configuration(
         agent_id,
         required_text(body, "model"),
@@ -64,6 +72,17 @@ def agent_configuration(request: HttpRequest, agent_id: str) -> HttpResponse:
         observation_store=DjangoAgentStore(),
     )
     return JsonResponse(asdict(configuration))
+
+
+@api_errors
+@owner_required
+@require_POST
+def agent_models(request: HttpRequest, agent_id: str) -> HttpResponse:
+    root, _project = current_project(request)
+    observations = probe_agent_models(agent_id, root.parent, observation_store=DjangoAgentStore())
+    return JsonResponse(
+        {"models": [{"value": item.model_value, "name": item.model_name} for item in observations]}
+    )
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> JsonResponse:
@@ -166,7 +185,10 @@ def sign_out(request: HttpRequest) -> HttpResponse:
 @require_POST
 def open_project(request: HttpRequest) -> HttpResponse:
     body = json_body(request)
-    record = register_current_project(DjangoProjectStore(), Path(required_text(body, "path")))
+    location = Path(required_text(body, "path"))
+    if body.get("initialize") is True:
+        initialize_project(location)
+    record = register_current_project(DjangoProjectStore(), location)
     return JsonResponse({"project": asdict(record)})
 
 
@@ -187,7 +209,7 @@ def relink_registered_project(request: HttpRequest) -> HttpResponse:
 @owner_required
 @require_POST
 def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
-    relay_root, project = current_project()
+    relay_root, project = current_project(request)
     body = json_body(request)
     store = DjangoWorkflowStore()
     store.require_lease(project.id, key, _lease_holder(body))
@@ -206,7 +228,7 @@ def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
 @owner_required
 @require_POST
 def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
-    relay_root, project = current_project()
+    relay_root, project = current_project(request)
     body = json_body(request)
     store = DjangoWorkflowStore()
     store.require_lease(project.id, key, _lease_holder(body))
@@ -225,7 +247,7 @@ def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
 @owner_required
 @require_POST
 def acquire_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
-    _relay_root, project = current_project()
+    _relay_root, project = current_project(request)
     body = json_body(request)
     holder = _lease_holder(body)
     lease = DjangoWorkflowStore().acquire_lease(project.id, key, holder)
@@ -235,9 +257,85 @@ def acquire_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
 @api_errors
 @owner_required
 @require_POST
-def launch_run(request: HttpRequest) -> HttpResponse:
-    relay_root, project = current_project()
+def create_workflow(request: HttpRequest) -> HttpResponse:
+    relay_root, project = current_project(request)
     body = json_body(request)
+    # "nested/review" becomes "nested/review.yaml", matching the inventory and its lease.
+    key = "/".join(workflow_key_parts(required_text(body, "key")))
+    store = DjangoWorkflowStore()
+    store.acquire_lease(project.id, key, _lease_holder(body))
+    document = create_workflow_document(
+        store,
+        relay_root,
+        project.id,
+        key,
+        _yaml_text(body) if "yaml" in body else None,
+        optional_text(body, "name") or "New workflow",
+    )
+    return JsonResponse(
+        {"key": key, "yaml": document.yaml, "base_hash": document.base_hash}, status=201
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
+def read_workflow_prompt(request: HttpRequest, key: str) -> HttpResponse:
+    relay_root, project = current_project(request)
+    read_workflow_document(DjangoWorkflowStore(), relay_root, project.id, key)
+    reference = request.GET.get("reference")
+    if reference is None:
+        message = "reference is required."
+        raise ConfigError(message)
+    return JsonResponse(read_prompt_document(relay_root, reference))
+
+
+@api_errors
+@owner_required
+@require_POST
+def save_workflow_prompt(request: HttpRequest, key: str) -> HttpResponse:
+    relay_root, project = current_project(request)
+    body = json_body(request)
+    DjangoWorkflowStore().require_lease(project.id, key, _lease_holder(body))
+    read_workflow_document(DjangoWorkflowStore(), relay_root, project.id, key)
+    return JsonResponse(
+        save_prompt_document(
+            relay_root,
+            required_text(body, "reference"),
+            required_text(body, "text"),
+            _base_hash(body) if body.get("base_hash") is not None else None,
+        )
+    )
+
+
+def workflow_prompt(request: HttpRequest, key: str) -> HttpResponseBase:
+    """Route instruction reads and lease-protected edits by HTTP method."""
+    if request.method == "POST":
+        return save_workflow_prompt(request, key)
+    return read_workflow_prompt(request, key)
+
+
+def workflows_collection(request: HttpRequest) -> HttpResponseBase:
+    """List workflows on GET and create a workflow on POST."""
+    if request.method == "POST":
+        return create_workflow(request)
+    from .pages import workflows
+
+    return workflows(request)
+
+
+@api_errors
+@owner_required
+@require_POST
+def launch_run(request: HttpRequest) -> HttpResponse:
+    relay_root, project = current_project(request)
+    body = json_body(request)
+    expected = body.get("project_id")
+    if expected is not None and expected != project.id:
+        message = "The workflow is bound to a different project than the one selected for this run."
+        raise ConfigError(
+            message, next_action="Reload the workflow in the selected project before starting."
+        )
     config = load_config()
     cleanup_value = body.get("cleanup_policy", config.cleanup_policy)
     if not isinstance(cleanup_value, str):
@@ -302,12 +400,19 @@ def _answer_control(
     if value_field not in body:
         message = f"{value_field} is required."
         raise ConfigError(message)
+    payload = {value_field: body[value_field]}
+    if "interaction_id" in body:
+        payload["interaction_id"] = canonical_record_id(
+            required_text(body, "interaction_id"), resource="interaction"
+        )
+    if kind == ControlKind.ELICITATION_ANSWER and "feedback" in body:
+        payload["feedback"] = required_text(body, "feedback")
     result = submit_control(
         DjangoExecutionStore(),
         attempt_id,
         kind,
         required_text(body, "idempotency_key"),
-        {value_field: body[value_field]},
+        payload,
     )
     return _control_response(result)
 
@@ -319,12 +424,19 @@ def answer_permission(request: HttpRequest, attempt_id: str) -> HttpResponse:
     attempt_id = canonical_record_id(attempt_id, resource="attempt")
     body = json_body(request)
     decision = required_text(body, "decision")
+    payload = {"decision": decision}
+    if "interaction_id" in body:
+        payload["interaction_id"] = canonical_record_id(
+            required_text(body, "interaction_id"), resource="interaction"
+        )
+    if "feedback" in body:
+        payload["feedback"] = required_text(body, "feedback")
     result = submit_control(
         DjangoExecutionStore(),
         attempt_id,
         ControlKind.PERMISSION_ANSWER,
         required_text(body, "idempotency_key"),
-        {"decision": decision},
+        payload,
     )
     return _control_response(result)
 
@@ -373,12 +485,23 @@ def clean_data(request: HttpRequest) -> HttpResponse:
             message,
             next_action="Review the selected scope before confirming deletion.",
         )
-    _relay_root, project = current_project()
+    _relay_root, project = current_project(request)
     deleted = DjangoExecutionStore().clean_project_data(
         project.id,
         required_text(body, "scope"),
     )
     return JsonResponse({"deleted": deleted})
+
+
+@api_errors
+@owner_required
+@require_POST
+def clean_run_resources(request: HttpRequest, run_id: str) -> HttpResponse:
+    if json_body(request).get("confirm") is not True:
+        message = "Temporary resource cleanup requires an explicit true confirmation."
+        raise PermissionFlowError(message)
+    removed = DjangoExecutionStore().clean_run_resources(canonical_uuid(run_id, resource="run"))
+    return JsonResponse({"removed": removed})
 
 
 __all__ = [

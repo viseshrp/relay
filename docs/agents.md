@@ -15,6 +15,11 @@ override combinations use fresh disposable sessions so an earlier selection
 cannot change a later probe's provider defaults. A cached observation may
 populate the launch form but never authorizes a run.
 
+The editor's model menu uses cached display names and exact values, with an
+explicit refresh that probes only the selected installed tools. Reading models
+does not select one or change effort or permission mode. Launch still requires
+a fresh exact-model proof.
+
 For example, requested value `gpt-5.3-codex` matches only an option whose value
 is exactly `gpt-5.3-codex`; a display label such as `GPT 5.3 Codex` and a value
 such as `gpt-5.3-codex-high` do not match. The first candidate in the node,
@@ -116,6 +121,22 @@ queued in arrival order. Relay opens the next durable interaction only after
 the current answer is applied, keeping each answer attached to its own request.
 Cancel or timeout rejects queued requests without opening another interaction.
 
+Permission and elicitation forms accept optional owner feedback. The decision
+answers the exact pending request. After the agent finishes that turn, Relay
+sends the feedback as another documented `session/prompt` in the same live
+session, retaining its exact model, options, cancellation mailbox, heartbeat,
+and original deadline. A declined permission stays declined; feedback can ask
+the agent for an alternative after that turn ends. Canceling the attempt never
+starts a feedback turn. Static prompt files are unchanged.
+This follows the [ACP prompt-turn contract](https://agentclientprotocol.com/protocol/v1/prompt-turn).
+Restart recovery still creates a new attempt and session.
+
+Text updates retain an optional ACP message ID and Relay turn number. Native
+Antigravity deltas identify their conversation and step. These boundaries let
+the browser join fragments without merging different messages or attempts.
+Tool summaries retain their call IDs; original numbered event parts remain
+available in diagnostics.
+
 Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to
@@ -161,6 +182,14 @@ confirmation. A stale validated registry cache may support discovery when a
 refresh fails, but Relay displays its age and warning.
 
 Agent and command processes inherit the full Relay worker environment. Relay
+overrides temporary storage for an attempt and supplies
+`RELAY_BROWSER_PROFILE_DIR` for disposable browser work. Agent run metadata
+names both directories. Only these owned allocations and the isolated process
+group are automatically cleaned; personal profiles and provider authentication
+remain outside cleanup. See
+[Run-owned resources](projects-and-storage.md#run-owned-resources).
+
+Relay
 has no secret vault, environment allowlist, or masking layer. Prompts, model
 output, tool details, stderr, permission answers, Git diffs, and artifacts can
 contain sensitive data and remain in local Relay storage until the owner

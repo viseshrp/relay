@@ -36,6 +36,7 @@ from relay.vcs.worktree import (
     create_primary_worktree,
     create_reader_worktree,
     remove_worktree,
+    require_project_worktree,
     reset_worktree,
     run_branch,
 )
@@ -119,6 +120,16 @@ def test_cleanliness_includes_untracked_files(repository: Path) -> None:
     assert status_porcelain(repository) == ("?? loose.txt",)
     with pytest.raises(DirtyRepositoryError):
         require_clean(repository, stage="launch")
+
+
+def test_a_checkout_from_another_project_cannot_be_used_for_execution(
+    repository: Path,
+    tmp_path: Path,
+) -> None:
+    other = init_repository(tmp_path / "other-project")
+    with pytest.raises(WorktreeError):
+        require_project_worktree(repository, other)
+    require_project_worktree(repository, repository)
 
 
 def test_a_writer_must_commit_its_changes(repository: Path) -> None:

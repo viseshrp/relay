@@ -158,7 +158,15 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
     if isinstance(update, schema.AgentMessageChunk):
         text = _visible_text(update.content)
         if text is not None:
-            return (AgentEvent("agent.message", {"text": text}),)
+            return (
+                AgentEvent(
+                    "agent.message",
+                    {
+                        "text": text,
+                        **({"message_id": update.message_id} if update.message_id else {}),
+                    },
+                ),
+            )
         content = _visible_content(update.content)
         return (
             () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
@@ -166,7 +174,15 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
     if isinstance(update, schema.AgentThoughtChunk):
         text = _visible_text(update.content)
         if text is not None:
-            return (AgentEvent("agent.thought", {"text": text}),)
+            return (
+                AgentEvent(
+                    "agent.thought",
+                    {
+                        "text": text,
+                        **({"message_id": update.message_id} if update.message_id else {}),
+                    },
+                ),
+            )
         content = _visible_content(update.content)
         return (
             () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
@@ -175,7 +191,11 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
         return (
             AgentEvent(
                 "agent.tool_call",
-                {"tool": update.title, "summary": _tool_summary(update)},
+                {
+                    "tool": update.title,
+                    "tool_call_id": update.tool_call_id,
+                    "summary": _tool_summary(update),
+                },
             ),
         )
     if isinstance(update, schema.ToolCallProgress):
@@ -183,7 +203,11 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
         return (
             AgentEvent(
                 "agent.tool_result" if terminal else "agent.tool_call",
-                {"tool": update.title or update.tool_call_id, "summary": _tool_summary(update)},
+                {
+                    "tool": update.title or update.tool_call_id,
+                    "tool_call_id": update.tool_call_id,
+                    "summary": _tool_summary(update),
+                },
             ),
         )
     if isinstance(update, (schema.AgentPlanUpdate, schema.AgentPlanContentUpdate)):
@@ -222,15 +246,23 @@ def normalize_antigravity_event(raw: Mapping[str, object]) -> tuple[AgentEvent, 
             return (AgentEvent("agent.provider_event", {"event": dict(raw)}),)
         step_type = _string(update.get("step_type")) or "step"
         delta = _string(update.get("text_delta"))
+        index = update.get("step_index")
+        # Conversation "abc", step 3 becomes "abc:3"; its deltas remain one message.
+        identity = (
+            {"message_id": f"{update.get('conversation_id', '')}:{index}"}
+            if isinstance(index, int)
+            else {}
+        )
         if step_type == "agent_response" and delta is not None:
-            return (AgentEvent("agent.message", {"text": delta}),)
+            return (AgentEvent("agent.message", {"text": delta, **identity}),)
         if "tool" in step_type:
             terminal = update.get("state") in {"DONE", "ERROR"}
             return (
                 AgentEvent(
                     "agent.tool_result" if terminal else "agent.tool_call",
                     {
-                        "tool": step_type,
+                        "tool": _string(update.get("tool_name")) or step_type,
+                        **({"tool_call_id": identity["message_id"]} if identity else {}),
                         "summary": json.dumps(update, separators=(",", ":"), ensure_ascii=False),
                     },
                 ),

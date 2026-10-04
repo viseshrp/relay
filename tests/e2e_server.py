@@ -106,8 +106,25 @@ def serve(root: Path, port: int) -> None:
         project.commit("Save browser-test workflow")
         return JsonResponse({"ok": True})
 
+    @owner_required
+    @require_POST
+    def report(request: HttpRequest) -> JsonResponse:
+        del request
+        project.write("REVIEW.md", "Ready: Yes\nRead this report before approving.\n")
+        project.commit("Add browser-test review material")
+        return JsonResponse({"ok": True})
+
+    @owner_required
+    @require_POST
+    def feedback_provider(request: HttpRequest) -> JsonResponse:
+        del request
+        providers.install("codex", mode="feedback")
+        return JsonResponse({"ok": True})
+
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/commit", commit))
+    urlpatterns.insert(0, path("__test__/report", report))
+    urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
 
     # Close each SDK callback's database connection in its owning thread.
     original_to_thread = asyncio.to_thread
@@ -128,9 +145,9 @@ def serve(root: Path, port: int) -> None:
     def consume() -> None:
         try:
             while not stopped.wait(0.02):
-                if not engine.tokens:
-                    continue
-                engine.run_token(engine.tokens.popleft())
+                engine.store.resolve_human_wait_controls()
+                if engine.tokens:
+                    engine.run_token(engine.tokens.popleft())
                 for run_id in Run.objects.filter(status="running").values_list("id", flat=True):
                     dispatch_ready_nodes(engine.store, str(run_id), engine.tokens.append)
         finally:

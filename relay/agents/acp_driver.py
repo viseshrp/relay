@@ -38,6 +38,7 @@ from relay.errors import (
 )
 from relay.execution.cancellation import (
     discard_process_stream,
+    release_process_group,
     spawn_process,
     terminate_async_process_tree,
 )
@@ -256,6 +257,8 @@ class RelayAcpClient:
     drift_error: RelayError | None
     control_stop: str | None
     interaction_lock: asyncio.Lock
+    feedback: list[str]
+    turn: int
 
     agent: acp.Agent | None
 
@@ -277,6 +280,8 @@ class RelayAcpClient:
         self.drift_error = None
         self.control_stop = None
         self.interaction_lock = asyncio.Lock()
+        self.feedback = []
+        self.turn = 0
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -368,7 +373,11 @@ class RelayAcpClient:
             await self._cancel_session()
         if self.event_queue is not None:
             for event in normalize_acp_update(update):
-                await self.event_queue.put(event)
+                await self.event_queue.put(
+                    AgentEvent(
+                        event.event_type, {**event.payload, "turn": self.turn}, event.sensitivity
+                    )
+                )
 
     async def _wait_for_control(self, kinds: tuple[str, ...]) -> ClaimedControl:
         if self.context is None:
@@ -391,6 +400,8 @@ class RelayAcpClient:
                 if applied:
                     if control.kind == ControlKind.CANCEL.value:
                         self.control_stop = cancel_stop_reason(control).value
+                    elif isinstance(feedback := control.payload.get("feedback"), str):
+                        self.feedback.append(feedback)
                     return control
             now = time.monotonic()
             if now >= heartbeat_due:
@@ -521,7 +532,10 @@ async def _connection(
     cwd: Path,
     client: RelayAcpClient,
 ) -> AsyncIterator[tuple[acp.ClientSideConnection, asyncio.subprocess.Process]]:
-    process = await spawn_process(command.argv(), cwd)
+    resources = client.context.attempt.resources if client.context is not None else None
+    process = await spawn_process(
+        command.argv(), cwd, environment=resources.environment() if resources is not None else None
+    )
     stderr_task = asyncio.create_task(_read_stderr(process, client.event_queue))
     if process.stdin is None or process.stdout is None:
         await terminate_async_process_tree(process)
@@ -556,6 +570,7 @@ async def _connection(
         try:
             await terminate_async_process_tree(process)
         finally:
+            release_process_group(process.pid)
             for reader in (stderr_task, stdout_task):
                 if process.returncode is None:
                     reader.cancel()
@@ -828,9 +843,28 @@ class AcpDriver:
                 agent_version=self.agent_version,
                 config_ids=config_ids,
             )
-            response = await connection.prompt(self.session_id, _prompt_blocks(context))
-            if client.drift_error is not None:
-                raise client.drift_error
+            blocks = _prompt_blocks(context)
+            while True:
+                client.turn += 1
+                if client.event_queue is not None:
+                    await client.event_queue.put(
+                        AgentEvent("agent.turn_started", {"turn": client.turn})
+                    )
+                response = await connection.prompt(self.session_id, blocks)
+                if client.drift_error is not None:
+                    raise client.drift_error
+                # ACP accepts another prompt after end_turn. Feedback stays in this
+                # session with its exact model, deadline, and permission settings.
+                if (
+                    response.stop_reason != "end_turn"
+                    or client.control_stop is not None
+                    or not client.feedback
+                ):
+                    break
+                blocks = [
+                    schema.TextContentBlock(type="text", text=text) for text in client.feedback
+                ]
+                client.feedback.clear()
             capabilities = (
                 initialized.agent_capabilities.session_capabilities
                 if initialized.agent_capabilities is not None

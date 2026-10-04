@@ -19,7 +19,8 @@ from relay.errors import (
     WorkflowValidationError,
 )
 from relay.paths import safe_resolve
-from relay.vcs.cleanliness import require_clean
+from relay.projects.discovery import git_root
+from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import create_primary_worktree
 from relay.workflows.loader import load_workflow, resolve_workflow_path
@@ -202,7 +203,12 @@ def launch_workflow(
     workflow = validate_loaded_workflow(root, relay_root)
     typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     repository = relay_root.parent.resolve()
-    require_clean(repository, stage="run launch")
+    captured = [workflow.root.path, *(item.path for item in workflow.subworkflows.values())]
+    captured.extend(Path(prompt.path) for prompt in workflow.prompts if prompt.source == "local")
+    # /repo/.relay/prompts/check.md becomes .relay/prompts/check.md in Git's root-relative status.
+    source_root = git_root(repository)
+    snapshot_files = frozenset(path.relative_to(source_root).as_posix() for path in captured)
+    require_launch_clean(repository, snapshot_files)
     entry_point = _validate_entry_point(
         workflow,
         request.entry_point,

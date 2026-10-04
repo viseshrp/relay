@@ -111,6 +111,15 @@ def test_acp_text_updates_keep_the_visible_text(kind: str, expected: str) -> Non
     ]
 
 
+def test_acp_message_identifiers_survive_normalization() -> None:
+    update = schema.AgentMessageChunk(
+        sessionUpdate="agent_message_chunk",
+        messageId="second-message",
+        content=schema.TextContentBlock(type="text", text="Hello."),
+    )
+    assert normalize_acp_update(update)[0].payload["message_id"] == "second-message"
+
+
 @pytest.mark.parametrize(
     "privacy", [{"annotations": {"audience": ["assistant"]}}, {"_meta": {"private": True}}]
 )

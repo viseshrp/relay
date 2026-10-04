@@ -20,6 +20,7 @@ from django.http.response import HttpResponseBase
 from relay.constants import DATABASE_INTEGER_MAX
 from relay.errors import ConfigError, ProjectDiscoveryError, RelayError
 from relay.projects.discovery import discover_relay_root
+from relay.projects.identity import canonical_path
 from relay.projects.service import ProjectRecord, register_current_project
 
 P = ParamSpec("P")
@@ -152,11 +153,21 @@ def canonical_record_id(value: str, *, resource: str) -> str:
     return str(parsed)
 
 
-def current_project() -> tuple[Path, ProjectRecord]:
-    """Register the one served repository once, including concurrent first reads."""
+def current_project(request: HttpRequest | None = None) -> tuple[Path, ProjectRecord]:
+    """Use a request's explicit project, or the cached served repository by default."""
     global _PROJECT
     from relay.web.repositories import DjangoProjectStore
 
+    selected = request.GET.get("project") if request is not None else None
+    if selected is not None:
+        record = DjangoProjectStore().get_project(canonical_uuid(selected, resource="project"))
+        relay_root = discover_relay_root(Path(record.canonical_path))
+        if canonical_path(relay_root.parent) != record.canonical_path:
+            message = "The selected project no longer matches its registered directory."
+            raise ProjectDiscoveryError(
+                message, next_action="Relink the project before continuing."
+            )
+        return relay_root, record
     with _PROJECT_GUARD:
         if _PROJECT is None:
             start_override = os.environ.get("RELAY_PROJECT_ROOT")

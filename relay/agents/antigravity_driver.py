@@ -33,6 +33,7 @@ from relay.errors import (
 )
 from relay.execution.cancellation import (
     discard_process_stream,
+    release_process_group,
     spawn_process,
     terminate_async_process_tree,
 )
@@ -386,7 +387,12 @@ class AntigravityDriver:
             print_deadline = attempt_deadline(_timeout_value(context), context.attempt.deadline_at)
             print_limit = duration_seconds(_timeout_value(context))
             command = AgentCommand(arguments[0], arguments[1:])
-            process = await spawn_process(command.argv(), context.cwd)
+            resources = context.attempt.resources
+            process = await spawn_process(
+                command.argv(),
+                context.cwd,
+                environment=resources.environment() if resources is not None else None,
+            )
             self.process = process
             readers = (
                 asyncio.create_task(_read_lines(process.stdout, "stdout", queue)),
@@ -583,6 +589,8 @@ class AntigravityDriver:
             )
             raise mapped from None
         finally:
+            if self.process is not None and self.process.returncode is not None:
+                release_process_group(self.process.pid)
             if sender is not None:
                 if not sender.done():
                     sender.cancel()
@@ -603,6 +611,7 @@ class AntigravityDriver:
                 try:
                     await terminate_async_process_tree(self.process)
                 finally:
+                    release_process_group(self.process.pid)
                     for drain in drains:
                         if self.process.returncode is None:
                             drain.cancel()

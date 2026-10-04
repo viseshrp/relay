@@ -279,6 +279,27 @@ def preflight_routes(
     return tuple(entries), tuple(results.values())
 
 
+def probe_agent_models(
+    agent_id: str,
+    cwd: Path,
+    *,
+    observation_store: AgentObservationStore | None = None,
+) -> tuple[ModelObservation, ...]:
+    """Read one installed tool's model menu without starting an attempt."""
+    installed = _installed_agent(agent_id, None)
+    if installed.command is None:
+        message = f"Agent {agent_id!r} is not installed."
+        raise AgentLaunchError(message)
+    result = asyncio.run(
+        _bounded_probe(_driver(installed.profile, installed.command), (), cwd.resolve(), agent_id)
+    )
+    if result.general_error is not None:
+        raise _aggregate_error({agent_id: result.general_error})
+    if observation_store is not None:
+        observation_store.replace_model_observations(agent_id, result.models)
+    return result.models
+
+
 def probe_agent_configuration(
     agent_id: str,
     model_value: str,
@@ -516,5 +537,6 @@ __all__ = [
     "RoutedAgentNodeDriver",
     "preflight_routes",
     "probe_agent_configuration",
+    "probe_agent_models",
     "probe_installed_agents",
 ]

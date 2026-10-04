@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 from typing import Protocol
 
 from relay.constants import (
@@ -75,15 +76,19 @@ def signal_process_tree(
 
 
 async def spawn_process(
-    argv: Sequence[str], cwd: Path, *, input_pipe: bool = True
+    argv: Sequence[str],
+    cwd: Path,
+    *,
+    input_pipe: bool = True,
+    environment: Mapping[str, str] | None = None,
 ) -> asyncio.subprocess.Process:
     """Start every agent command and probe in its own process group."""
     stdin = asyncio.subprocess.PIPE if input_pipe else asyncio.subprocess.DEVNULL
     if os.name == "nt":
         return await asyncio.create_subprocess_exec(
-            *argv,
+            *owned_process_argv(argv),
             cwd=str(cwd),
-            env=os.environ.copy(),
+            env=dict(environment) if environment is not None else os.environ.copy(),
             stdin=stdin,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -92,12 +97,25 @@ async def spawn_process(
     return await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd),
-        env=os.environ.copy(),
+        env=dict(environment) if environment is not None else os.environ.copy(),
         stdin=stdin,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
     )
+
+
+def owned_process_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Windows starts the command inside a private job; POSIX uses its new session."""
+    if os.name == "nt":
+        return (sys.executable, str(Path(__file__).with_name("windows_process.py")), *argv)
+    return tuple(argv)
+
+
+def release_process_group(process_id: int) -> None:
+    """Stop remaining descendants of a POSIX group Relay created, even after its leader exits."""
+    if os.name != "nt":
+        signal_process_tree(process_id, force=True)
 
 
 async def discard_process_stream(stream: asyncio.StreamReader | None) -> None:
