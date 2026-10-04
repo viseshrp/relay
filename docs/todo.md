@@ -1,5 +1,8 @@
 # Relay TODO
 
+Only the coordinating assistant edits this file. Relay workflow agents report
+proposed TODO entries without modifying it.
+
 ## Agent configuration
 
 - [x] Add an effort dropdown for the selected model. List the effort choices
@@ -18,3 +21,20 @@ defaults, explicit choices, model changes, save and reload, and execution.
 Tools that expose no separate effort selector retain Provider default.
 Antigravity includes effort in its exact model slug; choose another exact model
 to change that effort.
+
+## Workflow handoffs
+
+- [ ] Create and save new workflows through Relay without manually adding a
+  bootstrap YAML file. Keep prompts and agent execution bound to the selected
+  project and stop downstream stages automatically when that binding is wrong.
+- [ ] Handle generated planning and review documents without requiring manual
+  Git exclusions before launch. Preserve existing documents and keep them
+  unstaged and uncommitted unless the owner explicitly requests otherwise.
+- [ ] Retain required verification documents as inspectable Relay artifacts.
+  Use the existing artifact selectors and check required verdicts inside the
+  workflow before advancing. Preserve actual human review and approval gates.
+- [ ] Accept owner feedback while an agent is paused and resume it through
+  Relay, without manually editing prompt files or restarting a worker.
+- [ ] Clean up run-owned temporary files, browser profiles, and processes
+  through Relay after the run finishes. Preserve personal browser sessions,
+  credentials, unrelated files, and the owner's existing Relay data.
