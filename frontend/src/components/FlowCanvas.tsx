@@ -8,6 +8,8 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useNodesInitialized,
+  useReactFlow,
 } from "@xyflow/react";
 import { useEffect } from "react";
 
@@ -18,9 +20,19 @@ interface FlowCanvasProps {
   edges: Edge[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
+  followSelection?: boolean;
 }
 
-export function FlowCanvas({ nodes, edges, selectedId, onSelect }: FlowCanvasProps) {
+function FocusStep({ selectedId }: { selectedId?: string | null }) {
+  const initialized = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (initialized && selectedId) void fitView({ nodes: [{ id: selectedId }], padding: 0.6, minZoom: 0.8, maxZoom: 1 });
+  }, [initialized, selectedId, fitView]);
+  return null;
+}
+
+export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection = false }: FlowCanvasProps) {
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -29,11 +41,11 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect }: FlowCanvasPro
       const positions = new Map(current.map((node) => [node.id, node.position]));
       return nodes.map((node) => ({
         ...node,
-        position: positions.get(node.id) ?? node.position,
+        position: followSelection ? node.position : positions.get(node.id) ?? node.position,
         selected: node.id === selectedId,
       }));
     });
-  }, [nodes, selectedId, setNodes]);
+  }, [nodes, selectedId, setNodes, followSelection]);
 
   useEffect(() => setEdges(edges), [edges, setEdges]);
 
@@ -51,6 +63,7 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect }: FlowCanvasPro
         minZoom={0.25}
         maxZoom={1.75}
       >
+        {followSelection && <FocusStep selectedId={selectedId} />}
         <MiniMap pannable zoomable />
         <Controls />
         <Background gap={20} size={1} />

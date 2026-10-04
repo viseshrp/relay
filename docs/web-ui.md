@@ -1,7 +1,7 @@
 # Local web runtime
 
-Relay's browser application is a local control surface for one repository. It
-is not a network service and has no remote deployment mode in Phase 1.
+Relay's browser application controls work in registered local repositories.
+It runs on loopback and has no remote deployment mode in Phase 1.
 
 ## Start Relay
 
@@ -50,22 +50,53 @@ same-site CSRF cookie and header. Relay does not issue bearer tokens.
 If the first authentication request fails, Relay shows the error and a Retry
 button. A failed sign-out request also shows its error and can be retried.
 
+## Choose a project and workflow
+
+The project bar stays visible above both views. Choose a registered project,
+or use **Open another project** and enter its local Git repository path. Relay
+can initialize a blank `.relay` surface there. Each browser keeps its own
+selection; changing projects does not change another browser's selection.
+
+**Workflows** sets up stages, instructions, and inputs. **Runs** shows work
+already started. The run header names its captured workflow and project,
+shows completed steps, and states what happens next. Internal IDs, branch
+names, provider JSON, and cleanup controls are under advanced views.
+
 ## Author workflows
 
-The Author tab opens `workflow.yaml` by default. Enter another key to load a
-different file below `.relay/workflows/`; `review` and `review.yaml` both refer
+Choose a saved workflow from the menu, or use **New workflow** to create one
+in the selected project. **Add stage** asks for a name and an action. Commands,
+agent work, and human reviews have ordinary form fields. The new stage starts
+after the previous one; **Start after** changes its dependencies. An empty
+workflow explains how to add the first stage.
+
+Advanced workflow settings expose the YAML editor and workflow key. `review`
+and `review.yaml` both refer
 to `review.yaml`, and nested keys use `/`. Empty segments, backslashes, `.`,
 and `..` are rejected. The canvas and CodeMirror edit one eemeli `yaml`
 document. Typing valid YAML redraws the graph. Adding, deleting, or configuring
 a canvas node rewrites that same document instead of maintaining a second graph
 model.
 
-The node panel covers all six node types and their shared dependencies. A
-dependency field retains raw text while focused, including a trailing comma.
-On blur, `"build, test, "` becomes the YAML sequence `needs: [build, test]`.
-A command argument field transforms the JSON string
-`["python", "-m", "pytest"]` into the equivalent YAML `run` sequence. Invalid
-JSON stays in the field and is not applied to the document.
+The stage panel covers all six node types. Dependencies are selected by stage
+name. Commands have a Program field and one argument per line. For example,
+program `git` with arguments `status\n--short` saves
+`run: [git, status, --short]`; a line `a b` stays one argument. Relay does not
+invoke a shell. An optional advanced field accepts an explicit JSON argument
+array. Invalid JSON stays in that field and is not applied.
+
+Agent instructions can be written and saved in the stage panel. They live in
+the selected project's `.relay/prompts` folder. Saving checks the loaded file
+hash and requires the workflow's editing lease. Unsaved instructions block
+stage and project changes, workflow saving, and launch until they are saved.
+Use the model menu to select an advertised exact value; **Load available
+models** refreshes installed tools. A model read never grants permissions or
+changes provider defaults. The exact-value field remains available for a
+provider value already known to the owner.
+
+Workflow reads warn about `exists` report outputs in root, loop, and child
+workflows. **Retain the report** explains file-retaining selectors and verdict
+checks. Warnings never rewrite outputs or answer a human review.
 
 Agent nodes show the effective tools from node, workflow, and owner preferences.
 The Agent tools field adds node preferences in selection order. Each tool has
@@ -102,6 +133,10 @@ changing the Git-owned workflow file. Invalid YAML is retained as an `invalid`
 recovery draft. Reloading the workflow restores the newest draft and shows its
 validation state.
 
+Switching views, workflows, or projects flushes the recovery draft first.
+Requests are serialized so an older draft cannot overwrite a newer one.
+Leaving the page with unsaved changes triggers the browser's warning.
+
 Save validates the complete workflow, prompts, and subworkflows, then replaces
 one file atomically. It also sends the SHA-256 hash of the exact bytes loaded by
 the tab. If another process changed the file, Relay returns a conflict and
@@ -122,34 +157,67 @@ default or resolve it to `null`. Once the owner enters a value, Relay preserves
 its JSON type in the launch request.
 
 Cached model observations appear as suggestions, but Relay sends the exact
-model value entered by the owner. The form also selects `clean_on_success` or
-`retain` and one declared entry point. Launch is disabled while the editor has
-unsaved changes or invalid YAML. The server repeats validation, clean-Git,
+model value entered by the owner. Advanced start settings select
+`clean_on_success` or `retain` and one declared entry point. The form explains
+that tools work on a separate branch and pause for owner requests. Launch is
+disabled for empty workflows, unsaved changes, or invalid YAML. The server
+repeats validation, clean-Git,
 artifact, and exact-model preflight before it creates a run.
 
 ## Monitor and control runs
 
-The Runs tab lists bounded history pages and opens one run monitor. The canvas
-shows each materialized scope path with its durable status. Nested loop and
-subworkflow instances therefore appear separately. The monitor combines the
-SSE stream with paginated database reads:
+The Runs tab lists history for the selected project. The header shows the
+current stages, progress, and next action. Pending requests appear before the
+graph; failed steps have Show step and Retry step controls. Stage buttons
+focus the graph on that step at a readable scale.
 
-- provider output and event history use virtualized preview rows with a
-  View full text action that opens the complete retained payload;
+The graph uses captured dependencies and control targets, so editing today's
+workflow cannot redraw a past run's connections. Connected rows show stage
+order and branches. Nested workflows and loop iterations keep their concrete
+scope paths; completion junctions join child branches and order iterations.
+
+The monitor combines the SSE stream with paginated database reads:
+
+- Activity joins adjacent text fragments and command stream bytes into readable
+  messages, with stage, tool, time, and attempt attribution. Turn, message,
+  attempt, stage, and stdout/stderr boundaries stay separate. Split tool JSON
+  is assembled before readable summaries are shown. For example, `"Hello "` plus
+  `"world\n"` becomes `"Hello world\n"` within one message;
+- original events and complete provider payloads remain available under
+  Advanced diagnostics and saved files;
 - event history loads forward by the last durable event ID, then starts its
   live stream after the last loaded event;
 - node, interaction, and artifact lists load bounded pages by record ID;
-- pending permission, elicitation, and human-wait records show response forms;
+- pending permission, elicitation, and human-wait records show distinct forms;
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
 
-Cancel creates one durable, idempotent control request and fans it out to live
-attempts. A stale or duplicate answer cannot reach a later attempt. Manual
+At a human review, instructions and the response requested by the workflow
+appear beside retained reports and the committed source-to-run-head diff.
+Text previews are bounded to 256 KiB and shown as inert text. Download full
+reports when a preview is truncated; inspect the retained branch for a full
+large diff. Relay does not guess or submit the approval response.
+
+Tool permission requests require an explicit offered decision. Simple agent
+forms have typed fields; complex forms retain a JSON fallback. Optional
+feedback is sent into the same live ACP session after its current turn ends.
+This does not restart the worker or edit static instructions.
+
+**Link to run** and **Link to request** include the project, run, and interaction.
+Reload preserves the selection. A bare app URL restores the last selection.
+An already answered request is identified, and current pending requests remain
+visible. Answer submission includes the exact interaction ID, so a late
+response cannot answer a newer request in the same attempt.
+
+Stop work opens a dialog explaining that completed results remain available.
+Confirmation creates one durable, idempotent control request and fans it out
+to live attempts. A stale or duplicate answer cannot reach a later attempt. Manual
 rerun is available only for a failed run and failed node; Relay preserves
 evidence and creates a new attempt. A nested failed node also reopens its failed
 loop or subworkflow parents, while successful siblings remain complete. An
 interrupted run resumes automatically when `relay up` restarts, also as a new
-attempt. The UI never resumes an old provider session.
+attempt. Restart recovery never resumes an old provider session; feedback
+during a live permission or elicitation pause continues that existing session.
 Node completion leaves the live stream open. Only a run-level `succeeded`,
 `failed`, or `canceled` event closes it. Interrupted runs keep their stream
 open, and an accepted rerun reopens a completed stream without changing the
@@ -158,8 +226,14 @@ ordered pages merge without sorting the entire history for each event.
 
 ## History, artifacts, and cleanup
 
+Relay automatically releases attempt scratch folders and surviving processes.
+Terminal runs expose **Retry temporary resource cleanup** under Advanced
+diagnostics. This touches only marked attempt folders; it keeps code,
+evidence, credentials, and personal browser profiles. See
+[Run-owned resources](projects-and-storage.md#run-owned-resources).
+
 History, snapshots, output, interactions, and artifacts remain until explicit
-cleanup. The cleanup panel selects `worktrees`, `branches`, `runs`, or `all`
+cleanup. Advanced data cleanup selects `worktrees`, `branches`, `runs`, or `all`
 and requires a confirmation dialog. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
 never changes the launch branch. A disposable reader left by an interruption

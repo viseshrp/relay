@@ -9,6 +9,15 @@ body {
   min-width: 320px;
 }
 
+.activity-feed { max-height: 650px; overflow: auto; }
+.activity-message { padding: 16px; }
+.activity-text, .review-preview { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
+.activity-text { font: inherit; line-height: 1.65; }
+.review-preview { max-height: 500px; overflow: auto; padding: 16px; background: #f6f7fb; font-size: 0.85rem; }
+.stage-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; }
+.react-flow__node { white-space: pre-line; }
+.react-flow__edge-path { stroke-width: 2; }
+
 .app-header {
   border-bottom: 1px solid #dce1ec;
 }

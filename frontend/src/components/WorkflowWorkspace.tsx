@@ -1,5 +1,8 @@
 import {
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Checkbox,
@@ -24,7 +27,8 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, errorMessage, RelayApiError } from "../api";
-import type { AgentOptions, AgentsResponse, JsonScalar, WorkflowDocumentResponse, WorkflowDraft } from "../types";
+import { projectPath, stageLabel } from "../navigation";
+import type { AgentOptions, AgentsResponse, HandoffWarning, JsonScalar, ProjectRecord, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
   canonicalYaml,
   flowElements,
@@ -36,6 +40,8 @@ import {
 } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { AgentConfiguration } from "./AgentConfiguration";
+import { PromptEditor } from "./PromptEditor";
+import { ModelPicker } from "./ModelPicker";
 
 const YamlEditor = lazy(() =>
   import("./YamlEditor").then((module) => ({ default: module.YamlEditor })),
@@ -46,6 +52,11 @@ const AUTOSAVE_DELAY_MS = 600;
 
 interface WorkflowWorkspaceProps {
   onRunLaunched: (runId: string) => void;
+  project: ProjectRecord;
+  requestProject: string | null;
+  initialWorkflow: string | null;
+  onWorkflowLoaded: (key: string) => void;
+  onNavigationReady: (callback: (() => Promise<void>) | null) => void;
 }
 
 function workflowPath(key: string, suffix = ""): string {
@@ -74,8 +85,19 @@ function createHolder(): string {
   return holder;
 }
 
-export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
+export function WorkflowWorkspace({ onRunLaunched, project, requestProject, initialWorkflow, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
   const holder = useRef(createHolder());
+  const initialKey = useRef(initialWorkflow);
+  const [inventory, setInventory] = useState<Array<{ key: string; name: string }>>([]);
+  const [newWorkflow, setNewWorkflow] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const [addingStage, setAddingStage] = useState(false);
+  const [stageName, setStageName] = useState("Check project");
+  const [stageKind, setStageKind] = useState("command");
+  const [warnings, setWarnings] = useState<HandoffWarning[]>([]);
+  const [handoffHelp, setHandoffHelp] = useState(false);
+  const [promptDirty, setPromptDirty] = useState(false);
   const [workflowKey, setWorkflowKey] = useState("workflow");
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [yamlText, setYamlText] = useState("");
@@ -84,7 +106,6 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [leaseReady, setLeaseReady] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [needsDraft, setNeedsDraft] = useState<{ nodeId: string; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -100,14 +121,37 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   const graph = useMemo(() => flowElements(parsed.value), [parsed.value]);
   const definition = selectedNode ? parsed.value?.nodes[selectedNode] : undefined;
   const dirty = loadedKey !== null && yamlText !== savedYaml;
+  const draftWrites = useRef<Promise<void>>(Promise.resolve());
+  const flushDraft = useCallback(async () => {
+    if (promptDirty) throw new Error("Save the agent's instructions before leaving this stage.");
+    if (!dirty || loadedKey === null) return;
+    if (!leaseReady) throw new Error("Save or recover this workflow before switching projects. Its editing lease is unavailable.");
+    const write = draftWrites.current.catch(() => undefined).then(async () => {
+      const response = await api<{ draft: WorkflowDraft }>(projectPath(workflowPath(loadedKey, "/draft"), requestProject), {
+        method: "POST", body: JSON.stringify({ yaml: yamlText, base_hash: baseHash, holder: holder.current }),
+      });
+      setDraft(response.draft);
+    });
+    draftWrites.current = write;
+    await write;
+  }, [dirty, loadedKey, leaseReady, requestProject, yamlText, baseHash, promptDirty]);
+  useEffect(() => { onNavigationReady(flushDraft); return () => onNavigationReady(null); }, [onNavigationReady, flushDraft]);
+  const flushCurrent = useRef(flushDraft);
+  useEffect(() => { flushCurrent.current = flushDraft; }, [flushDraft]);
+  useEffect(() => {
+    if (!dirty && !promptDirty) return;
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [dirty, promptDirty]);
 
   const acquireLease = useCallback(async (key: string) => {
-    await api<{ lease: { expires_at: string } }>(workflowPath(key, "/lease"), {
+    await api<{ lease: { expires_at: string } }>(projectPath(workflowPath(key, "/lease"), requestProject), {
       method: "POST",
       body: JSON.stringify({ holder: holder.current }),
     });
     setLeaseReady(true);
-  }, []);
+  }, [requestProject]);
 
   const applyDocument = useCallback((document: WorkflowDocumentResponse) => {
     const recovered = document.draft?.yaml ?? document.yaml;
@@ -115,6 +159,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     setSavedYaml(document.yaml);
     setBaseHash(document.base_hash);
     setDraft(document.draft);
+    setWarnings(document.warnings);
     setSelectedNode(null);
   }, []);
 
@@ -122,28 +167,39 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     async (key: string) => {
       const normalized = key.trim();
       if (!normalized) return;
+      try { await flushCurrent.current(); } catch (caught) { setError(errorMessage(caught)); return; }
       setBusy(true);
       setError(null);
       setNotice(null);
       setLeaseReady(false);
       try {
         await acquireLease(normalized);
-        const document = await api<WorkflowDocumentResponse>(workflowPath(normalized));
+        const document = await api<WorkflowDocumentResponse>(projectPath(workflowPath(normalized), requestProject));
+        if (document.project.id !== project.id) throw new Error("This workflow belongs to another project. Choose the project again before editing.");
         applyDocument(document);
         setLoadedKey(normalized);
+        setWorkflowKey(normalized);
+        onWorkflowLoaded(normalized);
       } catch (caught) {
         setError(errorMessage(caught));
       } finally {
         setBusy(false);
       }
     },
-    [acquireLease, applyDocument],
+    [acquireLease, applyDocument, project.id, requestProject, onWorkflowLoaded],
   );
 
   useEffect(() => {
     void api<AgentsResponse>("/api/agents").then(setAgents).catch(() => setAgents(null));
-    void loadWorkflow("workflow");
-  }, [loadWorkflow]);
+    let active = true;
+    void api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", requestProject)).then((response) => {
+      if (!active) return;
+      setInventory(response.workflows);
+      const key = initialKey.current ?? response.workflows.find((item) => item.key === "workflow.yaml")?.key ?? response.workflows[0]?.key;
+      if (key) void loadWorkflow(key);
+    }).catch((caught: unknown) => { if (active) setError(errorMessage(caught)); });
+    return () => { active = false; };
+  }, [loadWorkflow, requestProject]);
 
   useEffect(() => {
     if (loadedKey === null) return;
@@ -157,21 +213,12 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   }, [acquireLease, loadedKey]);
 
   useEffect(() => {
-    if (!dirty || loadedKey === null || !leaseReady) return;
+    if (!dirty || loadedKey === null || !leaseReady || busy) return;
     const timer = window.setTimeout(() => {
-      void api<{ draft: WorkflowDraft }>(workflowPath(loadedKey, "/draft"), {
-        method: "POST",
-        body: JSON.stringify({
-          yaml: yamlText,
-          base_hash: baseHash,
-          holder: holder.current,
-        }),
-      })
-        .then((response) => setDraft(response.draft))
-        .catch((caught: unknown) => setError(errorMessage(caught)));
+      void flushDraft().catch((caught: unknown) => setError(errorMessage(caught)));
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [baseHash, dirty, leaseReady, loadedKey, yamlText]);
+  }, [dirty, leaseReady, loadedKey, busy, flushDraft]);
 
   useEffect(() => {
     const definitions = parsed.value?.inputs ?? {};
@@ -192,12 +239,18 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   }
 
   function addNode() {
-    const id = nextNodeId(parsed.value);
-    mutate((document) => document.setIn(["nodes", id], nodeDefaults("command")));
+    if (promptDirty) { setError("Save the agent's instructions before adding a stage."); return; }
+    // "Check project" becomes "check_project"; punctuation is removed from the internal stage key.
+    const prefix = stageName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "step";
+    const id = nextNodeId(parsed.value, /^[a-z]/.test(prefix) ? prefix : `step_${prefix}`);
+    const previous = Object.keys(parsed.value?.nodes ?? {}).at(-1);
+    mutate((document) => document.setIn(["nodes", id], { ...nodeDefaults(stageKind), ...(previous ? { needs: [previous] } : {}) }));
     setSelectedNode(id);
+    setAddingStage(false);
   }
 
   function deleteNode() {
+    if (promptDirty) { setError("Save the agent's instructions before removing a stage."); return; }
     if (selectedNode === null) return;
     mutate((document, value) => {
       document.deleteIn(["nodes", selectedNode]);
@@ -222,6 +275,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   }
 
   function setNodeType(type: string) {
+    if (promptDirty) { setError("Save the agent's instructions before changing this stage's action."); return; }
     if (selectedNode === null) return;
     const needs = definition?.needs;
     mutate((document) =>
@@ -268,7 +322,8 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
     setBusy(true);
     setError(null);
     try {
-      await api<{ ok: boolean }>(workflowPath(loadedKey, "/save"), {
+      await draftWrites.current;
+      await api<{ ok: boolean }>(projectPath(workflowPath(loadedKey, "/save"), requestProject), {
         method: "POST",
         body: JSON.stringify({
           yaml: canonical,
@@ -276,7 +331,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
           holder: holder.current,
         }),
       });
-      const refreshed = await api<WorkflowDocumentResponse>(workflowPath(loadedKey));
+      const refreshed = await api<WorkflowDocumentResponse>(projectPath(workflowPath(loadedKey), requestProject));
       applyDocument(refreshed);
       setNotice("Workflow saved and validated.");
     } catch (caught) {
@@ -292,6 +347,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   }
 
   function requestSave() {
+    if (promptDirty) { setError("Save the agent's instructions before saving the workflow."); return; }
     try {
       const canonical = canonicalYaml(yamlText);
       if (canonical !== yamlText) setFormattingYaml(canonical);
@@ -311,10 +367,11 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
           value === undefined ? [] : [[name, value]],
         ),
       );
-      const response = await api<{ run_id: string }>("/api/runs", {
+      const response = await api<{ run_id: string }>(projectPath("/api/runs", requestProject), {
         method: "POST",
         body: JSON.stringify({
           workflow_key: loadedKey,
+          project_id: project.id,
           inputs: suppliedInputs,
           ...(launchModel ? { model: launchModel } : {}),
           cleanup_policy: cleanupPolicy,
@@ -341,35 +398,54 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
   const effectiveModel = (typeof definition?.model === "string" ? definition.model : "")
     || launchModel || parsed.value?.model || "";
 
+  async function createWorkflow() {
+    setBusy(true);
+    setError(null);
+    try {
+      // "Release review" becomes "release-review"; the display name keeps the owner's wording.
+      const slug = newKey.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "workflow";
+      const key = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug) ? `workflow-${slug}` : slug;
+      const created = await api<{ key: string }>(projectPath("/api/workflows", requestProject), {
+        method: "POST", body: JSON.stringify({ key, name: newKey.trim(), holder: holder.current }),
+      });
+      const refreshed = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", requestProject));
+      setInventory(refreshed.workflows);
+      await loadWorkflow(created.key);
+      setNewWorkflow(false);
+      setNewKey("");
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally { setBusy(false); }
+  }
+
   return (
     <Stack spacing={2}>
+      <Box>
+        <Typography variant="h4">{parsed.value?.name || "Choose a workflow"}</Typography>
+        <Typography color="text.secondary">1. Choose or create a workflow. 2. Set up its stages. 3. Save and start work.</Typography>
+      </Box>
       <Paper className="toolbar-card" variant="outlined">
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
           sx={{ alignItems: { md: "center" } }}
         >
-          <TextField
-            size="small"
-            label="Workflow key"
-            value={workflowKey}
-            onChange={(event) => setWorkflowKey(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void loadWorkflow(workflowKey);
-            }}
-          />
-          <Button variant="outlined" onClick={() => void loadWorkflow(workflowKey)} disabled={busy}>
-            Load
-          </Button>
+          <FormControl size="small" sx={{ minWidth: 230 }}>
+            <InputLabel id="workflow-picker">Workflow</InputLabel>
+            <Select labelId="workflow-picker" label="Workflow" value={inventory.some((item) => item.key === loadedKey) ? loadedKey ?? "" : ""} onChange={(event) => void loadWorkflow(event.target.value)} disabled={busy}>
+              {inventory.map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Button variant="outlined" onClick={() => setNewWorkflow(true)}>New workflow</Button>
           <Button variant="contained" onClick={requestSave} disabled={!dirty || busy || !leaseReady}>
             Save
           </Button>
-          <Button onClick={addNode} disabled={parsed.value === null || !leaseReady}>Add node</Button>
+          <Button onClick={() => setAddingStage(true)} disabled={parsed.value === null || !leaseReady}>Add stage</Button>
           <Box sx={{ flex: 1 }} />
           <Chip
             size="small"
             color={leaseReady ? "success" : "warning"}
-            label={leaseReady ? "Editor lease active" : "Editor lease unavailable"}
+            label={leaseReady ? "Ready to edit" : "Editing unavailable"}
           />
           {draft && <Chip size="small" label={`Draft ${draft.validation_state}`} />}
           {dirty && <Chip size="small" color="primary" variant="outlined" label="Unsaved" />}
@@ -378,61 +454,67 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>}
+      {warnings.map((warning) => <Alert key={`${warning.workflow_key ?? ""}-${warning.scope_path}-${warning.output}`} severity="warning" action={<Button onClick={() => setHandoffHelp(true)}>Retain the report</Button>}>
+        {warning.workflow_key ? `${warning.workflow_key} · ` : ""}{stageLabel(warning.scope_path)}: {warning.artifact} is only checked for existence. {warning.message}
+      </Alert>)}
+      {loadedKey && Object.keys(parsed.value?.nodes ?? {}).length === 0 && <Alert severity="info" action={<Button onClick={() => setAddingStage(true)}>Add first stage</Button>}>Your workflow is empty. Add a command, agent task, or review step to begin.</Alert>}
       {parsed.errors.length > 0 && (
         <Alert severity="warning">{parsed.errors.join(" ")}</Alert>
       )}
 
-      <Box className="author-grid">
+      <Box>
         <Paper className="canvas-panel" variant="outlined">
+          <Typography variant="subtitle2" sx={{ p: 2 }}>Workflow stages · click a stage to configure it</Typography>
           <FlowCanvas
             nodes={graph.nodes}
             edges={graph.edges}
             selectedId={selectedNode}
-            onSelect={setSelectedNode}
+            onSelect={(id) => { if (promptDirty) setError("Save the agent's instructions before selecting another stage."); else setSelectedNode(id); }}
           />
         </Paper>
-        <Paper className="yaml-panel" variant="outlined">
+        <Accordion expanded={advanced} onChange={(_event, open) => setAdvanced(open)}>
+          <AccordionSummary><Typography>Advanced workflow settings and YAML</Typography></AccordionSummary>
+          <AccordionDetails>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <TextField size="small" label="Workflow key" value={workflowKey} onChange={(event) => setWorkflowKey(event.target.value)} />
+            <Button onClick={() => void loadWorkflow(workflowKey)}>Load</Button>
+          </Stack>
+          <Box className="yaml-panel">
           <Suspense fallback={<Box className="loading-panel">Loading YAML editor…</Box>}>
             <YamlEditor value={yamlText} onChange={setYamlText} />
           </Suspense>
-        </Paper>
+          </Box>
+          </AccordionDetails>
+        </Accordion>
       </Box>
 
       {selectedNode && definition && (
         <Paper className="section-card" variant="outlined">
           <Stack spacing={2}>
             <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-              <Typography variant="h6" sx={{ flex: 1 }}>{selectedNode}</Typography>
-              <Button color="error" onClick={deleteNode}>Delete node</Button>
+              <Typography variant="h6" sx={{ flex: 1 }}>{stageLabel(selectedNode)}</Typography>
+              <Button color="error" onClick={deleteNode}>Remove stage</Button>
             </Stack>
             <Box className="field-grid">
               <FormControl size="small">
-                <InputLabel>Node type</InputLabel>
+                <InputLabel id="stage-action">What this stage does</InputLabel>
                 <Select
-                  label="Node type"
+                  labelId="stage-action"
+                  label="What this stage does"
                   value={definition.type}
                   onChange={(event) => setNodeType(event.target.value)}
                 >
                   {['agent', 'command', 'human_wait', 'condition', 'loop', 'subworkflow'].map((type) => (
-                    <MenuItem key={type} value={type}>{type}</MenuItem>
+                    <MenuItem key={type} value={type}>{{ agent: "Agent work", command: "Run a command", human_wait: "Human review", condition: "Check a result", loop: "Repeat stages", subworkflow: "Run another workflow" }[type]}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
-              <TextField
-                size="small"
-                label="Needs (comma separated)"
-                value={needsDraft?.nodeId === selectedNode
-                  ? needsDraft.text : (definition.needs ?? []).join(", ")}
-                onFocus={(event) => setNeedsDraft({ nodeId: selectedNode, text: event.target.value })}
-                onChange={(event) => setNeedsDraft({ nodeId: selectedNode, text: event.target.value })}
-                onBlur={(event) => {
-                  // "build, test, " -> ["build", "test"], only after editing ends.
-                  setNodeField(
-                    "needs", event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                  );
-                  setNeedsDraft(null);
-                }}
-              />
+              <FormControl size="small">
+                <InputLabel id="stage-dependencies">Start after</InputLabel>
+                <Select multiple labelId="stage-dependencies" label="Start after" value={definition.needs ?? []} onChange={(event) => setNodeField("needs", event.target.value)} renderValue={(items) => items.map(stageLabel).join(", ")}>
+                  {Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode).map((id) => <MenuItem key={id} value={id}>{stageLabel(id)}</MenuItem>)}
+                </Select>
+              </FormControl>
               {(definition.type === "agent" || definition.type === "command") && (
                 <FormControlLabel
                   control={
@@ -441,14 +523,16 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                       onChange={(event) => setNodeField("writes", event.target.checked)}
                     />
                   }
-                  label="Writes to worktree"
+                  label="Allow file changes"
                 />
               )}
               {definition.type === "agent" && (
                 <>
+                  <ModelPicker key={`${selectedNode}-${candidateIds.join(",")}`} agents={agents?.agents.filter((agent) => candidateIds.includes(agent.id)) ?? []} value={typeof definition.model === "string" ? definition.model : ""} project={requestProject} onChange={setAgentModel} />
                   <TextField
                     size="small"
                     label="Exact model override"
+                    helperText="Choose a model offered by the selected tool. Leave empty to use the workflow's model."
                     value={typeof definition.model === "string" ? definition.model : ""}
                     onChange={(event) => setAgentModel(event.target.value)}
                     slotProps={{ htmlInput: { list: "relay-model-options" } }}
@@ -472,6 +556,13 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 </>
               )}
               {definition.type === "command" && (
+                <Stack spacing={1}>
+                  <TextField size="small" label="Program" value={Array.isArray(definition.run) ? String(definition.run[0] ?? "") : ""} onChange={(event) => setNodeField("run", [event.target.value, ...(Array.isArray(definition.run) ? definition.run.slice(1) : [])])} />
+                  <TextField size="small" label="Arguments (one per line)" multiline minRows={2} value={Array.isArray(definition.run) ? definition.run.slice(1).join("\n") : ""} onChange={(event) => {
+                    // "a b\n--fast" becomes ["a b", "--fast"]; no shell quoting or expansion occurs.
+                    setNodeField("run", [Array.isArray(definition.run) ? definition.run[0] : "", ...(event.target.value === "" ? [] : event.target.value.split("\n"))]);
+                  }} helperText="Each line is passed as one argument. For Git status, use status and --short on separate lines." />
+                <Accordion><AccordionSummary>Advanced command arguments</AccordionSummary><AccordionDetails>
                 <TextField
                   key={`${selectedNode}-${JSON.stringify(definition.run)}`}
                   size="small"
@@ -489,11 +580,14 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                     }
                   }}
                 />
+                </AccordionDetails></Accordion>
+                </Stack>
               )}
               {definition.type === "human_wait" && (
                 <TextField
                   size="small"
-                  label="Prompt"
+                  label="Review instructions and expected response"
+                  multiline minRows={4}
                   value={typeof definition.prompt === "string" ? definition.prompt : ""}
                   onChange={(event) => setNodeField("prompt", event.target.value)}
                 />
@@ -524,6 +618,20 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 />
               )}
             </Box>
+            {definition.type === "agent" && loadedKey && selectedNode && (
+              <PromptEditor
+                key={`${loadedKey}-${selectedNode}`}
+                workflowPath={workflowPath(loadedKey)}
+                reference={(Array.isArray(definition.prompts) ? definition.prompts : []).find((prompt) => typeof prompt.local === "string")?.local ?? null}
+                newReference={`prompts/ui/${loadedKey.replace(/\.(yaml|yml)$/, "")}/${selectedNode}.md`}
+                project={requestProject} holder={holder.current} disabled={!leaseReady}
+                onDirty={setPromptDirty}
+                onSaved={(reference) => {
+                  const prompts = Array.isArray(definition.prompts) ? definition.prompts : [];
+                  if (!prompts.some((prompt) => prompt.local === reference)) setNodeField("prompts", [...prompts, { local: reference }]);
+                }}
+              />
+            )}
             {definition.type === "agent" && candidateIds.map((agentId) => {
               const agent = agents?.agents.find((item) => item.id === agentId);
               return agent ? (
@@ -531,6 +639,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                   key={`${selectedNode}-${agentId}`}
                   agent={agent}
                   model={effectiveModel}
+                  project={requestProject}
                   options={definition.agent_options?.[agentId] ?? {}}
                   onChange={(field, value) => setAgentOption(agentId, field, value)}
                 />
@@ -546,9 +655,9 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
       <Paper className="section-card" variant="outlined">
         <Stack spacing={2}>
           <Box>
-            <Typography variant="h6">Launch</Typography>
+            <Typography variant="h6">Start work</Typography>
             <Typography variant="body2" color="text.secondary">
-              Inputs come from the loaded workflow schema. Launch still runs server-side validation.
+              Your tools work on a separate Git branch. Relay pauses for your review or a tool permission request, and continues only after you respond.
             </Typography>
           </Box>
           <Box className="field-grid">
@@ -583,8 +692,9 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                   : [];
                 return (
                   <FormControl key={name} size="small" required={input.required}>
-                    <InputLabel>{name}</InputLabel>
+                    <InputLabel id={`input-${name}`}>{name}</InputLabel>
                     <Select
+                      labelId={`input-${name}`}
                       label={name}
                       value={value === undefined ? "" : JSON.stringify(value)}
                       onChange={(event) =>
@@ -613,7 +723,7 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 <TextField
                   key={name}
                   size="small"
-                  label={name}
+                  label={stageLabel(name)}
                   helperText={input.description}
                   required={input.required}
                   type={numeric ? "number" : "text"}
@@ -631,6 +741,8 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 />
               );
             })}
+            </Box>
+            <Accordion><AccordionSummary>Advanced start settings</AccordionSummary><AccordionDetails><Box className="field-grid">
             <TextField
               size="small"
               label="Exact model (optional)"
@@ -642,8 +754,9 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
               {modelOptions.map((model) => <option key={model} value={model} />)}
             </datalist>
             <FormControl size="small">
-              <InputLabel>Cleanup policy</InputLabel>
+              <InputLabel id="cleanup-policy">Cleanup policy</InputLabel>
               <Select
+                labelId="cleanup-policy"
                 value={cleanupPolicy}
                 label="Cleanup policy"
                 onChange={(event) => setCleanupPolicy(event.target.value)}
@@ -653,8 +766,9 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
               </Select>
             </FormControl>
             <FormControl size="small">
-              <InputLabel>Entry point</InputLabel>
+              <InputLabel id="entry-point">Entry point</InputLabel>
               <Select
+                labelId="entry-point"
                 value={entryPoint}
                 label="Entry point"
                 onChange={(event) => setEntryPoint(event.target.value)}
@@ -665,20 +779,41 @@ export function WorkflowWorkspace({ onRunLaunched }: WorkflowWorkspaceProps) {
                 ))}
               </Select>
             </FormControl>
-          </Box>
+          </Box></AccordionDetails></Accordion>
           <Divider />
           <Stack direction="row" sx={{ justifyContent: "flex-end" }}>
             <Button
               variant="contained"
               size="large"
               onClick={() => void launch()}
-              disabled={launching || loadedKey === null || parsed.errors.length > 0 || dirty}
+              disabled={launching || promptDirty || loadedKey === null || parsed.errors.length > 0 || dirty || Object.keys(parsed.value?.nodes ?? {}).length === 0}
             >
               {launching ? "Launching…" : "Launch workflow"}
             </Button>
           </Stack>
         </Stack>
       </Paper>
+
+      <Dialog open={handoffHelp} onClose={() => setHandoffHelp(false)} fullWidth maxWidth="md">
+        <DialogTitle>Keep a report for the next stage</DialogTitle>
+        <DialogContent><Stack spacing={2}>
+          <Typography>Open Advanced workflow configuration and find the output that checks the file. A label selector keeps the full report and reads a named verdict line from it.</Typography>
+          <Typography component="pre" className="activity-text">{'outputs:\n  verdict:\n    label:\n      artifact: REVIEW.md\n      label: Ready'}</Typography>
+          <Typography>For a report containing “Ready: Yes”, this saves the report and gives the output verdict the value “Yes”. Choose the file and label used by your own report. JSON and YAML reports can use json_path or yaml_path with artifact and path fields.</Typography>
+          <Typography>Add a Check a result stage after the report stage to evaluate a verdict. For a stage named report, the expression can be:</Typography>
+          <Typography component="pre" className="activity-text">{'needs.report.outputs.verdict == "Yes"'}</Typography>
+          <Typography>Route that check to the intended next stage. Keep a Human review stage wherever a person must approve the work; an automated verdict never answers it.</Typography>
+        </Stack></DialogContent>
+        <DialogActions><Button onClick={() => { setHandoffHelp(false); setAdvanced(true); }}>Open workflow configuration</Button><Button onClick={() => setHandoffHelp(false)}>Close</Button></DialogActions>
+      </Dialog>
+      <Dialog open={newWorkflow} onClose={() => !busy && setNewWorkflow(false)} fullWidth>
+        <DialogTitle>Create a workflow</DialogTitle>
+        <DialogContent><Typography sx={{ mb: 2 }}>Name the workflow, then add the stages you want Relay to run in {project.display_name}.</Typography><TextField autoFocus fullWidth label="Workflow name" value={newKey} onChange={(event) => setNewKey(event.target.value)} />{error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}</DialogContent>
+        <DialogActions><Button onClick={() => setNewWorkflow(false)} disabled={busy}>Cancel</Button><Button variant="contained" onClick={() => void createWorkflow()} disabled={busy || !newKey.trim()}>Create workflow</Button></DialogActions>
+      </Dialog>
+      <Dialog open={addingStage} onClose={() => setAddingStage(false)} fullWidth>
+        <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem></Select></FormControl><Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim()}>Add stage</Button></DialogActions>
+      </Dialog>
 
       <Dialog open={formattingYaml !== null} onClose={() => setFormattingYaml(null)}>
         <DialogTitle>Save canonical YAML?</DialogTitle>

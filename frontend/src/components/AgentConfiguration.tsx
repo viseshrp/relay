@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
+import { projectPath } from "../navigation";
 import type {
   AgentConfiguration as Configuration, AgentOptions, AgentRecord, ConfigurationSelector,
 } from "../types";
@@ -14,9 +15,10 @@ interface AgentConfigurationProps {
   model: string;
   options: AgentOptions;
   onChange: (field: keyof AgentOptions, value: string) => void;
+  project: string | null;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;
@@ -24,7 +26,7 @@ export function AgentConfiguration({ agent, model, options, onChange }: AgentCon
     loading: boolean;
     error: string | null;
   }>({ key: "", configuration: null, loading: false, error: null });
-  const key = JSON.stringify([agent.id, model, refresh]);
+  const key = JSON.stringify([agent.id, model, refresh, project]);
   const ready = agent.installed && model !== "";
   const loading = ready && (state.key !== key || state.loading);
   const configuration = state.key === key ? state.configuration : null;
@@ -34,7 +36,7 @@ export function AgentConfiguration({ agent, model, options, onChange }: AgentCon
     const controller = new AbortController();
     setState({ key, configuration: null, loading: ready, error: null });
     if (ready) {
-      void api<Configuration>(`/api/agents/${encodeURIComponent(agent.id)}/configuration`, {
+      void api<Configuration>(projectPath(`/api/agents/${encodeURIComponent(agent.id)}/configuration`, project), {
         method: "POST",
         body: JSON.stringify({ model }),
         signal: controller.signal,
@@ -49,7 +51,7 @@ export function AgentConfiguration({ agent, model, options, onChange }: AgentCon
       });
     }
     return () => controller.abort();
-  }, [agent.id, key, model, ready]);
+  }, [agent.id, key, model, ready, project]);
 
   function selector(field: keyof AgentOptions, label: string, supported: ConfigurationSelector | null) {
     const value = options[field] ?? "";

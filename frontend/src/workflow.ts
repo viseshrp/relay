@@ -2,6 +2,8 @@ import type { Edge, Node } from "@xyflow/react";
 import { type Document, parseDocument } from "yaml";
 
 import type { AgentOptions } from "./types";
+import { arrangeGraph } from "./graph";
+import { stageLabel } from "./navigation";
 
 export interface WorkflowNodeValue {
   type: string;
@@ -9,6 +11,7 @@ export interface WorkflowNodeValue {
   writes?: boolean;
   agents?: string[];
   agent_options?: Record<string, AgentOptions>;
+  prompts?: Array<{ local?: string; global?: string }>;
   [key: string]: unknown;
 }
 
@@ -84,28 +87,38 @@ export function flowElements(
     id,
     position: { x: (index % 3) * 250, y: Math.floor(index / 3) * 150 },
     data: {
-      label: id,
+      label: stageLabel(id),
       kind: definition.type,
       status: statuses.get(`root.${id}`),
     },
     className: statuses.get(`root.${id}`) ? `node-status-${statuses.get(`root.${id}`)}` : "",
   }));
   const nodeIds = new Set(entries.map(([id]) => id));
-  const edges = entries.flatMap(([target, definition]) =>
+  const edges: Edge[] = entries.flatMap(([target, definition]) =>
     (definition.needs ?? [])
       .filter((source) => nodeIds.has(source))
       .map((source) => ({ id: `${source}-${target}`, source, target, animated: true })),
   );
-  return { nodes, edges };
+  for (const [source, definition] of entries) {
+    const branches = isRecord(definition.branches) ? definition.branches : {};
+    for (const [label, target] of Object.entries(branches)) {
+      if (typeof target === "string" && nodeIds.has(target)) edges.push({ id: `branch:${source}:${target}`, source, target, label, type: "smoothstep", animated: false });
+    }
+    for (const field of ["on_timeout", "exhausted"]) {
+      const target = definition[field];
+      if (typeof target === "string" && nodeIds.has(target)) edges.push({ id: `${field}:${source}:${target}`, source, target, label: field === "on_timeout" ? "Time limit" : "Iteration limit", type: "smoothstep", animated: false });
+    }
+  }
+  return { nodes: arrangeGraph(nodes, edges), edges };
 }
 
-export function nextNodeId(value: WorkflowValue | null): string {
+export function nextNodeId(value: WorkflowValue | null, prefix = "node"): string {
   // Existing IDs "node", "node_2" -> "node_3"; an empty map -> "node".
   const ids = new Set(Object.keys(value?.nodes ?? {}));
-  if (!ids.has("node")) return "node";
+  if (!ids.has(prefix)) return prefix;
   let index = 2;
-  while (ids.has(`node_${index}`)) index += 1;
-  return `node_${index}`;
+  while (ids.has(`${prefix}_${index}`)) index += 1;
+  return `${prefix}_${index}`;
 }
 
 export function nodeDefaults(type: string): WorkflowNodeValue {

@@ -24,59 +24,72 @@ to change that effort.
 
 ## Guided app experience
 
-- [ ] Make Relay intuitive for first-time users. Guide them through choosing a
+- [x] Make Relay intuitive for first-time users. Guide them through choosing a
   project and workflow, starting work, reviewing requests, and resuming a run.
   Use everyday language and clear next actions so common tasks do not require
   understanding YAML, internal node names, JSON, or status codes.
-- [ ] Keep advanced configuration and diagnostics in clearly labeled optional
+- [x] Keep advanced configuration and diagnostics in clearly labeled optional
   views. Explain what actions do and what happens next before starting,
   stopping, or approving work. Preserve explicit human review and permission
   decisions.
 
 ## Run navigation
 
-- [ ] Explain the workflow editor and run monitor in the navigation. Show the
+- [x] Explain the workflow editor and run monitor in the navigation. Show the
   selected project, workflow, and run together so the owner can identify the
   work being inspected.
-- [ ] Show the current stage, completed work, and next action in plain language
+- [x] Show the current stage, completed work, and next action in plain language
   above the graph and logs. Make waiting and failed stages easy to find without
   reading internal node names or zooming around the graph.
-- [ ] Draw dependency and control-flow connections in the run monitor using
+- [x] Draw dependency and control-flow connections in the run monitor using
   the run's captured workflow and runtime scopes. Arrange nodes by their
-  connections so branches and stage order are readable; the current run view
-  displays nodes without edges.
-- [ ] At a human review gate, show the review documents or diff, the required
+  connections so branches, nested scopes, and stage order are readable.
+- [x] At a human review gate, show the review documents or diff, the required
   review steps, and the expected response beside the response field. Keep human
   approval distinct from automated checks and agent permission requests.
-- [ ] Provide links to a specific run and its pending interaction. Preserve
+- [x] Provide links to a specific run and its pending interaction. Preserve
   that selection across reloads so opening the app returns to the intended
   stage instead of the default workflow editor.
 
 ## Run output
 
-- [ ] Join streamed agent text and command output into readable messages or
+- [x] Join streamed agent text and command output into readable messages or
   lines instead of a separate card for every fragment. Preserve ordering and
   boundaries between nodes, attempts, messages, and output streams, and show
   which node and agent produced the output.
-- [ ] Show readable messages and tool summaries by default. Keep raw provider
+- [x] Show readable messages and tool summaries by default. Keep raw provider
   JSON and low-level events in an optional diagnostics view, with the original
   events available for inspection. Make ongoing output readable without
   opening a full-text dialog for each fragment.
 
 ## Workflow handoffs
 
-- [ ] Create and save new workflows through Relay without manually adding a
+- [x] Create and save new workflows through Relay without manually adding a
   bootstrap YAML file. Keep prompts and agent execution bound to the selected
   project and stop downstream stages automatically when that binding is wrong.
-- [ ] Handle generated planning and review documents without requiring manual
+- [x] Handle generated planning and review documents without requiring manual
   Git exclusions before launch. Preserve existing documents and keep them
   unstaged and uncommitted unless the owner explicitly requests otherwise.
-- [ ] Warn when required report handoffs use only `exists` outputs. Relay
+- [x] Warn when required report handoffs use only `exists` outputs. Relay
   already retains files declared with `label`, `json_path`, or `yaml_path`.
   Guide workflow authors to those selectors and automatic verdict checks,
   while preserving actual human review and approval gates.
-- [ ] Accept owner feedback while an agent is paused and resume it through
+- [x] Accept owner feedback while an agent is paused and resume it through
   Relay, without manually editing prompt files or restarting a worker.
-- [ ] Clean up run-owned temporary files, browser profiles, and processes
+- [x] Clean up run-owned temporary files, browser profiles, and processes
   through Relay after the run finishes. Preserve personal browser sessions,
   credentials, unrelated files, and the owner's existing Relay data.
+
+The [web guide](web-ui.md) covers project selection, workflow creation, run
+progress, report previews, explicit review decisions, and readable activity.
+[Workflows](workflows.md) and [Git and artifacts](git-and-artifacts.md) describe
+source capture and generated-document handling.
+[Agents](agents.md) explains feedback in a live ACP session; native Antigravity
+keeps its single-turn headless transport.
+[Projects and storage](projects-and-storage.md) defines temporary-resource
+ownership and cleanup boundaries. The [HTTP API](http-api.md) documents the
+matching endpoints, project binding, and interaction links.
+
+Focused Python checks and browser scenarios cover creation without a bootstrap,
+captured connections, report handoffs, explicit approval, reload links,
+same-session feedback, and cleanup that preserves unrelated files and processes.

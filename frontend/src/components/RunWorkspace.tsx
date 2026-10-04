@@ -1,6 +1,9 @@
 import type { Edge, Node } from "@xyflow/react";
 import {
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Chip,
@@ -15,6 +18,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -32,9 +36,14 @@ import type {
   RunEvent,
   RunInteraction,
   RunSummary,
+  ProjectRecord,
 } from "../types";
+import { capturedRunGraph } from "../graph";
+import { projectPath, stageLabel, statusLabel } from "../navigation";
+import { activityMessages } from "../activity";
 import type { WorkflowNodeData } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
+import { ReviewRequest, ReviewEvidence } from "./RunReview";
 
 const EVENT_TYPES = [
   "run.created",
@@ -50,6 +59,8 @@ const EVENT_TYPES = [
   "run.rerun",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
+  "resource.cleanup_succeeded",
+  "resource.cleanup_failed",
   "node.created",
   "node.ready",
   "node.dispatched",
@@ -64,6 +75,7 @@ const EVENT_TYPES = [
   "attempt.started",
   "attempt.ended",
   "agent.message",
+  "agent.turn_started",
   "agent.thought",
   "agent.tool_call",
   "agent.tool_result",
@@ -92,6 +104,8 @@ const VIRTUAL_ROW_OVERSCAN = 3;
 interface RunWorkspaceProps {
   selectedRun: string | null;
   onSelectRun: (runId: string | null) => void;
+  project: ProjectRecord;
+  selectedInteraction: string | null;
 }
 
 type DetailCollection = "nodes" | "interactions";
@@ -160,15 +174,7 @@ function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail 
 
 function runGraph(run: RunDetail | null): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
   if (run === null) return { nodes: [], edges: [] };
-  return {
-    nodes: run.nodes.map((node, index) => ({
-      id: node.scope_path,
-      position: { x: (index % 3) * 255, y: Math.floor(index / 3) * 145 },
-      data: { label: node.scope_path, kind: node.node_type, status: node.status },
-      className: `node-status-${node.status}`,
-    })),
-    edges: [],
-  };
+  return capturedRunGraph(run.nodes);
 }
 
 function outputText(event: RunEvent): string | null {
@@ -246,117 +252,14 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
   );
 }
 
-function optionValue(value: JsonValue): string | null {
-  // "allow" and {id: "allow", name: "Allow"} -> "allow"; a number -> null.
-  if (typeof value === "string") return value;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  for (const key of ["id", "value", "optionId"]) {
-    if (typeof value[key] === "string") return value[key];
-  }
-  return null;
-}
 
-function optionLabel(value: JsonValue): string {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return String(value);
-  for (const key of ["name", "label", "id", "value", "optionId"]) {
-    if (typeof value[key] === "string") return value[key];
-  }
-  return JSON.stringify(value);
-}
-
-function InteractionCard({
-  interaction,
-  onAnswered,
-}: {
-  interaction: RunInteraction;
-  onAnswered: () => Promise<void>;
-}) {
-  const options = Array.isArray(interaction.request.options) ? interaction.request.options : [];
-  const [value, setValue] = useState(() => optionValue(options[0] ?? "") ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function answer() {
-    setBusy(true);
-    setError(null);
-    try {
-      const path = `/api/attempts/${encodeURIComponent(interaction.attempt_id)}/${interaction.kind}`;
-      let answerValue: JsonValue = value;
-      if (interaction.kind === "elicitation") {
-        try {
-          answerValue = JSON.parse(value) as JsonValue;
-        } catch {
-          throw new Error("An elicitation response must be a JSON object or null.");
-        }
-        if (
-          answerValue !== null
-          && (typeof answerValue !== "object" || Array.isArray(answerValue))
-        ) {
-          throw new Error("An elicitation response must be a JSON object or null.");
-        }
-      }
-      await api<{ result: string }>(path, {
-        method: "POST",
-        body: JSON.stringify({
-          idempotency_key: crypto.randomUUID(),
-          ...(interaction.kind === "permission"
-            ? { decision: value }
-            : { value: answerValue }),
-        }),
-      });
-      await onAnswered();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Paper variant="outlined" className="interaction-card">
-      <Stack spacing={1.5}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <Chip size="small" color="warning" label={interaction.kind} />
-          <Typography variant="subtitle2">{interaction.scope_path}</Typography>
-        </Stack>
-        <Typography>{String(interaction.request.prompt ?? "Owner input required.")}</Typography>
-        {options.length > 0 ? (
-          <FormControl size="small">
-            <InputLabel>Decision</InputLabel>
-            <Select value={value} label="Decision" onChange={(event) => setValue(event.target.value)}>
-              {options.flatMap((option) => {
-                const id = optionValue(option);
-                return id === null ? [] : [<MenuItem key={id} value={id}>{optionLabel(option)}</MenuItem>];
-              })}
-            </Select>
-          </FormControl>
-        ) : (
-          <TextField
-            size="small"
-            label={interaction.kind === "elicitation"
-              ? "Response (JSON object or null)"
-              : interaction.kind === "permission"
-                ? "Decision"
-                : "Response (text or JSON)"}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-          />
-        )}
-        {error && <Alert severity="error">{error}</Alert>}
-        <Button variant="contained" onClick={() => void answer()} disabled={busy || value === ""}>
-          {busy ? "Sending…" : "Send response"}
-        </Button>
-      </Stack>
-    </Paper>
-  );
-}
-
-export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [nodeCursor, setNodeCursor] = useState<number | null>(null);
   const [interactionCursor, setInteractionCursor] = useState<number | null>(null);
+  const [linkedRequest, setLinkedRequest] = useState<RunInteraction | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [eventCursor, setEventCursor] = useState<number | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -365,6 +268,9 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   const [error, setError] = useState<string | null>(null);
   const [cleanupScope, setCleanupScope] = useState("all");
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [stopOpen, setStopOpen] = useState(false);
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [activityLimit, setActivityLimit] = useState(30);
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
@@ -373,6 +279,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
 
   const loadHistory = useCallback(async (cursor?: string) => {
     const query = new URLSearchParams({ limit: "50" });
+    query.set("project", project.id);
     if (cursor) query.set("since", cursor);
     const response = await api<{ runs: RunSummary[]; next: string | null }>(
       `/api/runs?${query.toString()}`,
@@ -380,7 +287,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     setRuns((current) => (cursor ? [...current, ...response.runs] : response.runs));
     setRunCursor(response.next);
     if (!cursor && selectedRun === null && response.runs[0]) onSelectRun(response.runs[0].id);
-  }, [onSelectRun, selectedRun]);
+  }, [onSelectRun, selectedRun, project.id]);
 
   const loadDetailCollection = useCallback(async (
     collection: DetailCollection,
@@ -389,6 +296,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   ): Promise<RunDetail> => {
     if (selectedRun === null) throw new Error("Select a run before loading its detail.");
     const query = new URLSearchParams({ collection, since: String(since), limit: "200" });
+    if (collection === "interactions") query.set("pending", "true");
     const response = await api<RunDetailPage>(
       `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
     );
@@ -405,7 +313,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
             : mergeRecords(currentNodes, response.run.nodes))
           : currentNodes,
         interactions: collection === "interactions"
-          ? (mode === "replace"
+          ? (mode !== "append"
             ? response.run.interactions
             : mergeRecords(currentInteractions, response.run.interactions))
           : currentInteractions,
@@ -432,6 +340,12 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     setArtifactCursor(response.next);
   }, [selectedRun]);
 
+  const loadLinkedRequest = useCallback(async () => {
+    if (!selectedRun || !selectedInteraction) { setLinkedRequest(null); return; }
+    const response = await api<RunDetailPage>(`/api/runs/${selectedRun}?collection=interactions&interaction=${encodeURIComponent(selectedInteraction)}&limit=1`);
+    if (currentRun.current === selectedRun) setLinkedRequest(response.run.interactions[0] ?? null);
+  }, [selectedRun, selectedInteraction]);
+
   const refreshDetail = useCallback(async (reset = false): Promise<RunDetail | null> => {
     if (selectedRun === null) return null;
     const mode: PageMode = reset ? "replace" : "refresh";
@@ -439,9 +353,10 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
       loadDetailCollection("nodes", 0, mode),
       loadDetailCollection("interactions", 0, mode),
       loadArtifacts(0, mode),
+      loadLinkedRequest(),
     ]);
     return run;
-  }, [loadArtifacts, loadDetailCollection, selectedRun]);
+  }, [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun]);
 
   const loadEvents = useCallback(async (since = 0) => {
     if (selectedRun === null) return;
@@ -465,8 +380,12 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
     previousRunStatus.current = null;
     setStreamRun(null);
     setDetail(null);
+    setSelectedStage(null);
+    setActivityLimit(30);
+    setError(null);
     setNodeCursor(null);
     setInteractionCursor(null);
+    setLinkedRequest(null);
     setEvents([]);
     setArtifacts([]);
     setArtifactCursor(null);
@@ -513,6 +432,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
         void loadDetailCollection("interactions", 0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );
+        void loadLinkedRequest().catch((caught: unknown) => setError(errorMessage(caught)));
       }
       if (batch.some((item) => item.type === "artifact.preserved")) {
         void loadArtifacts(0, "refresh").catch((caught: unknown) =>
@@ -556,7 +476,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
       if (frame !== null) cancelAnimationFrame(frame);
       source.close();
     };
-  }, [loadArtifacts, loadDetailCollection, selectedRun, streamEpoch, streamRun]);
+  }, [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun, streamEpoch, streamRun]);
 
   async function cancelRun() {
     if (selectedRun === null) return;
@@ -615,7 +535,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
 
   async function cleanData() {
     try {
-      await api<{ deleted: Record<string, number> }>("/api/data/clean", {
+      await api<{ deleted: Record<string, number> }>(projectPath("/api/data/clean", project.id), {
         method: "POST",
         body: JSON.stringify({ scope: cleanupScope, confirm: true }),
       });
@@ -630,7 +550,12 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
   }
 
   const graph = useMemo(() => runGraph(detail), [detail]);
-  const pendingInteractions = detail?.interactions.filter((item) => item.status === "pending") ?? [];
+  const activity = useMemo(() => activityMessages(events), [events]);
+  const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending").map((item) => [item.id, item])).values());
+  const complete = detail?.nodes.filter((node) => node.status === "succeeded" || node.status === "skipped").length ?? 0;
+  const currentStages = detail?.nodes.filter((node) => ["waiting", "running", "failed"].includes(node.status)) ?? [];
+  const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
+  const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
   const active = detail && ["pending", "running", "paused_wait", "canceling"].includes(detail.status);
 
   return (
@@ -651,12 +576,13 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                 onClick={() => onSelectRun(run.id)}
               >
                 <ListItemText
-                  primary={run.workflow_key}
-                  secondary={`${run.status} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "not started"}`}
+                  primary={stageLabel(run.workflow_key.replace(/\.(yaml|yml)$/, ""))}
+                  secondary={`${statusLabel(run.status)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
                 />
               </ListItemButton>
             ))}
           </List>
+          {runs.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>No runs yet. Open Workflows to start work in this project.</Typography>}
           {runCursor && (
             <Button fullWidth onClick={() => void loadHistory(runCursor)}>Load older runs</Button>
           )}
@@ -676,18 +602,24 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                   sx={{ alignItems: { md: "center" } }}
                 >
                   <Box sx={{ flex: 1 }}>
-                    <Typography variant="h5">{detail.workflow_key}</Typography>
+                    <Typography variant="h5">{stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Typography>
                     <Typography variant="body2" color="text.secondary" className="mono-wrap">
-                      {detail.id} · {detail.run_branch}
+                      {detail.project.display_name} · Started {detail.started_at ? new Date(detail.started_at).toLocaleString() : "just now"}
                     </Typography>
                   </Box>
-                  <Chip color={detail.status === "succeeded" ? "success" : "default"} label={detail.status} />
-                  <Chip variant="outlined" label={`SSE ${streamState}`} />
+                  <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={statusLabel(detail.status)} />
+                  <Button component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
                   {active && (
-                    <Button color="error" variant="outlined" onClick={() => void cancelRun()}>
-                      Cancel run
+                    <Button color="error" variant="outlined" onClick={() => setStopOpen(true)}>
+                      Stop work
                     </Button>
                   )}
+                </Stack>
+                <Stack spacing={1.5} sx={{ mt: 2 }}>
+                  <Typography variant="subtitle1">{pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
+                  {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
+                  <LinearProgress variant="determinate" value={detail.nodes.length ? 100 * complete / detail.nodes.length : 0} />
+                  <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
                 </Stack>
                 {detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
                 {detail.status === "interrupted" && (
@@ -701,9 +633,10 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                 <Stack spacing={1}>
                   <Box className="interaction-grid">
                     {pendingInteractions.map((interaction) => (
-                      <InteractionCard
+                      <ReviewRequest
                         key={interaction.id}
                         interaction={interaction}
+                        runId={detail.id} artifacts={artifacts} selected={interaction.id === selectedInteraction}
                         onAnswered={async () => { await refreshDetail(); }}
                       />
                     ))}
@@ -715,22 +648,52 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                   )}
                 </Stack>
               )}
+              {selectedInteraction && linkedRequest && linkedRequest.status !== "pending" && <Alert severity="info">The linked request has already been {linkedRequest.status}. Any current requests appear above.</Alert>}
+
+              {detail.nodes.some((node) => node.status === "failed") && <Paper variant="outlined" className="section-card">
+                <Typography variant="h6">Steps that need attention</Typography>
+                {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
+                  <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
+                  <Button onClick={() => setSelectedStage(node.scope_path)}>Show step</Button>
+                  <Button variant="outlined" disabled={detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path)}>Retry step</Button>
+                </Stack>)}
+              </Paper>}
+
+              <Paper variant="outlined" className="section-card">
+                <Typography variant="h6" sx={{ mb: 1 }}>Steps and progress</Typography>
+                <Box className="stage-list">{detail.nodes.map((node) => <Button key={node.id} variant={focusStage === node.scope_path ? "outlined" : "text"} color={node.status === "failed" ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => setSelectedStage(node.scope_path)}>
+                  {stageLabel(node.scope_path)} · {statusLabel(node.status)}
+                </Button>)}</Box>
+                {nodeCursor !== null && <Button onClick={() => void loadMoreNodes()}>Load more steps</Button>}
+              </Paper>
 
               <Paper variant="outlined" className="canvas-panel run-canvas">
-                <FlowCanvas nodes={graph.nodes} edges={graph.edges} />
-                {nodeCursor !== null && (
-                  <Button fullWidth onClick={() => void loadMoreNodes()}>
-                    Load more nodes
-                  </Button>
-                )}
+                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection />
               </Paper>
 
               <Paper variant="outlined" className="section-card">
-                <Typography variant="h6" sx={{ mb: 1.5 }}>Provider and command output</Typography>
-                <VirtualEvents key={`output-${detail.id}`} events={events} mode="output" />
+                <Typography variant="h6" sx={{ mb: 1.5 }}>Activity</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Messages and tool results from this run, in order.</Typography>
+                {activity.length > activityLimit && <Button onClick={() => setActivityLimit((current) => current + 30)}>Show earlier messages</Button>}
+                <Stack spacing={2} className="activity-feed">{activity.slice(-activityLimit).map((message) => <Paper key={message.id} variant="outlined" className="activity-message">
+                  <Typography variant="subtitle2">{stageLabel(message.scope)} · {message.agent || (message.kind.startsWith("command.") ? "Command" : "Agent")} · {stageLabel(message.kind.replace(/^(agent|command)\./, ""))}</Typography>
+                  <Typography variant="caption" color="text.secondary">{new Date(message.timestamp).toLocaleTimeString()}{message.attempt !== null ? ` · Attempt ${message.attempt}` : ""}</Typography>
+                  <Typography component="pre" className="activity-text">{message.text}</Typography>
+                </Paper>)}</Stack>
+                {activity.length === 0 && <Typography color="text.secondary">Messages will appear here when a tool starts.</Typography>}
+                {eventCursor !== null && <Button onClick={() => void loadEvents(eventCursor)}>Load more activity</Button>}
               </Paper>
 
+              {pendingInteractions.length === 0 && <Paper variant="outlined" className="section-card"><ReviewEvidence runId={detail.id} artifacts={artifacts} /></Paper>}
+
+              <Accordion><AccordionSummary>Advanced diagnostics and saved files</AccordionSummary><AccordionDetails><Stack spacing={2}>
+              {TERMINAL_RUNS.has(detail.status) && <Paper variant="outlined" className="section-card">
+                <Typography variant="h6">Temporary run resources</Typography>
+                <Typography variant="body2">Relay cleans its temporary files, private browser profiles, and process groups automatically. You can retry folder cleanup here. Saved reports, code, credentials, and personal browser profiles are kept.</Typography>
+                <Button onClick={() => void api(`/api/runs/${detail.id}/resources/clean`, { method: "POST", body: JSON.stringify({ confirm: true }) }).then(async () => { await refreshDetail(); await loadEvents(); }).catch((caught: unknown) => setError(errorMessage(caught)))}>Retry temporary resource cleanup</Button>
+              </Paper>}
               <Paper variant="outlined" className="section-card">
+                <Typography variant="body2" className="mono-wrap">Run {detail.id} · {detail.run_branch} · {detail.status} · SSE {streamState}</Typography>
                 <Stack direction="row" sx={{ alignItems: "center", mb: 1 }}>
                   <Typography variant="h6" sx={{ flex: 1 }}>Event history</Typography>
                   {eventCursor !== null && (
@@ -738,23 +701,6 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                   )}
                 </Stack>
                 <VirtualEvents key={`history-${detail.id}`} events={events} mode="history" />
-              </Paper>
-
-              <Paper variant="outlined" className="section-card">
-                <Typography variant="h6" sx={{ mb: 1 }}>Failed nodes</Typography>
-                <Stack spacing={1}>
-                  {detail.nodes.filter((node) => node.status === "failed").map((node) => (
-                    <Stack key={node.id} direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                      <Typography className="mono-wrap" sx={{ flex: 1 }}>{node.scope_path}</Typography>
-                      <Button variant="outlined" onClick={() => void rerunNode(node.scope_path)}>
-                        Rerun node
-                      </Button>
-                    </Stack>
-                  ))}
-                  {!detail.nodes.some((node) => node.status === "failed") && (
-                    <Typography color="text.secondary">No failed nodes are eligible for rerun.</Typography>
-                  )}
-                </Stack>
               </Paper>
 
               <Paper variant="outlined" className="section-card">
@@ -792,10 +738,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                   )}
                 </Stack>
               </Paper>
+              </Stack></AccordionDetails></Accordion>
             </>
           )}
 
-          <Paper variant="outlined" className="section-card">
+          <Accordion><AccordionSummary>Advanced data cleanup</AccordionSummary><AccordionDetails><Paper variant="outlined" className="section-card">
             <Stack
               direction={{ xs: "column", sm: "row" }}
               spacing={2}
@@ -820,7 +767,7 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
                 Clean data
               </Button>
             </Stack>
-          </Paper>
+          </Paper></AccordionDetails></Accordion>
         </Stack>
       </Box>
 
@@ -838,6 +785,11 @@ export function RunWorkspace({ selectedRun, onSelectRun }: RunWorkspaceProps) {
             Confirm deletion
           </Button>
         </DialogActions>
+      </Dialog>
+      <Dialog open={stopOpen} onClose={() => setStopOpen(false)}>
+        <DialogTitle>Stop this run?</DialogTitle>
+        <DialogContent><DialogContentText>Relay stops active tools and skips remaining work. Finished steps keep their results and committed changes. You can still review the saved evidence.</DialogContentText></DialogContent>
+        <DialogActions><Button onClick={() => setStopOpen(false)}>Keep working</Button><Button color="error" onClick={() => { setStopOpen(false); void cancelRun(); }}>Stop run</Button></DialogActions>
       </Dialog>
     </Stack>
   );

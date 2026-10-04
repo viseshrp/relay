@@ -25,6 +25,23 @@ export interface WorkflowDocumentResponse {
   yaml: string;
   draft: WorkflowDraft | null;
   base_hash: string;
+  project: ProjectRecord;
+  warnings: HandoffWarning[];
+}
+
+export interface ProjectRecord {
+  id: string;
+  canonical_path: string;
+  display_name: string;
+  git_root: string;
+}
+
+export interface HandoffWarning {
+  workflow_key?: string;
+  scope_path: string;
+  output: string;
+  artifact: string;
+  message: string;
 }
 
 export interface ModelObservation {
@@ -104,6 +121,9 @@ export interface RunNode {
   writes: boolean;
   selected_branch: string | null;
   loop_index: number | null;
+  parent_scope: string | null;
+  dependencies: string[];
+  controls: Array<{ target: string; label: string }>;
 }
 
 export interface RunInteraction {
@@ -120,6 +140,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  project: ProjectRecord;
   snapshot: {
     relay_version: string;
     runtime_versions: Record<string, JsonValue>;
