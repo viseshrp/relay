@@ -150,6 +150,45 @@ def test_an_explicit_writer_noop_keeps_the_same_head(repository: Path) -> None:
     assert (result.starting_head, result.ending_head, result.commit_count) == (head, head, 0)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "PLAN_CHECKPOINT.json",
+        "REVIEW_CHECKPOINT.json",
+        "AUDIT_CHECKPOINT.json",
+        "E2E_CHECKPOINT.json",
+        "E2E_VERIFICATION.md",
+    ],
+)
+def test_autonomous_run_reports_can_remain_uncommitted(repository: Path, name: str) -> None:
+    head = current_head(repository)
+    (repository / name).write_text('{"ready": false}\n', encoding="utf-8")
+
+    result = validate_writer_result(repository, head, allow_no_commit=True)
+
+    assert result.ending_head == head
+    assert status_porcelain(repository) == (f"?? {name}",)
+
+
+@pytest.mark.parametrize("name", ["settings.json", "nested/PLAN_CHECKPOINT.json"])
+def test_other_uncommitted_json_remains_a_writer_error(repository: Path, name: str) -> None:
+    path = repository / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text('{"ready": false}\n', encoding="utf-8")
+
+    with pytest.raises(CommitValidationError):
+        validate_writer_result(repository, current_head(repository), allow_no_commit=True)
+
+
+def test_staged_checkpoint_changes_remain_a_writer_error(repository: Path) -> None:
+    name = "PLAN_CHECKPOINT.json"
+    (repository / name).write_text('{"ready": false}\n', encoding="utf-8")
+    git(repository, "add", name)
+
+    with pytest.raises(CommitValidationError):
+        validate_writer_result(repository, current_head(repository), allow_no_commit=True)
+
+
 def test_writer_commit_attribution_lists_descendants_in_order(repository: Path) -> None:
     start = current_head(repository)
     first = commit(repository, "a.txt")

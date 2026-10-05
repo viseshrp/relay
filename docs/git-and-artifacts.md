@@ -24,6 +24,11 @@ documents stay in place. Symlinks and staged report changes still stop launch.
 
 These report exemptions apply to writing-node cleanliness too, so a report
 can be preserved and passed to the next stage without a documentation commit.
+Autonomous workflows can also leave `E2E_VERIFICATION.md`,
+`PLAN_CHECKPOINT.json`, `REVIEW_CHECKPOINT.json`, `AUDIT_CHECKPOINT.json`, and
+`E2E_CHECKPOINT.json` unstaged in the repository root. These exact names are
+reserved for run reports and machine-readable verdicts. Nested files and other
+JSON files remain subject to the normal Git checks.
 Read-only nodes still fail for any worktree modification. Unrelated code
 changes remain errors. A clean dashboard or unchanged `HEAD` does not replace
 the Git checks.

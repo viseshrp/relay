@@ -23,6 +23,11 @@ WORKFLOW_DOCUMENT_NAMES: Final = frozenset(
         "REVIEW_FIX_VERIFICATION.md",
         "FOLLOWUP.md",
         "TEST_AUDIT.md",
+        "E2E_VERIFICATION.md",
+        "PLAN_CHECKPOINT.json",
+        "REVIEW_CHECKPOINT.json",
+        "AUDIT_CHECKPOINT.json",
+        "E2E_CHECKPOINT.json",
     }
 )
 
