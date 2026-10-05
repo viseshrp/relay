@@ -13,6 +13,7 @@ import pytest
 
 from relay.errors import ConfigError, PersistenceError
 from relay.execution import huey_app
+from relay.execution.cancellation import request_cancellation
 from relay.execution.control import ControlResult
 from relay.execution.reconcile import reconcile_once
 from relay.execution.recovery import prepare_recovery_workspace
@@ -166,8 +167,13 @@ def test_a_rerun_in_preparation_rejects_a_concurrent_request(
 
 
 @pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("cancel_stage", [None, "before_dispatch", "after_claim"])
 def test_rerunning_a_child_reopens_its_failed_iteration_summaries(
-    project: RelayProject, engine: InlineEngine, tmp_path: Path, nested: bool
+    project: RelayProject,
+    engine: InlineEngine,
+    tmp_path: Path,
+    nested: bool,
+    cancel_stage: str | None,
 ) -> None:
     marker = str(tmp_path / "second-try")
     script = (
@@ -238,10 +244,34 @@ def test_rerunning_a_child_reopens_its_failed_iteration_summaries(
     assert result is ControlResult.ACCEPTED
     assert all(node_statuses(run_id)[scope] == "running" for scope in summaries)
     assert node_statuses(run_id)[parent + ".before"] == "succeeded"
-    dispatch_ready_nodes(store, run_id, engine.tokens.append)
-    engine.drain(run_id)
-    assert run_status(run_id) == "succeeded"
-    assert all(node_statuses(run_id)[scope] == "succeeded" for scope in summaries)
+    if cancel_stage == "after_claim":
+        dispatch_ready_nodes(store, run_id, engine.tokens.append)
+        coordinator = store.claim_dispatch(engine.tokens.popleft(), "worker").attempt
+        assert coordinator is not None
+        assert request_cancellation(store, run_id, "cancel-retry") is ControlResult.ACCEPTED
+        assert run_status(run_id) == "canceling"
+        assert node_statuses(run_id)[summaries[0]] == "running"
+        if nested:
+            assert node_statuses(run_id)[summaries[1]] == "canceled"
+        store.record_loop_iteration(
+            coordinator.node_run_id, summaries[0], 1, OutcomeKind.FAILED, {}
+        )
+        store.finish_attempt(
+            coordinator.attempt_id,
+            ExecutionOutcome(OutcomeKind.FAILED, stop_reason=AttemptStopReason.CANCELED),
+            coordinator.starting_head,
+        )
+        assert run_status(run_id) == "canceled"
+        assert node_statuses(run_id)[summaries[0]] == "failed"
+    elif cancel_stage == "before_dispatch":
+        assert request_cancellation(store, run_id, "cancel-retry") is ControlResult.ACCEPTED
+        assert run_status(run_id) == "canceled"
+        assert all(node_statuses(run_id)[scope] == "canceled" for scope in summaries)
+    else:
+        dispatch_ready_nodes(store, run_id, engine.tokens.append)
+        engine.drain(run_id)
+        assert run_status(run_id) == "succeeded"
+        assert all(node_statuses(run_id)[scope] == "succeeded" for scope in summaries)
     assert (
         NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__node_id="before").count() == 1
     )

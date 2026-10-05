@@ -2801,6 +2801,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                 NodeStatus.DISPATCHED.value,
             ),
         )
+        canceled_loops = {
+            _string(node, "scope_path")
+            for node in nodes
+            if _string(node, "node_type") == NodeType.LOOP.value
+        }
         for node in nodes:
             transition = transition_node(_string(node, "status"), "fail_fast")
             _set_model_field(node, "status", transition.status)
@@ -2818,6 +2823,35 @@ class DjangoExecutionStore(DjangoAgentStore):
                     "status": transition.status,
                 },
                 node=node,
+            )
+        if not canceled_loops:
+            return
+        summaries = NodeRun.objects.select_for_update().filter(
+            run=run,
+            node_type=NodeType.LOOP.value,
+            status=NodeStatus.RUNNING.value,
+            attempts__isnull=True,
+        )
+        for summary in summaries:
+            # root.repeat#1 belongs to root.repeat; root.outer#1.inner#2
+            # belongs to root.outer#1.inner, preserving the enclosing iteration.
+            coordinator = sibling_scope(_string(summary, "scope_path"), _string(summary, "node_id"))
+            if coordinator not in canceled_loops:
+                continue
+            # A summary has no attempt to drain if its loop never starts.
+            # Active loops keep their summaries until the child scope settles.
+            _set_model_field(summary, "status", NodeStatus.CANCELED.value)
+            summary.save(update_fields=("status",))
+            _append_event(
+                run,
+                "node.canceled",
+                EventSource.NODE,
+                {
+                    "scope_path": _string(summary, "scope_path"),
+                    "node_type": NodeType.LOOP.value,
+                    "status": NodeStatus.CANCELED.value,
+                },
+                node=summary,
             )
 
     def _fan_out_fail_fast(self, run: Run, failed_attempt: NodeAttempt) -> None:

@@ -76,7 +76,9 @@ transition table. Their status reflects the child scope. Rerunning a failed
 child marks its enclosing failed iteration summaries `running`, such as
 `root.repeat#1` for `root.repeat#1.check`. When that scope settles, its summary
 becomes `waiting`, `failed`, or `succeeded` again. Completed iterations retain
-their result.
+their result. Canceling a retry before its loop coordinator starts marks its
+unfinished iteration summaries `canceled`; they have no attempt to drain.
+An active coordinator keeps its summary until the child scope settles.
 
 ### Human interactions
 
