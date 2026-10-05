@@ -29,6 +29,7 @@ from relay.errors import (
     AgentAuthError,
     AgentConfigurationError,
     AgentProtocolError,
+    AgentUsageLimitError,
     ModelSelectionRejectedError,
     ModelSelectorError,
     ModelUnavailableError,
@@ -59,6 +60,7 @@ from .models import (
     ProbeRequirement,
     ProbeResult,
 )
+from .usage_limits import ProviderUsageLimit, claude_usage_limit
 
 LOGGER = logging.getLogger(__name__)
 _AUTH_REQUIRED_CODE = RequestError.auth_required().code
@@ -263,6 +265,7 @@ class RelayAcpClient:
     interaction_lock: asyncio.Lock
     feedback: list[str]
     turn: int
+    usage_limit: ProviderUsageLimit | None
 
     agent: acp.Agent | None
 
@@ -286,6 +289,7 @@ class RelayAcpClient:
         self.interaction_lock = asyncio.Lock()
         self.feedback = []
         self.turn = 0
+        self.usage_limit = None
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -375,6 +379,19 @@ class RelayAcpClient:
                 context={"agent": self.profile.agent_id},
             )
             await self._cancel_session()
+        if (
+            isinstance(update, schema.UsageUpdate)
+            and self.profile.agent_id == "claude"
+            and isinstance(update.field_meta, dict)
+            and "_claude/rateLimit" in update.field_meta
+        ):
+            self.usage_limit = claude_usage_limit(update.field_meta)
+            if self.usage_limit is not None and self.event_queue is not None:
+                await self.event_queue.put(
+                    AgentEvent(
+                        "agent.usage_limit", {**self.usage_limit.payload(), "turn": self.turn}
+                    )
+                )
         if self.event_queue is not None:
             for event in normalize_acp_update(update):
                 await self.event_queue.put(
@@ -965,6 +982,25 @@ class AcpDriver:
                     error_code,
                 )
         except Exception as error:
+            # The typed error identifies the limit; a separate namespaced
+            # usage update identifies the reset. Context-token counts do neither.
+            if (
+                self.profile.agent_id == "claude"
+                and isinstance(error, RequestError)
+                and isinstance(error.data, dict)
+                and error.data.get("errorKind") == "rate_limit"
+                and requested_stop is None
+            ):
+                limit = client.usage_limit or ProviderUsageLimit()
+                self.result = AgentResult(
+                    False,
+                    "failed",
+                    self.process.returncode if self.process is not None else None,
+                    AgentUsageLimitError.error_code,
+                    usage_limit=limit,
+                )
+                yield AgentEvent("agent.usage_limit", {**limit.payload(), "turn": client.turn})
+                return
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,

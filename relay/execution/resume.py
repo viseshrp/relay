@@ -9,7 +9,10 @@ from hashlib import sha256
 import threading
 from typing import Protocol
 
+from relay.errors import PersistenceError
 from relay.execution.control import ControlResult, valid_idempotency_key
+from relay.manage import MigrationLock
+from relay.paths import data_dir
 
 _RERUN_GUARD: LockType = threading.Lock()
 _ACTIVE_RERUNS: set[str] = set()
@@ -60,6 +63,8 @@ class ResumeStore(Protocol):
 
     def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
 
+    def activate_usage_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
+
     def activate_interrupted_run(self, run_id: str, idempotency_key: str) -> bool: ...
 
 
@@ -69,6 +74,8 @@ def rerun_failed_node(
     scope_path: str,
     idempotency_key: str,
     prepare_workspace: Callable[[RecoveryTarget], None],
+    *,
+    usage_reset: bool = False,
 ) -> ControlResult:
     """Preserve/reset first, then reopen only the selected failed node."""
     if not valid_idempotency_key(idempotency_key):
@@ -77,17 +84,28 @@ def rerun_failed_node(
         # The first request has not committed its durable rerun event yet, so
         # reporting it as applied would make a failed preparation look successful.
         return ControlResult.STALE
+    # The consumer's scheduled recovery and the web owner's manual retry share
+    # this kernel lock. It is released by the OS even if either process crashes.
+    # `../run` becomes a fixed hexadecimal filename, never a path component.
+    filename = sha256(run_id.encode()).hexdigest()
+    lock = MigrationLock(data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0)
     try:
+        try:
+            lock.__enter__()
+        except PersistenceError:
+            return ControlResult.STALE
         target = store.manual_rerun_target(run_id, scope_path, idempotency_key)
         if target is None:
             return ControlResult.ALREADY_APPLIED
         prepare_workspace(target)
-        return (
-            ControlResult.ACCEPTED
-            if store.activate_recovery(target, idempotency_key)
-            else ControlResult.ALREADY_APPLIED
+        activated = (
+            store.activate_usage_recovery(target, idempotency_key)
+            if usage_reset
+            else store.activate_recovery(target, idempotency_key)
         )
+        return ControlResult.ACCEPTED if activated else ControlResult.ALREADY_APPLIED
     finally:
+        lock.__exit__(None, None, None)
         _release_local_rerun(run_id)
 
 

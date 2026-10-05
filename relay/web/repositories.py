@@ -143,6 +143,7 @@ from .models import (
     RunEvent,
     RunLock,
     RunSnapshot,
+    UsageRetry,
     WorkflowDraft,
 )
 
@@ -724,6 +725,7 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     ended = RunEvent.objects.filter(attempt=attempt, type="attempt.ended").order_by("-id").first()
     message = _mapping(ended, "payload").get("error_message") if ended else None
     provider_message, truncated = _provider_failure_message(attempt)
+    retry = UsageRetry.objects.filter(run=run, attempt=attempt).first()
     return {
         "scope_path": _string(_related(attempt, "node_run", NodeRun), "scope_path"),
         "attempt_number": _integer(attempt, "attempt_number"),
@@ -735,6 +737,15 @@ def _run_problem(run: Run) -> dict[str, object] | None:
         "message": message if isinstance(message, str) else None,
         "provider_message": provider_message,
         "provider_message_truncated": truncated,
+        "retry": (
+            {
+                "state": _string(retry, "state"),
+                "reset_at": retry.reset_at.isoformat() if retry.reset_at is not None else None,
+                "error_message": retry.error_message,
+            }
+            if retry is not None
+            else None
+        ),
     }
 
 
@@ -3149,6 +3160,29 @@ class DjangoExecutionStore(DjangoAgentStore):
                             _set_model_field(run, "failure_code", outcome.error_code or stop_reason)
                             _set_model_field(run, "failure_summary", failure_message)
                             run.save(update_fields=("status", "failure_code", "failure_summary"))
+                            if outcome.usage_limit is not None:
+                                limit = outcome.usage_limit
+                                _retry, _created = UsageRetry.objects.update_or_create(
+                                    run=run,
+                                    defaults={
+                                        "attempt": attempt,
+                                        "reset_at": limit.reset_at,
+                                        "state": "scheduled"
+                                        if limit.reset_at is not None
+                                        else "blocked",
+                                        "error_message": None,
+                                    },
+                                )
+                                _append_event(
+                                    run,
+                                    "run.retry_scheduled"
+                                    if limit.reset_at is not None
+                                    else "run.retry_blocked",
+                                    EventSource.RUN,
+                                    {**limit.payload(), "scope_path": _string(node, "scope_path")},
+                                    node=node,
+                                    attempt=attempt,
+                                )
                             _append_event(
                                 run,
                                 run_transition.event,
@@ -3806,6 +3840,22 @@ class DjangoExecutionStore(DjangoAgentStore):
                 if duplicate:
                     return ControlResult.ALREADY_APPLIED
                 status = _string(run, "status")
+                retry = (
+                    UsageRetry.objects.select_for_update()
+                    .filter(run=run, state="scheduled")
+                    .first()
+                )
+                if retry is not None:
+                    _set_model_field(retry, "state", "canceled")
+                    retry.save(update_fields=("state",))
+                    _append_event(
+                        run,
+                        "run.retry_canceled",
+                        EventSource.RUN,
+                        {"idempotency_key": idempotency_key},
+                    )
+                    if status == RunStatus.FAILED.value:
+                        return ControlResult.ACCEPTED
                 if status in {RunStatus.PENDING.value, RunStatus.INTERRUPTED.value}:
                     return ControlResult.STALE
                 if status in {
@@ -3947,6 +3997,69 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not find the requested failed-node rerun target."
             raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
 
+    def resume_usage_retries(self) -> int:
+        """Recover due provider limits once through the existing failed-node path."""
+        from relay.execution.recovery import prepare_recovery_workspace
+        from relay.execution.resume import rerun_failed_node
+
+        if Instance.objects.filter(shutdown_requested=True).exists():
+            return 0
+        resumed = 0
+        due = list(
+            UsageRetry.objects.select_related("attempt__node_run")
+            .filter(
+                state="scheduled", reset_at__lte=timezone.now(), run__status=RunStatus.FAILED.value
+            )
+            .order_by("reset_at", "pk")[:RECONCILE_MAX_ITEMS]
+        )
+        for retry in due:
+            run_id = str(retry.run_id)
+            attempt = _related(retry, "attempt", NodeAttempt)
+            node = _related(attempt, "node_run", NodeRun)
+            scope = _string(node, "scope_path")
+            try:
+                unrelated_failure = any(
+                    not scope_is_ancestor(other, scope)
+                    for other in NodeRun.objects.filter(
+                        run_id=run_id, status=NodeStatus.FAILED.value
+                    ).values_list("scope_path", flat=True)
+                )
+                if unrelated_failure:
+                    message = "Another failed step must be resolved before automatic recovery."
+                    raise PersistenceError(message)  # noqa: TRY301
+                result = rerun_failed_node(
+                    self,
+                    run_id,
+                    scope,
+                    f"quota:{_identifier(attempt)}",
+                    lambda target: prepare_recovery_workspace(self, target),
+                    usage_reset=True,
+                )
+                if result is ControlResult.ACCEPTED:
+                    resumed += 1
+            except Exception as error:
+                LOGGER.exception("Scheduled provider recovery failed", extra={"run_id": run_id})
+                message = (
+                    error.message
+                    if isinstance(error, RelayError)
+                    else "Relay could not prepare the failed step for its scheduled retry."
+                )
+                with transaction.atomic():
+                    updated = UsageRetry.objects.filter(pk=retry.pk, state="scheduled").update(
+                        state="blocked", error_message=message[:RUN_PROBLEM_TEXT_MAX_CHARS]
+                    )
+                    if updated:
+                        run = Run.objects.get(pk=run_id)
+                        _append_event(
+                            run,
+                            "run.retry_blocked",
+                            EventSource.RUN,
+                            {"scope_path": scope, "message": message[:RUN_PROBLEM_TEXT_MAX_CHARS]},
+                            node=node,
+                            attempt=attempt,
+                        )
+        return resumed
+
     def interrupted_targets(self) -> tuple[RecoveryTarget, ...]:
         try:
             targets = []
@@ -3991,6 +4104,28 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not enumerate interrupted runs."
             raise PersistenceError(message) from None
 
+    def activate_usage_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool:
+        """Recheck reset authorization after workspace preparation and owner actions."""
+        try:
+            with transaction.atomic():
+                run = Run.objects.select_for_update().get(pk=target.run_id)
+                retry = (
+                    UsageRetry.objects.select_for_update()
+                    .filter(
+                        run=run,
+                        attempt_id=target.attempt_id,
+                        state="scheduled",
+                        reset_at__lte=timezone.now(),
+                    )
+                    .first()
+                )
+                if retry is None or _string(run, "status") != RunStatus.FAILED.value:
+                    return False
+                return self.activate_recovery(target, idempotency_key)
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not authorize the scheduled usage retry."
+            raise PersistenceError(message, context={"run": target.run_id}) from None
+
     def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool:
         if target.interrupted:
             return self.activate_interrupted_run(target.run_id, idempotency_key)
@@ -4005,6 +4140,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ).exists()
                 if duplicate:
                     return False
+                UsageRetry.objects.filter(run=run, state="scheduled").update(state="resumed")
                 run_transition = transition_run(_string(run, "status"), "manual_rerun")
                 _set_model_field(run, "status", run_transition.status)
                 _set_model_field(run, "failure_code", None)

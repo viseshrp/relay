@@ -268,7 +268,7 @@ RUN_TRANSITIONS: tuple[Transition, ...] = (
     Transition(
         RunStatus.FAILED,
         "manual_rerun",
-        "owner_requested_failed_node",
+        "owner_requested_or_confirmed_usage_reset",
         RunStatus.RUNNING,
         "run.rerun",
     ),

@@ -29,7 +29,7 @@ target state already holds is a no-op.
 | `running` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `paused_wait` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `interrupted` | `restart_reconcile` | `snapshot_and_artifacts_valid` | `running` | `run.resumed` |
-| `failed` | `manual_rerun` | `owner_requested_failed_node` | `running` | `run.rerun` |
+| `failed` | `manual_rerun` | `owner_requested_or_confirmed_usage_reset` | `running` | `run.rerun` |
 <!-- relay-transitions:run:end -->
 
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
@@ -118,8 +118,33 @@ unclaimed dispatches. It never re-enqueues a claim once an attempt began.
 Concurrent scheduling passes recheck the node inside the Relay transaction.
 If another caller already started, finished, or canceled it, the stale dispatch
 does nothing. Duplicate deliveries of an existing claim still create one attempt.
-`run_node_attempt` is declared with `retries=0`; Relay does not retry a failed,
-lost, timed-out, canceled, or soft-denied attempt.
+`run_node_attempt` is declared with `retries=0`. Queue delivery never retries an
+attempt. A confirmed provider usage reset can authorize a fresh failed-node
+recovery as described below; other failures require an owner retry.
+
+### Provider usage resets
+
+Claude's typed ACP `errorKind: rate_limit` identifies a usage-limit failure.
+Only a rejected `_claude/rateLimit` update with a valid future `resetsAt`
+authorizes automatic recovery. Warning windows, context-token counts, private
+thoughts, and reset times in prose never authorize it. An unknown or expired
+reset leaves the run visibly blocked for manual recovery.
+
+Relay stores the initiating attempt and UTC reset in `UsageRetry`. The run
+remains failed while waiting. The consumer's bounded reconciliation pass
+recovers that step at or after the reset, once the fail-fast drain is complete.
+The schedule survives process restarts. A fresh database connection reads the
+same due row; no browser tab or external chat scheduler is required. Another
+independent failed step or a workspace-preparation error blocks recovery and
+records its reason rather than repeatedly launching the provider.
+
+Automatic and manual recovery share a kernel lock across web and worker
+processes. Recovery preserves partial evidence before reset and reuses the
+run's frozen prompts, routes, model, effort, and permissions. Completed nodes,
+their outputs, and the protected writer head remain intact. A new attempt that
+hits another limit needs a new confirmed future reset. Owner cancellation
+removes the schedule, and an owner retry supersedes it. Shutdown suspends
+reconciliation without losing a pending schedule.
 
 ## Controls and waits
 
@@ -224,7 +249,7 @@ and its loop or subworkflow parents so the synchronous scope can reach that
 leaf. Successful nodes remain complete. Nodes canceled only by fail-fast return
 to `pending` and have eligibility recomputed. If a separate concurrent failure
 remains, the run returns to `failed` after the selected rerun settles. This is a
-new attempt initiated by the owner, not an automatic retry.
+new attempt initiated by the owner or a confirmed provider usage reset.
 
 During orderly shutdown, interrupted attempts in canceling runs end as
 `canceled`. Successful and failed results keep their original outcome while

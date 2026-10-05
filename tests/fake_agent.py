@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 from acp import PROTOCOL_VERSION, RequestError
 
@@ -195,6 +196,34 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode in {"quota", "quota-unknown"}:
+                self.update(
+                    {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "Usage limit reached."},
+                    }
+                )
+                if self.mode == "quota":
+                    self.update(
+                        {
+                            "sessionUpdate": "usage_update",
+                            "used": 10,
+                            "size": 100,
+                            "_meta": {
+                                "_claude/rateLimit": {
+                                    "status": "rejected",
+                                    "resetsAt": time.time() + 3600,
+                                    "rateLimitType": "five_hour",
+                                }
+                            },
+                        }
+                    )
+                    # Context accounting after the rejection must not erase its reset.
+                    self.update({"sessionUpdate": "usage_update", "used": 10, "size": 100})
+                self.error(
+                    request_id, RequestError.internal_error(data={"errorKind": "rate_limit"})
+                )
+                return
             if self.mode == "feedback" and self.prompt_count == 1:
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
                 emit(

@@ -67,11 +67,12 @@ to change that effort.
 - [x] Show the failed step, failure description or exit code, and the provider's
   last public message at the top of the run. Keep quota notices and reported
   reset times visible after reload, without replaying the entire activity log.
-- [ ] Recognize structured provider usage limits and preserve the failed step
-  for an automatic resume after the reset
-  without changing its model or reasoning effort. Use structured provider data
-  where available; do not guess reset times or retry blindly. A chat continuation
-  currently handles this outside Relay.
+- [x] Recognize structured provider usage limits and preserve the failed step
+  for an automatic resume after the reset without changing its model or
+  reasoning effort. Claude's typed rejection and confirmed reset now create a
+  durable schedule in Relay. Missing or stale resets remain visibly blocked;
+  cancellation removes the schedule. No reset times are guessed. See
+  [Provider usage resets](execution.md#provider-usage-resets).
 - [ ] Restore supervision when a lost supervisor leaves its web or worker
   children running. Verify ownership and protect against reused process IDs
   before stopping or reusing children. Preserve completed runs and avoid

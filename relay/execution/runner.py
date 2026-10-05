@@ -13,6 +13,7 @@ import threading
 import time
 from typing import Protocol, TypeAlias
 
+from relay.agents.usage_limits import ProviderUsageLimit
 from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, RelayError
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
@@ -170,6 +171,7 @@ class ExecutionOutcome:
     error_code: str | None = None
     wait_timeout_seconds: float | None = None
     error_message: str | None = None
+    usage_limit: ProviderUsageLimit | None = None
 
 
 class AttemptExecutor(Protocol):

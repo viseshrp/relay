@@ -19,7 +19,7 @@ from relay.constants import (
 )
 from relay.execution.state import TERMINAL_RUN_STATUSES
 
-from ..models import Run, RunEvent
+from ..models import Run, RunEvent, UsageRetry
 from . import log_context_value
 
 LOGGER = logging.getLogger(__name__)
@@ -105,7 +105,11 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
             if len(rows) == SSE_MAX_BATCH:
                 continue
             status = await Run.objects.filter(pk=run_id).values_list("status", flat=True).afirst()
-            if status is None or status in _TERMINAL:
+            scheduled = (
+                status == "failed"
+                and await UsageRetry.objects.filter(run_id=run_id, state="scheduled").aexists()
+            )
+            if status is None or (status in _TERMINAL and not scheduled):
                 return
             await asyncio.sleep(SSE_POLL_INTERVAL_SECONDS)
     except asyncio.CancelledError:

@@ -216,8 +216,14 @@ step** selects that step in the progress view. Provider quota notices and reset
 times stay visible above Activity, including after a reload and in older runs
 whose saved failure summary is empty. Reset times and time zones keep the
 provider's wording. Relay does not infer subscription limits from context-token
-usage, inspect private thoughts, or schedule a quota retry from this notice.
-An external continuation may retry the failed step after the reported reset.
+usage or inspect private thoughts. When the provider supplies a structured,
+rejected usage window and a confirmed future reset, the notice shows the
+automatic retry time in your local time zone and offers **Cancel automatic
+retry**. Relay's consumer resumes the same step with its frozen settings; the
+schedule survives a restart. Keep Relay running for it to execute when due.
+The stream stays connected while that schedule is pending. A missing reset or
+a recovery failure shows why automatic retry is blocked. Public prose-only
+reset messages still require a manual retry.
 Completed steps remain saved. Starting a retry clears the old failure notice;
 a new failure shows its own cause. Long provider messages show a partial-text
 notice, with their full recorded text available in Activity.

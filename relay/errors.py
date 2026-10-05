@@ -154,6 +154,14 @@ class AgentProtocolError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_BAD_GATEWAY
 
 
+class AgentUsageLimitError(RelayError):
+    """The provider rejected a request because its usage window is full."""
+
+    error_code: ClassVar[str] = "agent_usage_limit"
+    cli_exit_code: ClassVar[int] = constants.EXIT_AGENT_ERROR
+    http_status: ClassVar[int] = constants.HTTP_BAD_GATEWAY
+
+
 class AgentConfigurationError(RelayError):
     error_code: ClassVar[str] = "agent_configuration_error"
     cli_exit_code: ClassVar[int] = constants.EXIT_MODEL_ERROR
@@ -207,6 +215,7 @@ __all__ = [
     "AgentDiscoveryError",
     "AgentLaunchError",
     "AgentProtocolError",
+    "AgentUsageLimitError",
     "ArtifactPreservationError",
     "CancellationError",
     "CommitValidationError",

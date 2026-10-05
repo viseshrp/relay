@@ -164,6 +164,11 @@ export interface RunProblem {
   message: string | null;
   provider_message: string | null;
   provider_message_truncated: boolean;
+  retry?: {
+    state: "scheduled" | "blocked" | "canceled" | "resumed";
+    reset_at: string | null;
+    error_message: string | null;
+  } | null;
 }
 
 export interface RunEvent {

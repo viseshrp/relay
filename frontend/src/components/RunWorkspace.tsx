@@ -58,6 +58,9 @@ const EVENT_TYPES = [
   "run.interrupted",
   "run.succeeded",
   "run.rerun",
+  "run.retry_scheduled",
+  "run.retry_blocked",
+  "run.retry_canceled",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
   "resource.cleanup_succeeded",
@@ -82,6 +85,7 @@ const EVENT_TYPES = [
   "agent.tool_result",
   "agent.plan",
   "agent.provider_event",
+  "agent.usage_limit",
   "agent.result",
   "agent.stderr",
   "agent.cleanup_warning",
@@ -379,7 +383,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setDetail((current) => live.reduce(applyStateEvent, current));
     const interactionChanged = live.some((item) => item.type === "attempt.ended"
       || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
-    if (interactionChanged || live.some((item) => item.type === "node.created")) {
+    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type.startsWith("run.retry_"))) {
       void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
         setError(errorMessage(caught)),
       );
@@ -470,7 +474,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       completionCheck = loadDetailCollection("nodes", 0, "refresh")
         .then((run) => {
           if (disposed || currentRun.current !== selectedRun) return;
-          if (TERMINAL_RUNS.has(run.status)) {
+          if (TERMINAL_RUNS.has(run.status) && run.problem?.retry?.state !== "scheduled") {
             source.close();
             setStreamState("complete");
           }
@@ -486,8 +490,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       if (batch.length === 0) return;
       setEvents((current) => mergeEvents(current, batch));
       applyLiveUpdates(batch);
-      if (batch.some((item) => item.id > stateAfter.current && item.type.startsWith("run.")
-        && typeof item.payload.status === "string" && TERMINAL_RUNS.has(item.payload.status))) checkCompletion();
+      if (batch.some((item) => item.id > stateAfter.current && (
+        item.type.startsWith("run.retry_") || item.type.startsWith("run.")
+          && typeof item.payload.status === "string" && TERMINAL_RUNS.has(item.payload.status)
+      ))) checkCompletion();
     };
     setStreamState("connecting");
     source.onopen = () => setStreamState("live");
@@ -668,7 +674,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
                 </Stack>
                 {detail.problem && ["failed", "canceling"].includes(detail.status)
-                  ? <RunProblemNotice problem={detail.problem} onShowStep={setSelectedStage} />
+                  ? <RunProblemNotice problem={detail.problem} onShowStep={setSelectedStage} onCancelRetry={() => void cancelRun()} />
                   : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>

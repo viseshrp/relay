@@ -528,6 +528,12 @@ class RoutedAgentNodeDriver:
             stop_reason=_stop_reason(result),
             exit_code=result.exit_code,
             error_code=result.error_code,
+            error_message=(
+                "The provider's usage limit stopped this step."
+                if result.usage_limit is not None
+                else None
+            ),
+            usage_limit=result.usage_limit,
         )
 
 

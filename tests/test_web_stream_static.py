@@ -18,6 +18,7 @@ import pytest
 from relay.constants import DATABASE_INTEGER_MAX, SSE_MAX_FRAME_BYTES
 from relay.errors import ConfigError, ProjectDiscoveryError
 from relay.web.models import RunEvent
+from relay.web.repositories import DjangoExecutionStore
 from relay.web.views import (
     api_errors,
     canonical_record_id,
@@ -26,6 +27,7 @@ from relay.web.views import (
     log_context_value,
 )
 from tests.support import InlineEngine, RelayProject
+from tests.test_usage_retries import limited_run
 
 
 @pytest.fixture
@@ -78,6 +80,26 @@ def test_a_terminal_run_replays_every_event_and_ends(finished_run: str) -> None:
     assert status == 200
     assert frame_ids(chunks) == stored
     assert json.loads(chunks[0].split("data: ", 1)[1])["type"] == "run.created"
+
+
+def test_a_scheduled_failed_run_streams_until_the_owner_cancels_its_retry(
+    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    run_id = limited_run(project, engine, timezone.now() + timedelta(hours=1))
+
+    async def cancel_at_poll(_interval: float) -> None:
+        await sync_to_async(DjangoExecutionStore().request_run_cancellation)(
+            run_id, "stop-schedule"
+        )
+
+    monkeypatch.setattr("relay.web.views.stream.asyncio.sleep", cancel_at_poll)
+    status, chunks, _body = stream(f"/api/runs/{run_id}/stream")
+    assert status == 200
+    assert any('"type":"run.retry_canceled"' in chunk for chunk in chunks)
 
 
 @pytest.mark.parametrize("header", [False, True], ids=["url-cursor", "header-takes-priority"])

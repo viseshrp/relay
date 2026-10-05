@@ -162,6 +162,12 @@ by `"resets 1:50pm"` becomes `"Limit · resets 1:50pm"`. The notice is capped at
 4,096 characters and flags omitted text. Full events remain in the event API.
 `problem` is `null` for active retries, completed, canceled, and interrupted
 runs; launch failures without an attempt retain `failure_summary` instead.
+`problem.retry` is `null` or contains `state`, UTC ISO-8601 `reset_at`, and
+`error_message`. States are `scheduled`, `blocked`, `canceled`, and `resumed`.
+Only structured provider rejection metadata authorizes `scheduled`. A failed
+run with a pending schedule keeps its SSE stream open so automatic recovery is
+visible without reloading. Canceling or blocking the schedule lets a terminal
+stream finish. Ordinary failed runs still end their stream.
 Artifact pages use the same numeric cursor rule. The browser merges pages by
 record ID, so loading another page cannot duplicate an item.
 
@@ -192,6 +198,10 @@ numeric ID as `id`. Attempt payloads also contain `scope_path` and
 | `agent.result` | `agent` | Antigravity's result object with `response` and `structured_output` omitted. Agent response deltas use `agent.message`. |
 | `agent.cleanup_warning` | `agent` | `{"message":"The ACP session may remain in the agent's history."}` when session close fails. |
 | `agent.turn_started` | `agent` | One-based `turn` for a prompt in the current session. Message boundaries remain separate between turns. |
+| `agent.usage_limit` | `agent` | `reset_at` (UTC ISO-8601 or null), `window` (provider window or null), and `turn`; only a typed usage-limit failure authorizes recovery. |
+| `run.retry_scheduled` | `run` | `scope_path`, confirmed `reset_at`, and `window` for the initiating failed step. |
+| `run.retry_blocked` | `run` | `scope_path` and reset metadata, or a `message` explaining why workspace recovery stopped. |
+| `run.retry_canceled` | `run` | The owner's cancellation `idempotency_key`; the run remains failed when already drained. |
 | `resource.cleanup_succeeded` | `system` | `{"removed":0}` or the number of marked attempt allocations removed during terminal cleanup. |
 | `resource.cleanup_failed` | `system` | A recoverable `message`; cleanup failure leaves the run's result intact. |
 
@@ -214,6 +224,9 @@ Run cancel and rerun keys are stored in an indexed event column; duplicate
 requests do not scan event payloads. Canceling a run still preparing its
 worktree (`pending`) or awaiting restart reconciliation (`interrupted`) returns
 `stale` (409). Retry with a new key after preparation or reconciliation finishes.
+For a failed run with a scheduled usage retry, `cancel` returns `accepted` and
+cancels that schedule without rewriting the failed attempt. A repeated request
+returns `already_applied`. Manual `rerun-node` supersedes a pending schedule.
 
 | Method and path | JSON body |
 | --- | --- |

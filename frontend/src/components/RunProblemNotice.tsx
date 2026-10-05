@@ -10,6 +10,7 @@ function failureReason(problem: RunProblem): string {
   }
   const reasons: Record<string, string> = {
     agent_protocol_error: "The agent stopped before completing its request.",
+    agent_usage_limit: "The provider's usage limit stopped this step.",
     agent_auth_error: "The agent needs a working sign-in before it can continue.",
     agent_launch_error: "Relay could not start the selected agent.",
     model_unavailable_error: "The selected model is unavailable from the configured tools.",
@@ -26,11 +27,13 @@ function failureReason(problem: RunProblem): string {
     ?? "The step could not finish. Open its activity to inspect the cause.";
 }
 
-export function RunProblemNotice({ problem, onShowStep }: {
+export function RunProblemNotice({ problem, onShowStep, onCancelRetry }: {
   problem: RunProblem;
   onShowStep: (scope: string) => void;
+  onCancelRetry: () => void;
 }) {
-  return <Alert severity="error" sx={{ mt: 2 }}>
+  const scheduled = problem.retry?.state === "scheduled";
+  return <Alert severity={scheduled ? "warning" : "error"} sx={{ mt: 2 }}>
     <Stack spacing={1}>
       <Typography variant="subtitle1" component="h2">
         {stageLabel(problem.scope_path)} stopped
@@ -48,12 +51,20 @@ export function RunProblemNotice({ problem, onShowStep }: {
         </Typography>}
       </>}
       <Typography variant="body2">
-        Completed steps are saved. Retry this step when the cause is resolved.
-        {problem.provider_message && " For a provider limit, wait until its reported reset."}
+        Completed steps are saved. {scheduled && problem.retry?.reset_at
+          ? `Relay will retry this step after ${new Date(problem.retry.reset_at).toLocaleString()}, using the same model and settings. Keep Relay running; a restart keeps this schedule.`
+          : problem.retry?.state === "blocked"
+            ? problem.retry.error_message ?? "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved."
+            : problem.retry?.state === "canceled"
+              ? "Automatic retry is canceled. You can retry this step manually."
+              : "Retry this step when the cause is resolved."}
       </Typography>
       <Button variant="outlined" sx={{ alignSelf: "flex-start" }} onClick={() => onShowStep(problem.scope_path)}>
         Show stopped step
       </Button>
+      {scheduled && <Button variant="outlined" sx={{ alignSelf: "flex-start" }} onClick={onCancelRetry}>
+        Cancel automatic retry
+      </Button>}
     </Stack>
   </Alert>;
 }

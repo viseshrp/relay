@@ -13,6 +13,8 @@ from relay.errors import RelayError
 from relay.execution.runner import AttemptContext
 from relay.workflows.schema import AgentNode
 
+from .usage_limits import ProviderUsageLimit
+
 DriverName = Literal["acp", "antigravity"]
 
 
@@ -215,6 +217,7 @@ class AgentResult:
     exit_code: int | None = None
     error_code: str | None = None
     denied_write_targets: tuple[str, ...] = ()
+    usage_limit: ProviderUsageLimit | None = None
 
 
 @dataclass(frozen=True, slots=True)

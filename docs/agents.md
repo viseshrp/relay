@@ -100,6 +100,14 @@ prompt bytes `Review this file.\n` remain unchanged in their block, while input
 `{"target":"api"}` appears in a separate block headed `Relay inputs (JSON)`.
 Relay never appends an earlier conversation transcript.
 
+Claude ACP usage-limit failures use the adapter's structured `errorKind`
+and `_claude/rateLimit` metadata. Relay retains the rejected reset as an
+`agent.usage_limit` event and schedules recovery only with a confirmed future
+UTC timestamp. This follows the [adapter source](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
+Other adapters and native Antigravity do not currently expose a supported reset
+contract to Relay; their public limit messages remain visible for manual
+recovery. Relay never switches providers or reduces effort to bypass a limit.
+
 Agent prompts also include the node's declared output selectors. File-backed
 `label`, `json_path`, and `yaml_path` selectors require their referenced files;
 an `exists` selector can return false for an absent file. For example,

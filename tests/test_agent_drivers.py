@@ -72,6 +72,19 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     )
 
 
+@pytest.mark.parametrize("agent_context", ["claude"], indirect=True)
+@pytest.mark.parametrize("mode", ["quota", "quota-unknown"])
+def test_claude_limits_use_typed_errors_and_only_confirmed_resets(
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents, mode: str
+) -> None:
+    fake_agents.install("claude", mode=mode)
+    events, result = execute(AcpDriver(PROFILES["claude"], agent_context.command), agent_context)
+    assert not result.succeeded and result.error_code == "agent_usage_limit"
+    assert result.usage_limit is not None
+    assert (result.usage_limit.reset_at is not None) == (mode == "quota")
+    assert any(event.event_type == "agent.usage_limit" for event in events)
+
+
 @pytest.mark.parametrize("agent_context", ["codex", "antigravity"], indirect=True)
 def test_agents_receive_their_declared_output_selectors(
     agent_context: AgentExecutionContext,

@@ -421,6 +421,23 @@ class AgentModelObservation(RelayModel):
         ]
 
 
+class UsageRetry(RelayModel):
+    """One authoritative reset schedule for the initiating failed attempt."""
+
+    run: models.OneToOneField = models.OneToOneField(
+        Run, on_delete=models.CASCADE, related_name="usage_retry"
+    )
+    attempt: models.ForeignKey = models.ForeignKey(NodeAttempt, on_delete=models.CASCADE)
+    reset_at: models.DateTimeField = models.DateTimeField(null=True)
+    state: models.CharField = models.CharField(max_length=16, default="scheduled")
+    error_message: models.TextField = models.TextField(null=True)
+
+    class Meta:
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=("state", "reset_at"), name="relay_usage_retry_due_idx")
+        ]
+
+
 class RunLock(RelayModel):
     """A reader or writer admission lease tied to one live attempt."""
 
