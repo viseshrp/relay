@@ -5,6 +5,13 @@ proposed TODO entries without modifying it.
 
 ## Agent configuration
 
+- [x] Let the owner retry a failed agent step with a different advertised effort.
+  Validate the choice before recovery, keep the original snapshot and earlier
+  attempts, and retain the choice for that step's automatic quota retries.
+  The run monitor's Retry with settings dialog and the failed-node API now
+  support this choice. Focused checks cover default preservation, exact-model
+  validation, unchanged snapshots and earlier attempts, idempotency, browser
+  execution, and native quota recovery.
 - [x] Add an effort dropdown for the selected model. List the effort choices
   supported by that provider and model, and let the user choose. Start with
   **Provider default** selected. Keep the effort override unset unless the user

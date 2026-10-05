@@ -214,6 +214,14 @@ group are automatically cleaned; personal profiles and provider authentication
 remain outside cleanup. See
 [Run-owned resources](projects-and-storage.md#run-owned-resources).
 
+When launching Relay from another process or a service, merge Relay's storage
+overrides into the inherited environment. Replacing the environment with only
+those overrides can hide an existing provider login. Preserve account lookup
+variables such as `USER`, `HOME`, and `USERPROFILE` where the platform supplies
+them. A model-list probe proves model availability; it does not prove that the
+provider can authenticate a prompt. Check the provider's authentication status
+under the same account and environment as the Relay worker.
+
 Both agent transports instruct the agent to keep downloaded skills, scratch
 scripts, and transient files in `temporary_directory` or the inherited temporary
 directory. Task reports still use their prescribed paths. For example,

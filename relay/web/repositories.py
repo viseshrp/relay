@@ -70,7 +70,7 @@ from relay.execution.machine import (
 from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resources import cleanup_run_resources
-from relay.execution.resume import RecoveryTarget
+from relay.execution.resume import RecoveryTarget, RetryEffort
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.scheduler import (
     RunSchedule,
@@ -701,6 +701,23 @@ def _provider_failure_message(attempt: NodeAttempt) -> tuple[str | None, bool]:
     return text[:RUN_PROBLEM_TEXT_MAX_CHARS], truncated
 
 
+def _effective_route(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
+    """Apply owner retry choices without mutating the captured launch route."""
+    scope = _string(node, "scope_path")
+    route = _mapping(snapshot, "route_table").get(scope, {})
+    if not isinstance(route, dict):
+        message = "The snapshotted route entry is invalid."
+        raise PersistenceError(message, context={"node": scope})
+    options = _mapping(node, "retry_options")
+    effort = options.get("effort")
+    if set(options) - {"effort"} or (
+        effort is not None and (not isinstance(effort, str) or not effort)
+    ):
+        message = "The stored retry effort is invalid."
+        raise PersistenceError(message, context={"node": scope})
+    return {**route, **options}
+
+
 def _run_problem(run: Run) -> dict[str, object] | None:
     """Expose the initiating failure independently of node and event pagination."""
     if _string(run, "status") not in {RunStatus.FAILED.value, RunStatus.CANCELING.value}:
@@ -727,11 +744,14 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     message = _mapping(ended, "payload").get("error_message") if ended else None
     provider_message, truncated = _provider_failure_message(attempt)
     retry = UsageRetry.objects.filter(run=run, attempt=attempt).first()
+    node = _related(attempt, "node_run", NodeRun)
+    route = _effective_route(node, _related(run, "snapshot", RunSnapshot))
     return {
-        "scope_path": _string(_related(attempt, "node_run", NodeRun), "scope_path"),
+        "scope_path": _string(node, "scope_path"),
         "attempt_number": _integer(attempt, "attempt_number"),
         "agent_id": _string(attempt, "agent_id"),
         "model_value": _string(attempt, "model_value"),
+        "effort": route.get("effort"),
         "error_code": attempt.error_code,
         "stop_reason": attempt.stop_reason,
         "exit_code": attempt.exit_code,
@@ -2036,17 +2056,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 message = "The stored loop iteration is invalid."
                 raise PersistenceError(message, context={"node": scope_path})
             metadata["loop_index"] = loop_index
-        route_table = _mapping(snapshot, "route_table")
-        route_value = route_table.get(scope_path, {})
-        if not isinstance(route_value, dict):
-            message = "The snapshotted route entry is invalid."
-            raise PersistenceError(message, context={"node": scope_path})
         return _ClaimContext(
             inputs,
             upstream,
             metadata,
             _resolved_prompt_contents(snapshot, frozen),
-            dict(route_value),
+            _effective_route(node, snapshot),
             _mapping(snapshot, "subworkflows"),
         )
 
@@ -3950,6 +3965,8 @@ class DjangoExecutionStore(DjangoAgentStore):
             if ephemeral_reader and attempt is not None
             else primary
         )
+        route = _effective_route(node, _related(run, "snapshot", RunSnapshot))
+        agent_id, model_value = route.get("selected_agent"), route.get("model_value")
         return RecoveryTarget(
             run_id=_identifier(run),
             node_run_id=_identifier(node),
@@ -3966,6 +3983,8 @@ class DjangoExecutionStore(DjangoAgentStore):
             uses_git=uses_git,
             ephemeral_reader=ephemeral_reader,
             interrupted=interrupted,
+            agent_id=agent_id if isinstance(agent_id, str) else None,
+            model_value=model_value if isinstance(model_value, str) else None,
         )
 
     def manual_rerun_target(
@@ -4147,7 +4166,13 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not authorize the scheduled usage retry."
             raise PersistenceError(message, context={"run": target.run_id}) from None
 
-    def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool:
+    def activate_recovery(
+        self,
+        target: RecoveryTarget,
+        idempotency_key: str,
+        *,
+        effort: RetryEffort | None = None,
+    ) -> bool:
         if target.interrupted:
             return self.activate_interrupted_run(target.run_id, idempotency_key)
         try:
@@ -4161,6 +4186,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ).exists()
                 if duplicate:
                     return False
+                if effort is not None:
+                    if _string(node, "node_type") != NodeType.AGENT.value:
+                        message = "Retry effort can only be changed for an agent step."
+                        raise ConfigError(message)
+                    _set_model_field(node, "retry_options", {"effort": effort.value})
+                    node.save(update_fields=("retry_options",))
                 UsageRetry.objects.filter(run=run, state="scheduled").update(state="resumed")
                 run_transition = transition_run(_string(run, "status"), "manual_rerun")
                 _set_model_field(run, "status", run_transition.status)
@@ -4237,6 +4268,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "status": run_transition.status,
                         "idempotency_key": idempotency_key,
                         "scope_path": target.scope_path,
+                        "retry_options": _mapping(node, "retry_options"),
                     },
                     node=node,
                 )

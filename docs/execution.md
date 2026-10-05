@@ -140,8 +140,10 @@ records its reason rather than repeatedly launching the provider.
 
 Automatic and manual recovery share a kernel lock across web and worker
 processes. Recovery preserves partial evidence before reset and reuses the
-run's frozen prompts, routes, model, effort, and permissions. Completed nodes,
-their outputs, and the protected writer head remain intact. A new attempt that
+run's frozen prompts, routes, model, permissions, and current effort choice.
+An explicit owner retry can replace that step's effort as described below.
+Completed nodes, their outputs, and the protected writer head remain intact.
+A new attempt that
 hits another limit needs a new confirmed future reset. Owner cancellation
 removes the schedule, and an owner retry supersedes it. Shutdown suspends
 reconciliation without losing a pending schedule.
@@ -250,6 +252,14 @@ leaf. Successful nodes remain complete. Nodes canceled only by fail-fast return
 to `pending` and have eligibility recomputed. If a separate concurrent failure
 remains, the run returns to `failed` after the selected rerun settles. This is a
 new attempt initiated by the owner or a confirmed provider usage reset.
+
+An owner retry may explicitly change an agent step's effort to a value freshly
+advertised for its existing model, or request the provider default. Relay stores
+the choice on that node and in the `run.rerun` event, separately from the
+immutable launch snapshot. Only its new attempts use that effort. Completed
+nodes, previous attempts, prompts, model, permissions, and snapshot hashes keep
+their captured values. The choice survives restart and later automatic quota
+recovery. Omitting the choice keeps the step's current effort.
 
 During orderly shutdown, interrupted attempts in canceling runs end as
 `canceled`. Successful and failed results keep their original outcome while

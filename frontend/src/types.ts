@@ -158,6 +158,7 @@ export interface RunProblem {
   attempt_number: number;
   agent_id: string;
   model_value: string;
+  effort?: string | null;
   error_code: string | null;
   stop_reason: string | null;
   exit_code: number | null;

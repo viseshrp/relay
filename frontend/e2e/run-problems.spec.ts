@@ -78,3 +78,58 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   await expect(page.getByText("You've hit your session limit · resets 1:50pm (UTC)", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("alert")).toContainText("The tool exited with code 1.");
 });
+
+test("an owner can retry an agent with advertised effort while keeping its snapshot", async ({ page }, testInfo) => {
+  await page.request.get("/api/auth");
+  const csrf = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
+  expect((await page.request.post("/api/auth/login", {
+    headers: { "X-CSRFToken": csrf?.value ?? "" },
+    data: { username: "owner", password: "Relay-Test-Passphrase-2026!" },
+  })).ok()).toBeTruthy();
+  const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
+  const headers = { "X-CSRFToken": token?.value ?? "" };
+  expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
+  const created = await page.request.post("/api/workflows", {
+    headers, data: { key: "retry-effort", holder, yaml: stringify({
+      version: 1, name: "Retry effort", model: "m2", agents: ["claude"],
+      nodes: { review: {
+        type: "agent", agent_options: { claude: { effort: "low", permission_mode: "auto" } },
+        // The wire-level fake writes no artifact, so validation fails after its turn.
+        outputs: { verdict: { json_path: { artifact: "result.json", path: "verdict" } } },
+      } },
+    }) },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const launched = await page.request.post("/api/runs", {
+    headers, data: { workflow_key: "retry-effort", inputs: {}, cleanup_policy: "retain" },
+  });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const { run_id: runId } = await launched.json();
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
+  const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  await page.goto(`/?view=runs&run=${runId}`);
+  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
+  await expect(dialog).toContainText("Keep current effort (low)");
+  await dialog.getByRole("combobox", { name: "Effort", exact: true }).click();
+  await page.getByRole("option", { name: "Medium", exact: true }).click();
+  const submitted = page.waitForResponse((response) => response.url().endsWith(`/api/runs/${runId}/rerun-node`));
+  await dialog.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  const response = await submitted;
+  expect(response.status(), await response.text()).toBe(202);
+  expect(response.request().postDataJSON().effort).toBe("medium");
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => {
+    const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+    return [run.status, run.problem?.attempt_number, run.problem?.effort];
+  }).toEqual(["failed", 2, "medium"]);
+  const after = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  expect(after.snapshot).toEqual(before.snapshot);
+  const events = (await (await page.request.get(`/api/runs/${runId}/events?since=${before.event_cursor}`)).json()).events;
+  expect(events.some((event: { payload: { text?: string } }) => event.payload.text === "config: model=m2;effort=medium;mode=auto")).toBeTruthy();
+  await page.screenshot({ path: testInfo.outputPath("retry-effort.png"), fullPage: true });
+});

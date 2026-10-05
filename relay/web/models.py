@@ -198,6 +198,7 @@ class NodeRun(RelayModel):
     node_id: models.TextField = models.TextField()
     node_type: models.CharField = models.CharField(max_length=16, choices=NodeType.choices())
     frozen_def: models.JSONField = models.JSONField(default=dict)
+    retry_options: models.JSONField = models.JSONField(default=dict)
     scope_inputs: models.JSONField = models.JSONField(default=dict)
     outputs: models.JSONField = models.JSONField(default=dict)
     status: models.CharField = models.CharField(

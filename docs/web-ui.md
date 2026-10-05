@@ -168,7 +168,12 @@ artifact, and exact-model preflight before it creates a run.
 
 The Runs tab lists history for the selected project. The header shows the
 current stages, progress, and next action. Pending requests appear before the
-graph; failed steps have Show step and Retry step controls. Stage buttons
+graph; failed steps have Show step and Retry step controls. Agent failures also
+offer **Retry with settings**, which loads the current model's advertised effort
+choices. Keep the current effort, select a supported value, or choose Provider
+default. The choice applies to that step's new attempts, including later quota
+retries; the launch snapshot, earlier attempts, and completed steps stay saved.
+Stage buttons
 focus the graph on that step at a readable scale.
 The selected run's history entry uses its live status, so it agrees with the
 detail view when work waits, finishes, stops, or restarts. Refresh reloads the

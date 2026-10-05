@@ -33,6 +33,13 @@ def _release_local_rerun(run_id: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class RetryEffort:
+    """An explicit owner choice; None requests the provider's default effort."""
+
+    value: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryTarget:
     """Durable workspace and attempt facts needed before reopening a node."""
 
@@ -47,6 +54,8 @@ class RecoveryTarget:
     uses_git: bool
     ephemeral_reader: bool
     interrupted: bool
+    agent_id: str | None = None
+    model_value: str | None = None
 
 
 class ResumeStore(Protocol):
@@ -61,7 +70,13 @@ class ResumeStore(Protocol):
 
     def interrupted_run_ids(self) -> tuple[str, ...]: ...
 
-    def activate_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
+    def activate_recovery(
+        self,
+        target: RecoveryTarget,
+        idempotency_key: str,
+        *,
+        effort: RetryEffort | None = None,
+    ) -> bool: ...
 
     def activate_usage_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
 
@@ -76,6 +91,7 @@ def rerun_failed_node(
     prepare_workspace: Callable[[RecoveryTarget], None],
     *,
     usage_reset: bool = False,
+    effort: RetryEffort | None = None,
 ) -> ControlResult:
     """Preserve/reset first, then reopen only the selected failed node."""
     if not valid_idempotency_key(idempotency_key):
@@ -100,11 +116,12 @@ def rerun_failed_node(
         if target is None:
             return ControlResult.ALREADY_APPLIED
         prepare_workspace(target)
-        activated = (
-            store.activate_usage_recovery(target, idempotency_key)
-            if usage_reset
-            else store.activate_recovery(target, idempotency_key)
-        )
+        if usage_reset:
+            activated = store.activate_usage_recovery(target, idempotency_key)
+        elif effort is not None:
+            activated = store.activate_recovery(target, idempotency_key, effort=effort)
+        else:
+            activated = store.activate_recovery(target, idempotency_key)
         return ControlResult.ACCEPTED if activated else ControlResult.ALREADY_APPLIED
     finally:
         lock.__exit__(None, None, None)
@@ -140,4 +157,10 @@ def resume_interrupted(
     return tuple(resumed)
 
 
-__all__ = ["RecoveryTarget", "ResumeStore", "rerun_failed_node", "resume_interrupted"]
+__all__ = [
+    "RecoveryTarget",
+    "ResumeStore",
+    "RetryEffort",
+    "rerun_failed_node",
+    "resume_interrupted",
+]

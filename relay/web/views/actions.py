@@ -10,6 +10,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.http.response import HttpResponseBase
 from django.views.decorators.http import require_GET, require_POST
 
+from relay.agents.configuration import require_choice
 from relay.agents.driver import probe_agent_configuration, probe_agent_models
 from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
@@ -17,7 +18,7 @@ from relay.execution.cancellation import request_cancellation
 from relay.execution.control import ControlResult, submit_control
 from relay.execution.launch import LaunchRequest, launch_workflow
 from relay.execution.recovery import prepare_recovery_workspace
-from relay.execution.resume import rerun_failed_node
+from relay.execution.resume import RecoveryTarget, RetryEffort, rerun_failed_node
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import CleanupPolicy, ControlKind
 from relay.projects.service import initialize_project, register_current_project, relink_project
@@ -462,12 +463,30 @@ def rerun_node(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
     body = json_body(request)
     store = DjangoExecutionStore()
+    effort = RetryEffort(optional_text(body, "effort")) if "effort" in body else None
+
+    def prepare(target: RecoveryTarget) -> None:
+        if effort is not None:
+            if target.agent_id is None or target.model_value is None:
+                message = "Retry effort can only be changed for an agent step."
+                raise ConfigError(message)
+            configuration = probe_agent_configuration(
+                target.agent_id,
+                target.model_value,
+                Path(target.project_path),
+                observation_store=DjangoAgentStore(),
+            )
+            if effort.value is not None:
+                require_choice(configuration, "effort", effort.value)
+        prepare_recovery_workspace(store, target)
+
     result = rerun_failed_node(
         store,
         run_id,
         required_text(body, "scope_path"),
         required_text(body, "idempotency_key"),
-        lambda target: prepare_recovery_workspace(store, target),
+        prepare,
+        effort=effort,
     )
     if result is ControlResult.ACCEPTED:
         dispatch_ready_nodes(store, run_id, _enqueue_claim)

@@ -236,6 +236,21 @@ returns `already_applied`. Manual `rerun-node` supersedes a pending schedule.
 | `POST /api/attempts/{id}/wait` | `{"idempotency_key":"w-1","value":...}` |
 | `POST /api/runs/{id}/rerun-node` | `{"scope_path":"root.failed","idempotency_key":"r-1"}` |
 
+An agent rerun accepts an optional `effort` field. For example,
+`{"scope_path":"root.review","idempotency_key":"r-2","effort":"medium"}`
+requests Medium for that step's new attempts using its existing agent and exact
+model. `"effort":null` requests the provider default. Omitting `effort` keeps
+the current choice. Relay probes the selected model's configuration before
+preparing the workspace; unsupported values return `agent_configuration_error`
+with HTTP `422`, without reopening the step. Non-agent recovery targets reject
+this field. A failed parent scope resolves to its deepest failed child, as with
+an ordinary rerun.
+The choice is saved outside the original snapshot, survives restart, and appears
+in `run.rerun.payload.retry_options`. Later quota retries retain it. Repeating
+the same idempotency key returns the first outcome and cannot change the choice.
+The run's `problem.effort` reports its failed step's current effort, with `null`
+for provider default.
+
 Control results are distinct and stable:
 
 | Result | HTTP status | Meaning |
