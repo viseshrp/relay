@@ -240,12 +240,19 @@ The disposable `agy models` probe has a 15-second response limit and runs in
 its own process group. Relay stops that group before reporting a model-list
 timeout.
 
-The complete composed prompt must fit in 32 KiB of UTF-8. On Windows the
-command must also fit the 32,767 UTF-16-unit process limit, including its final
-NUL, or the smaller 8,191-character limit when the executable is a `.cmd` or
-`.bat` shim. Relay checks the quoted command and wrapper allowance before
-starting it. Oversized input raises `node_execution_error` with guidance to
-reduce prompt files, inputs, or upstream output. The command-line limit applies
+The complete composed prompt must fit in 1 MiB of UTF-8 (1,048,576 bytes).
+This is Relay's stdin resource bound; the selected model can impose its own
+context limit. For example, `é` counts as two bytes and `😀` as four before
+JSON escaping. A 40 KiB prompt fits even when escaping makes its JSON line
+larger. Oversized input reports `node_execution_error` with the actual byte
+count and limit as decimal strings, plus guidance to reduce prompt files,
+inputs, or upstream output.
+
+On Windows the command must also fit the 32,767 UTF-16-unit process limit,
+including its final NUL, or the smaller 8,191-character limit when the
+executable is a `.cmd` or `.bat` shim. Relay checks the quoted command and
+wrapper allowance before
+starting it. The command-line limit applies
 only to the executable, adapter arguments, model and flags; the prompt travels
 through stdin. An oversized command reports the same code with guidance to
 shorten its arguments or model value.

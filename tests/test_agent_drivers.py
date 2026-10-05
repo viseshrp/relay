@@ -343,7 +343,11 @@ def test_antigravity_attempts_use_the_documented_headless_arguments(
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
-@pytest.mark.parametrize("prompt", ['First line\n"Second" line', "é😀 %&|<>()^!", "\t" * 16_000])
+@pytest.mark.parametrize(
+    "prompt",
+    ['First line\n"Second" line', "é😀 %&|<>()^!", "\t" * 16_000, "é" * 24_000, "\t" * 40_000],
+    ids=["newlines", "unicode", "escaped-input", "large-unicode", "large-escaped-input"],
+)
 def test_antigravity_stdin_preserves_prompt_text_while_draining_startup_output(
     agent_context: AgentExecutionContext,
     fake_agents: FakeAgents,
@@ -443,9 +447,13 @@ def test_oversized_antigravity_prompts_fail_before_starting_a_process(
     )
     context = replace(agent_context, attempt=replace(agent_context.attempt, attempt=claim))
     driver = AntigravityDriver(PROFILES["antigravity"], context.command)
-    with pytest.raises(NodeExecutionError):
+    with pytest.raises(NodeExecutionError) as error:
         execute(driver, context)
     assert driver.process is None
+    assert error.value.context["max_bytes"] == str(ANTIGRAVITY_PROMPT_MAX_BYTES)
+    prompt_bytes = error.value.context["prompt_bytes"]
+    assert prompt_bytes is not None
+    assert int(prompt_bytes) > ANTIGRAVITY_PROMPT_MAX_BYTES
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)

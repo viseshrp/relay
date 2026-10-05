@@ -86,10 +86,17 @@ def _timeout_value(context: AgentExecutionContext) -> str:
 
 def _argv(context: AgentExecutionContext, prompt: str) -> tuple[str, ...]:
     """Bound the stdin prompt separately from the platform command line."""
-    if len(prompt.encode("utf-8")) > ANTIGRAVITY_PROMPT_MAX_BYTES:
-        message = "The composed Antigravity prompt exceeds Relay's 32 KiB UTF-8 limit."
+    prompt_bytes = len(prompt.encode("utf-8"))
+    if prompt_bytes > ANTIGRAVITY_PROMPT_MAX_BYTES:
+        message = "The composed Antigravity prompt exceeds Relay's UTF-8 byte limit."
+        # Error context carries decimal strings: 1200000 bytes becomes "1200000".
         raise NodeExecutionError(
-            message, next_action="Reduce prompt files, inputs, or upstream output."
+            message,
+            context={
+                "prompt_bytes": str(prompt_bytes),
+                "max_bytes": str(ANTIGRAVITY_PROMPT_MAX_BYTES),
+            },
+            next_action="Reduce prompt files, inputs, or upstream output.",
         )
     values = [
         context.command.executable,
