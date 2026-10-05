@@ -109,6 +109,14 @@ findings. ACP sends this contract in a final text block; Antigravity appends
 the same contract to its stdin prompt. Static source prompts are unchanged.
 Output validation still rejects missing files and unresolved labels or paths.
 
+Both transports also provide the selected tool, exact model, permission profile,
+and requested effort and permission overrides. For example, `opus` appears as
+`"model_value": "opus"`; an unset effort appears as `"effort_override": null`,
+which does not claim a particular provider default. Agents receive instructions
+to use that selection for report provenance, regardless of role names in static
+source prompts. Retained attempt metadata and provider startup events remain
+the evidence for which tool and model ran.
+
 ACP message, thought, tool-call, tool-result, and plan updates become Relay
 events. Content explicitly marked for an audience that excludes `user`, or
 marked private in ACP metadata, is dropped. A visible string larger than the

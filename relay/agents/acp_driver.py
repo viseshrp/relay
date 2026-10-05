@@ -216,6 +216,7 @@ def _prompt_blocks(context: AgentExecutionContext) -> list[schema.TextContentBlo
         ("Relay inputs", context.attempt.attempt.inputs),
         ("Relay run metadata", context.attempt.attempt.run_metadata),
         ("Relay upstream outputs", context.attempt.attempt.upstream_outputs),
+        ("Relay agent selection", context.agent_selection()),
     )
     blocks.extend(
         schema.TextContentBlock(

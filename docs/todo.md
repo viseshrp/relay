@@ -64,6 +64,12 @@ to change that effort.
 
 ## Workflow handoffs
 
+- [ ] Recognize provider usage limits and show their reset time when the provider
+  supplies it. Preserve the failed step and resume automatically after the reset
+  without changing its model or reasoning effort. Use structured provider data
+  where available; do not guess reset times or retry blindly. A chat continuation
+  currently handles this outside Relay.
+
 - [x] Create and save new workflows through Relay without manually adding a
   bootstrap YAML file. Keep prompts and agent execution bound to the selected
   project and stop downstream stages automatically when that binding is wrong.

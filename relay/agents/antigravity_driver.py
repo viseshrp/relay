@@ -71,6 +71,7 @@ def _prompt(context: AgentExecutionContext) -> str:
         ("Relay inputs", context.attempt.attempt.inputs),
         ("Relay run metadata", context.attempt.attempt.run_metadata),
         ("Relay upstream outputs", context.attempt.attempt.upstream_outputs),
+        ("Relay agent selection", context.agent_selection()),
     )
     suffix = "".join(
         f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}"

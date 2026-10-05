@@ -157,6 +157,16 @@ class AgentExecutionContext:
     def cwd(self) -> Path:
         return self.attempt.worktree
 
+    def agent_selection(self) -> dict[str, str | None]:
+        """Expose exact `opus` as model_value; an unset override remains JSON null."""
+        return {
+            "agent_id": self.agent_id,
+            "model_value": self.model_value,
+            "effort_override": self.effort,
+            "permission_mode_override": self.permission_mode,
+            "permission_profile": self.permission_profile,
+        }
+
     def workspace_instructions(self) -> str:
         """Keep downloads under the allocated scratch path, outside the checkout."""
         return (
@@ -167,7 +177,10 @@ class AgentExecutionContext:
             "Keep required task reports at their prescribed artifact paths. "
             "Follow the task's commit contract: uncommitted source changes or "
             "unrelated files reject a writer's result; readers must leave the "
-            "checkout unchanged."
+            "checkout unchanged. Use Relay agent selection to identify the "
+            "executing tool and exact model in report provenance; source-prompt "
+            "role names do not change the selected agent. Do not infer provider "
+            "default effort or permission values from an unset override."
         )
 
     def output_instructions(self) -> str:

@@ -107,6 +107,14 @@ def test_agents_receive_their_declared_output_selectors(
     assert json.dumps(selectors, sort_keys=True, ensure_ascii=False) in prompt
     assert "Relay worktree rules" in prompt
     assert "temporary_directory" in prompt
+    selection = {
+        "agent_id": context.agent_id,
+        "model_value": "m1",
+        "effort_override": None,
+        "permission_mode_override": None,
+        "permission_profile": context.permission_profile,
+    }
+    assert json.dumps(selection, sort_keys=True, ensure_ascii=False) in prompt
 
 
 @pytest.mark.parametrize("decision", ["allow", "deny"])
