@@ -170,6 +170,10 @@ The Runs tab lists history for the selected project. The header shows the
 current stages, progress, and next action. Pending requests appear before the
 graph; failed steps have Show step and Retry step controls. Stage buttons
 focus the graph on that step at a readable scale.
+The selected run's history entry uses its live status, so it agrees with the
+detail view when work waits, finishes, stops, or restarts. Refresh reloads the
+history list for other runs. Workflows continue automatically until a configured
+stage or tool requests input.
 Interaction updates refresh the current step state after event replay, so a
 waiting stage stays labeled **Needs your input** when a historical stream opens.
 The captured state cursor prevents replayed progress from replacing current

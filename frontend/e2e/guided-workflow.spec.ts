@@ -79,6 +79,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByLabel("Your response", { exact: true }).fill("AGREE");
   await page.getByRole("button", { name: "Send response and continue" }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Guided browser flow Complete ·/ })).toBeVisible();
   await page.getByRole("button", { name: "Open review material" }).click();
   await expect(page.getByText("No committed code changes yet.")).toBeVisible();
   await page.getByText("Advanced diagnostics and saved files", { exact: true }).click();
@@ -118,6 +119,7 @@ test("report handoffs explain retention and review material is readable beside t
   await page.getByRole("button", { name: "Stop work" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stop run" }).click();
   await expect(page.getByText("Work stopped. Finished steps and their changes remain available for review.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Retained review Stopped ·/ })).toBeVisible();
 });
 
 test("permission requests send owner feedback through the same agent session", async ({ page }) => {

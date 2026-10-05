@@ -657,7 +657,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
           <Box>
             <Typography variant="h6">Start work</Typography>
             <Typography variant="body2" color="text.secondary">
-              Your tools work on a separate Git branch. Relay pauses for your review or a tool permission request, and continues only after you respond.
+              Your tools work on a separate Git branch. Work continues automatically unless a workflow stage or tool asks for your input.
             </Typography>
           </Box>
           <Box className="field-grid">

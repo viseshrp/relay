@@ -612,7 +612,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
               >
                 <ListItemText
                   primary={stageLabel(run.workflow_key.replace(/\.(yaml|yml)$/, ""))}
-                  secondary={`${statusLabel(run.status)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
+                  secondary={`${statusLabel(detail?.id === run.id ? detail.status : run.status)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
                 />
               </ListItemButton>
             ))}
