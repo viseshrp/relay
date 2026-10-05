@@ -162,6 +162,19 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   expect(after.snapshot).toEqual(before.snapshot);
   const events = (await (await page.request.get(`/api/runs/${runId}/events?since=${before.event_cursor}`)).json()).events;
   expect(events.some((event: { payload: { text?: string } }) => event.payload.text === "config: model=m2;effort=medium;mode=ask")).toBeTruthy();
+  // A different owner client can retry while this browser's terminal stream is closed.
+  const external = await page.request.post(`/api/runs/${runId}/rerun-node`, {
+    headers, data: { scope_path: "root.review", idempotency_key: "external-retry", effort: "low" },
+  });
+  expect(external.ok(), await external.text()).toBeTruthy();
+  await expect.poll(async () => {
+    const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+    return [run.status, run.problem?.attempt_number];
+  }).toEqual(["failed", 3]);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Keep current effort (low)");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("retry-effort.png"), fullPage: true });
 });
 

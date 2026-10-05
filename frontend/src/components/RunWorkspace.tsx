@@ -567,6 +567,22 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     }
   }
 
+  async function refreshRuns() {
+    try {
+      await Promise.all([loadHistory(), refreshDetail(true)]);
+      const history = await loadEvents(eventAfter.current);
+      applyLiveUpdates(history);
+      // Another owner client may have retried after this terminal stream closed.
+      // Reopen from the retained cursor so its new attempt updates remain visible.
+      if (selectedRun !== null) {
+        previousRunStatus.current = null;
+        setStreamEpoch((value) => value + 1);
+      }
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
   function showStep(scopePath: string): void {
     setSelectedStage(scopePath);
     // Explicit navigation also recenters an already selected step after panning.
@@ -634,7 +650,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
         <Paper variant="outlined" className="history-panel">
           <Stack direction="row" sx={{ alignItems: "center", p: 2 }}>
             <Typography variant="h6" sx={{ flex: 1 }}>Run history</Typography>
-            <Button size="small" onClick={() => void loadHistory()}>Refresh</Button>
+            <Button size="small" onClick={() => void refreshRuns()}>Refresh</Button>
           </Stack>
           <Divider />
           <List disablePadding>
