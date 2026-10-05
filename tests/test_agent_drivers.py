@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +35,7 @@ from relay.execution.nodes import node_executors
 from relay.web.models import NodeAttempt, RunEvent
 from relay.web.repositories import DjangoExecutionStore
 from relay.workflows.routing import RouteRequirement
+from relay.workflows.schema import AgentNode
 from tests.support import FakeAgents, InlineEngine, RelayProject
 
 
@@ -68,6 +70,41 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     assert any(
         event.event_type == "agent.message" and event.payload["text"] == "ready" for event in events
     )
+
+
+@pytest.mark.parametrize("agent_context", ["codex", "antigravity"], indirect=True)
+def test_agents_receive_their_declared_output_selectors(
+    agent_context: AgentExecutionContext,
+    fake_agents: FakeAgents,
+) -> None:
+    selectors = {
+        "report": {"label": {"artifact": "REPORT.md", "label": "Created by"}},
+        "ready": {"json_path": {"artifact": "result.json", "path": "ready"}},
+        "optional": {"exists": "optional.txt"},
+    }
+    definition = agent_context.node.model_dump(mode="json", by_alias=True)
+    node = AgentNode.model_validate({**definition, "outputs": selectors})
+    context = replace(agent_context, node=node)
+    driver = (
+        AntigravityDriver(PROFILES["antigravity"], context.command)
+        if context.agent_id == "antigravity"
+        else AcpDriver(PROFILES["codex"], context.command)
+    )
+    _, result = execute(driver, context)
+    assert result.succeeded
+    messages = fake_agents.messages()
+    if context.agent_id == "antigravity":
+        prompt = next(
+            message["input"]["message"]["content"] for message in messages if "input" in message
+        )
+    else:
+        blocks = next(
+            message["params"]["prompt"]
+            for message in messages
+            if message.get("method") == "session/prompt"
+        )
+        prompt = "\n".join(block["text"] for block in blocks)
+    assert json.dumps(selectors, sort_keys=True, ensure_ascii=False) in prompt
 
 
 @pytest.mark.parametrize("decision", ["allow", "deny"])

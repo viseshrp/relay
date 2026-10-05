@@ -76,7 +76,8 @@ def _prompt(context: AgentExecutionContext) -> str:
         f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}"
         for heading, value in sections
     )
-    return prompt_bytes + suffix
+    instructions = context.output_instructions()
+    return prompt_bytes + suffix + (f"\n\n{instructions}" if instructions else "")
 
 
 def _timeout_value(context: AgentExecutionContext) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -155,6 +156,28 @@ class AgentExecutionContext:
     @property
     def cwd(self) -> Path:
         return self.attempt.worktree
+
+    def output_instructions(self) -> str:
+        """Expose `report: {label: ...}` as an ordered JSON handoff contract."""
+        if not self.node.outputs:
+            return ""
+        selectors = {
+            name: selector.model_dump(mode="json", by_alias=True)
+            for name, selector in self.node.outputs.items()
+        }
+        # The agent must see the same selectors that validate its result.
+        # A label selector for REPORT.md requires that file and its label,
+        # even when the report has no findings to address.
+        return (
+            "Relay declared outputs (JSON):\n"
+            "These selectors are validated before this step can succeed. "
+            "Files referenced by label, json_path, or yaml_path selectors are required; "
+            "create them with the supplied task's required content "
+            "even when there are no findings. "
+            "An exists selector records a boolean and permits an absent file. "
+            "Keep phase boundaries and report only evidence-based outcomes.\n"
+            + json.dumps(selectors, sort_keys=True, ensure_ascii=False)
+        )
 
 
 @dataclass(frozen=True, slots=True)

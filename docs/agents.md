@@ -100,6 +100,15 @@ prompt bytes `Review this file.\n` remain unchanged in their block, while input
 `{"target":"api"}` appears in a separate block headed `Relay inputs (JSON)`.
 Relay never appends an earlier conversation transcript.
 
+Agent prompts also include the node's declared output selectors. File-backed
+`label`, `json_path`, and `yaml_path` selectors require their referenced files;
+an `exists` selector can return false for an absent file. For example,
+`report: {label: {artifact: REPORT.md, label: Created by}}` tells the agent to
+create `REPORT.md` with a `Created by: ...` line even if the report has no
+findings. ACP sends this contract in a final text block; Antigravity appends
+the same contract to its stdin prompt. Static source prompts are unchanged.
+Output validation still rejects missing files and unresolved labels or paths.
+
 ACP message, thought, tool-call, tool-result, and plan updates become Relay
 events. Content explicitly marked for an audience that excludes `user`, or
 marked private in ACP metadata, is dropped. A visible string larger than the
