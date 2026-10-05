@@ -10,7 +10,7 @@ from pathlib import Path
 from django.contrib.auth.models import User
 from django.db import connection, transaction
 from django.http import HttpResponse
-from django.test import Client
+from django.test import Client, override_settings
 import pytest
 
 from relay.agents.models import ModelObservation
@@ -475,7 +475,12 @@ def waiting_run(served: RelayProject, engine: InlineEngine) -> tuple[str, int]:
 def test_auth_state_before_onboarding_issues_a_csrf_cookie(client: Client) -> None:
     response = client.get("/api/auth")
 
-    assert response.json() == {"owner_created": False, "authenticated": False, "username": None}
+    assert response.json() == {
+        "owner_created": False,
+        "authenticated": False,
+        "username": None,
+        "login_required": True,
+    }
     assert "relay_csrftoken" in client.cookies
 
 
@@ -540,6 +545,82 @@ def test_wrong_methods_use_the_json_envelope(owner: Client) -> None:
     response = owner.get("/api/auth/login")
     assert (response.status_code, response.json()["code"]) == (405, "method_not_allowed")
     assert response["Allow"] == "POST"
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+def test_disabled_login_opens_projects_without_creating_an_owner(client: Client) -> None:
+    response = client.get("/api/auth")
+
+    assert response.json() == {
+        "owner_created": False,
+        "authenticated": True,
+        "username": "local",
+        "login_required": False,
+    }
+    assert "relay_csrftoken" in client.cookies
+    assert "relay_sessionid" not in client.cookies
+    assert client.get("/api/projects").status_code == 200
+    assert not User.objects.exists()
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False, ALLOWED_HOSTS=["127.0.0.1", "localhost", "[::1]"])
+def test_disabled_login_still_rejects_untrusted_hosts(client: Client) -> None:
+    assert client.get("/api/projects", HTTP_HOST="other.example").status_code == 400
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+def test_disabled_login_records_the_local_launcher(served: RelayProject) -> None:
+    served.write_workflow(
+        "local", "version: 1\nname: Local\nnodes:\n  a: {type: command, run: [git, status]}\n"
+    )
+    served.commit("Save the local command workflow")
+    client = Client(enforce_csrf_checks=True)
+    client.get("/api/auth")
+    response = client.post(
+        "/api/runs",
+        data=json.dumps({"workflow_key": "local", "inputs": {}}),
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=client.cookies["relay_csrftoken"].value,
+    )
+
+    assert response.status_code == 201, response.json()
+    run = Run.objects.get(pk=response.json()["run_id"])
+    assert run.launcher == "local"
+    assert not User.objects.exists()
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+@pytest.mark.parametrize("cross_origin", [False, True])
+def test_disabled_login_still_rejects_unsafe_browser_posts(cross_origin: bool) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.get("/api/auth")
+    headers = (
+        {
+            "HTTP_X_CSRFTOKEN": client.cookies["relay_csrftoken"].value,
+            "HTTP_ORIGIN": "https://other.example",
+        }
+        if cross_origin
+        else {}
+    )
+    response = client.post(
+        "/api/auth/logout", data="{}", content_type="application/json", **headers
+    )
+
+    assert (response.status_code, response.json()["code"]) == (403, "csrf_failed")
+
+
+def test_reenabling_login_preserves_the_existing_owner_and_requires_a_session(
+    owner: Client,
+) -> None:
+    password_hash = User.objects.get(username="owner").password
+    browser = Client()
+    with override_settings(RELAY_LOGIN_REQUIRED=False):
+        assert browser.get("/api/projects").status_code == 200
+        assert post(browser, "/api/auth/logout", {}).json() == {"authenticated": True}
+
+    assert browser.get("/api/projects").status_code == 401
+    assert owner.get("/api/projects").status_code == 200
+    assert User.objects.get(username="owner").password == password_hash
 
 
 @pytest.mark.parametrize(

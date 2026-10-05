@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "test": "npm run build && playwright test",
+    "test": "npm run build && playwright test && playwright test --config playwright.no-login.config.ts",
     "test:e2e": "npm test"
   },
   "dependencies": {

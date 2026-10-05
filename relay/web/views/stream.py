@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 
+from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 
 from relay.constants import (
@@ -146,12 +147,15 @@ async def run_stream(request: HttpRequest, run_id: str) -> StreamingHttpResponse
         )
         response["Allow"] = "GET"
         return response
-    resolve_user = getattr(request, "auser", None)
-    if not callable(resolve_user):
-        return _error("internal_error", "Relay could not read the owner session.", 500)
-    user = await resolve_user()
-    if not bool(getattr(user, "is_authenticated", False)):
-        return _error("authentication_required", "Sign in to the local Relay owner account.", 401)
+    if settings.RELAY_LOGIN_REQUIRED:
+        resolve_user = getattr(request, "auser", None)
+        if not callable(resolve_user):
+            return _error("internal_error", "Relay could not read the owner session.", 500)
+        user = await resolve_user()
+        if not bool(getattr(user, "is_authenticated", False)):
+            return _error(
+                "authentication_required", "Sign in to the local Relay owner account.", 401
+            )
     after = _cursor(request)
     if after < 0:
         return _error(

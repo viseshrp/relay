@@ -6,6 +6,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Concatenate, NoReturn, ParamSpec
 
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import AnonymousUser, User
 from django.contrib.auth.password_validation import validate_password
@@ -20,6 +21,7 @@ from relay.errors import ConfigError, PermissionFlowError, PersistenceError
 from .models import Installation
 
 P = ParamSpec("P")
+LOCAL_OWNER_NAME = "local"
 
 
 def _reject_existing_owner() -> NoReturn:
@@ -42,11 +44,13 @@ def auth_state(request: HttpRequest) -> dict[str, object]:
         message = "Relay could not read installation authentication state."
         raise PersistenceError(message) from None
     user = _request_user(request)
-    authenticated = bool(user.is_authenticated)
+    login_required = settings.RELAY_LOGIN_REQUIRED
+    authenticated = not login_required or bool(user.is_authenticated)
     return {
         "owner_created": owner_created,
         "authenticated": authenticated,
-        "username": user.get_username() if authenticated else None,
+        "username": owner_username(request) if authenticated else None,
+        "login_required": login_required,
     }
 
 
@@ -102,7 +106,7 @@ def owner_required(
 
     @wraps(view)
     def wrapped(request: HttpRequest, *args: P.args, **kwargs: P.kwargs) -> HttpResponseBase:
-        if not _request_user(request).is_authenticated:
+        if settings.RELAY_LOGIN_REQUIRED and not _request_user(request).is_authenticated:
             return JsonResponse(
                 {
                     "code": "authentication_required",
@@ -117,7 +121,9 @@ def owner_required(
 
 
 def owner_username(request: HttpRequest) -> str:
-    """Return the authenticated local owner's stable session name."""
+    """Attribute password-free actions to `local` without creating a user or session."""
+    if not settings.RELAY_LOGIN_REQUIRED:
+        return LOCAL_OWNER_NAME
     return _request_user(request).get_username()
 
 

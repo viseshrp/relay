@@ -15,6 +15,7 @@ _ALLOWED_KEYS: set[str] = {
     "agent_preferences",
     "cleanup_policy",
     "host",
+    "login_required",
     "port",
     "workers",
 }
@@ -29,6 +30,7 @@ class RelayConfig:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     workers: int = DEFAULT_WORKERS
+    login_required: bool = True
 
     def to_dict(self) -> dict[str, object]:
         """Return JSON-compatible settings for diagnostics and UI reads."""
@@ -71,7 +73,11 @@ def _validate_config(raw: object) -> RelayConfig:
     if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
         message = "workers must be a positive integer."
         raise ConfigError(message)
-    return RelayConfig(tuple(preferences), cleanup_policy, host, port, workers)
+    login_required = raw.get("login_required", True)
+    if not isinstance(login_required, bool):
+        message = "login_required must be true or false."
+        raise ConfigError(message)
+    return RelayConfig(tuple(preferences), cleanup_policy, host, port, workers, login_required)
 
 
 def load_config(path: Path | None = None) -> RelayConfig:

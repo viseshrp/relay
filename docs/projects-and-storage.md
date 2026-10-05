@@ -71,6 +71,29 @@ concurrent processes from rotating the same open file. Diagnostic context
 such as run, attempt, path, and cursor appears as escaped JSON alongside the
 message and exception trace.
 
+## Owner settings
+
+`settings.json` is a JSON object in the config root listed above. Missing keys
+use defaults; unknown keys and invalid types fail with `config_error`.
+For example, this file opens the loopback app without owner credentials:
+
+```json
+{
+  "login_required": false
+}
+```
+
+`login_required` must be a JSON boolean and defaults to `true`. Restart Relay
+after changing it. An explicit `relay up --login` or `relay up --no-login`
+overrides the saved value for that process. Disabling login preserves the
+owner account and all run data. See [Open without a login](web-ui.md#open-without-a-login)
+for the access boundary and browser protections.
+
+The supervisor passes its resolved choice to both children through
+`RELAY_LOGIN_REQUIRED=true` or `RELAY_LOGIN_REQUIRED=false`. Direct ASGI
+launches can use the same override; other values are rejected. Without it,
+the web settings read `login_required` from the saved file.
+
 ## Database and disk roles
 
 `relay.db` is the durable source for projects, drafts, editor leases, runs,

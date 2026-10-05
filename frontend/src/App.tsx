@@ -126,6 +126,7 @@ export function App() {
     );
   }
   if (!auth.authenticated) return <AuthView state={auth} onAuthenticated={setAuth} />;
+  const loginRequired = auth.login_required !== false;
 
   async function logout() {
     setLogoutError(null);
@@ -176,9 +177,11 @@ export function App() {
             <Tab value="runs" label="Runs" />
           </Tabs>
           <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
-            {auth.username}
+            {loginRequired ? auth.username : "Login disabled"}
           </Typography>
-          <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Sign out</Button>
+          {loginRequired && (
+            <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Sign out</Button>
+          )}
         </Toolbar>
       </AppBar>
       <Container maxWidth={false} className="app-content">

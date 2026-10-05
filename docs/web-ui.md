@@ -25,11 +25,12 @@ The command accepts these options:
 | `--port` | `7845` | TCP port from 1 through 65535 |
 | `--workers` | `1` | Number of Huey thread workers |
 | `--no-browser` | off | Start without opening the system browser |
+| `--login / --no-login` | login required | Require owner credentials, or open the local app directly |
 
-Command-line values override `host`, `port`, and `workers` in Relay's settings
-file. A second live supervisor or an occupied address fails before another pair
-of children starts. Configuration and bind failures exit with status 4. A
-child or supervision failure exits with status 5.
+Command-line values override `host`, `port`, `workers`, and `login_required`
+in Relay's settings file. A second live supervisor or an occupied address fails
+before another pair of children starts. Configuration and bind failures exit
+with status 4. A child or supervision failure exits with status 5.
 
 Relay binds only to loopback. `--host 0.0.0.0` and non-loopback names are
 rejected. IPv6 `::1` is rendered in the browser URL as
@@ -37,8 +38,9 @@ rejected. IPv6 `::1` is rendered in the browser URL as
 
 ## First login
 
-The first browser session shows owner onboarding. Choose the only local owner
-username and a password that passes Django's configured password validators.
+Login is required by default. The first browser session shows owner onboarding.
+Choose the only local owner username and a password that passes Django's
+configured password validators.
 Relay ships no username or password. Onboarding creates one Django superuser in
 a transaction, signs that browser session in, and rejects later attempts to
 create another owner.
@@ -49,6 +51,21 @@ same-site CSRF cookie and header. Relay does not issue bearer tokens.
 
 If the first authentication request fails, Relay shows the error and a Retry
 button. A failed sign-out request also shows its error and can be retried.
+
+### Open without a login
+
+Start with `relay up --no-login` to skip both onboarding and sign-in. The app
+opens directly and shows **Login disabled** instead of an account name and
+Sign out button. Anyone who can reach this computer's loopback service can
+use its project, run, and cleanup controls. Browser actions still require the
+CSRF cookie and header; host checks and the loopback-only bind remain in place.
+
+To keep this choice for later starts, set `"login_required": false` in the
+installation's [settings.json](projects-and-storage.md#owner-settings).
+Restart Relay to apply the saved choice. `relay up --login` overrides it and
+restores the existing owner login, or onboarding if no owner was created.
+Disabling login leaves stored passwords, sessions, projects, and runs intact.
+Actions started without a login are attributed to `local`.
 
 ## Choose a project and workflow
 
@@ -311,9 +328,10 @@ target mobile browsers or expose a remote web service.
 
 ## Live events and replay
 
-The run monitor connects to `GET /api/runs/{id}/stream` with an authenticated
-`EventSource`. Each frame has the durable database event ID, the versioned
-event type, and one JSON event object:
+The run monitor connects to `GET /api/runs/{id}/stream` with an `EventSource`.
+It sends the owner session when login is required; the same stream is available
+without a session when login is disabled. Each frame has the durable database
+event ID, the versioned event type, and one JSON event object:
 
 ```text
 id: 17

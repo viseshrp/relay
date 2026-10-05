@@ -67,6 +67,10 @@ In **Workflows**, choose **New workflow**, add stages and instructions, save,
 and start work. **Runs** shows progress, readable output, and requests for your
 input.
 
+Login is required by default. Use `relay up --no-login` to open the local app
+without credentials. The saved `login_required` setting keeps this choice for
+later starts. See [Open without a login](docs/web-ui.md#open-without-a-login).
+
 Relay captures the exact saved workflow and instruction files for each run;
 they do not need a Git commit before launch. Untouched initialization files
 and supported generated planning and review documents may stay untracked.
@@ -146,7 +150,8 @@ cleanup are browser actions.
 ## Architecture
 
 Relay owns workflow state in SQLite. Huey dispatches eligible attempts, while
-Django and Uvicorn serve authenticated HTTP and replayable server-sent events.
+Django and Uvicorn serve HTTP and replayable server-sent events with optional
+owner login.
 React Flow and a synchronized YAML editor provide the browser authoring
 surface. Coding agents run through Agent Client Protocol adapters, except for
 Antigravity's documented native headless interface.

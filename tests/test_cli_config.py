@@ -256,6 +256,7 @@ def test_all_cleanup_preserves_other_tools_logs_in_an_override_directory(
 
 def test_missing_settings_use_the_defaults(tmp_path: Path) -> None:
     assert load_config(tmp_path / "missing.json") == RelayConfig()
+    assert load_config(tmp_path / "missing.json").login_required is True
 
 
 def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> None:
@@ -265,6 +266,7 @@ def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> 
         "host": "localhost",
         "port": 8080,
         "workers": 2,
+        "login_required": False,
     }
     path = tmp_path / "settings.json"
     path.write_text(json.dumps(expected), encoding="utf-8")
@@ -283,6 +285,9 @@ def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> 
         '{"port": true}',
         '{"port": 70000}',
         '{"workers": 0}',
+        '{"login_required": "false"}',
+        '{"login_required": 0}',
+        '{"login_required": null}',
     ],
 )
 def test_invalid_settings_raise_a_config_error(tmp_path: Path, content: str) -> None:
@@ -290,3 +295,28 @@ def test_invalid_settings_raise_a_config_error(tmp_path: Path, content: str) -> 
     path.write_text(content, encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("stored_login", "options", "expected"),
+    [
+        (True, (), True),
+        (False, (), False),
+        (True, ("--no-login",), False),
+        (False, ("--login",), True),
+    ],
+)
+def test_up_preserves_the_saved_login_choice_unless_explicitly_overridden(
+    supervisor_boundary: SupervisorBoundary,
+    stored_login: bool,
+    options: tuple[str, ...],
+    expected: bool,
+) -> None:
+    settings = paths.settings_path()
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"login_required": stored_login}), encoding="utf-8")
+
+    result = invoke("up", "--no-browser", *options)
+
+    assert result.exit_code == 0
+    assert supervisor_boundary.configurations[0].login_required is expected

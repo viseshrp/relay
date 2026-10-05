@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import tempfile
 
+from relay.config import load_config
 from relay.constants import (
     API_MAX_PAGE_BYTES,
     APPLICATION_LOG_BACKUP_COUNT,
@@ -16,7 +17,7 @@ from relay.constants import (
     LOOPBACK_HOSTS,
     SECRET_KEY_TOKEN_BYTES,
 )
-from relay.errors import PersistenceError
+from relay.errors import ConfigError, PersistenceError
 from relay.paths import (
     application_log_path,
     data_dir,
@@ -26,6 +27,20 @@ from relay.paths import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _login_required() -> bool:
+    """Read saved settings or an override: `true` -> True; `false` -> False."""
+    override = os.environ.get("RELAY_LOGIN_REQUIRED")
+    if override is None:
+        return load_config().login_required
+    if override not in {"true", "false"}:
+        message = "RELAY_LOGIN_REQUIRED must be true or false."
+        raise ConfigError(message)
+    return override == "true"
+
+
+RELAY_LOGIN_REQUIRED: bool = _login_required()
 
 
 def _read_or_create_secret_key() -> str:

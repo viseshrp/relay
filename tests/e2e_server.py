@@ -25,7 +25,7 @@ WORKFLOW = (
 )
 
 
-def serve(root: Path, port: int) -> None:
+def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     for name, value in {
         "DJANGO_SETTINGS_MODULE": "relay.web.settings",
         "XDG_CONFIG_HOME": str(root / "config"),
@@ -37,6 +37,7 @@ def serve(root: Path, port: int) -> None:
         "RELAY_MIGRATION_LOCK_PATH": str(root / "migrate.lock"),
         "RELAY_LOG_PATH": str(root / "relay.log"),
         "RELAY_DJANGO_SECRET_KEY": "relay-browser-tests-only-0123456789abcdefghijklmnopqrstuvwxyz",
+        "RELAY_LOGIN_REQUIRED": "true" if login_required else "false",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": str(root / "empty-gitconfig"),
     }.items():
@@ -74,15 +75,16 @@ def serve(root: Path, port: int) -> None:
     project = create_project(root / "repo")
     project.write_workflow("workflow", WORKFLOW)
     patch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
-    response = Client().post(
-        "/api/auth/onboard",
-        data='{"username":"owner","password":"Relay-Test-Passphrase-2026!"}',
-        content_type="application/json",
-        HTTP_HOST="127.0.0.1",
-    )
-    if response.status_code != 201:
-        message = "The browser-test owner could not be created."
-        raise RuntimeError(message)
+    if login_required:
+        response = Client().post(
+            "/api/auth/onboard",
+            data='{"username":"owner","password":"Relay-Test-Passphrase-2026!"}',
+            content_type="application/json",
+            HTTP_HOST="127.0.0.1",
+        )
+        if response.status_code != 201:
+            message = "The browser-test owner could not be created."
+            raise RuntimeError(message)
 
     engine = InlineEngine(
         node_executors(agent_driver=RoutedAgentNodeDriver()), artifacts_dir(create=True)
@@ -167,9 +169,10 @@ def serve(root: Path, port: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=4174)
+    parser.add_argument("--no-login", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="relay-browser-tests-") as directory:
-        serve(Path(directory), args.port)
+        serve(Path(directory), args.port, login_required=not args.no_login)
 
 
 if __name__ == "__main__":

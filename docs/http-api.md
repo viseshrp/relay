@@ -18,8 +18,18 @@ authentication actions are:
 
 Onboarding accepts no default password and fails with `409` after an owner
 exists. Every project, workflow, agent, run, control, artifact, and cleanup
-route requires an authenticated owner session. An unauthenticated request gets
-`401 authentication_required` instead of a redirect.
+route requires an authenticated owner session while login is enabled. An
+unauthenticated request gets `401 authentication_required` instead of a redirect.
+
+`GET /api/auth` also returns `login_required`, which is `true` by default.
+With `relay up --no-login` or the saved `"login_required": false` setting,
+`authenticated` reports effective access as `true`, `username` is `local`, and
+`owner_created` still reports the actual onboarding state. Relay creates no
+user or authenticated session for this access. All owner routes, including
+artifact downloads and SSE, accept requests without a session in this mode.
+`POST /api/auth/logout` still ends an existing session but reports
+`{"authenticated":true}` because the app remains accessible. Restoring login
+requires a valid owner session again; existing passwords are preserved.
 
 Every `POST` uses `Content-Type: application/json` and must send the Django CSRF
 cookie value in `X-CSRFToken`. A missing or expired token gets
@@ -90,8 +100,9 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
 | `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
 
-Configuration discovery requires owner authentication and CSRF protection. It
-probes only the named installed tool, proves the exact model, and returns
+Configuration discovery requires owner access and CSRF protection. Owner
+access is a session when login is enabled, or direct local access when disabled.
+It probes only the named installed tool, proves the exact model, and returns
 `agent_id`, `model_value`, `effort`, and `permission_mode`. Each selector contains
 `config_id`, `name`, `current_value`, ordered `choices` with `value`, `name`, and
 `description`, and a `transport`. An unavailable selector is `null`.

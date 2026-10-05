@@ -84,6 +84,13 @@ def init_command(context: click.Context) -> None:
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=click.IntRange(1, 65_535))
 @click.option("--no-browser", is_flag=True, help="Do not open the browser after startup.")
 @click.option("--workers", default=DEFAULT_WORKERS, show_default=True, type=click.IntRange(min=1))
+@click.option(
+    "--login/--no-login",
+    "login_required",
+    default=True,
+    show_default=True,
+    help="Require an owner login, or open the local app without signing in.",
+)
 @click.pass_context
 def up_command(
     context: click.Context,
@@ -91,6 +98,7 @@ def up_command(
     port: int,
     no_browser: bool,
     workers: int,
+    login_required: bool,
 ) -> None:
     """Start the loopback web application and local worker."""
     from .config import RelayConfig, load_config
@@ -115,6 +123,11 @@ def up_command(
                 stored.workers
                 if context.get_parameter_source("workers") is ParameterSource.DEFAULT
                 else workers
+            ),
+            (
+                stored.login_required
+                if context.get_parameter_source("login_required") is ParameterSource.DEFAULT
+                else login_required
             ),
         )
         run_supervisor(

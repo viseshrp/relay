@@ -12,6 +12,7 @@ export interface AuthState {
   owner_created: boolean;
   authenticated: boolean;
   username: string | null;
+  login_required: boolean;
 }
 
 export interface WorkflowDraft {

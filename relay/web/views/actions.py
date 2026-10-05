@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 import re
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.http.response import HttpResponseBase
 from django.views.decorators.http import require_GET, require_POST
@@ -178,7 +179,7 @@ def sign_in(request: HttpRequest) -> HttpResponse:
 @require_POST
 def sign_out(request: HttpRequest) -> HttpResponse:
     logout_owner(request)
-    return JsonResponse({"authenticated": False})
+    return JsonResponse({"authenticated": not settings.RELAY_LOGIN_REQUIRED})
 
 
 @api_errors

@@ -275,12 +275,15 @@ def test_supervisor_opens_the_ready_loopback_url_and_releases_its_lease(
     assert boundary.handlers == {signal.SIGINT: signal.SIG_DFL, signal.SIGTERM: signal.SIG_DFL}
 
 
+@pytest.mark.parametrize("login_required", [True, False])
 def test_supervisor_launches_thread_workers_with_the_owner_configuration(
-    supervisor_boundary: SupervisorBoundary, project: RelayProject
+    supervisor_boundary: SupervisorBoundary, project: RelayProject, login_required: bool
 ) -> None:
     boundary = supervisor_boundary
     supervisor.run_supervisor(
-        RelayConfig(port=9001, workers=3), open_browser=False, on_ready=boundary.stop_when_ready
+        RelayConfig(port=9001, workers=3, login_required=login_required),
+        open_browser=False,
+        on_ready=boundary.stop_when_ready,
     )
     web, consumer = boundary.children
     assert web.arguments[1:5] == ("-m", "uvicorn", "relay.web.asgi:application", "--host")
@@ -289,6 +292,10 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
     assert consumer.arguments[consumer.arguments.index("-w") + 1] == "3"
     assert all(
         options["env"]["RELAY_PROJECT_ROOT"] == str(project.repository)
+        for options in boundary.launches
+    )
+    assert all(
+        options["env"]["RELAY_LOGIN_REQUIRED"] == ("true" if login_required else "false")
         for options in boundary.launches
     )
     assert not boundary.browser_urls

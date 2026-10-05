@@ -31,6 +31,11 @@ to change that effort.
 
 ## Guided app experience
 
+- [x] Make owner login optional for a local installation. Keep login required
+  by default, support `relay up --no-login` and the saved `login_required`
+  setting, and open the browser app directly when disabled. Preserve owner
+  credentials, CSRF and host checks, live updates, and run attribution.
+
 - [x] Make Relay intuitive for first-time users. Guide them through choosing a
   project and workflow, starting work, reviewing requests, and resuming a run.
   Use everyday language and clear next actions so common tasks do not require

@@ -151,6 +151,9 @@ def _spawn_children(
 ) -> tuple[subprocess.Popen[bytes], subprocess.Popen[bytes]]:
     environment = os.environ.copy()
     environment["RELAY_PROJECT_ROOT"] = str(repository)
+    # Both children must use the effective CLI choice rather than rereading a
+    # stored default that an explicit --login or --no-login already replaced.
+    environment["RELAY_LOGIN_REQUIRED"] = "true" if config.login_required else "false"
     try:
         web = _spawn_child(
             [

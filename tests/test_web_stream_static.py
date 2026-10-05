@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import RequestDataTooBig
 from django.db import connection, connections
 from django.http import HttpRequest, HttpResponse
-from django.test import AsyncClient, RequestFactory
+from django.test import AsyncClient, RequestFactory, override_settings
 import pytest
 
 from relay.constants import DATABASE_INTEGER_MAX, SSE_MAX_FRAME_BYTES
@@ -80,6 +80,19 @@ def test_a_terminal_run_replays_every_event_and_ends(finished_run: str) -> None:
     assert status == 200
     assert frame_ids(chunks) == stored
     assert json.loads(chunks[0].split("data: ", 1)[1])["type"] == "run.created"
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+def test_disabled_login_replays_live_events_without_a_session(finished_run: str) -> None:
+    stored = list(
+        RunEvent.objects.filter(run_id=finished_run).order_by("id").values_list("id", flat=True)
+    )
+
+    status, chunks, _body = stream(f"/api/runs/{finished_run}/stream", login=False)
+
+    assert status == 200
+    assert frame_ids(chunks) == stored
+    assert not User.objects.exists()
 
 
 def test_a_scheduled_failed_run_streams_until_the_owner_cancels_its_retry(
