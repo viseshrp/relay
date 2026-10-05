@@ -69,6 +69,10 @@ to change that effort.
   without changing its model or reasoning effort. Use structured provider data
   where available; do not guess reset times or retry blindly. A chat continuation
   currently handles this outside Relay.
+- [ ] Restore supervision when a lost supervisor leaves its web or worker
+  children running. Verify ownership and protect against reused process IDs
+  before stopping or reusing children. Preserve completed runs and avoid
+  requiring manual process inspection and signaling to restart Relay.
 
 - [x] Create and save new workflows through Relay without manually adding a
   bootstrap YAML file. Keep prompts and agent execution bound to the selected
