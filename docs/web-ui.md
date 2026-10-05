@@ -186,10 +186,24 @@ artifact, and exact-model preflight before it creates a run.
 The Runs tab lists history for the selected project. The header shows the
 current stages, progress, and next action. Pending requests appear before the
 graph; failed steps have Show step and Retry step controls. Agent failures also
-offer **Retry with settings**, which loads the current model's advertised effort
-choices. Keep the current effort, select a supported value, or choose Provider
-default. The choice applies to that step's new attempts, including later quota
-retries; the launch snapshot, earlier attempts, and completed steps stay saved.
+offer **Retry with settings**, which lets the owner keep the current tool and
+model or select another installed tool and one of its freshly loaded models.
+Every failed agent step has this control, including other failures below the
+run's initiating problem notice.
+For the current selection, keep its effort and permission mode, select
+advertised values, or choose Provider default. A replacement loads its own
+effort and permission choices, initially using Provider default. Antigravity
+shows the effort encoded
+in its exact model. Choose Auto approve explicitly when that is intended.
+The choice applies to that step's new attempts, including later quota retries;
+the launch snapshot, earlier attempts, completed steps, and other steps' tool
+selections stay saved.
+Changing the tool or exact model reveals **Handoff instructions**, prefilled
+with Relay's continuation prompt. Edit that text to guide the new model, or
+choose **Use default handoff** to restore it. Returning to the original
+selection hides the editor; effort and permission changes alone keep it hidden.
+Relay adds the chosen instructions after the original step prompts and retains
+them for future retries.
 Stage buttons and **Show step** scroll to the graph, move keyboard focus to
 the progress view, and center that step at a readable scale. Repeated clicks
 restore the view after you pan or zoom away, even when the step is already

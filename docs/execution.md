@@ -254,12 +254,29 @@ remains, the run returns to `failed` after the selected rerun settles. This is a
 new attempt initiated by the owner or a confirmed provider usage reset.
 
 An owner retry may explicitly change an agent step's effort to a value freshly
-advertised for its existing model, or request the provider default. Relay stores
-the choice on that node and in the `run.rerun` event, separately from the
-immutable launch snapshot. Only its new attempts use that effort. Completed
-nodes, previous attempts, prompts, model, permissions, and snapshot hashes keep
-their captured values. The choice survives restart and later automatic quota
-recovery. Omitting the choice keeps the step's current effort.
+advertised for its existing model, change its permission mode, or request the
+provider defaults. It may also select another installed agent and exact model
+for that failed step. Relay
+proves the new selection and validates its effort and permission mode before
+preparing the workspace. A replacement starts with that tool's defaults unless
+the owner selects supported overrides; options from the previous tool do not
+carry over. Antigravity effort remains encoded in its exact model slug.
+
+Relay stores the choice on that node and in the `run.rerun` event, separately
+from the immutable launch snapshot. Only that step's new attempts use the
+replacement. Completed nodes, previous attempts, prompts, other nodes' routes,
+and snapshot hashes keep their captured values. The choice survives restart and
+later automatic quota recovery. A subsequent effort or permission change
+preserves the replacement agent and model. Omitting all choices keeps the
+current route.
+Relay never changes providers automatically in response to an error.
+
+Changing the tool/model pair appends a default continuation prompt to that
+step's captured prompt sequence. The owner can replace it with custom handoff
+instructions. Those instructions remain separate from the snapshot and survive
+subsequent retries. An effort-only or permission-only change adds no new
+handoff. The browser shows the handoff editor only for a changed tool/model
+pair, with an option to restore the default text.
 
 During orderly shutdown, interrupted attempts in canceling runs end as
 `canceled`. Successful and failed results keep their original outcome while

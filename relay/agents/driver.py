@@ -379,7 +379,7 @@ def _stop_reason(result: AgentResult) -> AttemptStopReason:
 
 
 class RoutedAgentNodeDriver:
-    """Consume only the immutable selected route captured before run creation."""
+    """Execute the captured route or an explicitly authorized retry replacement."""
 
     registry: RegistrySnapshot | None
 
@@ -391,13 +391,17 @@ class RoutedAgentNodeDriver:
         agent_id = route.get("selected_agent")
         model_value = route.get("model_value")
         if not isinstance(agent_id, str) or not isinstance(model_value, str):
-            message = "The immutable node route has no preflight-proven agent and model."
+            message = "The selected node route has no preflight-proven agent and model."
             raise AgentLaunchError(message, context={"node": context.attempt.scope_path})
         installed = _installed_agent(agent_id, self.registry)
         if installed.command is None:
             message = f"The selected agent {agent_id!r} has no executable command."
             raise AgentLaunchError(message, context={"node": context.attempt.scope_path})
-        permission_profile = node.permission_profile or (
+        profile_override = route.get("permission_profile", node.permission_profile)
+        if profile_override is not None and not isinstance(profile_override, str):
+            message = "The selected route has an invalid permission profile."
+            raise AgentLaunchError(message, context={"node": context.attempt.scope_path})
+        permission_profile = profile_override or (
             "respect_settings" if installed.profile.driver == "antigravity" else "interactive"
         )
         if permission_profile not in installed.profile.permission_profiles:
@@ -410,7 +414,7 @@ class RoutedAgentNodeDriver:
         if any(
             value is not None and not isinstance(value, str) for value in (effort, permission_mode)
         ):
-            message = "The immutable node route has malformed agent overrides."
+            message = "The selected node route has malformed agent overrides."
             raise AgentLaunchError(message, context={"node": context.attempt.scope_path})
         execution = AgentExecutionContext(
             context,

@@ -31,6 +31,10 @@ Confirmed provider usage resets can resume a failed stage automatically while
 preserving its captured model, effort, and prompts. Unsupported or missing reset
 information remains visible for the owner. See
 [Provider usage resets](docs/execution.md#provider-usage-resets).
+An owner can retry a stopped agent step with another installed tool and exact
+model. Relay validates the selection and keeps completed steps, prompts, and
+the original snapshot. See
+[Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
 
 ## Requirements
 

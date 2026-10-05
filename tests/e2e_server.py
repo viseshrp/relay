@@ -70,6 +70,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     providers.isolate_path()
     providers.install("codex", mode="configuration")
     providers.install("claude", mode="configuration")
+    providers.install("antigravity", mode="configuration")
     patch.setattr(discovery, "shutil", SimpleNamespace(which=providers.find_executable))
     patch.setattr(registry, "urlopen", RegistryNetwork().open)
     project = create_project(root / "repo")

@@ -37,6 +37,8 @@ import type {
   RunInteraction,
   RunSummary,
   ProjectRecord,
+  RetryConfiguration,
+  RetryOptions,
 } from "../types";
 import { capturedRunGraph } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
@@ -285,7 +287,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [cleanupScope, setCleanupScope] = useState("all");
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
-  const [retrySettingsOpen, setRetrySettingsOpen] = useState(false);
+  const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [stepFocusRequest, setStepFocusRequest] = useState(0);
   const [activityLimit, setActivityLimit] = useState(30);
@@ -431,7 +433,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setDetail(null);
     setSelectedStage(null);
     setStepFocusRequest(0);
-    setRetrySettingsOpen(false);
+    setRetrySettings(null);
     setActivityLimit(30);
     setError(null);
     setNodeCursor(null);
@@ -549,12 +551,12 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     }
   }
 
-  async function rerunNode(scopePath: string, effort?: string | null) {
+  async function rerunNode(scopePath: string, options: RetryOptions = {}) {
     if (selectedRun === null) return;
     try {
       await api<{ result: string }>(`/api/runs/${encodeURIComponent(selectedRun)}/rerun-node`, {
         method: "POST",
-        body: JSON.stringify({ scope_path: scopePath, idempotency_key: crypto.randomUUID(), effort }),
+        body: JSON.stringify({ scope_path: scopePath, idempotency_key: crypto.randomUUID(), ...options }),
       });
       previousRunStatus.current = null;
       setStreamEpoch((value) => value + 1);
@@ -725,14 +727,14 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
                   <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
                   <Button variant="outlined" disabled={detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path).catch(() => undefined)}>Retry step</Button>
-                  {node.node_type === "agent" && detail.problem?.scope_path === node.scope_path &&
-                    <Button disabled={detail.status !== "failed"} onClick={() => setRetrySettingsOpen(true)}>Retry with settings</Button>}
+                  {node.retry_settings &&
+                    <Button disabled={detail.status !== "failed"} onClick={() => setRetrySettings(node.retry_settings ?? null)}>Retry with settings</Button>}
                 </Stack>)}
               </Paper>}
-              {retrySettingsOpen && detail.problem && <RetrySettings
-                key={`${detail.id}:${detail.problem.scope_path}:${detail.problem.attempt_number}`}
-                problem={detail.problem} projectId={detail.project_id}
-                onClose={() => setRetrySettingsOpen(false)} onRetry={rerunNode}
+              {retrySettings && <RetrySettings
+                key={`${detail.id}:${retrySettings.scope_path}`}
+                problem={retrySettings} projectId={detail.project_id}
+                onClose={() => setRetrySettings(null)} onRetry={rerunNode}
               />}
 
               <Paper variant="outlined" className="section-card">

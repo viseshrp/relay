@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from _thread import LockType
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import threading
 from typing import Protocol
 
-from relay.errors import PersistenceError
+from relay.constants import DEFAULT_RETRY_HANDOFF_PROMPT, RETRY_HANDOFF_MAX_BYTES
+from relay.errors import ConfigError, PersistenceError
 from relay.execution.control import ControlResult, valid_idempotency_key
 from relay.manage import MigrationLock
 from relay.paths import data_dir
@@ -37,6 +38,55 @@ class RetryEffort:
     """An explicit owner choice; None requests the provider's default effort."""
 
     value: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RetryPermissionMode:
+    """An explicit mode choice; None requests the selected tool's default."""
+
+    value: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RetryAgent:
+    """An owner-selected replacement for one failed step's future attempts."""
+
+    agent_id: str
+    model_value: str
+    effort: str | None = None
+    permission_mode: str | None = None
+    handoff_prompt: str | None = None
+
+    def for_target(self, target: RecoveryTarget) -> RetryAgent:
+        """Supply a continuation prompt only when the tool/model pair changes."""
+        changed = (self.agent_id, self.model_value) != (target.agent_id, target.model_value)
+        if not changed and self.handoff_prompt is not None:
+            message = "A handoff prompt requires changing the tool or model."
+            raise ConfigError(message)
+        prompt = (self.handoff_prompt or DEFAULT_RETRY_HANDOFF_PROMPT) if changed else None
+        if prompt is not None and (
+            not prompt.strip() or len(prompt.encode("utf-8")) > RETRY_HANDOFF_MAX_BYTES
+        ):
+            message = (
+                "The handoff prompt must contain text and fit within "
+                f"{RETRY_HANDOFF_MAX_BYTES} UTF-8 bytes."
+            )
+            raise ConfigError(message)
+        return replace(self, handoff_prompt=prompt)
+
+    def to_route(self) -> dict[str, object]:
+        """Replace the provider route without inheriting another tool's options."""
+        return {
+            "selected_agent": self.agent_id,
+            "model_value": self.model_value,
+            "effective_agent_order": [self.agent_id],
+            "effort": self.effort,
+            "permission_mode": self.permission_mode,
+            # An old interactive ACP profile must not reach a native provider.
+            # The replacement uses its own default profile and selected mode.
+            "permission_profile": None,
+            **({"handoff_prompt": self.handoff_prompt} if self.handoff_prompt is not None else {}),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +126,8 @@ class ResumeStore(Protocol):
         idempotency_key: str,
         *,
         effort: RetryEffort | None = None,
+        agent: RetryAgent | None = None,
+        permission_mode: RetryPermissionMode | None = None,
     ) -> bool: ...
 
     def activate_usage_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
@@ -92,6 +144,8 @@ def rerun_failed_node(
     *,
     usage_reset: bool = False,
     effort: RetryEffort | None = None,
+    agent: RetryAgent | None = None,
+    permission_mode: RetryPermissionMode | None = None,
 ) -> ControlResult:
     """Preserve/reset first, then reopen only the selected failed node."""
     if not valid_idempotency_key(idempotency_key):
@@ -115,11 +169,17 @@ def rerun_failed_node(
         target = store.manual_rerun_target(run_id, scope_path, idempotency_key)
         if target is None:
             return ControlResult.ALREADY_APPLIED
+        if agent is not None:
+            agent = agent.for_target(target)
         prepare_workspace(target)
         if usage_reset:
             activated = store.activate_usage_recovery(target, idempotency_key)
-        elif effort is not None:
-            activated = store.activate_recovery(target, idempotency_key, effort=effort)
+        elif agent is not None:
+            activated = store.activate_recovery(target, idempotency_key, agent=agent)
+        elif effort is not None or permission_mode is not None:
+            activated = store.activate_recovery(
+                target, idempotency_key, effort=effort, permission_mode=permission_mode
+            )
         else:
             activated = store.activate_recovery(target, idempotency_key)
         return ControlResult.ACCEPTED if activated else ControlResult.ALREADY_APPLIED
@@ -160,7 +220,9 @@ def resume_interrupted(
 __all__ = [
     "RecoveryTarget",
     "ResumeStore",
+    "RetryAgent",
     "RetryEffort",
+    "RetryPermissionMode",
     "rerun_failed_node",
     "resume_interrupted",
 ]

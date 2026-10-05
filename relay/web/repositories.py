@@ -28,11 +28,13 @@ from relay.constants import (
     ATTEMPT_STALE_AFTER_SECONDS,
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
     CONTROL_REQUEST_TTL_SECONDS,
+    DEFAULT_RETRY_HANDOFF_PROMPT,
     DISPATCH_ORPHAN_AFTER_SECONDS,
     EDITOR_LEASE_TTL_SECONDS,
     EVENT_MAX_PAYLOAD_BYTES,
     INSTANCE_STALE_AFTER_SECONDS,
     RECONCILE_MAX_ITEMS,
+    RETRY_HANDOFF_MAX_BYTES,
     REVIEW_PREVIEW_MAX_BYTES,
     RUN_PROBLEM_MESSAGE_MAX_EVENTS,
     RUN_PROBLEM_TEXT_MAX_CHARS,
@@ -70,7 +72,7 @@ from relay.execution.machine import (
 from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resources import cleanup_run_resources
-from relay.execution.resume import RecoveryTarget, RetryEffort
+from relay.execution.resume import RecoveryTarget, RetryAgent, RetryEffort, RetryPermissionMode
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.scheduler import (
     RunSchedule,
@@ -709,13 +711,53 @@ def _effective_route(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
         message = "The snapshotted route entry is invalid."
         raise PersistenceError(message, context={"node": scope})
     options = _mapping(node, "retry_options")
-    effort = options.get("effort")
-    if set(options) - {"effort"} or (
-        effort is not None and (not isinstance(effort, str) or not effort)
-    ):
-        message = "The stored retry effort is invalid."
+    fields = {"effort", "permission_mode"}
+    replacement = "selected_agent" in options or "model_value" in options
+    if replacement:
+        fields.update(
+            {
+                "selected_agent",
+                "model_value",
+                "effective_agent_order",
+                "permission_profile",
+            }
+        )
+    invalid = bool(set(options) - (fields | {"handoff_prompt"} if replacement else fields))
+    invalid |= any(
+        value is not None and (not isinstance(value, str) or not value)
+        for value in (options.get("effort"), options.get("permission_mode"))
+    )
+    if replacement:
+        invalid |= not fields.issubset(options) or any(
+            not isinstance(options.get(field), str) or not options.get(field)
+            for field in ("selected_agent", "model_value")
+        )
+        invalid |= options.get("effective_agent_order") != [options.get("selected_agent")]
+        invalid |= options.get("permission_profile") is not None
+        handoff = options.get("handoff_prompt")
+        invalid |= handoff is not None and (
+            not isinstance(handoff, str)
+            or not handoff.strip()
+            or len(handoff.encode("utf-8")) > RETRY_HANDOFF_MAX_BYTES
+        )
+    if invalid:
+        message = "The stored retry configuration is invalid."
         raise PersistenceError(message, context={"node": scope})
     return {**route, **options}
+
+
+def _retry_configuration(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
+    """Read this step's current retry choices without another database query."""
+    route = _effective_route(node, snapshot)
+    return {
+        "scope_path": _string(node, "scope_path"),
+        "agent_id": route.get("selected_agent"),
+        "model_value": route.get("model_value"),
+        "effort": route.get("effort"),
+        "permission_mode": route.get("permission_mode"),
+        "default_handoff_prompt": DEFAULT_RETRY_HANDOFF_PROMPT,
+        "handoff_prompt_max_bytes": RETRY_HANDOFF_MAX_BYTES,
+    }
 
 
 def _run_problem(run: Run) -> dict[str, object] | None:
@@ -745,13 +787,11 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     provider_message, truncated = _provider_failure_message(attempt)
     retry = UsageRetry.objects.filter(run=run, attempt=attempt).first()
     node = _related(attempt, "node_run", NodeRun)
-    route = _effective_route(node, _related(run, "snapshot", RunSnapshot))
     return {
-        "scope_path": _string(node, "scope_path"),
+        **_retry_configuration(node, _related(run, "snapshot", RunSnapshot)),
         "attempt_number": _integer(attempt, "attempt_number"),
         "agent_id": _string(attempt, "agent_id"),
         "model_value": _string(attempt, "model_value"),
-        "effort": route.get("effort"),
         "error_code": attempt.error_code,
         "stop_reason": attempt.stop_reason,
         "exit_code": attempt.exit_code,
@@ -770,7 +810,7 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     }
 
 
-def _node_record(node: NodeRun) -> dict[str, object]:
+def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
     scope = _string(node, "scope_path")
@@ -801,6 +841,12 @@ def _node_record(node: NodeRun) -> dict[str, object]:
         if isinstance(needs, list)
         else [],
         "controls": controls,
+        "retry_settings": (
+            _retry_configuration(node, snapshot)
+            if _string(node, "node_type") == NodeType.AGENT.value
+            and _string(node, "status") == NodeStatus.FAILED.value
+            else None
+        ),
     }
 
 
@@ -987,7 +1033,12 @@ class DjangoReadStore:
                 nodes = list(
                     NodeRun.objects.filter(run=run, pk__gt=since).order_by("pk")[: bounded + 1]
                 )
-                records, more = _bounded_page(nodes, bounded, _node_record, byte_budget=byte_budget)
+                records, more = _bounded_page(
+                    nodes,
+                    bounded,
+                    lambda node: _node_record(node, snapshot),
+                    byte_budget=byte_budget,
+                )
             else:
                 query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
                     run=run, pk__gt=since
@@ -2056,12 +2107,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                 message = "The stored loop iteration is invalid."
                 raise PersistenceError(message, context={"node": scope_path})
             metadata["loop_index"] = loop_index
+        route = _effective_route(node, snapshot)
+        prompts = _resolved_prompt_contents(snapshot, frozen)
+        handoff = route.get("handoff_prompt")
+        if isinstance(handoff, str):
+            # ("Review the code",) becomes ("Review the code", "Continue...").
+            # Captured prompt bytes remain intact; the retry instruction follows them.
+            prompts = (*prompts, handoff)
         return _ClaimContext(
             inputs,
             upstream,
             metadata,
-            _resolved_prompt_contents(snapshot, frozen),
-            _effective_route(node, snapshot),
+            prompts,
+            route,
             _mapping(snapshot, "subworkflows"),
         )
 
@@ -4172,6 +4230,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         idempotency_key: str,
         *,
         effort: RetryEffort | None = None,
+        agent: RetryAgent | None = None,
+        permission_mode: RetryPermissionMode | None = None,
     ) -> bool:
         if target.interrupted:
             return self.activate_interrupted_run(target.run_id, idempotency_key)
@@ -4186,11 +4246,18 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ).exists()
                 if duplicate:
                     return False
-                if effort is not None:
+                if agent is not None or effort is not None or permission_mode is not None:
                     if _string(node, "node_type") != NodeType.AGENT.value:
-                        message = "Retry effort can only be changed for an agent step."
+                        message = "Retry configuration can only be changed for an agent step."
                         raise ConfigError(message)
-                    _set_model_field(node, "retry_options", {"effort": effort.value})
+                    options = (
+                        agent.to_route() if agent is not None else _mapping(node, "retry_options")
+                    )
+                    if effort is not None:
+                        options = {**options, "effort": effort.value}
+                    if permission_mode is not None:
+                        options = {**options, "permission_mode": permission_mode.value}
+                    _set_model_field(node, "retry_options", options)
                     node.save(update_fields=("retry_options",))
                 UsageRetry.objects.filter(run=run, state="scheduled").update(state="resumed")
                 run_transition = transition_run(_string(run, "status"), "manual_rerun")

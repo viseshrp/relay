@@ -159,6 +159,11 @@ Run metadata includes the registered `project`. Each node includes captured
 `dependencies` (scope paths), `controls` (`target` and `label`), and
 `parent_scope`. These fields come from that run's frozen node definitions,
 including concrete loop and child scopes, rather than today's editable YAML.
+Failed agent nodes also include `retry_settings`, containing their own
+`scope_path`, effective `agent_id`, `model_value`, `effort`, `permission_mode`,
+`default_handoff_prompt`, and `handoff_prompt_max_bytes`. Other nodes return
+`null`. These settings let each failed step offer its own retry controls when
+several agents fail, independently of the initiating problem notice.
 Run detail includes `problem`, either `null` or the initiating failed attempt's
 `scope_path`, `attempt_number`, `agent_id`, `model_value`, `error_code`,
 `stop_reason`, `exit_code`, `message`, `provider_message`, and
@@ -259,8 +264,50 @@ an ordinary rerun.
 The choice is saved outside the original snapshot, survives restart, and appears
 in `run.rerun.payload.retry_options`. Later quota retries retain it. Repeating
 the same idempotency key returns the first outcome and cannot change the choice.
-The run's `problem.effort` reports its failed step's current effort, with `null`
-for provider default.
+The run's `problem.effort` and `problem.permission_mode` report its failed step's
+current choices, with `null` for provider default. A permission-only change
+uses `{"scope_path":"root.review","idempotency_key":"r-3","permission_mode":"ask"}`;
+an explicit null restores the current tool's default. Omitted fields keep their
+current values. Non-agent recovery targets reject these options.
+
+To hand the failed agent step to another tool or model, supply both `agent_id`
+and `model` on `rerun-node`. For example:
+
+```json
+{
+  "scope_path": "root.refresh",
+  "idempotency_key": "handoff-1",
+  "agent_id": "antigravity",
+  "model": "gemini-3.8-flash-high",
+  "permission_mode": "auto_approve"
+}
+```
+
+Relay freshly proves this exact selection and validates optional `effort` and
+`permission_mode` values before workspace recovery. Supplying only one of the
+two selection fields returns HTTP `400`.
+Missing installations, unavailable models, and unsupported overrides retain
+their Relay error envelopes and leave the failed step unchanged.
+
+A replacement clears the previous tool's effort, mode, and permission profile;
+omitted or null options use the new tool's defaults. Antigravity effort belongs
+to the selected model slug. This affects only the resolved failed agent leaf's
+future attempts. The original route table, prompts, earlier attempts, completed
+steps, and other nodes' routes remain unchanged. The `run.rerun` event records
+the complete replacement in `retry_options`, including `selected_agent`,
+`model_value`, `effective_agent_order`, `effort`, `permission_mode`, and a null
+`permission_profile`. Subsequent effort, permission, and quota retries keep it.
+Repeating an accepted idempotency key cannot substitute a different selection.
+
+A changed tool/model pair receives Relay's default continuation prompt after
+its captured prompts. Supply `handoff_prompt` to replace that default with the
+owner's exact text. The prompt must contain non-whitespace text and fit within
+8,192 UTF-8 bytes. A custom handoff without a changed tool/model pair returns
+HTTP `400`, leaving the failed step unchanged. The chosen text is retained in
+`retry_options.handoff_prompt` and sent on later attempts, including quota
+retries. Snapshot prompt bytes and hashes remain unchanged.
+`problem.default_handoff_prompt` and `problem.handoff_prompt_max_bytes` expose
+the default text and its limit for the retry dialog.
 
 Control results are distinct and stable:
 

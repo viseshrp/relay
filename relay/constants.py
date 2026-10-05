@@ -78,6 +78,16 @@ PROVIDER_USAGE_WINDOW_MAX_CHARS: Final = 64
 SSE_MAX_BATCH: Final = 100
 SSE_MAX_FRAME_BYTES: Final = 65_536
 EVENT_MAX_PAYLOAD_BYTES: Final = 65_536
+# Leave room for JSON escaping and route metadata in the durable rerun event.
+RETRY_HANDOFF_MAX_BYTES: Final = EVENT_MAX_PAYLOAD_BYTES // 8
+DEFAULT_RETRY_HANDOFF_PROMPT: Final = (
+    "Continue the failed step in this existing Relay run. Read the files and "
+    "reports already in the worktree, and inspect unfinished work before acting. "
+    "Follow the original step instructions and its declared outputs. Preserve "
+    "completed work and successful stages. Finish the remaining work for this "
+    "step and report fresh verification evidence. Use the current Relay agent "
+    "and exact model for report provenance."
+)
 CONTROL_PAYLOAD_MAX_BYTES: Final = 65_536
 CONTROL_IDEMPOTENCY_KEY_MAX_CHARS: Final = 200
 RECONCILE_MAX_ITEMS: Final = 200

@@ -96,6 +96,14 @@ export interface AgentConfiguration {
   permission_mode: ConfigurationSelector | null;
 }
 
+export interface RetryOptions {
+  agent_id?: string;
+  model?: string;
+  effort?: string | null;
+  permission_mode?: string | null;
+  handoff_prompt?: string;
+}
+
 export interface RunSummary {
   id: string;
   project_id: string;
@@ -125,6 +133,7 @@ export interface RunNode {
   parent_scope: string | null;
   dependencies: string[];
   controls: Array<{ target: string; label: string }>;
+  retry_settings?: RetryConfiguration | null;
 }
 
 export interface RunInteraction {
@@ -154,12 +163,18 @@ export interface RunDetail extends RunSummary {
   interactions: RunInteraction[];
 }
 
-export interface RunProblem {
+export interface RetryConfiguration {
   scope_path: string;
-  attempt_number: number;
   agent_id: string;
   model_value: string;
   effort?: string | null;
+  permission_mode?: string | null;
+  default_handoff_prompt?: string;
+  handoff_prompt_max_bytes?: number;
+}
+
+export interface RunProblem extends RetryConfiguration {
+  attempt_number: number;
   error_code: string | null;
   stop_reason: string | null;
   exit_code: number | null;

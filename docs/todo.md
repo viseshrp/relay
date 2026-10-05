@@ -5,6 +5,16 @@ proposed TODO entries without modifying it.
 
 ## Agent configuration
 
+- [x] Let the owner hand a failed agent step to another installed tool and exact
+  model through Relay. Validate its settings before recovery, clear the previous
+  tool's options, preserve the snapshot and completed work, and retain the
+  replacement for subsequent retries. Include tool, model, effort, and
+  permission choices in Retry with settings. Permit effort and permission
+  changes without replacing the model. Show an editable default handoff only
+  when the tool/model pair changes, and retain its exact text for later retries.
+  Every failed agent step exposes its own settings. Focused API/worker and
+  browser checks cover same-tool model changes, ACP/native handoffs, custom
+  instructions, multiple failures, idempotency, saved evidence, and quota retries.
 - [x] Let the owner retry a failed agent step with a different advertised effort.
   Validate the choice before recovery, keep the original snapshot and earlier
   attempts, and retain the choice for that step's automatic quota retries.
