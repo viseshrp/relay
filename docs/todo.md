@@ -53,6 +53,8 @@ to change that effort.
 - [x] Show the current stage, completed work, and next action in plain language
   above the graph and logs. Make waiting and failed stages easy to find without
   reading internal node names or zooming around the graph.
+  Show stopped step, Show step, and stage buttons bring the graph into view
+  and focus the chosen step. Repeated clicks restore its readable scale.
 - [x] Draw dependency and control-flow connections in the run monitor using
   the run's captured workflow and runtime scopes. Arrange nodes by their
   connections so branches, nested scopes, and stage order are readable.

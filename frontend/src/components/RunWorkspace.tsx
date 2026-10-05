@@ -287,6 +287,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettingsOpen, setRetrySettingsOpen] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [stepFocusRequest, setStepFocusRequest] = useState(0);
   const [activityLimit, setActivityLimit] = useState(30);
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
@@ -294,6 +295,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const stateAfter = useRef(0);
   const eventAfter = useRef(0);
   const previousRunStatus = useRef<string | null>(null);
+  const stepProgress = useRef<HTMLDivElement>(null);
 
   const loadHistory = useCallback(async (cursor?: string) => {
     const query = new URLSearchParams({ limit: "50" });
@@ -428,6 +430,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setStreamRun(null);
     setDetail(null);
     setSelectedStage(null);
+    setStepFocusRequest(0);
     setRetrySettingsOpen(false);
     setActivityLimit(30);
     setError(null);
@@ -562,6 +565,14 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     }
   }
 
+  function showStep(scopePath: string): void {
+    setSelectedStage(scopePath);
+    // Explicit navigation also recenters an already selected step after panning.
+    setStepFocusRequest((value) => value + 1);
+    stepProgress.current?.scrollIntoView({ block: "start" });
+    stepProgress.current?.focus({ preventScroll: true });
+  }
+
   async function loadMoreNodes() {
     if (nodeCursor === null) return;
     try {
@@ -678,7 +689,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
                 </Stack>
                 {detail.problem && ["failed", "canceling"].includes(detail.status)
-                  ? <RunProblemNotice problem={detail.problem} onShowStep={setSelectedStage} onCancelRetry={() => void cancelRun()} />
+                  ? <RunProblemNotice problem={detail.problem} onShowStep={showStep} onCancelRetry={() => void cancelRun()} />
                   : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>
@@ -712,7 +723,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                 <Typography variant="h6">Steps that need attention</Typography>
                 {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
                   <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
-                  <Button onClick={() => setSelectedStage(node.scope_path)}>Show step</Button>
+                  <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
                   <Button variant="outlined" disabled={detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path).catch(() => undefined)}>Retry step</Button>
                   {node.node_type === "agent" && detail.problem?.scope_path === node.scope_path &&
                     <Button disabled={detail.status !== "failed"} onClick={() => setRetrySettingsOpen(true)}>Retry with settings</Button>}
@@ -726,14 +737,14 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
 
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1 }}>Steps and progress</Typography>
-                <Box className="stage-list">{detail.nodes.map((node) => <Button key={node.id} variant={focusStage === node.scope_path ? "outlined" : "text"} color={node.status === "failed" ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => setSelectedStage(node.scope_path)}>
+                <Box className="stage-list">{detail.nodes.map((node) => <Button key={node.id} variant={focusStage === node.scope_path ? "outlined" : "text"} color={node.status === "failed" ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => showStep(node.scope_path)}>
                   {stageLabel(node.scope_path)} · {statusLabel(node.status)}
                 </Button>)}</Box>
                 {nodeCursor !== null && <Button onClick={() => void loadMoreNodes()}>Load more steps</Button>}
               </Paper>
 
-              <Paper variant="outlined" className="canvas-panel run-canvas">
-                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection />
+              <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
+                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection focusRequest={stepFocusRequest} />
               </Paper>
 
               <Paper variant="outlined" className="section-card">

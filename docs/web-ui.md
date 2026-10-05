@@ -190,8 +190,10 @@ offer **Retry with settings**, which loads the current model's advertised effort
 choices. Keep the current effort, select a supported value, or choose Provider
 default. The choice applies to that step's new attempts, including later quota
 retries; the launch snapshot, earlier attempts, and completed steps stay saved.
-Stage buttons
-focus the graph on that step at a readable scale.
+Stage buttons and **Show step** scroll to the graph, move keyboard focus to
+the progress view, and center that step at a readable scale. Repeated clicks
+restore the view after you pan or zoom away, even when the step is already
+selected.
 The selected run's history entry uses its live status, so it agrees with the
 detail view when work waits, finishes, stops, or restarts. Refresh reloads the
 history list for other runs. Workflows continue automatically until a configured
@@ -234,7 +236,8 @@ The monitor combines the SSE stream with paginated database reads:
 
 When a step fails, the run header shows its name, the failure description or
 exit code, and the provider's last public message when available. **Show stopped
-step** selects that step in the progress view. Provider quota notices and reset
+step** brings the progress view into sight and centers the failed step, including
+when it is already selected. Provider quota notices and reset
 times stay visible above Activity, including after a reload and in older runs
 whose saved failure summary is empty. Reset times and time zones keep the
 provider's wording. Relay does not infer subscription limits from context-token

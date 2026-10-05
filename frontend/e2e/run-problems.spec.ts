@@ -51,6 +51,23 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   await expect(notice).toContainText("Completed steps are saved.");
   await page.reload();
   await expect(notice).toBeVisible();
+  if (!automatic) {
+    await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
+    const progress = page.getByRole("region", { name: "Step progress", exact: true });
+    await expect(progress).toBeInViewport({ ratio: 0.5 });
+    await expect(progress).toBeFocused();
+    const review = progress.locator('[data-id="root.review"]');
+    await expect(review).toBeInViewport();
+    const width = await review.evaluate((element) => element.getBoundingClientRect().width);
+    await progress.getByRole("button", { name: "Zoom Out", exact: true }).click();
+    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(width);
+    await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
+    await expect(progress).toBeInViewport({ ratio: 0.5 });
+    await expect(progress).toBeFocused();
+    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(width);
+    await page.getByRole("button", { name: "Show step", exact: true }).click();
+    await expect(progress).toBeFocused();
+  }
   if (automatic) {
     await expect(page.getByText("Relay is waiting for the provider's reset. It will retry automatically.", { exact: true })).toBeVisible();
     await expect(notice).toContainText("Relay will retry this step after");

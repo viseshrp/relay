@@ -96,6 +96,9 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @require_POST
     def reset(request: HttpRequest) -> JsonResponse:
         del request
+        # The feedback scenario replaces Codex and the shared ACP mode.
+        # Restore its configuration so later tests get the normal capabilities.
+        providers.install("codex", mode="configuration")
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
         project.write_workflow("workflow", WORKFLOW)

@@ -21,18 +21,19 @@ interface FlowCanvasProps {
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   followSelection?: boolean;
+  focusRequest?: number;
 }
 
-function FocusStep({ selectedId }: { selectedId?: string | null }) {
+function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; focusRequest: number }) {
   const initialized = useNodesInitialized();
   const { fitView } = useReactFlow();
   useEffect(() => {
     if (initialized && selectedId) void fitView({ nodes: [{ id: selectedId }], padding: 0.6, minZoom: 0.8, maxZoom: 1 });
-  }, [initialized, selectedId, fitView]);
+  }, [initialized, selectedId, focusRequest, fitView]);
   return null;
 }
 
-export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection = false }: FlowCanvasProps) {
+export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0 }: FlowCanvasProps) {
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -63,7 +64,7 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection
         minZoom={0.25}
         maxZoom={1.75}
       >
-        {followSelection && <FocusStep selectedId={selectedId} />}
+        {followSelection && <FocusStep selectedId={selectedId} focusRequest={focusRequest} />}
         <MiniMap pannable zoomable />
         <Controls />
         <Background gap={20} size={1} />
