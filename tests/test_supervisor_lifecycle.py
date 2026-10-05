@@ -141,12 +141,12 @@ class SupervisorBoundary:
         self.handlers[number] = handler
         return previous
 
-    def send_stop(self) -> None:
-        handler = self.get_handler(signal.SIGINT)
+    def send_stop(self, number: int = signal.SIGINT) -> None:
+        handler = self.get_handler(number)
         if not callable(handler):
             message = "The supervisor did not install its signal handler"
             raise TypeError(message)
-        handler(signal.SIGINT, None)
+        handler(number, None)
 
     def stop_tree(
         self, pid: int, *, graceful_signal: signal.Signals = signal.SIGTERM, force: bool = False
@@ -292,6 +292,24 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
         for options in boundary.launches
     )
     assert not boundary.browser_urls
+
+
+def test_console_break_uses_orderly_shutdown_and_restores_its_handler(
+    supervisor_boundary: SupervisorBoundary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    boundary = supervisor_boundary
+    # The boundary records signal handlers without touching the host's signals.
+    console_break = getattr(signal, "SIGBREAK", signal.SIGABRT)
+    monkeypatch.setattr(supervisor.signal, "SIGBREAK", console_break, raising=False)
+
+    def stop_when_ready(_url: str) -> None:
+        boundary.send_stop(console_break)
+
+    supervisor.run_supervisor(RelayConfig(), open_browser=False, on_ready=stop_when_ready)
+    assert all(child.returncode == 0 for child in boundary.children)
+    assert not Instance.objects.exists()
+    assert not shutdown_marker_path().exists()
+    assert boundary.handlers[console_break] == signal.SIG_DFL
 
 
 @pytest.mark.parametrize("failed_child", [0, 1])

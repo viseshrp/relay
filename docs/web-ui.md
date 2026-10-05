@@ -345,7 +345,8 @@ children:
 1. Uvicorn serves Django's HTTP, SSE, and packaged static files.
 2. Huey runs with thread workers and a 15-second shutdown timeout.
 
-Press Ctrl+C once to stop. Relay first writes a durable shutdown marker, closes
+Press Ctrl+C once to stop. Windows console-break requests follow the same
+orderly shutdown path. Relay first writes a durable shutdown marker, closes
 new-run admission, marks running and paused runs `interrupted`, and sends each active
 attempt an `orderly_shutdown` cancellation request. On POSIX, Huey receives
 `SIGINT`, its graceful signal. On Windows, Relay does not depend on a console

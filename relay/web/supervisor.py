@@ -427,7 +427,11 @@ def _run_supervisor(
             store.acquire_instance(os.getpid(), socket.gethostname())
         _validate_bind(config.host, config.port)
         _startup_reconcile(store)
-        for candidate in (signal.SIGINT, signal.SIGTERM):
+        stop_signals = [signal.SIGINT, signal.SIGTERM]
+        if hasattr(signal, "SIGBREAK"):
+            # Windows' targeted console stop arrives as SIGBREAK, not SIGINT.
+            stop_signals.append(signal.SIGBREAK)
+        for candidate in stop_signals:
             previous_handlers[candidate] = signal.getsignal(candidate)
             signal.signal(candidate, request_stop)
         ownership = SupervisorOwnership.current(instance_id)
