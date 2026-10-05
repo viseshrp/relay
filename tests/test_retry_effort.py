@@ -389,12 +389,14 @@ def test_invalid_handoff_keeps_the_failed_step_and_its_route_unchanged(
     )
 
 
+# Pytest exports case IDs in PYTEST_CURRENT_TEST, which Windows bounds in size.
 @pytest.mark.parametrize(
     "instructions",
     [
         "Read REVIEW.md first.\nFinish only the remaining documentation. 🧭",
         "\x01" * RETRY_HANDOFF_MAX_BYTES,
     ],
+    ids=["custom-text", "maximum-escaped-bytes"],
 )
 def test_custom_handoff_replaces_the_default_and_reaches_the_new_provider(
     failed_agent: tuple[str, Client],
