@@ -303,18 +303,23 @@ def test_restart_recovers_real_orphan_children_and_preserves_completed_runs(
             assert old is not None
             first.kill()
             first.wait(timeout=10)
+            assert process_identity(old.owner.pid) != old.owner
             assert all(
                 process_identity(child.identity.pid) == child.identity for child in old.children
             )
             second = start()
             current = read_ownership()
             assert current is not None
-            assert current.owner.pid == second.pid
+            # Windows' virtual-environment executable can redirect to another
+            # interpreter PID. The manifest records the actual supervisor.
+            assert process_identity(current.owner.pid) == current.owner
+            assert current.owner != old.owner
             assert current.instance_id != old.instance_id
             assert not any(
                 process_identity(child.identity.pid) == child.identity for child in old.children
             )
             assert str(Instance.objects.get().pk) == current.instance_id
+            assert Instance.objects.get().pid == current.owner.pid
             assert Run.objects.values("status", "recorded_head").get(pk=run_id) == before
             assert RunSnapshot.objects.values().get(run_id=run_id) == snapshot
             signal_process_tree(second.pid, graceful_signal=signal.SIGINT)

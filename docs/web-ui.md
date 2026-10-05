@@ -219,7 +219,9 @@ provider's wording. Relay does not infer subscription limits from context-token
 usage or inspect private thoughts. When the provider supplies a structured,
 rejected usage window and a confirmed future reset, the notice shows the
 automatic retry time in your local time zone and offers **Cancel automatic
-retry**. Relay's consumer resumes the same step with its frozen settings; the
+retry**. The next-action banner says Relay will retry automatically, so you
+do not need to submit a manual retry. Relay's consumer resumes the same step
+with its frozen settings; the
 schedule survives a restart. Keep Relay running for it to execute when due.
 The stream stays connected while that schedule is pending. A missing reset or
 a recovery failure shows why automatic retry is blocked. Public prose-only
@@ -356,15 +358,19 @@ attempts keep their failure details.
 
 An orderly restart preserves attempt evidence before resetting a writer or
 removing a disposable reader worktree. It reopens each interrupted run and
-creates a new attempt; it never resumes an old agent session or automatically
-retries a failed attempt. A worker process that dies without the shutdown
+creates a new attempt; it never resumes an old agent session. Failed attempts
+remain failed unless the owner retries them or a confirmed provider-reset
+schedule becomes due. A worker process that dies without the shutdown
 marker is recorded as `worker_lost` and fails the run instead.
 Runs already canceling retain that status and drain to `canceled` or `failed`,
 including after restart. Relay never reopens work canceled by the owner.
 
-Startup does not signal PIDs saved by an earlier Relay instance: after a crash
-or reboot a PID can belong to another program. Relay logs those unverified
-attempt IDs and PIDs for the owner to inspect.
+Startup holds a lifetime kernel lock and checks the old supervisor's recorded
+creation identity before recovering its abandoned web and worker children.
+It signals only matching creation identities and leaves reused PIDs alone.
+Verified attempt processes must exit before workspace recovery. Unknown
+legacy identities remain untouched and can block recovery. See
+[Restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
 
 Relay removes the supervisor lease and shutdown marker only after a clean stop.
 If startup or shutdown reconciliation fails, retained state and the marker stay

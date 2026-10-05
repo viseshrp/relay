@@ -52,6 +52,7 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   await page.reload();
   await expect(notice).toBeVisible();
   if (automatic) {
+    await expect(page.getByText("Relay is waiting for the provider's reset. It will retry automatically.", { exact: true })).toBeVisible();
     await expect(notice).toContainText("Relay will retry this step after");
     await expect(notice).toContainText("using the same model and settings");
     await page.route(`**/api/runs/${runId}/cancel`, async (route) => {
