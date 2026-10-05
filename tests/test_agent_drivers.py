@@ -105,6 +105,8 @@ def test_agents_receive_their_declared_output_selectors(
         )
         prompt = "\n".join(block["text"] for block in blocks)
     assert json.dumps(selectors, sort_keys=True, ensure_ascii=False) in prompt
+    assert "Relay worktree rules" in prompt
+    assert "temporary_directory" in prompt
 
 
 @pytest.mark.parametrize("decision", ["allow", "deny"])

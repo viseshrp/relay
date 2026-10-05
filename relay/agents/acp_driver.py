@@ -224,6 +224,7 @@ def _prompt_blocks(context: AgentExecutionContext) -> list[schema.TextContentBlo
         )
         for heading, value in values
     )
+    blocks.append(schema.TextContentBlock(type="text", text=context.workspace_instructions()))
     if instructions := context.output_instructions():
         blocks.append(schema.TextContentBlock(type="text", text=instructions))
     return blocks

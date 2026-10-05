@@ -198,6 +198,13 @@ group are automatically cleaned; personal profiles and provider authentication
 remain outside cleanup. See
 [Run-owned resources](projects-and-storage.md#run-owned-resources).
 
+Both agent transports instruct the agent to keep downloaded skills, scratch
+scripts, and transient files in `temporary_directory` or the inherited temporary
+directory. Task reports still use their prescribed paths. For example,
+downloaded review instructions belong below the attempt's temporary directory,
+while `PLAN_CRITIQUE.md` stays in the repository root. The Git cleanliness check
+still rejects an uncommitted `.skills/review.md` file in the checkout.
+
 Relay
 has no secret vault, environment allowlist, or masking layer. Prompts, model
 output, tool details, stderr, permission answers, Git diffs, and artifacts can

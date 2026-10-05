@@ -157,6 +157,19 @@ class AgentExecutionContext:
     def cwd(self) -> Path:
         return self.attempt.worktree
 
+    def workspace_instructions(self) -> str:
+        """Keep downloads under the allocated scratch path, outside the checkout."""
+        return (
+            "Relay worktree rules:\n"
+            "Use temporary_directory from Relay run metadata, or the inherited "
+            "TMPDIR/TMP/TEMP directory, for downloaded skills, scratch scripts, "
+            "and other transient files. Do not put them in the Git worktree. "
+            "Keep required task reports at their prescribed artifact paths. "
+            "Follow the task's commit contract: uncommitted source changes or "
+            "unrelated files reject a writer's result; readers must leave the "
+            "checkout unchanged."
+        )
+
     def output_instructions(self) -> str:
         """Expose `report: {label: ...}` as an ordered JSON handoff contract."""
         if not self.node.outputs:
