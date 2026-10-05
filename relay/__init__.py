@@ -1,4 +1,4 @@
-"Top-level package for relay."
+"""Top-level package metadata and console entry point for Relay."""
 
 from ._version import __version__
 from .cli import main

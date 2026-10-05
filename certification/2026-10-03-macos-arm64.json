@@ -1,0 +1,410 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-03T16:47:06.875804Z",
+  "platform": {
+    "system": "macOS",
+    "version": "26.6.1",
+    "machine": "arm64"
+  },
+  "scope": "Authenticated writer workflow in a disposable Git repository: exact committed bytes, declared artifact SHA-256, recorded head, process cleanup, and clean_on_success worktree removal.",
+  "agents": [
+    {
+      "id": "codex",
+      "execution_command": [
+        "codex-acp"
+      ],
+      "execution_command_present": true,
+      "binary_version": "@agentclientprotocol/codex-acp 2.1.1",
+      "executed_relay_sha": "f9c95cb16d8f1e702b862449c96f8301de3a917a",
+      "status": "certified",
+      "requested_model_value": "gpt-6-luna",
+      "advertised_model_values": [
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol"
+      ],
+      "confirmed_model_values": [
+        "gpt-6-luna"
+      ],
+      "authenticated_execution_completed": true,
+      "worktree_run_completed": true,
+      "probe_cleanup_warning": "The ACP probe session may be retained. The pinned ACP SDK exposes no supported delete-session call.",
+      "required_client_file_methods_observed": [],
+      "required_client_terminal_methods_observed": [],
+      "run": {
+        "run_id": "e2fff289-42be-4fff-bf9e-581f8419a4a2",
+        "run_status": "succeeded",
+        "node_stop_reason": "completed",
+        "error_code": null,
+        "exit_code": -15,
+        "writer_commit_advanced": true,
+        "committed_content_matches": true,
+        "declared_artifact_matches": true,
+        "process_id_cleared": true,
+        "session_id_retained_for_diagnostics": true,
+        "worktree_removed": true,
+        "worktree_state": "removed",
+        "artifacts": [
+          {
+            "declared_name": "commits",
+            "sha256": "bd97f178cee48e61733cb74cdbb22d0d3f2267dc04d096296754f04d30d6e35e",
+            "bytes": 41,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "worktree_diff",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "content",
+            "sha256": "fe42e9f562903c217148e1287bf499ab2bd130c25185a5728ac8e83c911fc8e9",
+            "bytes": 34,
+            "preservation_state": "preserved"
+          }
+        ]
+      },
+      "shutdown_observation": "ACP completed the prompt before the adapter was stopped with SIGTERM; the attempt remained succeeded."
+    },
+    {
+      "id": "claude",
+      "execution_command": [
+        "claude-agent-acp"
+      ],
+      "execution_command_present": true,
+      "binary_version": "0.85.1",
+      "executed_relay_sha": "4f17fbe8b834219b58a6572bd87d7d290b6c78d4",
+      "status": "certified",
+      "requested_model_value": "haiku",
+      "advertised_model_values": [
+        "default",
+        "opus",
+        "sonnet",
+        "claude-fable-5-1",
+        "haiku",
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6"
+      ],
+      "confirmed_model_values": [
+        "haiku"
+      ],
+      "authenticated_execution_completed": true,
+      "worktree_run_completed": true,
+      "probe_cleanup_warning": "The ACP probe session may be retained. The pinned ACP SDK exposes no supported delete-session call.",
+      "required_client_file_methods_observed": [],
+      "required_client_terminal_methods_observed": [],
+      "run": {
+        "run_id": "db445d73-e557-419b-a133-6a8628c4fb09",
+        "run_status": "succeeded",
+        "node_stop_reason": "completed",
+        "error_code": null,
+        "exit_code": 0,
+        "writer_commit_advanced": true,
+        "committed_content_matches": true,
+        "declared_artifact_matches": true,
+        "process_id_cleared": true,
+        "session_id_retained_for_diagnostics": true,
+        "worktree_removed": true,
+        "worktree_state": "removed",
+        "artifacts": [
+          {
+            "declared_name": "commits",
+            "sha256": "5cc9aa8b9993a662c4eb26637fc56297a93e7d4f2fb6f3a930273d91b2a876d8",
+            "bytes": 41,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "worktree_diff",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "content",
+            "sha256": "d89d7c9bf7fb397e94573c0320f0f66b7a87bfafa3ff5602fa83e2eb67d41b26",
+            "bytes": 35,
+            "preservation_state": "preserved"
+          }
+        ]
+      },
+      "related_cli_version": "2.1.288",
+      "permission_delivery": "A one-use owner answer was persisted through the Relay control mailbox and returned to the live ACP request."
+    },
+    {
+      "id": "copilot",
+      "execution_command": [
+        "copilot",
+        "--acp"
+      ],
+      "execution_command_present": true,
+      "binary_version": "GitHub Copilot CLI 1.0.91.",
+      "executed_relay_sha": "f9c95cb16d8f1e702b862449c96f8301de3a917a",
+      "status": "certified",
+      "requested_model_value": "auto",
+      "advertised_model_values": [
+        "auto"
+      ],
+      "confirmed_model_values": [
+        "auto"
+      ],
+      "authenticated_execution_completed": true,
+      "worktree_run_completed": true,
+      "probe_cleanup_warning": null,
+      "required_client_file_methods_observed": [],
+      "required_client_terminal_methods_observed": [],
+      "run": {
+        "run_id": "323e767a-672f-4ecd-b054-82283e8132b9",
+        "run_status": "succeeded",
+        "node_stop_reason": "completed",
+        "error_code": null,
+        "exit_code": 0,
+        "writer_commit_advanced": true,
+        "committed_content_matches": true,
+        "declared_artifact_matches": true,
+        "process_id_cleared": true,
+        "session_id_retained_for_diagnostics": true,
+        "worktree_removed": true,
+        "worktree_state": "removed",
+        "artifacts": [
+          {
+            "declared_name": "commits",
+            "sha256": "ccf50affdee77878a4836056e056c59d15762887a4c33b893d58dbf1bc46d3b3",
+            "bytes": 41,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "worktree_diff",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "content",
+            "sha256": "15fdebb3bf1aedc7c067990f74fa0a23b8489767058938639ef4218ed04b9c75",
+            "bytes": 36,
+            "preservation_state": "preserved"
+          }
+        ]
+      },
+      "model_selection_scope": "auto is the literal ACP selector value. This run does not identify the concrete provider-selected backend model.",
+      "permission_delivery": "A one-use owner answer was persisted through the Relay control mailbox and returned to the live ACP request."
+    },
+    {
+      "id": "cursor",
+      "execution_command": [
+        "cursor-agent",
+        "acp"
+      ],
+      "execution_command_present": true,
+      "binary_version": "2026.10.01-e373342",
+      "executed_relay_sha": "4f17fbe8b834219b58a6572bd87d7d290b6c78d4",
+      "status": "certified",
+      "requested_model_value": "default[]",
+      "advertised_model_values": [
+        "default[]",
+        "grok-4.7[context=256k,reasoning_effort=high,fast=true]",
+        "grok-4.6[effort=high,fast=true]",
+        "composer-2.5[fast=true]",
+        "claude-opus-5-5[context=300k,effort=medium,fast=false]",
+        "claude-opus-5[thinking=true,context=300k,effort=high,fast=false]",
+        "claude-opus-4-8[thinking=true,context=300k,effort=high,fast=false]",
+        "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]",
+        "gpt-5.5[context=272k,reasoning=medium,fast=false]",
+        "claude-fable-5-1[thinking=true,context=300k,effort=high]",
+        "claude-fable-5[thinking=true,context=300k,effort=high]",
+        "grok-4.5[effort=high,fast=true]",
+        "gemini-3.8-flash[reasoning_effort=high]",
+        "gemini-3.7-flash[effort=high]",
+        "muse-spark-1.3[context=300k,effort=high]",
+        "gpt-5.6-terra[context=272k,reasoning=medium,fast=false]",
+        "claude-sonnet-5-5[context=300k,reasoning_effort=high]",
+        "claude-sonnet-5[thinking=true,context=300k,effort=high]",
+        "claude-sonnet-4-6[thinking=true,context=200k,effort=medium]",
+        "gpt-5.3-codex[reasoning=medium,fast=false]",
+        "claude-opus-4-7[thinking=true,context=300k,effort=xhigh,fast=false]",
+        "gpt-5.4[context=272k,reasoning=medium,fast=false]",
+        "claude-opus-4-6[thinking=true,context=200k,effort=high]",
+        "claude-opus-4-5[thinking=true]",
+        "gpt-5.2[reasoning=medium,fast=false]",
+        "gpt-5.6-luna[context=272k,reasoning=medium,fast=false]",
+        "gemini-3.6-flash[effort=high]",
+        "gemini-3.1-pro[]",
+        "gpt-5.4-mini[reasoning=medium]",
+        "gpt-5.4-nano[reasoning=medium]",
+        "claude-haiku-4-5[thinking=true]",
+        "claude-sonnet-4-5[thinking=true,context=200k]",
+        "gpt-5.1[reasoning=medium]",
+        "gemini-3-flash[]",
+        "gemini-3.5-flash[]",
+        "claude-sonnet-4[thinking=false,context=200k]",
+        "gpt-5-mini[]",
+        "gemini-2.5-flash[]",
+        "kimi-k3[reasoning=max]",
+        "kimi-k2.7-code[]",
+        "glm-5.2[reasoning=high]",
+        "glm-5p3[reasoning=high]",
+        "glm-5p3-flash[reasoning=high]"
+      ],
+      "confirmed_model_values": [
+        "default[]"
+      ],
+      "authenticated_execution_completed": true,
+      "worktree_run_completed": true,
+      "probe_cleanup_warning": null,
+      "required_client_file_methods_observed": [],
+      "required_client_terminal_methods_observed": [],
+      "run": {
+        "run_id": "815076fa-3aa2-43a3-aa18-fa9fe4e44d66",
+        "run_status": "succeeded",
+        "node_stop_reason": "completed",
+        "error_code": null,
+        "exit_code": 0,
+        "writer_commit_advanced": true,
+        "committed_content_matches": true,
+        "declared_artifact_matches": true,
+        "process_id_cleared": true,
+        "session_id_retained_for_diagnostics": true,
+        "worktree_removed": true,
+        "worktree_state": "removed",
+        "artifacts": [
+          {
+            "declared_name": "commits",
+            "sha256": "a60a91aa41721a429a788d7189337cf776b11854139a1b2fee1e7d8a1a1ab846",
+            "bytes": 41,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "worktree_diff",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "content",
+            "sha256": "aa92c3506bf2ee3f821271f562a72c4b898656bb20796e3bf01bb2a05a5f1d42",
+            "bytes": 35,
+            "preservation_state": "preserved"
+          }
+        ]
+      },
+      "permission_delivery": "A one-use owner answer was persisted through the Relay control mailbox and returned to the live ACP request.",
+      "model_selection_scope": "default[] is the literal advertised and confirmed ACP selector. This run does not identify the concrete provider-selected backend model."
+    },
+    {
+      "id": "antigravity",
+      "execution_command": [
+        "agy"
+      ],
+      "execution_command_present": true,
+      "binary_version": "1.2.16",
+      "executed_relay_sha": "f9c95cb16d8f1e702b862449c96f8301de3a917a",
+      "status": "certified",
+      "requested_model_value": "gemini-3.8-flash-low",
+      "advertised_model_values": [
+        "claude-opus-5-5-high",
+        "claude-opus-5-5-low",
+        "claude-opus-5-5-medium",
+        "claude-sonnet-5-5-high",
+        "claude-sonnet-5-5-low",
+        "claude-sonnet-5-5-medium",
+        "gemini-3.1-pro-high",
+        "gemini-3.1-pro-low",
+        "gemini-3.6-flash-high",
+        "gemini-3.6-flash-low",
+        "gemini-3.6-flash-medium",
+        "gemini-3.7-flash-high",
+        "gemini-3.7-flash-low",
+        "gemini-3.7-flash-medium",
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-low",
+        "gemini-3.8-flash-medium",
+        "gpt-oss-120b-medium"
+      ],
+      "confirmed_model_values": [
+        "gemini-3.8-flash-low"
+      ],
+      "authenticated_execution_completed": true,
+      "worktree_run_completed": true,
+      "probe_cleanup_warning": null,
+      "required_client_file_methods_observed": [],
+      "required_client_terminal_methods_observed": [],
+      "run": {
+        "run_id": "28b0f533-a499-470a-aa8a-97935b460c4e",
+        "run_status": "succeeded",
+        "node_stop_reason": "completed",
+        "error_code": null,
+        "exit_code": 0,
+        "writer_commit_advanced": true,
+        "committed_content_matches": true,
+        "declared_artifact_matches": true,
+        "process_id_cleared": true,
+        "session_id_retained_for_diagnostics": false,
+        "worktree_removed": true,
+        "worktree_state": "removed",
+        "artifacts": [
+          {
+            "declared_name": "commits",
+            "sha256": "b84f17d09332521c9db538798b08d772ee205f8288fece830bfed114f75ecf52",
+            "bytes": 41,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "worktree_diff",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "preservation_state": "preserved"
+          },
+          {
+            "declared_name": "content",
+            "sha256": "a59a7baf0e581e31cdb6d4567309c17b301755382c8d799ac13df6f70148965f",
+            "bytes": 40,
+            "preservation_state": "preserved"
+          }
+        ]
+      },
+      "permission_profile": "auto_approve",
+      "model_selection_scope": "Fresh native model-list membership and an explicit --model argument; no ACP configuration confirmation exists."
+    }
+  ],
+  "unverified": [
+    "Live agent behavior on Linux and Windows",
+    "Live cancellation, model drift, elicitation, and provider timeout paths",
+    "Antigravity respect_settings soft-deny notice format"
+  ],
+  "cleanup": "Successful run worktrees were removed by Relay. Verification-only scratch repositories, retained refs, and artifacts are disposable and are not part of this repository record. Provider-owned session history may remain when SDK 0.12.1 cannot delete it.",
+  "browser_smoke": {
+    "browser": "Google Chrome on macOS arm64",
+    "run_id": "04946fd3-1180-4a44-aa24-851006dcb44f",
+    "executed_relay_sha": "f91e1b59093a32d0f685465406afbd3f0447a0b9",
+    "run_status": "succeeded",
+    "node_statuses": {
+      "root.before": "succeeded",
+      "root.approve": "succeeded",
+      "root.after": "succeeded"
+    },
+    "interaction_status": "answered",
+    "retained_event_count": 37,
+    "worktree_removed": true,
+    "browser_observations": [
+      "Sign-in form opened the author canvas and loaded YAML",
+      "SSE remained live after the first node succeeded",
+      "Browser owner answer resumed the human wait",
+      "Post-wait command output arrived without a reload",
+      "Monitor showed succeeded and SSE complete",
+      "History Refresh showed succeeded"
+    ],
+    "screenshot": "2026-10-03-browser-smoke.jpg",
+    "supervisor_stop": "Relay stopped cleanly."
+  }
+}

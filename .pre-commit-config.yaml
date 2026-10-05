@@ -17,7 +17,7 @@ repos:
     hooks:
       - id: markdownlint
         name: markdownlint
-        args: [ --fix, --disable, MD024 ]
+        args: [ --fix, --disable, MD024, -- ]
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

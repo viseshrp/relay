@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-16T03:56:13Z",
+  "platform": {
+    "system": "macOS",
+    "version": "26.6.1",
+    "machine": "arm64"
+  },
+  "relay_doctor": {
+    "exit_code": 6,
+    "temporary_sessions": true,
+    "checks": {
+      "git": "passed",
+      "database": "passed",
+      "wheel_assets": "passed",
+      "wheel_asset_count": 11,
+      "registry": "passed",
+      "registry_stale": false
+    }
+  },
+  "agents": [
+    {
+      "id": "codex",
+      "execution_command": "codex-acp",
+      "execution_command_present": false,
+      "related_cli": "codex-cli 0.145.0",
+      "registry_version": "1.12.0",
+      "status": "blocked_missing_binary",
+      "credentials_checked": false,
+      "model_probe_completed": false,
+      "worktree_run_completed": false
+    },
+    {
+      "id": "claude",
+      "execution_command": "claude-agent-acp",
+      "execution_command_present": false,
+      "related_cli": null,
+      "registry_version": "0.78.0",
+      "status": "blocked_missing_binary",
+      "credentials_checked": false,
+      "model_probe_completed": false,
+      "worktree_run_completed": false
+    },
+    {
+      "id": "copilot",
+      "execution_command": "copilot --acp",
+      "execution_command_present": false,
+      "related_cli": null,
+      "registry_version": "1.0.83",
+      "status": "blocked_missing_binary",
+      "credentials_checked": false,
+      "model_probe_completed": false,
+      "worktree_run_completed": false
+    },
+    {
+      "id": "cursor",
+      "execution_command": "cursor-agent acp",
+      "execution_command_present": false,
+      "related_cli": null,
+      "registry_version": "2026.09.10",
+      "status": "blocked_missing_binary",
+      "credentials_checked": false,
+      "model_probe_completed": false,
+      "worktree_run_completed": false
+    },
+    {
+      "id": "antigravity",
+      "execution_command": "agy",
+      "execution_command_present": false,
+      "related_cli": null,
+      "registry_version": null,
+      "status": "blocked_missing_binary",
+      "credentials_checked": false,
+      "model_probe_completed": false,
+      "worktree_run_completed": false
+    }
+  ],
+  "url_checks": [
+    {
+      "url": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+      "http_status": 200
+    },
+    {
+      "url": "https://github.com/agentclientprotocol/codex-acp",
+      "http_status": 200
+    },
+    {
+      "url": "https://github.com/agentclientprotocol/claude-agent-acp",
+      "http_status": 200
+    },
+    {
+      "url": "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+      "http_status": 200
+    },
+    {
+      "url": "https://cursor.com/docs/cli/acp",
+      "http_status": 200
+    },
+    {
+      "url": "https://antigravity.google/docs/cli/install/",
+      "http_status": 200
+    }
+  ]
+}

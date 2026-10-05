@@ -1,0 +1,291 @@
+"""Normalization of provider updates into Relay's durable event vocabulary."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+import json
+
+from acp import schema
+
+from relay.constants import EVENT_MAX_PAYLOAD_BYTES
+from relay.execution.state import EventSensitivity
+
+# Reserve half of the persistence limit for scope/attempt metadata and SSE framing.
+_SAFE_CHUNK_BYTES = EVENT_MAX_PAYLOAD_BYTES // 2
+
+
+@dataclass(frozen=True, slots=True)
+class AgentEvent:
+    """A provider-neutral event safe for persistence and browser rendering."""
+
+    event_type: str
+    payload: Mapping[str, object]
+    sensitivity: EventSensitivity = EventSensitivity.NORMAL
+
+
+def _json_chunks(value: str, budget: int) -> tuple[str, ...]:
+    """`a\"é` with a 3-byte JSON-content budget becomes (`a\"`, `é`)."""
+    chunks = []
+    start = 0
+    size = 0
+    for index, character in enumerate(value):
+        if character in ('"', "\\", "\b", "\f", "\n", "\r", "\t"):
+            width = 2
+        elif ord(character) < 32:
+            width = 6  # Other JSON control characters use a six-byte \u00xx escape.
+        else:
+            width = len(character.encode("utf-8"))
+        if size + width > budget:
+            chunks.append(value[start:index])
+            start = index
+            size = 0
+        size += width
+    if start < len(value):
+        chunks.append(value[start:])
+    return tuple(chunks) or ("",)
+
+
+def bounded_agent_events(event: AgentEvent) -> tuple[AgentEvent, ...]:
+    """Split large visible strings so no persisted event drops provider bytes."""
+    encoded = json.dumps(event.payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(encoded) <= _SAFE_CHUNK_BYTES:
+        return (event,)
+    for key in ("text", "summary", "chunk"):
+        value = event.payload.get(key)
+        if isinstance(value, str):
+            # Number fields can never need more digits than the character count.
+            template = {**event.payload, key: "", "part": len(value), "parts": len(value)}
+            overhead = len(
+                json.dumps(template, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            )
+            budget = _SAFE_CHUNK_BYTES - overhead
+            if budget < 6:
+                # Oversized metadata must also be retained, through serialized parts.
+                break
+            chunks = _json_chunks(value, budget)
+            return tuple(
+                AgentEvent(
+                    event.event_type,
+                    {**event.payload, key: chunk, "part": index, "parts": len(chunks)},
+                    event.sensitivity,
+                )
+                for index, chunk in enumerate(chunks, start=1)
+            )
+    serialized = json.dumps(event.payload, separators=(",", ":"), ensure_ascii=False)
+    template = {"chunk": "", "part": len(serialized), "parts": len(serialized)}
+    overhead = len(json.dumps(template, separators=(",", ":")).encode("utf-8"))
+    chunks = _json_chunks(serialized, _SAFE_CHUNK_BYTES - overhead)
+    return tuple(
+        AgentEvent(
+            event.event_type,
+            {"chunk": chunk, "part": index, "parts": len(chunks)},
+            event.sensitivity,
+        )
+        for index, chunk in enumerate(chunks, start=1)
+    )
+
+
+def _is_private(content: object) -> bool:
+    annotations = getattr(content, "annotations", None)
+    audience = getattr(annotations, "audience", None)
+    if isinstance(audience, list) and audience and "user" not in audience:
+        return True
+    metadata = getattr(content, "field_meta", None)
+    return isinstance(metadata, dict) and metadata.get("private") is True
+
+
+def _visible_text(content: object) -> str | None:
+    if _is_private(content):
+        return None
+    text = getattr(content, "text", None)
+    return text if isinstance(text, str) else None
+
+
+def _visible_content(content: object) -> Mapping[str, object] | None:
+    if _is_private(content):
+        return None
+    dump = getattr(content, "model_dump", None)
+    if not callable(dump):
+        return None
+    value = dump(mode="json", by_alias=True, exclude={"field_meta", "annotations"})
+    return value if isinstance(value, dict) else None
+
+
+def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str:
+    summary = {}
+    if update.kind is not None:
+        summary["kind"] = update.kind
+    if update.status is not None:
+        summary["status"] = update.status
+    if update.locations:
+        summary["locations"] = [
+            {"path": item.path, **({"line": item.line} if item.line is not None else {})}
+            for item in update.locations
+        ]
+    if update.raw_input is not None:
+        summary["raw_input"] = update.raw_input
+    if update.raw_output is not None:
+        summary["raw_output"] = update.raw_output
+    visible = []
+    for item in update.content or []:
+        if isinstance(item, schema.ContentToolCallContent):
+            text = _visible_text(item.content)
+            if text is not None:
+                visible.append({"text": text})
+        elif isinstance(item, schema.FileEditToolCallContent):
+            visible.append(
+                {"path": item.path, "old_text": item.old_text, "new_text": item.new_text}
+            )
+        elif isinstance(item, schema.TerminalToolCallContent):
+            visible.append({"terminal_id": item.terminal_id})
+    if visible:
+        summary["content"] = visible
+    return json.dumps(summary, separators=(",", ":"), ensure_ascii=False)
+
+
+def _plan_payload(update: schema.AgentPlanUpdate | schema.AgentPlanContentUpdate) -> object:
+    if isinstance(update, schema.AgentPlanUpdate):
+        return [
+            {"content": item.content, "priority": item.priority, "status": item.status}
+            for item in update.entries
+        ]
+    return update.plan.model_dump(mode="json", by_alias=True, exclude={"field_meta"})
+
+
+def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
+    """Map all owner-visible ACP updates and discard provider-private content."""
+    if isinstance(update, schema.AgentMessageChunk):
+        text = _visible_text(update.content)
+        if text is not None:
+            return (
+                AgentEvent(
+                    "agent.message",
+                    {
+                        "text": text,
+                        **({"message_id": update.message_id} if update.message_id else {}),
+                    },
+                ),
+            )
+        content = _visible_content(update.content)
+        return (
+            () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
+        )
+    if isinstance(update, schema.AgentThoughtChunk):
+        text = _visible_text(update.content)
+        if text is not None:
+            return (
+                AgentEvent(
+                    "agent.thought",
+                    {
+                        "text": text,
+                        **({"message_id": update.message_id} if update.message_id else {}),
+                    },
+                ),
+            )
+        content = _visible_content(update.content)
+        return (
+            () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
+        )
+    if isinstance(update, schema.ToolCallStart):
+        return (
+            AgentEvent(
+                "agent.tool_call",
+                {
+                    "tool": update.title,
+                    "tool_call_id": update.tool_call_id,
+                    "summary": _tool_summary(update),
+                },
+            ),
+        )
+    if isinstance(update, schema.ToolCallProgress):
+        terminal = update.status in {"completed", "failed"}
+        return (
+            AgentEvent(
+                "agent.tool_result" if terminal else "agent.tool_call",
+                {
+                    "tool": update.title or update.tool_call_id,
+                    "tool_call_id": update.tool_call_id,
+                    "summary": _tool_summary(update),
+                },
+            ),
+        )
+    if isinstance(update, (schema.AgentPlanUpdate, schema.AgentPlanContentUpdate)):
+        return (AgentEvent("agent.plan", {"plan": _plan_payload(update)}),)
+    if isinstance(update, schema.AgentPlanRemovedUpdate):
+        return (AgentEvent("agent.plan", {"plan": None, "plan_id": update.plan_id}),)
+    if isinstance(
+        update,
+        (
+            schema.AvailableCommandsUpdate,
+            schema.CurrentModeUpdate,
+            schema.ConfigOptionUpdate,
+            schema.SessionInfoUpdate,
+            schema.UsageUpdate,
+        ),
+    ):
+        return (
+            AgentEvent(
+                "agent.provider_event",
+                {"update": update.model_dump(mode="json", by_alias=True, exclude={"field_meta"})},
+            ),
+        )
+    return ()
+
+
+def _string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def normalize_antigravity_event(raw: Mapping[str, object]) -> tuple[AgentEvent, ...]:
+    """Map documented stream-json lines while preserving unknown lines as diagnostics."""
+    kind = _string(raw.get("event"))
+    if kind == "step_update":
+        update = raw.get("step_update")
+        if not isinstance(update, dict):
+            return (AgentEvent("agent.provider_event", {"event": dict(raw)}),)
+        step_type = _string(update.get("step_type")) or "step"
+        delta = _string(update.get("text_delta"))
+        index = update.get("step_index")
+        # Conversation "abc", step 3 becomes "abc:3"; its deltas remain one message.
+        identity = (
+            {"message_id": f"{update.get('conversation_id', '')}:{index}"}
+            if isinstance(index, int)
+            else {}
+        )
+        if step_type == "agent_response" and delta is not None:
+            return (AgentEvent("agent.message", {"text": delta, **identity}),)
+        if "tool" in step_type:
+            terminal = update.get("state") in {"DONE", "ERROR"}
+            return (
+                AgentEvent(
+                    "agent.tool_result" if terminal else "agent.tool_call",
+                    {
+                        "tool": _string(update.get("tool_name")) or step_type,
+                        **({"tool_call_id": identity["message_id"]} if identity else {}),
+                        "summary": json.dumps(update, separators=(",", ":"), ensure_ascii=False),
+                    },
+                ),
+            )
+    if kind == "result":
+        result = raw.get("result")
+        if isinstance(result, dict):
+            return (
+                AgentEvent(
+                    "agent.result",
+                    {
+                        key: value
+                        for key, value in result.items()
+                        if key not in {"response", "structured_output"}
+                    },
+                ),
+            )
+    return ()
+
+
+__all__ = [
+    "AgentEvent",
+    "bounded_agent_events",
+    "normalize_acp_update",
+    "normalize_antigravity_event",
+]
