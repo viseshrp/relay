@@ -148,6 +148,20 @@ Run metadata includes the registered `project`. Each node includes captured
 `dependencies` (scope paths), `controls` (`target` and `label`), and
 `parent_scope`. These fields come from that run's frozen node definitions,
 including concrete loop and child scopes, rather than today's editable YAML.
+Run detail includes `problem`, either `null` or the initiating failed attempt's
+`scope_path`, `attempt_number`, `agent_id`, `model_value`, `error_code`,
+`stop_reason`, `exit_code`, `message`, `provider_message`, and
+`provider_message_truncated`. This metadata does not depend on the node or
+event page cursor. It selects only the latest attempt of a currently failed
+node, so a retried attempt's old error cannot become the current problem.
+The provider text comes from that attempt's last normal, public `agent.message`,
+never a thought, tool result, redacted event, or context-usage update. Up to
+16 adjacent chunks with the same message ID and turn are joined in event order;
+without an ID, only the last chunk is shown. For example, `"Limit · "` followed
+by `"resets 1:50pm"` becomes `"Limit · resets 1:50pm"`. The notice is capped at
+4,096 characters and flags omitted text. Full events remain in the event API.
+`problem` is `null` for active retries, completed, canceled, and interrupted
+runs; launch failures without an attempt retain `failure_summary` instead.
 Artifact pages use the same numeric cursor rule. The browser merges pages by
 record ID, so loading another page cannot duplicate an item.
 

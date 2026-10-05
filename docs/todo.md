@@ -64,8 +64,11 @@ to change that effort.
 
 ## Workflow handoffs
 
-- [ ] Recognize provider usage limits and show their reset time when the provider
-  supplies it. Preserve the failed step and resume automatically after the reset
+- [x] Show the failed step, failure description or exit code, and the provider's
+  last public message at the top of the run. Keep quota notices and reported
+  reset times visible after reload, without replaying the entire activity log.
+- [ ] Recognize structured provider usage limits and preserve the failed step
+  for an automatic resume after the reset
   without changing its model or reasoning effort. Use structured provider data
   where available; do not guess reset times or retry blindly. A chat continuation
   currently handles this outside Relay.

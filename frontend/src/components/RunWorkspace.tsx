@@ -44,6 +44,7 @@ import { activityMessages } from "../activity";
 import type { WorkflowNodeData } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { ReviewRequest, ReviewEvidence } from "./RunReview";
+import { RunProblemNotice } from "./RunProblemNotice";
 
 const EVENT_TYPES = [
   "run.created",
@@ -150,7 +151,17 @@ function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail 
   if (current === null) return null;
   const status = event.payload.status;
   if (event.type.startsWith("run.") && typeof status === "string") {
-    return { ...current, status };
+    const failed = ["failed", "canceling"].includes(status);
+    return {
+      ...current, status,
+      problem: failed ? current.problem : null,
+      failure_summary: failed
+        ? typeof event.payload.failure_summary === "string" ? event.payload.failure_summary : current.failure_summary
+        : null,
+      failure_code: failed
+        ? typeof event.payload.failure_code === "string" ? event.payload.failure_code : current.failure_code
+        : null,
+    };
   }
   if (event.type.startsWith("node.")) {
     const scopePath = event.payload.scope_path;
@@ -656,7 +667,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   <LinearProgress variant="determinate" value={detail.nodes.length ? 100 * complete / detail.nodes.length : 0} />
                   <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
                 </Stack>
-                {detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
+                {detail.problem && ["failed", "canceling"].includes(detail.status)
+                  ? <RunProblemNotice problem={detail.problem} onShowStep={setSelectedStage} />
+                  : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>
                     Restarting <code>relay up</code> resumes this run from durable state as a fresh attempt.

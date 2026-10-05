@@ -34,6 +34,8 @@ from relay.constants import (
     INSTANCE_STALE_AFTER_SECONDS,
     RECONCILE_MAX_ITEMS,
     REVIEW_PREVIEW_MAX_BYTES,
+    RUN_PROBLEM_MESSAGE_MAX_EVENTS,
+    RUN_PROBLEM_TEXT_MAX_CHARS,
 )
 from relay.errors import (
     ConfigError,
@@ -658,6 +660,84 @@ def _run_record(run: Run) -> dict[str, object]:
     }
 
 
+def _provider_failure_message(attempt: NodeAttempt) -> tuple[str | None, bool]:
+    """Read a bounded tail of this attempt's public final message, never thoughts."""
+    rows = list(
+        RunEvent.objects.filter(
+            attempt=attempt,
+            type="agent.message",
+            source=EventSource.AGENT.value,
+            sensitivity=EventSensitivity.NORMAL.value,
+        )
+        .order_by("-id")
+        .values_list("payload", flat=True)[: RUN_PROBLEM_MESSAGE_MAX_EVENTS + 1]
+    )
+    if not rows or not isinstance(rows[0].get("text"), str):
+        return None, False
+    latest = rows[0]
+    identity = (latest.get("message_id"), latest.get("turn"))
+    chunks = []
+    for payload in rows[:RUN_PROBLEM_MESSAGE_MAX_EVENTS]:
+        if (payload.get("message_id"), payload.get("turn")) != identity:
+            break
+        text = payload.get("text")
+        if not isinstance(text, str):
+            break
+        chunks.append(text)
+        # Without a provider message ID, adjacent messages cannot be proven
+        # to belong together; preserve the last chunk rather than joining them.
+        if identity[0] is None:
+            break
+    # Stored chunks arrive newest first: ["resets 1:50pm", "Limit · "]
+    # becomes "Limit · resets 1:50pm", keeping the provider's own wording.
+    text = "".join(reversed(chunks))
+    truncated = len(text) > RUN_PROBLEM_TEXT_MAX_CHARS or (
+        len(chunks) == RUN_PROBLEM_MESSAGE_MAX_EVENTS
+        and len(rows) > len(chunks)
+        and (rows[-1].get("message_id"), rows[-1].get("turn")) == identity
+    )
+    return text[:RUN_PROBLEM_TEXT_MAX_CHARS], truncated
+
+
+def _run_problem(run: Run) -> dict[str, object] | None:
+    """Expose the initiating failure independently of node and event pagination."""
+    if _string(run, "status") not in {RunStatus.FAILED.value, RunStatus.CANCELING.value}:
+        return None
+    latest_number = (
+        NodeAttempt.objects.filter(node_run_id=models.OuterRef("node_run_id"))
+        .order_by("-attempt_number")
+        .values("attempt_number")[:1]
+    )
+    attempt = (
+        NodeAttempt.objects.select_related("node_run")
+        .filter(node_run__run=run, node_run__status=NodeStatus.FAILED.value)
+        .annotate(latest_number=models.Subquery(latest_number))
+        .filter(attempt_number=models.F("latest_number"), status=AttemptStatus.TERMINAL.value)
+        .exclude(
+            stop_reason__in=(AttemptStopReason.CANCELED.value, AttemptStopReason.INTERRUPTED.value)
+        )
+        .order_by("ended_at", "pk")
+        .first()
+    )
+    if attempt is None:
+        return None
+    ended = RunEvent.objects.filter(attempt=attempt, type="attempt.ended").order_by("-id").first()
+    message = _mapping(ended, "payload").get("error_message") if ended else None
+    provider_message, truncated = _provider_failure_message(attempt)
+    return {
+        "scope_path": _string(_related(attempt, "node_run", NodeRun), "scope_path"),
+        "attempt_number": _integer(attempt, "attempt_number"),
+        "agent_id": _string(attempt, "agent_id"),
+        "model_value": _string(attempt, "model_value"),
+        "error_code": attempt.error_code,
+        "stop_reason": attempt.stop_reason,
+        "exit_code": attempt.exit_code,
+        "message": message if isinstance(message, str) else None,
+        "provider_message": provider_message,
+        "provider_message_truncated": truncated,
+    }
+
+
 def _node_record(node: NodeRun) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
@@ -858,6 +938,7 @@ class DjangoReadStore:
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            result["problem"] = _run_problem(run)
             result["event_cursor"] = _integer(run, "read_event_cursor")
             result["project"] = asdict(_record(_related(run, "project", Project)))
             result["snapshot"] = {
@@ -2988,6 +3069,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                         error_code=AttemptStopReason.CANCELED.value,
                     )
                 node_status, node_event, stop_reason = self._finish_node_transition(node, outcome)
+                # A 5,000-character diagnostic retains its first 4,096 characters
+                # in both the run header and the terminal attempt event.
+                failure_message = (
+                    outcome.error_message[:RUN_PROBLEM_TEXT_MAX_CHARS]
+                    if outcome.error_message is not None
+                    else None
+                )
                 now = timezone.now()
                 _set_model_field(attempt, "status", AttemptStatus.TERMINAL.value)
                 _set_model_field(attempt, "ending_head", ending_head)
@@ -3027,6 +3115,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "model_value": _string(attempt, "model_value"),
                         "stop_reason": stop_reason,
                         "exit_code": outcome.exit_code,
+                        "error_code": outcome.error_code,
+                        "error_message": failure_message,
                     },
                     node=node,
                     attempt=attempt,
@@ -3057,7 +3147,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         if run_transition.changed:
                             _set_model_field(run, "status", run_transition.status)
                             _set_model_field(run, "failure_code", outcome.error_code or stop_reason)
-                            run.save(update_fields=("status", "failure_code"))
+                            _set_model_field(run, "failure_summary", failure_message)
+                            run.save(update_fields=("status", "failure_code", "failure_summary"))
                             _append_event(
                                 run,
                                 run_transition.event,
@@ -3065,6 +3156,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                                 {
                                     "status": run_transition.status,
                                     "failure_code": outcome.error_code or stop_reason,
+                                    "failure_summary": run.failure_summary,
                                 },
                             )
                         self._cancel_not_started(run)

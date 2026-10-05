@@ -71,6 +71,9 @@ API_MAX_PAGE: Final = 200
 API_MAX_PAGE_BYTES: Final = 1_048_576
 # Leave room for JSON escaping and metadata around a review document or Git diff.
 REVIEW_PREVIEW_MAX_BYTES: Final = API_MAX_PAGE_BYTES // 4
+# Run notices stay small even when an agent streams a long final message.
+RUN_PROBLEM_TEXT_MAX_CHARS: Final = 4_096
+RUN_PROBLEM_MESSAGE_MAX_EVENTS: Final = 16
 SSE_MAX_BATCH: Final = 100
 SSE_MAX_FRAME_BYTES: Final = 65_536
 EVENT_MAX_PAYLOAD_BYTES: Final = 65_536

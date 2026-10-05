@@ -139,6 +139,16 @@ def test_executor_faults_settle_the_run_with_relay_error_codes(
         "failed",
         code,
     )
+    expected = (
+        failure.message
+        if isinstance(failure, AgentProtocolError)
+        else ("The node executor failed unexpectedly.")
+    )
+    assert Run.objects.get(pk=run_id).failure_summary == expected
+    assert (
+        RunEvent.objects.get(run_id=run_id, type="attempt.ended").payload["error_message"]
+        == expected
+    )
 
 
 def test_an_unregistered_node_executor_fails_its_claim_instead_of_leaving_it_running(

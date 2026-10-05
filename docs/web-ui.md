@@ -210,6 +210,18 @@ The monitor combines the SSE stream with paginated database reads:
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
 
+When a step fails, the run header shows its name, the failure description or
+exit code, and the provider's last public message when available. **Show stopped
+step** selects that step in the progress view. Provider quota notices and reset
+times stay visible above Activity, including after a reload and in older runs
+whose saved failure summary is empty. Reset times and time zones keep the
+provider's wording. Relay does not infer subscription limits from context-token
+usage, inspect private thoughts, or schedule a quota retry from this notice.
+An external continuation may retry the failed step after the reported reset.
+Completed steps remain saved. Starting a retry clears the old failure notice;
+a new failure shows its own cause. Long provider messages show a partial-text
+notice, with their full recorded text available in Activity.
+
 At a human review, instructions and the response requested by the workflow
 appear beside retained reports and the committed source-to-run-head diff.
 Choose a file in the changes viewer to see its additions, removals, and line

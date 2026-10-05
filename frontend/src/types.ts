@@ -140,6 +140,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  problem: RunProblem | null;
   event_cursor: number;
   project: ProjectRecord;
   snapshot: {
@@ -150,6 +151,19 @@ export interface RunDetail extends RunSummary {
   };
   nodes: RunNode[];
   interactions: RunInteraction[];
+}
+
+export interface RunProblem {
+  scope_path: string;
+  attempt_number: number;
+  agent_id: string;
+  model_value: string;
+  error_code: string | null;
+  stop_reason: string | null;
+  exit_code: number | null;
+  message: string | null;
+  provider_message: string | null;
+  provider_message_truncated: boolean;
 }
 
 export interface RunEvent {

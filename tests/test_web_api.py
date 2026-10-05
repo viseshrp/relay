@@ -14,12 +14,163 @@ from django.test import Client
 import pytest
 
 from relay.agents.models import ModelObservation
-from relay.constants import DATABASE_INTEGER_MAX
+from relay.constants import (
+    DATABASE_INTEGER_MAX,
+    RUN_PROBLEM_MESSAGE_MAX_EVENTS,
+    RUN_PROBLEM_TEXT_MAX_CHARS,
+)
+from relay.execution.runner import ExecutionOutcome, OutcomeKind
+from relay.execution.state import AttemptStopReason, EventSensitivity, EventSource
 from relay.web.models import Artifact, HumanInteraction, Run, RunEvent
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
 from tests.support import FakeAgents, InlineEngine, RelayProject, fake_executable, run_status
 
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
+
+
+def test_historical_provider_failure_is_visible_without_replaying_activity(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "limited",
+        "version: 1\nname: Limited\nnodes:\n  review: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "limited")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    for text in ("You've hit your session limit · ", "resets 1:50pm (UTC)"):
+        engine.store.append_attempt_event(
+            attempt.attempt_id,
+            "agent.message",
+            EventSource.AGENT,
+            {"text": text, "message_id": "quota", "turn": 1},
+        )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.thought",
+        EventSource.AGENT,
+        {"text": "private reasoning"},
+        sensitivity=EventSensitivity.REDACTED,
+    )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.provider_event",
+        EventSource.AGENT,
+        {"update": {"used": 325347, "size": 1000000, "sessionUpdate": "usage_update"}},
+    )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.message",
+        EventSource.AGENT,
+        {"text": "redacted text"},
+        sensitivity=EventSensitivity.REDACTED,
+    )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"summary": "A quoted example of another provider limit."},
+    )
+    engine.store.finish_attempt(
+        attempt.attempt_id,
+        ExecutionOutcome(
+            OutcomeKind.FAILED,
+            stop_reason=AttemptStopReason.FAILED,
+            error_code="agent_protocol_error",
+        ),
+        attempt.starting_head,
+    )
+    # Old attempts have no stored failure summary; the detail read still finds
+    # their own public message, even on a node page that excludes the failed node.
+    assert Run.objects.get(pk=run_id).failure_summary is None
+    detail = owner.get(f"/api/runs/{run_id}?since={DATABASE_INTEGER_MAX}").json()["run"]
+    assert detail["nodes"] == []
+    assert detail["problem"]["scope_path"] == "root.review"
+    assert detail["problem"]["provider_message"] == (
+        "You've hit your session limit · resets 1:50pm (UTC)"
+    )
+    assert detail["problem"]["provider_message_truncated"] is False
+    assert detail["problem"]["error_code"] == "agent_protocol_error"
+    # A new retry cannot keep showing the old quota as a current problem.
+    response = post(
+        owner,
+        f"/api/runs/{run_id}/rerun-node",
+        {"scope_path": "root.review", "idempotency_key": "retry-limited"},
+    )
+    assert response.status_code == 202
+    assert owner.get(f"/api/runs/{run_id}").json()["run"]["problem"] is None
+
+
+@pytest.mark.parametrize(
+    ("chunks", "expected", "truncated"),
+    [
+        ([{"text": "older"}, {"text": "newer"}], "newer", False),
+        (
+            [
+                {"text": "old turn", "message_id": "same", "turn": 1},
+                {"text": "current turn", "message_id": "same", "turn": 2},
+            ],
+            "current turn",
+            False,
+        ),
+        (
+            [{"text": "x" * (RUN_PROBLEM_TEXT_MAX_CHARS + 1), "message_id": "long"}],
+            "x" * RUN_PROBLEM_TEXT_MAX_CHARS,
+            True,
+        ),
+        (
+            [{"text": "x", "message_id": "many"}] * (RUN_PROBLEM_MESSAGE_MAX_EVENTS + 1),
+            "x" * RUN_PROBLEM_MESSAGE_MAX_EVENTS,
+            True,
+        ),
+    ],
+    ids=["unidentified-message", "new-turn", "text-limit", "fragment-limit"],
+)
+def test_provider_failure_notice_bounds_and_message_identity(
+    owner: Client,
+    served: RelayProject,
+    engine: InlineEngine,
+    chunks: list[dict[str, str | int]],
+    expected: str,
+    truncated: bool,
+) -> None:
+    served.write_workflow(
+        "bounded",
+        "version: 1\nname: Bounded\nnodes:\n  work: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "bounded")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    for payload in chunks:
+        engine.store.append_attempt_event(
+            attempt.attempt_id, "agent.message", EventSource.AGENT, payload
+        )
+    engine.store.finish_attempt(
+        attempt.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_code="agent_protocol_error"),
+        attempt.starting_head,
+    )
+    problem = owner.get(f"/api/runs/{run_id}").json()["run"]["problem"]
+    assert (problem["provider_message"], problem["provider_message_truncated"]) == (
+        expected,
+        truncated,
+    )
+
+
+def test_command_failure_detail_reports_its_exit_code(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "command-failure",
+        "version: 1\nname: Failed command\nnodes:\n"
+        "  check: {type: command, run: [git, unknown-command]}\n",
+    )
+    run_id = engine.launch(served, "command-failure")
+    engine.drain(run_id)
+    problem = owner.get(f"/api/runs/{run_id}").json()["run"]["problem"]
+    assert problem["scope_path"] == "root.check"
+    assert problem["exit_code"] == 1
+    assert problem["provider_message"] is None
 
 
 @pytest.mark.usefixtures("served", "database_threads")

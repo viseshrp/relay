@@ -195,6 +195,16 @@ output from iteration 1 or 3.
 
 ## Failure, cancellation, and recovery
 
+When an executor raises a Relay error, its public description is saved in
+`failure_summary` and the `attempt.ended` event's `error_message`. The event also
+includes `error_code`; existing codes and terminal outcomes retain their
+meaning. Descriptions keep at most their first 4,096 characters. For example,
+a 5,000-character description retains its 4,096-character prefix. Unexpected
+exceptions expose a generic Relay description while their trace stays in the
+application log. The run monitor combines this diagnostic with the failed
+attempt's exit code and last public provider message. A rerun clears the run
+summary and shows only the new attempt's failure if it fails again.
+
 The first node failure moves the run to `canceling`, prevents pending work from
 starting, and sends one durable cancel request to each active sibling attempt.
 Agent cancellation asks the protocol session to stop, then Relay terminates the

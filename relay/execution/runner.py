@@ -169,6 +169,7 @@ class ExecutionOutcome:
     exit_code: int | None = None
     error_code: str | None = None
     wait_timeout_seconds: float | None = None
+    error_message: str | None = None
 
 
 class AttemptExecutor(Protocol):
@@ -251,6 +252,7 @@ def _failure(error: RelayError) -> ExecutionOutcome:
         OutcomeKind.FAILED,
         stop_reason=reason,
         error_code=error.error_code,
+        error_message=error.message,
     )
 
 
