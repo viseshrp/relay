@@ -2588,6 +2588,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 if current_status == status:
                     return
                 if current_status in {
+                    NodeStatus.RUNNING.value,
                     NodeStatus.FAILED.value,
                     NodeStatus.WAITING.value,
                 }:
@@ -3891,7 +3892,6 @@ class DjangoExecutionStore(DjangoAgentStore):
                         .filter(
                             run=run,
                             status=NodeStatus.FAILED.value,
-                            attempts__isnull=False,
                         )
                         .distinct()
                         if scope_is_ancestor(_string(candidate, "scope_path"), target.scope_path)
@@ -3902,17 +3902,26 @@ class DjangoExecutionStore(DjangoAgentStore):
                     ),
                 )
                 for candidate in failed_nodes:
-                    node_transition = transition_node(_string(candidate, "status"), "rerun")
-                    _set_model_field(candidate, "status", node_transition.status)
+                    # Iteration rows summarize children without their own attempt.
+                    # root.repeat#1 becomes running while its failed child is retried.
+                    iteration = parse_scope_path(_string(candidate, "scope_path"))[-1].iteration
+                    if _string(candidate, "node_type") == NodeType.LOOP.value and iteration:
+                        status = NodeStatus.RUNNING.value
+                        event = "node.running"
+                    else:
+                        node_transition = transition_node(_string(candidate, "status"), "rerun")
+                        status = node_transition.status
+                        event = node_transition.event
+                    _set_model_field(candidate, "status", status)
                     candidate.save(update_fields=("status",))
                     _append_event(
                         run,
-                        node_transition.event,
+                        event,
                         EventSource.NODE,
                         {
                             "scope_path": _string(candidate, "scope_path"),
                             "node_type": _string(candidate, "node_type"),
-                            "status": node_transition.status,
+                            "status": status,
                         },
                         node=candidate,
                     )

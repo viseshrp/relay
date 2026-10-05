@@ -174,6 +174,9 @@ The selected run's history entry uses its live status, so it agrees with the
 detail view when work waits, finishes, stops, or restarts. Refresh reloads the
 history list for other runs. Workflows continue automatically until a configured
 stage or tool requests input.
+Retrying a failed child also marks its enclosing failed loop iterations
+**In progress**. Their earlier failure stays in history; completed steps and
+iterations keep their results.
 Interaction updates refresh the current step state after event replay, so a
 waiting stage stays labeled **Needs your input** when a historical stream opens.
 The captured state cursor prevents replayed progress from replacing current

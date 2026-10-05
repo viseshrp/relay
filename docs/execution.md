@@ -72,8 +72,11 @@ or `failed`; restart never reopens canceled nodes.
 
 Loop-iteration rows such as `root.build#2` are structural summaries, not
 executable nodes. They own no attempt or dispatch and do not use the node
-transition table. Their `waiting`, `failed`, or `succeeded` status reflects the
-child scope; resuming that scope may replace its waiting or failed summary.
+transition table. Their status reflects the child scope. Rerunning a failed
+child marks its enclosing failed iteration summaries `running`, such as
+`root.repeat#1` for `root.repeat#1.check`. When that scope settles, its summary
+becomes `waiting`, `failed`, or `succeeded` again. Completed iterations retain
+their result.
 
 ### Human interactions
 

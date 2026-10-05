@@ -165,6 +165,88 @@ def test_a_rerun_in_preparation_rejects_a_concurrent_request(
     assert duplicate == [ControlResult.STALE]
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_rerunning_a_child_reopens_its_failed_iteration_summaries(
+    project: RelayProject, engine: InlineEngine, tmp_path: Path, nested: bool
+) -> None:
+    marker = str(tmp_path / "second-try")
+    script = (
+        "from pathlib import Path; import os,sys; p=Path(os.environ['MARKER']); "
+        "existed=p.exists(); p.touch(); sys.exit(0 if existed else 1)"
+    )
+    body = {
+        "before": {"type": "command", "run": ["git", "status"]},
+        "retry": {
+            "type": "command",
+            "needs": ["before"],
+            "run": [PYTHON, "-c", script],
+            "env": {"MARKER": marker},
+        },
+        "after": {"type": "command", "needs": ["retry"], "run": ["git", "status"]},
+    }
+    parent = "root.repeat#1"
+    summaries = [parent]
+    if nested:
+        body = {
+            "inner": {
+                "type": "loop",
+                "max_iterations": 1,
+                "until": "${{ True }}",
+                "exhausted": "inner_exhausted",
+                "body": body,
+            },
+            "inner_exhausted": {
+                "type": "command",
+                "needs": ["inner"],
+                "run": ["git", "status"],
+            },
+        }
+        parent += ".inner#1"
+        summaries.append(parent)
+    project.write_workflow(
+        "iteration-rerun",
+        json.dumps(
+            {
+                "version": 1,
+                "name": "Iteration rerun",
+                "nodes": {
+                    "repeat": {
+                        "type": "loop",
+                        "max_iterations": 1,
+                        "until": "${{ True }}",
+                        "exhausted": "exhausted",
+                        "body": body,
+                    },
+                    "exhausted": {
+                        "type": "command",
+                        "needs": ["repeat"],
+                        "run": ["git", "status"],
+                    },
+                },
+            }
+        ),
+    )
+    run_id = engine.launch(project, "iteration-rerun")
+    engine.drain(run_id)
+    assert all(node_statuses(run_id)[scope] == "failed" for scope in summaries)
+    store = engine.store
+
+    result = rerun_failed_node(
+        store, run_id, parent + ".retry", "nested-rerun", partial(prepare_recovery_workspace, store)
+    )
+
+    assert result is ControlResult.ACCEPTED
+    assert all(node_statuses(run_id)[scope] == "running" for scope in summaries)
+    assert node_statuses(run_id)[parent + ".before"] == "succeeded"
+    dispatch_ready_nodes(store, run_id, engine.tokens.append)
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+    assert all(node_statuses(run_id)[scope] == "succeeded" for scope in summaries)
+    assert (
+        NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__node_id="before").count() == 1
+    )
+
+
 def test_orderly_shutdown_interrupts_attempts_and_restart_resumes_them(
     project: RelayProject, engine: InlineEngine
 ) -> None:
