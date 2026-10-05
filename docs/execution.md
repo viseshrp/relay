@@ -264,6 +264,38 @@ or cannot persist shutdown intent. A marker written before a persistence
 failure stays available for restart reconciliation. The supervisor releases
 its own lease after child cleanup and reports a shutdown failure.
 
+### Restart after a lost supervisor
+
+`relay up` holds a kernel lock for its whole lifetime. A second supervisor
+cannot take over while that lock is held. The operating system releases it
+when the supervisor exits, including after an abrupt termination.
+
+The supervisor atomically records its instance UUID, host, and the PID and
+creation time of itself and its web and worker children. On the next start,
+Relay checks that the recorded supervisor has exited before releasing that
+exact database lease. A live matching supervisor remains authoritative even
+if its database heartbeat is stale.
+
+Relay gates new work, records shutdown intent, and stops only children whose
+current creation time matches the record. It rechecks that identity before
+force-stop. A reused PID is left alone. Linux identities combine the boot ID
+and process start ticks; Windows uses `GetProcessTimes`; macOS uses
+`PROC_PIDTBSDINFO`. Active command and agent attempts also retain their creation
+time. Recovery waits for verified attempts to exit before reconciling their
+worktrees.
+
+After cleanup, Relay reclaims the requested port, reconciles interrupted work,
+and starts fresh children. Completed runs, successful nodes, recorded commits,
+and frozen snapshots remain intact. Cancel and fail-fast intent follow the
+shutdown rules above. The ownership record is removed only after its matching
+children exit.
+
+Unrelated port occupants, missing or invalid ownership records, links, another
+host's record, and unverifiable process identities never authorize a stop.
+An older live attempt without a creation token blocks workspace recovery;
+stop that older worker normally first. Relay reports the reason and preserves
+its worktree instead of guessing ownership.
+
 ## Scheduling and worktree admission
 
 Unstarted stale dispatches are repaired for both `running` and `paused_wait`

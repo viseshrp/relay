@@ -15,8 +15,9 @@ import pytest
 from relay.config import RelayConfig
 from relay.constants import INSTANCE_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import ConfigError, PersistenceError
+from relay.execution.process_identity import ProcessIdentity
 from relay.paths import shutdown_marker_path
-from relay.web import supervisor
+from relay.web import process_ownership, supervisor
 from relay.web.models import Instance, NodeAttempt, Run
 from relay.web.repositories import DjangoExecutionStore
 from tests.support import Clock, InlineEngine, RelayProject
@@ -157,6 +158,14 @@ class SupervisorBoundary:
             if child.pid == pid and (force or not child.ignore_grace):
                 child.returncode = 0
 
+    def process_identity(self, pid: int) -> ProcessIdentity | None:
+        if pid == os.getpid():
+            return ProcessIdentity(pid, "test-supervisor-birth")
+        for child in self.children:
+            if child.pid == pid and child.returncode is None:
+                return ProcessIdentity(pid, f"test-child-birth:{pid}")
+        return None
+
     def connection(self, host: str, port: int, *, timeout: float) -> SupervisorBoundary:
         del host, port, timeout
         return self
@@ -233,6 +242,7 @@ def supervisor_boundary(
     monkeypatch.setattr(supervisor, "threading", SimpleNamespace(Event=boundary.event))
     monkeypatch.setattr(supervisor, "HTTPConnection", boundary.connection)
     monkeypatch.setattr(supervisor, "signal_process_tree", boundary.stop_tree)
+    monkeypatch.setattr(process_ownership, "process_identity", boundary.process_identity)
     monkeypatch.setattr(
         supervisor,
         "time",
@@ -325,6 +335,26 @@ def test_supervisor_spawn_failure_stops_any_child_already_started(
         supervisor.run_supervisor(RelayConfig(), open_browser=False)
     assert all(child.returncode == 0 for child in boundary.children)
     assert not Instance.objects.exists()
+
+
+def test_child_ownership_write_failure_stops_the_child_already_started(
+    supervisor_boundary: SupervisorBoundary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save = process_ownership.SupervisorOwnership.save
+
+    def fail_child_save(record: process_ownership.SupervisorOwnership) -> None:
+        if record.children:
+            message = "Ownership storage became unavailable after spawn"
+            raise PersistenceError(message)
+        save(record)
+
+    monkeypatch.setattr(process_ownership.SupervisorOwnership, "save", fail_child_save)
+    with pytest.raises(PersistenceError):
+        supervisor.run_supervisor(RelayConfig(), open_browser=False)
+    assert len(supervisor_boundary.children) == 1
+    assert supervisor_boundary.children[0].returncode == 0
+    assert not Instance.objects.exists()
+    assert not process_ownership.ownership_path().exists()
 
 
 @pytest.mark.parametrize("index", [0, 1])
@@ -460,3 +490,31 @@ def test_startup_marker_never_authorizes_signaling_a_previous_attempt_pid(
     assert NodeAttempt.objects.get(pk=claim.attempt_id).stop_reason == "interrupted"
     assert Run.objects.get(pk=run_id).status == "interrupted"
     assert not marker.exists()
+
+
+def test_orphan_recovery_preserves_workspaces_when_a_live_legacy_attempt_is_unverified(
+    supervisor_boundary: SupervisorBoundary, project: RelayProject, engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "legacy", "version: 1\nname: Legacy\nnodes:\n  work: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(project, "legacy")
+    claim = engine.store.claim_dispatch(engine.tokens.popleft(), "older-worker").attempt
+    assert claim is not None
+    # A migrated attempt has a PID but no historical creation time to trust.
+    NodeAttempt.objects.filter(pk=claim.attempt_id).update(
+        process_pid=os.getpid(), process_started=None
+    )
+    old_instance = engine.store.acquire_instance(100, "test-host")
+    record = process_ownership.SupervisorOwnership(
+        old_instance, ProcessIdentity(100, "former-supervisor")
+    )
+    record.save()
+    before = Run.objects.values("worktree_path", "recorded_head").get(pk=run_id)
+    with pytest.raises(PersistenceError):
+        supervisor.run_supervisor(RelayConfig(), open_browser=False)
+    assert Run.objects.values("worktree_path", "recorded_head").get(pk=run_id) == before
+    assert supervisor_boundary.forced_pids == []
+    assert supervisor_boundary.children == []
+    assert process_ownership.read_ownership() == record
+    assert NodeAttempt.objects.get(pk=claim.attempt_id).status == "running"

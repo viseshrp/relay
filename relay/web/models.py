@@ -8,7 +8,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
-from relay.constants import CONTROL_IDEMPOTENCY_KEY_MAX_CHARS
+from relay.constants import CONTROL_IDEMPOTENCY_KEY_MAX_CHARS, PROCESS_IDENTITY_MAX_CHARS
 from relay.execution.state import (
     AttemptStatus,
     AttemptStopReason,
@@ -52,7 +52,7 @@ class Installation(RelayModel):
 
 
 class Instance(RelayModel):
-    """The sole live supervisor lease, replaced only after heartbeat expiry."""
+    """The database lease for the kernel-locked local supervisor."""
 
     id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     singleton_key: models.PositiveSmallIntegerField = models.PositiveSmallIntegerField(
@@ -229,6 +229,9 @@ class NodeAttempt(RelayModel):
     )
     worker_id: models.TextField = models.TextField()
     process_pid: models.PositiveIntegerField = models.PositiveIntegerField(null=True, blank=True)
+    process_started: models.CharField = models.CharField(
+        max_length=PROCESS_IDENTITY_MAX_CHARS, null=True, blank=True
+    )
     acp_session_id: models.TextField = models.TextField(null=True, blank=True)
     driver_kind: models.CharField = models.CharField(
         max_length=16, choices=DriverKind.choices(), null=True, blank=True

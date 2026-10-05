@@ -25,8 +25,12 @@ The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, automatic retries, model fallback, automatic merge, or
+Redis, Postgres, general failure retries, model fallback, automatic merge, or
 bundled workflow templates.
+Confirmed provider usage resets can resume a failed stage automatically while
+preserving its captured model, effort, and prompts. Unsupported or missing reset
+information remains visible for the owner. See
+[Provider usage resets](docs/execution.md#provider-usage-resets).
 
 ## Requirements
 

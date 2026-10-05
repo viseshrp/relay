@@ -62,6 +62,7 @@ def unavailable_database(
         ("execution", "heartbeat_instance", (MISSING_UUID,), {}),
         ("execution", "request_orderly_shutdown", (MISSING_UUID,), {}),
         ("execution", "active_attempt_processes", (), {}),
+        ("execution", "owned_attempt_processes", (), {}),
         ("execution", "interrupt_active_attempts", (), {}),
         ("execution", "fail_worker_attempts", (), {}),
         ("execution", "release_instance", (MISSING_UUID,), {}),

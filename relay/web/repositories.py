@@ -67,6 +67,7 @@ from relay.execution.machine import (
     transition_node,
     transition_run,
 )
+from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import RecoveryTarget
@@ -2361,12 +2362,30 @@ class DjangoExecutionStore(DjangoAgentStore):
                 RunLock.objects.filter(attempt_id=attempt_id).update(heartbeat_at=now)
             return updated == 1
 
+    def owned_attempt_processes(self) -> tuple[tuple[str, ProcessIdentity], ...]:
+        """Only identities recorded at spawn may authorize later escalation."""
+        try:
+            rows = NodeAttempt.objects.filter(
+                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                process_pid__isnull=False,
+                process_started__isnull=False,
+            ).values_list("pk", "process_pid", "process_started")
+            return tuple(
+                (str(attempt_id), ProcessIdentity(pid, started))
+                for attempt_id, pid, started in rows
+                if isinstance(pid, int) and isinstance(started, str)
+            )
+        except DatabaseError:
+            message = "Relay could not load verified attempt process identities."
+            raise PersistenceError(message) from None
+
     def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None:
+        identity = process_identity(process_id) if process_id is not None else None
         try:
             NodeAttempt.objects.filter(
                 pk=attempt_id,
                 status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(process_pid=process_id)
+            ).update(process_pid=process_id, process_started=identity.started if identity else None)
         except DatabaseError:
             message = "Relay could not record the attempt process."
             raise PersistenceError(message, context={"node": attempt_id}) from None
@@ -2381,12 +2400,14 @@ class DjangoExecutionStore(DjangoAgentStore):
         config_ids: Mapping[str, object],
     ) -> None:
         """Persist process/session correlation without changing attempt ownership."""
+        identity = process_identity(process_id) if process_id is not None else None
         try:
             NodeAttempt.objects.filter(
                 pk=attempt_id,
                 status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
             ).update(
                 process_pid=process_id,
+                process_started=identity.started if identity else None,
                 acp_session_id=session_id,
                 agent_version=agent_version,
                 config_ids=dict(config_ids),

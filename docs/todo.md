@@ -73,10 +73,14 @@ to change that effort.
   durable schedule in Relay. Missing or stale resets remain visibly blocked;
   cancellation removes the schedule. No reset times are guessed. See
   [Provider usage resets](execution.md#provider-usage-resets).
-- [ ] Restore supervision when a lost supervisor leaves its web or worker
+- [x] Restore supervision when a lost supervisor leaves its web or worker
   children running. Verify ownership and protect against reused process IDs
   before stopping or reusing children. Preserve completed runs and avoid
   requiring manual process inspection and signaling to restart Relay.
+  A lifetime kernel lock and atomic creation-identity record now authorize
+  takeover only after the recorded owner exits. Matching children stop before
+  restart reconciliation; reused or unverifiable PIDs remain untouched. See
+  [Restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
 
 - [x] Create and save new workflows through Relay without manually adding a
   bootstrap YAML file. Keep prompts and agent execution bound to the selected

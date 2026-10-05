@@ -30,11 +30,19 @@ class MigrationLock:
 
     path: Path
     timeout: float
+    purpose: str
     _stream: BinaryIO | None
 
-    def __init__(self, path: Path, *, timeout: float = MIGRATION_LOCK_WAIT_SECONDS) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        timeout: float = MIGRATION_LOCK_WAIT_SECONDS,
+        purpose: str = "migration",
+    ) -> None:
         self.path = path
         self.timeout = timeout
+        self.purpose = purpose
         self._stream = None
 
     def __enter__(self) -> MigrationLock:
@@ -54,7 +62,8 @@ class MigrationLock:
                     raise
                 if time.monotonic() >= deadline:
                     stream.close()
-                    message = "Timed out waiting for Relay's migration lock."
+                    # purpose='supervisor' becomes "Relay's supervisor lock".
+                    message = f"Timed out waiting for Relay's {self.purpose} lock."
                     raise PersistenceError(
                         message,
                         next_action="Wait for the other Relay instance to finish starting.",

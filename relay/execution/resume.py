@@ -88,7 +88,9 @@ def rerun_failed_node(
     # this kernel lock. It is released by the OS even if either process crashes.
     # `../run` becomes a fixed hexadecimal filename, never a path component.
     filename = sha256(run_id.encode()).hexdigest()
-    lock = MigrationLock(data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0)
+    lock = MigrationLock(
+        data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0, purpose="run recovery"
+    )
     try:
         try:
             lock.__enter__()

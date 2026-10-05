@@ -23,19 +23,23 @@ from relay.config import RelayConfig
 from relay.constants import (
     INSTANCE_HEARTBEAT_INTERVAL_SECONDS,
     LOOPBACK_HOSTS,
+    PROCESS_EXIT_POLL_SECONDS,
     SHUTDOWN_TIMEOUT_SECONDS,
 )
 from relay.errors import ConfigError, PersistenceError, RelayError
 from relay.execution.cancellation import signal_process_tree
 from relay.execution.huey_app import enqueue_claim
+from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import ReconcileStore, reconcile_once
 from relay.execution.recovery import RecoveryEvidenceStore, prepare_recovery_workspace
 from relay.execution.resume import ResumeStore, resume_interrupted
 from relay.execution.scheduler import SchedulingStore, dispatch_ready_nodes
-from relay.manage import apply_migrations
+from relay.manage import MigrationLock, apply_migrations
 from relay.paths import data_dir, shutdown_marker_path
 from relay.projects.discovery import discover_relay_root
 from relay.projects.service import register_current_project
+
+from .process_ownership import SupervisorOwnership, abandoned_ownership, stop_owned_children
 
 LOGGER = logging.getLogger(__name__)
 _STARTUP_TIMEOUT_SECONDS = 15.0
@@ -58,6 +62,8 @@ class SupervisorStore(
     def request_orderly_shutdown(self, instance_id: str) -> int: ...
 
     def active_attempt_processes(self) -> tuple[tuple[str, int], ...]: ...
+
+    def owned_attempt_processes(self) -> tuple[tuple[str, ProcessIdentity], ...]: ...
 
     def interrupt_active_attempts(self) -> int: ...
 
@@ -141,6 +147,7 @@ def _spawn_child(
 def _spawn_children(
     repository: Path,
     config: RelayConfig,
+    ownership: SupervisorOwnership,
 ) -> tuple[subprocess.Popen[bytes], subprocess.Popen[bytes]]:
     environment = os.environ.copy()
     environment["RELAY_PROJECT_ROOT"] = str(repository)
@@ -162,7 +169,9 @@ def _spawn_children(
             repository,
             environment,
         )
+        consumer = None
         try:
+            ownership.record_child("web", web.pid)
             consumer = _spawn_child(
                 [
                     sys.executable,
@@ -181,13 +190,16 @@ def _spawn_children(
                 repository,
                 environment,
             )
-        except OSError:
-            _terminate_child(web, graceful_signal=signal.SIGTERM)
-            with suppress(subprocess.TimeoutExpired):
-                web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
-            _kill_child(web)
-            with suppress(subprocess.TimeoutExpired):
-                web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+            ownership.record_child("worker", consumer.pid)
+        except (OSError, RelayError):
+            for child in (web, consumer):
+                if child is not None:
+                    _terminate_child(child, graceful_signal=signal.SIGTERM)
+                    with suppress(subprocess.TimeoutExpired):
+                        child.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+                    _kill_child(child)
+                    with suppress(subprocess.TimeoutExpired):
+                        child.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
             raise
     except OSError:
         message = "Relay could not start its local web and worker processes."
@@ -209,8 +221,11 @@ def _kill_child(process: subprocess.Popen[bytes]) -> None:
         signal_process_tree(process.pid, force=True)
 
 
-def _force_attempt_processes(rows: tuple[tuple[str, int], ...]) -> None:
-    for attempt_id, process_id in rows:
+def _force_attempt_processes(
+    rows: tuple[tuple[str, ProcessIdentity], ...], *, require_exit: bool = False
+) -> None:
+    for attempt_id, identity in rows:
+        process_id = identity.pid
         if process_id <= 1 or process_id == os.getpid():
             LOGGER.error(
                 "Refusing unsafe recorded attempt pid",
@@ -218,12 +233,24 @@ def _force_attempt_processes(rows: tuple[tuple[str, int], ...]) -> None:
             )
             continue
         try:
+            if process_identity(process_id) != identity:
+                continue
             signal_process_tree(process_id, force=True)
         except (OSError, subprocess.SubprocessError):
             LOGGER.exception(
                 "Attempt process-tree escalation failed",
                 extra={"attempt_id": attempt_id, "process_id": process_id},
             )
+            if require_exit:
+                message = "Relay could not stop an abandoned attempt before recovery."
+                raise PersistenceError(message) from None
+    if require_exit:
+        deadline = time.monotonic() + _ESCALATION_TIMEOUT_SECONDS
+        while any(process_identity(identity.pid) == identity for _, identity in rows):
+            if time.monotonic() >= deadline:
+                message = "An abandoned attempt is still running; Relay preserved its worktree."
+                raise PersistenceError(message)
+            threading.Event().wait(PROCESS_EXIT_POLL_SECONDS)
 
 
 def _wait_until_ready(
@@ -319,7 +346,7 @@ def _shutdown_children(
         time.sleep(0.05)
 
     if web.poll() is None or consumer.poll() is None:
-        _force_attempt_processes(store.active_attempt_processes())
+        _force_attempt_processes(store.owned_attempt_processes())
         _terminate_child(web, graceful_signal=signal.SIGTERM)
         _terminate_child(consumer, graceful_signal=signal.SIGTERM)
         escalation_deadline = time.monotonic() + _ESCALATION_TIMEOUT_SECONDS
@@ -336,14 +363,13 @@ def _shutdown_children(
     store.interrupt_active_attempts()
 
 
-def run_supervisor(
+def _run_supervisor(
     config: RelayConfig,
     *,
     open_browser: bool,
     on_ready: Callable[[str], None] | None = None,
 ) -> None:
     """Run until a signal or child failure, then preserve resumable state."""
-    _validate_bind(config.host, config.port)
     try:
         relay_root = discover_relay_root(Path.cwd())
     except RelayError as error:
@@ -361,6 +387,11 @@ def run_supervisor(
 
     register_current_project(DjangoProjectStore(), repository)
     store = DjangoExecutionStore()
+    abandoned = abandoned_ownership()
+    if abandoned is not None:
+        # Birth verification proved that this manifest's owner is gone.
+        # A heartbeat alone must never authorize terminating its children.
+        store.release_instance(abandoned.instance_id)
     instance_id = store.acquire_instance(os.getpid(), socket.gethostname())
     stop = threading.Event()
     signal_requested = threading.Event()
@@ -368,17 +399,40 @@ def run_supervisor(
     web = None
     consumer = None
     previous_handlers = {}
+    ownership = None
 
     def request_stop(_signum: int, _frame: FrameType | None) -> None:
         signal_requested.set()
         stop.set()
 
     try:
+        if abandoned is not None:
+            _write_shutdown_marker(instance_id)
+            store.request_orderly_shutdown(instance_id)
+            stop_owned_children(abandoned)
+            processes = store.owned_attempt_processes()
+            verified_pids = {identity.pid for _, identity in processes}
+            for _, process_id in store.active_attempt_processes():
+                if process_id not in verified_pids and process_identity(process_id) is not None:
+                    # Older attempts lack a creation token. Even a live PID
+                    # cannot prove ownership, so leave its worktree untouched.
+                    message = "Relay cannot verify an older attempt's process before recovery."
+                    raise PersistenceError(
+                        message,
+                        next_action="Stop the older Relay worker normally before restarting.",
+                    )
+            _force_attempt_processes(processes, require_exit=True)
+            abandoned.clear()
+            # Reopen launch only after the former children have stopped.
+            store.acquire_instance(os.getpid(), socket.gethostname())
+        _validate_bind(config.host, config.port)
         _startup_reconcile(store)
         for candidate in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[candidate] = signal.getsignal(candidate)
             signal.signal(candidate, request_stop)
-        web, consumer = _spawn_children(repository, config)
+        ownership = SupervisorOwnership.current(instance_id)
+        ownership.save()
+        web, consumer = _spawn_children(repository, config, ownership)
         url = _browser_url(config.host, config.port)
         _wait_until_ready(web, consumer, config.host, config.port, stop)
         if not stop.is_set():
@@ -416,7 +470,7 @@ def run_supervisor(
                 worker_failed = consumer.poll() is not None and not signal_requested.is_set()
                 if worker_failed:
                     _terminate_child(web, graceful_signal=signal.SIGTERM)
-                    _force_attempt_processes(store.active_attempt_processes())
+                    _force_attempt_processes(store.owned_attempt_processes())
                     store.fail_worker_attempts()
                     _kill_child(web)
                     with suppress(subprocess.TimeoutExpired):
@@ -435,8 +489,24 @@ def run_supervisor(
                 with suppress(OSError):
                     shutdown_marker_path().unlink(missing_ok=True)
             store.release_instance(instance_id)
+            if ownership is not None:
+                ownership.clear()
     if unexpected is not None:
         raise unexpected
+
+
+def run_supervisor(
+    config: RelayConfig,
+    *,
+    open_browser: bool,
+    on_ready: Callable[[str], None] | None = None,
+) -> None:
+    """Hold one OS lease through startup, orphan recovery, and child shutdown."""
+    if config.host not in LOOPBACK_HOSTS:
+        message = "Relay may bind only to a loopback address."
+        raise ConfigError(message)
+    with MigrationLock(data_dir(create=True) / "supervisor.lock", timeout=0, purpose="supervisor"):
+        _run_supervisor(config, open_browser=open_browser, on_ready=on_ready)
 
 
 __all__ = ["run_supervisor"]

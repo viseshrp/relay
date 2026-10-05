@@ -46,6 +46,9 @@ if other local accounts can access the profile.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and `registry-cache/`.
+It also contains `supervisor.lock` and `supervisor-processes.json`, the kernel
+lease and atomic process ownership record used for
+[restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
 Snapshots are database rows. Each process that emits a diagnostic, including
 a CLI command, writes a rotating `relay-{pid}.log` with up to three backups
 of 5 MB each. Quiet commands create no empty log file. Every log file Relay
@@ -154,8 +157,9 @@ On POSIX, each command or agent runs in a new process group; Relay stops its
 remaining descendants when the lifecycle ends. On Windows, a launcher joins
 an unnamed Job Object before creating the target. Its non-inheritable job
 handle uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so surviving descendants stop
-when the launcher exits. No cleanup scans personal browser processes or acts
-on a PID saved by an earlier Relay instance. See Microsoft's
+when the launcher exits. Cleanup never scans personal browser processes. A PID
+saved by an earlier instance authorizes a stop only when its recorded OS
+creation identity still matches; unverified older PIDs are left alone. See Microsoft's
 [Job Objects documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 
 Files created outside the supplied temporary and profile folders remain
