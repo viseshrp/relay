@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from relay.errors import ArtifactPreservationError, WorktreeError
+from relay.errors import WorktreeError
 from relay.paths import artifacts_dir
 from relay.vcs.artifacts import (
     PreservationResult,
     RecoveryReport,
     preserve_attempt_evidence,
     restore_recovery_reports,
+    validate_attempt_evidence,
     validate_recovery_reports,
 )
 from relay.vcs.cleanliness import require_clean
@@ -64,9 +65,9 @@ def prepare_recovery_workspace(
             repository, worktree, target.run_id, target.attempt_id, target.starting_head
         )
         store.record_preservation(target.attempt_id, preservation)
-    elif not (retained / "manifest.json").is_file():
-        message = "The retained attempt evidence has no complete manifest."
-        raise ArtifactPreservationError(message)
+    # Previously captured evidence can be damaged later. Verify all archived
+    # bytes and the retained commit before removing the current partial work.
+    validate_attempt_evidence(repository, target.run_id, target.attempt_id, target.starting_head)
     # Retain ignored/rejected reports from older attempts before any reset.
     # The database then selects the failed report and successful handoffs.
     store.capture_recovery_reports(target)

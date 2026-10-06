@@ -18,11 +18,12 @@ from relay.media import media_type_for
 from relay.paths import artifacts_dir, ensure_private_dir, safe_resolve
 
 from .commits import commits_between, current_head
-from .git import run_git, run_git_bytes, run_git_to_file
+from .git import git_stdout, run_git, run_git_bytes, run_git_to_file
 from .worktree import reset_worktree
 
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _COPY_CHUNK_BYTES = 1024 * 1024
+_MANIFEST_VERSION = 1
 LOGGER = logging.getLogger(__name__)
 
 
@@ -249,7 +250,7 @@ def _write_manifest(
     files: list[PreservedArtifact],
 ) -> None:
     manifest = {
-        "version": 1,
+        "version": _MANIFEST_VERSION,
         "run_id": run_id,
         "attempt_id": attempt_id,
         "retained_ref": reference,
@@ -382,6 +383,69 @@ def preserve_then_reset(
     return result
 
 
+def validate_attempt_evidence(
+    repository: Path, run_id: str, attempt_id: str, starting_head: str
+) -> None:
+    """Verify the archived ref and every recorded byte before discarding a checkout."""
+    directory = (
+        artifacts_dir() / _component(run_id, "run id") / _component(attempt_id, "attempt id")
+    )
+    reference = retained_attempt_ref(run_id, attempt_id)
+    try:
+        with safe_resolve(directory, "manifest.json").open(encoding="utf-8") as stream:
+            manifest = json.load(stream)
+        if (
+            not isinstance(manifest, dict)
+            or type(manifest.get("version")) is not int
+            or manifest.get("version") != _MANIFEST_VERSION
+            or manifest.get("run_id") != run_id
+            or manifest.get("attempt_id") != attempt_id
+            or manifest.get("starting_head") != starting_head
+            or manifest.get("retained_ref") != reference
+        ):
+            message = "Retained attempt evidence has an invalid manifest."
+            raise ArtifactPreservationError(message)
+        files = manifest.get("files")
+        if not isinstance(files, list) or not files:
+            message = "Retained attempt evidence has no complete file inventory."
+            raise ArtifactPreservationError(message)
+        for item in files:
+            if not isinstance(item, dict):
+                message = "Retained attempt evidence has invalid file metadata."
+                raise ArtifactPreservationError(message)
+            path = item.get("retained_path")
+            digest = item.get("sha256")
+            size = item.get("bytes")
+            if (
+                not isinstance(path, str)
+                or not isinstance(digest, str)
+                or type(size) is not int
+                or size < 0
+            ):
+                message = "Retained attempt evidence has invalid file metadata."
+                raise ArtifactPreservationError(message)
+            source = safe_resolve(directory, path)
+            if (
+                (directory / path).is_symlink()
+                or not source.is_file()
+                or _hash_file(source)
+                != (
+                    digest,
+                    size,
+                )
+            ):
+                message = "Retained attempt evidence failed its file integrity check."
+                raise ArtifactPreservationError(message)
+        if git_stdout(repository, ["rev-parse", "--verify", reference]) != manifest.get(
+            "ending_head"
+        ):
+            message = "The retained attempt ref no longer matches its archived commit."
+            raise ArtifactPreservationError(message)
+    except (OSError, UnicodeError, json.JSONDecodeError, PathSafetyError, GitError):
+        message = "Relay could not verify the retained attempt evidence."
+        raise ArtifactPreservationError(message) from None
+
+
 def preserve_recovery_reports(
     worktree: Path, run_id: str, attempt_id: str, filenames: tuple[str, ...]
 ) -> tuple[PreservedArtifact, ...]:
@@ -468,5 +532,6 @@ __all__ = [
     "preserve_then_reset",
     "restore_recovery_reports",
     "retained_attempt_ref",
+    "validate_attempt_evidence",
     "validate_recovery_reports",
 ]

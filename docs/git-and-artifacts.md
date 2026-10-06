@@ -147,10 +147,13 @@ Manual rerun, automatic recovery, and interrupted resume use this order:
 
 1. Stop the attempt process.
 2. Preserve its ref, commits, diff, untracked files, and declared artifacts.
-3. Prove the reset target descends from the latest successful writer's
+3. Verify the complete manifest, each recorded file's byte count and SHA-256,
+   and the retained ref's commit. Missing, changed, or escaping evidence blocks
+   recovery while the current worktree remains intact.
+4. Prove the reset target descends from the latest successful writer's
    protected head.
-4. Reset the primary worktree to the attempt's recorded starting head.
-5. Remove remaining untracked files from that isolated worktree.
+5. Reset the primary worktree to the attempt's recorded starting head.
+6. Remove remaining untracked files from that isolated worktree.
 
 The protection check prevents a failed later attempt from erasing a successful
 upstream writer. Evidence remains available when the reset itself fails.
