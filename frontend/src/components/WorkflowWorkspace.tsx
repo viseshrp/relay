@@ -16,6 +16,9 @@ import {
   FormControl,
   FormControlLabel,
   InputLabel,
+  List,
+  ListItemButton,
+  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -106,6 +109,9 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [leaseReady, setLeaseReady] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [stageFilter, setStageFilter] = useState("");
+  const [stageFocusRequest, setStageFocusRequest] = useState(0);
+  const stageCanvas = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -119,6 +125,11 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
 
   const parsed = useMemo(() => parseWorkflow(yamlText), [yamlText]);
   const graph = useMemo(() => flowElements(parsed.value), [parsed.value]);
+  // "verify_fixes" or "VERIFY" finds the stage labeled "Verify fixes".
+  const stageQuery = stageFilter.trim().toLowerCase();
+  const matchingStages = graph.nodes.filter((node) =>
+    node.data.label.toLowerCase().includes(stageQuery) || node.id.toLowerCase().includes(stageQuery),
+  );
   const definition = selectedNode ? parsed.value?.nodes[selectedNode] : undefined;
   const dirty = loadedKey !== null && yamlText !== savedYaml;
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
@@ -161,6 +172,8 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     setDraft(document.draft);
     setWarnings(document.warnings);
     setSelectedNode(null);
+    setStageFilter("");
+    setStageFocusRequest(0);
   }, []);
 
   const loadWorkflow = useCallback(
@@ -246,7 +259,19 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     const previous = Object.keys(parsed.value?.nodes ?? {}).at(-1);
     mutate((document) => document.setIn(["nodes", id], { ...nodeDefaults(stageKind), ...(previous ? { needs: [previous] } : {}) }));
     setSelectedNode(id);
+    setStageFocusRequest((value) => value + 1);
     setAddingStage(false);
+  }
+
+  function selectStage(id: string, bringIntoView = false) {
+    if (promptDirty) { setError("Save the agent's instructions before selecting another stage."); return; }
+    setSelectedNode(id);
+    // Selecting the same stage again restores its readable scale after panning.
+    setStageFocusRequest((value) => value + 1);
+    if (bringIntoView) {
+      stageCanvas.current?.scrollIntoView({ block: "center" });
+      stageCanvas.current?.focus({ preventScroll: true });
+    }
   }
 
   function deleteNode() {
@@ -464,13 +489,32 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
 
       <Box>
         <Paper className="canvas-panel" variant="outlined">
-          <Typography variant="subtitle2" sx={{ p: 2 }}>Workflow stages · click a stage to configure it</Typography>
-          <FlowCanvas
-            nodes={graph.nodes}
-            edges={graph.edges}
-            selectedId={selectedNode}
-            onSelect={(id) => { if (promptDirty) setError("Save the agent's instructions before selecting another stage."); else setSelectedNode(id); }}
-          />
+          <Box sx={{ p: 2 }}>
+            <Typography variant="subtitle2">Workflow stages</Typography>
+            <Typography variant="body2" color="text.secondary">Choose a stage to center it and edit its settings below.</Typography>
+          </Box>
+          <Stack direction={{ xs: "column", md: "row" }}>
+            <Box component="nav" aria-label="Workflow stage navigation" sx={{ width: { md: 260 }, flexShrink: 0, p: 1.5 }}>
+              <TextField fullWidth size="small" label="Find a stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} />
+              <List sx={{ maxHeight: { xs: 210, md: 490 }, overflowY: "auto", mt: 1 }}>
+                {matchingStages.map((node) => <ListItemButton key={node.id} component="button" selected={selectedNode === node.id} aria-pressed={selectedNode === node.id} onClick={() => selectStage(node.id, true)} sx={{ width: "100%", textAlign: "left" }}>
+                  <ListItemText primary={node.data.label} />
+                </ListItemButton>)}
+              </List>
+              {matchingStages.length === 0 && graph.nodes.length > 0 && <Typography variant="body2" sx={{ p: 1 }}>No stages match. Try another name.</Typography>}
+            </Box>
+            <Box ref={stageCanvas} role="region" aria-label="Workflow canvas" tabIndex={-1} sx={{ flex: 1, minWidth: 0 }}>
+              <FlowCanvas
+                key={`${project.id}:${loadedKey}`}
+                nodes={graph.nodes}
+                edges={graph.edges}
+                selectedId={selectedNode}
+                initialFocusId={graph.nodes[0]?.id}
+                focusRequest={stageFocusRequest}
+                onSelect={selectStage}
+              />
+            </Box>
+          </Stack>
         </Paper>
         <Accordion expanded={advanced} onChange={(_event, open) => setAdvanced(open)}>
           <AccordionSummary><Typography>Advanced workflow settings and YAML</Typography></AccordionSummary>
@@ -489,7 +533,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
       </Box>
 
       {selectedNode && definition && (
-        <Paper className="section-card" variant="outlined">
+        <Paper className="section-card" variant="outlined" role="region" aria-label="Stage settings">
           <Stack spacing={2}>
             <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
               <Typography variant="h6" sx={{ flex: 1 }}>{stageLabel(selectedNode)}</Typography>

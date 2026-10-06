@@ -22,6 +22,7 @@ interface FlowCanvasProps {
   onSelect?: (id: string) => void;
   followSelection?: boolean;
   focusRequest?: number;
+  initialFocusId?: string | null;
 }
 
 function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; focusRequest: number }) {
@@ -33,7 +34,7 @@ function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; f
   return null;
 }
 
-export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0 }: FlowCanvasProps) {
+export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0, initialFocusId }: FlowCanvasProps) {
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -64,7 +65,8 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection
         minZoom={0.25}
         maxZoom={1.75}
       >
-        {followSelection && <FocusStep selectedId={selectedId} focusRequest={focusRequest} />}
+        {/* Authoring can focus a stage while retaining manually dragged positions. */}
+        {(followSelection || initialFocusId) && <FocusStep selectedId={selectedId ?? initialFocusId} focusRequest={focusRequest} />}
         <MiniMap pannable zoomable />
         <Controls />
         <Background gap={20} size={1} />

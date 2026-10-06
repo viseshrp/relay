@@ -54,11 +54,11 @@ to change that effort.
   views. Explain what actions do and what happens next before starting,
   stopping, or approving work. Preserve explicit human review and permission
   decisions.
-- [ ] Make long workflows easy to navigate in the authoring canvas.
-  Switching from a single-stage workflow currently retains its zoom, leaving
-  most stages off-screen. Fit View reveals the outline but makes labels too
-  small to read. Reframe when the selected workflow changes and provide a
-  readable way to find and select any stage.
+- [x] Make long workflows easy to navigate in the authoring canvas.
+  Loading another workflow starts at its first stage with fresh positions
+  and readable zoom. A searchable stage list supports keyboard selection and
+  repeated centering after panning. Browser checks cover workflow changes,
+  narrow layouts, unchanged saved sources, and unsaved-instruction protection.
 
 ## Run navigation
 

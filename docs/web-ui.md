@@ -87,6 +87,18 @@ agent work, and human reviews have ordinary form fields. The new stage starts
 after the previous one; **Start after** changes its dependencies. An empty
 workflow explains how to add the first stage.
 
+The stage list stays readable beside the canvas. Use **Find a stage** to
+filter it by name, then choose a stage to center it at a readable scale and
+open its settings below. Keyboard selection also brings the canvas into view
+and moves focus there. Choose the same stage again to restore its view after
+panning or zooming. **Fit View** provides an overview; the list lets you return
+to an individual stage without finding its small label in that overview.
+
+Loading another workflow clears the search and starts the canvas at its first
+stage, with fresh positions and zoom. Navigation does not edit the workflow
+or its instructions. Unsaved agent instructions must be saved before choosing
+another stage.
+
 Advanced workflow settings expose the YAML editor and workflow key. `review`
 and `review.yaml` both refer
 to `review.yaml`, and nested keys use `/`. Empty segments, backslashes, `.`,
