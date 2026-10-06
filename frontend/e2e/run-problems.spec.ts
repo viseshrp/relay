@@ -235,18 +235,20 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: runId } = await launched.json();
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
-  const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  const beforeResponse = await (await page.request.get(`/api/runs/${runId}`)).json();
+  const before = beforeResponse.run;
   if (!native) {
     // The first problem notice can describe a different concurrent failure.
     // Retry settings must still come from the selected failed step's own route.
-    await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      if (body.run.problem) body.run.problem.scope_path = "root.other";
-      await route.fulfill({ response, json: body });
-    });
+    // Fulfill the captured state directly so aborted reads cannot outlive route.fetch.
+    await page.route(`**/api/runs/${runId}?collection=*`, (route) => route.fulfill({
+      json: { ...beforeResponse, run: {
+        ...before, problem: { ...before.problem, scope_path: "root.other" },
+      } },
+    }));
   }
   await page.goto(`/?view=runs&run=${runId}`);
+  if (!native) await expect(page.getByRole("heading", { name: "Other stopped", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Tool", exact: true })).toBeEnabled();
@@ -275,6 +277,8 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   await permission.click();
   await page.getByRole("option", { name: native ? "Auto approve" : "Auto", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("handoff-settings.png"), fullPage: true });
+  // Finish simulated reads before retrying; the new attempt uses the real API.
+  if (!native) await page.unrouteAll({ behavior: "wait" });
   const submitted = page.waitForResponse((response) => response.url().endsWith(`/api/runs/${runId}/rerun-node`));
   await dialog.getByRole("button", { name: "Retry with settings", exact: true }).click();
   const response = await submitted;
