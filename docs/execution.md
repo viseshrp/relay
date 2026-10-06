@@ -327,6 +327,32 @@ preserves the replacement agent and model. Omitting all choices keeps the
 current route.
 Relay never changes providers automatically in response to an error.
 
+### Pause new steps and change an unstarted agent
+
+An owner can pause new steps while a provider session is running. The saved
+`dispatch_paused` flag blocks admission, including tokens already in Huey's
+queue. Existing attempts keep their sessions and can finish, retain outputs,
+and advance the committed head normally. This flag survives restart and does
+not change the run's state-machine status or freeze its deadlines. Nested scopes
+yield while their children wait, releasing worker capacity.
+
+Automatic error recovery and confirmed quota schedules wait while this flag is
+set; pausing does not cancel a schedule or reset its spent retry budget. Resume
+new steps explicitly to wake existing dispatch intent and advance successors.
+
+While paused, an agent node in `pending`, `ready`, or `dispatched` can receive
+new settings only if it has never started an attempt. Relay freshly proves the
+chosen tool/model and validates supported effort and permission choices before
+atomically rechecking the pause, admission, and previous settings. A concurrent
+resume, attempt start, or settings edit rejects a stale save. Saving settings
+keeps the run paused and does not reset its worktree or create an attempt.
+
+The selection uses the same durable per-node override as retry settings.
+Completed work, frozen prompts, snapshot hashes, and other nodes' settings stay
+unchanged. A changed tool/model appends an editable default handoff describing
+an unstarted step; effort or permission changes alone add no handoff. The
+selected provider starts a new session when the owner resumes new steps.
+
 Changing the tool/model pair appends a default continuation prompt to that
 step's captured prompt sequence. The owner can replace it with custom handoff
 instructions. Those instructions remain separate from the snapshot and survive

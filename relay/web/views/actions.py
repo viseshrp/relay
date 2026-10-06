@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 import re
@@ -28,6 +29,7 @@ from relay.execution.resume import (
 )
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import CleanupPolicy, ControlKind
+from relay.execution.step_settings import UnstartedAgentTarget, change_unstarted_agent_settings
 from relay.projects.service import initialize_project, register_current_project, relink_project
 from relay.workflows.editor import (
     autosave_workflow_draft,
@@ -139,6 +141,104 @@ def _control_response(result: ControlResult) -> JsonResponse:
         ControlResult.INVALID: 422,
     }[result]
     return JsonResponse({"result": result.value}, status=status)
+
+
+def _requested_agent_settings(
+    body: dict[str, object],
+) -> tuple[RetryAgent | None, RetryEffort | None, RetryPermissionMode | None]:
+    """Parse the same optional choices for a retry or an unstarted step."""
+    agent = None
+    if "agent_id" in body or "model" in body:
+        agent = RetryAgent(
+            required_text(body, "agent_id"),
+            required_text(body, "model"),
+            effort=optional_text(body, "effort"),
+            permission_mode=optional_text(body, "permission_mode"),
+            handoff_prompt=optional_text(body, "handoff_prompt"),
+        )
+    elif "handoff_prompt" in body:
+        message = "A handoff prompt requires an explicit agent_id and model."
+        raise ConfigError(message)
+    effort = (
+        RetryEffort(optional_text(body, "effort")) if "effort" in body and agent is None else None
+    )
+    mode = (
+        RetryPermissionMode(optional_text(body, "permission_mode"))
+        if "permission_mode" in body and agent is None
+        else None
+    )
+    return agent, effort, mode
+
+
+def _validate_agent_choices(
+    agent_id: str,
+    model: str,
+    project_path: Path,
+    effort: str | None,
+    permission_mode: str | None,
+) -> None:
+    configuration = probe_agent_configuration(
+        agent_id, model, project_path, observation_store=DjangoAgentStore()
+    )
+    if effort is not None:
+        require_choice(configuration, "effort", effort)
+    if permission_mode is not None:
+        require_choice(configuration, "permission_mode", permission_mode)
+
+
+@api_errors
+@owner_required
+@require_POST
+def configure_dispatch_pause(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
+    body = json_body(request)
+    paused = body.get("paused")
+    if not isinstance(paused, bool):
+        message = "paused must be a boolean."
+        raise ConfigError(message)
+    store = DjangoExecutionStore()
+    result = store.configure_dispatch_pause(run_id, paused, required_text(body, "idempotency_key"))
+    if result is ControlResult.ACCEPTED and not paused:
+        dispatch_ready_nodes(store, run_id, _enqueue_claim)
+        for token in store.pending_dispatch_tokens(run_id):
+            _enqueue_claim(token)
+    return _control_response(result)
+
+
+@api_errors
+@owner_required
+@require_POST
+def configure_pending_step(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
+    body = json_body(request)
+    agent, effort, mode = _requested_agent_settings(body)
+
+    def validate(target: UnstartedAgentTarget, route: Mapping[str, object]) -> None:
+        agent_id, model = route.get("selected_agent"), route.get("model_value")
+        selected_effort, permission_mode = route.get("effort"), route.get("permission_mode")
+        if (
+            not isinstance(agent_id, str)
+            or not isinstance(model, str)
+            or (selected_effort is not None and not isinstance(selected_effort, str))
+            or (permission_mode is not None and not isinstance(permission_mode, str))
+        ):
+            message = "The agent configuration is invalid."
+            raise ConfigError(message)
+        _validate_agent_choices(
+            agent_id, model, Path(target.project_path), selected_effort, permission_mode
+        )
+
+    result = change_unstarted_agent_settings(
+        DjangoExecutionStore(),
+        run_id,
+        required_text(body, "scope_path"),
+        required_text(body, "idempotency_key"),
+        validate,
+        agent=agent,
+        effort=effort,
+        permission_mode=mode,
+    )
+    return _control_response(result)
 
 
 @api_errors
@@ -486,48 +586,26 @@ def rerun_node(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
     body = json_body(request)
     store = DjangoExecutionStore()
-    agent = None
-    if "agent_id" in body or "model" in body:
-        agent = RetryAgent(
-            required_text(body, "agent_id"),
-            required_text(body, "model"),
-            effort=optional_text(body, "effort"),
-            permission_mode=optional_text(body, "permission_mode"),
-            handoff_prompt=optional_text(body, "handoff_prompt"),
-        )
-    elif "handoff_prompt" in body:
-        message = "A handoff prompt requires an explicit agent_id and model."
-        raise ConfigError(message)
-    effort = (
-        RetryEffort(optional_text(body, "effort")) if "effort" in body and agent is None else None
-    )
-    permission_mode = (
-        RetryPermissionMode(optional_text(body, "permission_mode"))
-        if "permission_mode" in body and agent is None
-        else None
-    )
+    agent, effort, permission_mode = _requested_agent_settings(body)
 
     def prepare(target: RecoveryTarget) -> None:
         if agent is not None or effort is not None or permission_mode is not None:
             if target.agent_id is None or target.model_value is None:
                 message = "Retry configuration can only be changed for an agent step."
                 raise ConfigError(message)
-            configuration = probe_agent_configuration(
-                agent.agent_id if agent is not None else target.agent_id,
-                agent.model_value if agent is not None else target.model_value,
-                Path(target.project_path),
-                observation_store=DjangoAgentStore(),
-            )
             if agent is not None:
                 effort_choice = agent.effort
                 mode_choice = agent.permission_mode
             else:
                 effort_choice = effort.value if effort is not None else None
                 mode_choice = permission_mode.value if permission_mode is not None else None
-            if effort_choice is not None:
-                require_choice(configuration, "effort", effort_choice)
-            if mode_choice is not None:
-                require_choice(configuration, "permission_mode", mode_choice)
+            _validate_agent_choices(
+                agent.agent_id if agent is not None else target.agent_id,
+                agent.model_value if agent is not None else target.model_value,
+                Path(target.project_path),
+                effort_choice,
+                mode_choice,
+            )
         prepare_recovery_workspace(store, target)
 
     result = rerun_failed_node(

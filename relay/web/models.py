@@ -162,6 +162,7 @@ class Run(RelayModel):
     entry_point: models.TextField = models.TextField(null=True, blank=True)
     recorded_head: models.CharField = models.CharField(max_length=40)
     recovery_policy: models.JSONField = models.JSONField(default=dict)
+    dispatch_paused: models.BooleanField = models.BooleanField(default=False)
 
     class Meta:
         indexes: ClassVar[list[models.Index]] = [

@@ -30,6 +30,7 @@ from relay.constants import (
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
     CONTROL_REQUEST_TTL_SECONDS,
     DEFAULT_RETRY_HANDOFF_PROMPT,
+    DEFAULT_UNSTARTED_HANDOFF_PROMPT,
     DISPATCH_ORPHAN_AFTER_SECONDS,
     EDITOR_LEASE_TTL_SECONDS,
     EVENT_MAX_PAYLOAD_BYTES,
@@ -113,6 +114,7 @@ from relay.execution.state import (
     RunStatus,
     WorktreeState,
 )
+from relay.execution.step_settings import UnstartedAgentTarget
 from relay.execution.timing import duration_seconds
 from relay.paths import (
     artifacts_dir,
@@ -715,6 +717,7 @@ def _run_record(run: Run) -> dict[str, object]:
         "failure_code": run.failure_code,
         "failure_summary": run.failure_summary,
         "entry_point": run.entry_point,
+        "dispatch_paused": _boolean(run, "dispatch_paused"),
     }
 
 
@@ -864,7 +867,9 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     }
 
 
-def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
+def _node_record(
+    node: NodeRun, snapshot: RunSnapshot, *, dispatch_paused: bool = False
+) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
     scope = _string(node, "scope_path")
@@ -899,6 +904,18 @@ def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
             _retry_configuration(node, snapshot)
             if _string(node, "node_type") == NodeType.AGENT.value
             and _string(node, "status") == NodeStatus.FAILED.value
+            else None
+        ),
+        "pending_settings": (
+            {
+                **_retry_configuration(node, snapshot),
+                "default_handoff_prompt": DEFAULT_UNSTARTED_HANDOFF_PROMPT,
+            }
+            if dispatch_paused
+            and _string(node, "node_type") == NodeType.AGENT.value
+            and _string(node, "status")
+            in {NodeStatus.PENDING.value, NodeStatus.READY.value, NodeStatus.DISPATCHED.value}
+            and not _boolean(node, "has_attempt")
             else None
         ),
     }
@@ -1086,12 +1103,20 @@ class DjangoReadStore:
             byte_budget = API_MAX_PAGE_BYTES // 2
             if collection == "nodes":
                 nodes = list(
-                    NodeRun.objects.filter(run=run, pk__gt=since).order_by("pk")[: bounded + 1]
+                    NodeRun.objects.filter(run=run, pk__gt=since)
+                    .annotate(
+                        has_attempt=models.Exists(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                        )
+                    )
+                    .order_by("pk")[: bounded + 1]
                 )
                 records, more = _bounded_page(
                     nodes,
                     bounded,
-                    lambda node: _node_record(node, snapshot),
+                    lambda node: _node_record(
+                        node, snapshot, dispatch_paused=_boolean(run, "dispatch_paused")
+                    ),
                     byte_budget=byte_budget,
                 )
             else:
@@ -1788,6 +1813,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     "source_commit": _string(run, "source_commit"),
                     "run_branch": _string(run, "run_branch"),
                     "status": _string(run, "status"),
+                    "dispatch_paused": _boolean(run, "dispatch_paused"),
                 },
                 run.entry_point if isinstance(run.entry_point, str) else None,
             )
@@ -2342,6 +2368,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return ClaimResult(ClaimDisposition.IGNORED)
                 if _string(node, "status") != NodeStatus.DISPATCHED.value:
                     return ClaimResult(ClaimDisposition.IGNORED)
+                if _boolean(run, "dispatch_paused"):
+                    # An already queued token can arrive after the owner's pause.
+                    # Keep its intent and defer admission; the active attempt is untouched.
+                    defer_dispatch(_identifier(run), claim_token)
+                    return ClaimResult(ClaimDisposition.BUSY)
 
                 node_type = _string(node, "node_type")
                 needs_lock = node_type in {NodeType.AGENT.value, NodeType.COMMAND.value}
@@ -4045,6 +4076,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         RunStatus.RUNNING.value,
                         RunStatus.PAUSED_WAIT.value,
                     ),
+                    node_run__run__dispatch_paused=False,
                 )
                 .filter(
                     models.Q(enqueued_at__lte=cutoff)
@@ -4365,6 +4397,158 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not find the requested failed-node rerun target."
             raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
 
+    def configure_dispatch_pause(
+        self, run_id: str, paused: bool, idempotency_key: str
+    ) -> ControlResult:
+        """Gate future claims while preserving every current attempt and session."""
+        from relay.execution.control import valid_idempotency_key
+
+        if not valid_idempotency_key(idempotency_key):
+            return ControlResult.INVALID
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="run.dispatch_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                if _string(run, "status") in {
+                    RunStatus.SUCCEEDED.value,
+                    RunStatus.CANCELED.value,
+                    RunStatus.CANCELING.value,
+                }:
+                    return ControlResult.STALE
+                _set_model_field(run, "dispatch_paused", paused)
+                run.save(update_fields=("dispatch_paused",))
+                _append_event(
+                    run,
+                    "run.dispatch_changed",
+                    EventSource.RUN,
+                    {"paused": paused, "idempotency_key": idempotency_key},
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the run's pause setting."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def pending_dispatch_tokens(self, run_id: str) -> tuple[str, ...]:
+        """Wake existing delivery intent immediately after an explicit resume."""
+        try:
+            return tuple(
+                DispatchClaim.objects.filter(
+                    node_run__run_id=run_id,
+                    state=DispatchState.DISPATCHED.value,
+                    node_run__run__dispatch_paused=False,
+                )
+                .order_by("created_at")
+                .values_list("claim_token", flat=True)[:RECONCILE_MAX_ITEMS]
+            )
+        except DatabaseError:
+            message = "Relay could not read the run's paused dispatch tokens."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def unstarted_agent_target(
+        self, run_id: str, scope_path: str, idempotency_key: str
+    ) -> UnstartedAgentTarget | None:
+        """Capture choices for a fresh probe, without holding a lock during I/O."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("project", "snapshot").filter(pk=run_id).first(),
+                run_id,
+            )
+            if RunEvent.objects.filter(
+                run=run, type="node.settings_changed", idempotency_key=idempotency_key
+            ).exists():
+                return None
+            node = NodeRun.objects.filter(run=run, scope_path=scope_path).first()
+            if (
+                node is None
+                or not _boolean(run, "dispatch_paused")
+                or _string(run, "status")
+                in {RunStatus.SUCCEEDED.value, RunStatus.CANCELED.value, RunStatus.CANCELING.value}
+                or _string(node, "node_type") != NodeType.AGENT.value
+                or _string(node, "status")
+                not in {
+                    NodeStatus.PENDING.value,
+                    NodeStatus.READY.value,
+                    NodeStatus.DISPATCHED.value,
+                }
+                or NodeAttempt.objects.filter(node_run=node).exists()
+            ):
+                message = "Pause new steps before changing an agent step that has never started."
+                raise PermissionFlowError(message, context={"run": run_id, "node": scope_path})
+            return UnstartedAgentTarget(
+                run_id,
+                _identifier(node),
+                scope_path,
+                _string(_related(run, "project", Project), "git_root"),
+                _effective_route(node, _related(run, "snapshot", RunSnapshot)),
+                _mapping(node, "retry_options"),
+            )
+        except DatabaseError:
+            message = "Relay could not read the unstarted agent step's settings."
+            raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
+
+    def save_unstarted_agent_settings(
+        self,
+        target: UnstartedAgentTarget,
+        options: Mapping[str, object],
+        idempotency_key: str,
+    ) -> ControlResult:
+        """Recheck pause, admission, and prior choices after the provider probe."""
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=target.run_id).first(), target.run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="node.settings_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                node = (
+                    NodeRun.objects.select_for_update()
+                    .filter(pk=target.node_run_id, run=run)
+                    .first()
+                )
+                if (
+                    node is None
+                    or not _boolean(run, "dispatch_paused")
+                    or _string(run, "status")
+                    in {
+                        RunStatus.SUCCEEDED.value,
+                        RunStatus.CANCELED.value,
+                        RunStatus.CANCELING.value,
+                    }
+                    or _string(node, "status")
+                    not in {
+                        NodeStatus.PENDING.value,
+                        NodeStatus.READY.value,
+                        NodeStatus.DISPATCHED.value,
+                    }
+                    or _mapping(node, "retry_options") != target.options
+                    or NodeAttempt.objects.filter(node_run=node).exists()
+                ):
+                    return ControlResult.STALE
+                _set_model_field(node, "retry_options", dict(options))
+                node.save(update_fields=("retry_options",))
+                _append_event(
+                    run,
+                    "node.settings_changed",
+                    EventSource.NODE,
+                    {
+                        "scope_path": target.scope_path,
+                        "options": dict(options),
+                        "idempotency_key": idempotency_key,
+                    },
+                    node=node,
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the unstarted agent step's settings."
+            raise PersistenceError(message, context={"run": target.run_id}) from None
+
     def configure_recovery(self, run_id: str, enabled: bool, idempotency_key: str) -> ControlResult:
         """Record an owner policy override without modifying the launch snapshot."""
         from relay.execution.control import valid_idempotency_key
@@ -4427,7 +4611,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         with transaction.atomic():
             run = Run.objects.select_for_update().get(pk=run_id)
             if (
-                not _recovery_policy(run).enabled
+                _boolean(run, "dispatch_paused")
+                or not _recovery_policy(run).enabled
                 or _string(run, "status") != RunStatus.FAILED.value
             ):
                 return None
@@ -4473,6 +4658,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             .filter(
                 state__in=PENDING_RECOVERY_STATES,
                 attempt__node_run__run__status=RunStatus.FAILED.value,
+                attempt__node_run__run__dispatch_paused=False,
             )
             .order_by("created_at", "pk")[:RECONCILE_MAX_ITEMS]
         )
@@ -4532,6 +4718,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 retry is None
                 or latest is None
                 or _identifier(latest) != target.attempt_id
+                or _boolean(run, "dispatch_paused")
                 or not _recovery_policy(run).enabled
                 or _string(run, "status") != RunStatus.FAILED.value
                 or Instance.objects.filter(shutdown_requested=True).exists()
@@ -4557,7 +4744,10 @@ class DjangoExecutionStore(DjangoAgentStore):
         due = list(
             UsageRetry.objects.select_related("attempt__node_run")
             .filter(
-                state="scheduled", reset_at__lte=timezone.now(), run__status=RunStatus.FAILED.value
+                state="scheduled",
+                reset_at__lte=timezone.now(),
+                run__status=RunStatus.FAILED.value,
+                run__dispatch_paused=False,
             )
             .order_by("reset_at", "pk")[:RECONCILE_MAX_ITEMS]
         )
@@ -4668,7 +4858,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     )
                     .first()
                 )
-                if retry is None or _string(run, "status") != RunStatus.FAILED.value:
+                if (
+                    retry is None
+                    or _boolean(run, "dispatch_paused")
+                    or _string(run, "status") != RunStatus.FAILED.value
+                ):
                     return False
                 return self.activate_recovery(target, idempotency_key, preserve_recovery_note=True)
         except (DatabaseError, ObjectDoesNotExist):

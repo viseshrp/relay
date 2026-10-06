@@ -10,11 +10,12 @@ import type { AgentConfiguration, AgentsResponse, ModelObservation, RetryConfigu
 
 type RetryModel = Pick<ModelObservation, "value" | "name">;
 
-export function RetrySettings({ problem, projectId, onClose, onRetry }: {
+export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = "retry" }: {
   problem: RetryConfiguration;
   projectId: string;
   onClose: () => void;
   onRetry: (scope: string, options?: RetryOptions) => Promise<void>;
+  purpose?: "retry" | "pending";
 }) {
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
   const [agentId, setAgentId] = useState(problem.agent_id);
@@ -109,12 +110,13 @@ export function RetrySettings({ problem, projectId, onClose, onRetry }: {
   }
 
   return <Dialog open onClose={submitting ? undefined : onClose} fullWidth maxWidth="sm">
-    <DialogTitle>Retry {stageLabel(problem.scope_path)} with settings</DialogTitle>
+    <DialogTitle>{purpose === "pending" ? "Change" : "Retry"} {stageLabel(problem.scope_path)} {purpose === "pending" ? "settings" : "with settings"}</DialogTitle>
     <DialogContent>
       <Stack spacing={2} sx={{ pt: 1 }}>
         <Typography variant="body2">
-          Choose the tool and model for this step's new attempts. Completed steps,
-          prompts, and earlier attempts stay saved. Automatic retries keep your choice.
+          {purpose === "pending"
+            ? "Choose settings for this unstarted step. Saving keeps the run paused. Completed work and captured instructions stay saved."
+            : "Choose the tool and model for this step's new attempts. Completed steps, prompts, and earlier attempts stay saved. Automatic retries keep your choice."}
         </Typography>
         <FormControl fullWidth disabled={!agents || submitting}>
           <InputLabel id="retry-agent-label">Tool</InputLabel>
@@ -172,8 +174,9 @@ export function RetrySettings({ problem, projectId, onClose, onRetry }: {
     </DialogContent>
     <DialogActions>
       <Button disabled={submitting} onClick={onClose}>Cancel</Button>
-      <Button variant="contained" disabled={!configuration || submitting || (changed && (!handoff.trim() || handoffTooLong))} onClick={() => void submit()}>
-        {submitting ? "Starting retry…" : "Retry with settings"}
+      <Button variant="contained" disabled={!configuration || submitting || (changed && (!handoff.trim() || handoffTooLong)) || (purpose === "pending" && !changed && selection === 0 && permissionSelection === 0)} onClick={() => void submit()}>
+        {purpose === "pending" ? submitting ? "Saving…" : "Save settings"
+          : submitting ? "Starting retry…" : "Retry with settings"}
       </Button>
     </DialogActions>
   </Dialog>;

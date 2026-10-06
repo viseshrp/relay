@@ -58,7 +58,7 @@ class RetryPermissionMode:
 
 @dataclass(frozen=True, slots=True)
 class RetryAgent:
-    """An owner-selected replacement for one failed step's future attempts."""
+    """An owner-selected replacement for one agent step's future attempts."""
 
     agent_id: str
     model_value: str
@@ -68,11 +68,21 @@ class RetryAgent:
 
     def for_target(self, target: RecoveryTarget) -> RetryAgent:
         """Supply a continuation prompt only when the tool/model pair changes."""
-        changed = (self.agent_id, self.model_value) != (target.agent_id, target.model_value)
+        return self.for_selection(target.agent_id, target.model_value)
+
+    def for_selection(
+        self,
+        agent_id: str | None,
+        model_value: str | None,
+        *,
+        default_handoff: str = DEFAULT_RETRY_HANDOFF_PROMPT,
+    ) -> RetryAgent:
+        """Keep handoffs separate from captured prompts for either kind of change."""
+        changed = (self.agent_id, self.model_value) != (agent_id, model_value)
         if not changed and self.handoff_prompt is not None:
             message = "A handoff prompt requires changing the tool or model."
             raise ConfigError(message)
-        prompt = (self.handoff_prompt or DEFAULT_RETRY_HANDOFF_PROMPT) if changed else None
+        prompt = (self.handoff_prompt or default_handoff) if changed else None
         if prompt is not None and (
             not prompt.strip() or len(prompt.encode("utf-8")) > RETRY_HANDOFF_MAX_BYTES
         ):

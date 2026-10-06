@@ -251,6 +251,8 @@ returns `already_applied`. Manual `rerun-node` supersedes a pending schedule.
 | `POST /api/attempts/{id}/elicitation` | `{"idempotency_key":"e-1","value":{...}}` |
 | `POST /api/attempts/{id}/wait` | `{"idempotency_key":"w-1","value":...}` |
 | `POST /api/runs/{id}/rerun-node` | `{"scope_path":"root.failed","idempotency_key":"r-1"}` |
+| `POST /api/runs/{id}/pause` | `{"paused":true,"idempotency_key":"pause-1"}` |
+| `POST /api/runs/{id}/step-settings` | `{"scope_path":"root.review","effort":"high","idempotency_key":"settings-1"}` |
 | `POST /api/runs/{id}/recovery` | `{"enabled":true,"idempotency_key":"auto-1"}` |
 
 The recovery action records a run-level policy override separately from the
@@ -275,6 +277,38 @@ idempotency key. Recovery preparation errors include their scope and public
 message. A failed run's stream stays open while error recovery is pending,
 as it does for a pending quota reset. Run cancellation and manual retry
 supersede queued error recovery through the existing recovery lock.
+
+`pause` saves `dispatch_paused` without interrupting active attempts. The flag
+appears in run summaries and detail and survives restart. `paused` must be a
+JSON boolean. Pending, running, waiting, failed, and interrupted runs accept
+the action; completed, canceled, and canceling runs return `stale`. Duplicate
+keys return `already_applied`. Setting `paused:false` wakes queued tokens and
+advances eligible steps. Error recovery and quota schedules wait while paused.
+Deadlines continue to apply.
+
+While paused, unstarted agent nodes expose `pending_settings` in run detail,
+with the same configuration fields as `retry_settings` and a default handoff
+for unstarted work. `step-settings` accepts `scope_path`, `idempotency_key`, and
+the optional `agent_id`, `model`, `effort`, `permission_mode`, and
+`handoff_prompt` choices described below. At least one setting is required.
+Changing providers requires both `agent_id` and `model`. Null effort or mode
+requests the provider default; omitted fields keep their current value unless
+a replacement provider/model is supplied.
+
+Only an agent in `pending`, `ready`, or `dispatched` with no prior attempt is
+eligible. Relay validates against fresh provider configuration outside its
+transaction, then rechecks the pause and target before saving. Ineligible
+targets return `permission_flow_error` with HTTP `409`; races return
+`{"result":"stale"}` with HTTP `409`. Unsupported choices keep their existing
+HTTP `422` errors. A successful save returns `accepted` and keeps the run
+paused. It creates no attempt and changes no snapshot, upstream work, other
+nodes, or workspace. Duplicate keys return `already_applied`.
+
+SSE exposes `run.dispatch_changed` with `paused` and `idempotency_key`, and
+`node.settings_changed` with `scope_path`, `options`, and `idempotency_key`.
+The latter records the effective per-node override separately from frozen
+launch routes. Handoffs appear only for a changed tool/model pair and follow
+the captured prompts on execution.
 
 An agent rerun accepts an optional `effort` field. For example,
 `{"scope_path":"root.review","idempotency_key":"r-2","effort":"medium"}`

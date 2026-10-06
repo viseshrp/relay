@@ -98,6 +98,11 @@ overrides, save and reload, model-dependent choices, failures and retries, and
 the configuration received by the executing worker. The browser-test CI job
 runs on Linux and gates package publication alongside Python and quality checks.
 
+To test a scratch frontend build without replacing a running app's assets, set
+`RELAY_TEST_ASSETS_ROOT` to that build directory when invoking Playwright. Only
+the isolated browser-test server reads this variable; production serving keeps
+its packaged asset root.
+
 The pre-commit license gate checks runtime dependencies against the allow-list
 in `pyproject.toml`. Run it directly with `uv run liccheck`. The pinned
 `agent-client-protocol` 0.12.1 and `huey` 3.4.0 omit license metadata, so the

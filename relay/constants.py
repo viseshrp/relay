@@ -89,6 +89,14 @@ DEFAULT_RETRY_HANDOFF_PROMPT: Final = (
     "step and report fresh verification evidence. Use the current Relay agent "
     "and exact model for report provenance."
 )
+DEFAULT_UNSTARTED_HANDOFF_PROMPT: Final = (
+    "Perform this unstarted step in the existing Relay run. Read the existing "
+    "files and retained upstream reports before acting. Follow this step's "
+    "captured instructions and declared outputs. Preserve completed stages "
+    "and committed work rather than repeating them. Report fresh verification "
+    "evidence and identify any missing evidence. Use the current Relay agent "
+    "and exact model for report provenance."
+)
 DEFAULT_RECOVERY_PROMPT: Final = (
     "Recover only this failed step. Follow its original instructions and scope. "
     "Read the retained evidence and existing reports before acting. Fix the "

@@ -5,6 +5,11 @@ proposed TODO entries without modifying it.
 
 ## Agent configuration
 
+- [x] Change the tool, model, effort, and permissions for an unstarted agent
+  step while its run is paused. Validate advertised choices, keep captured
+  prompts and completed work, and supply editable handoff instructions only
+  when the tool/model changes. Saving keeps the run paused. See
+  [Monitor and control runs](web-ui.md#monitor-and-control-runs).
 - [x] Let the owner hand a failed agent step to another installed tool and exact
   model through Relay. Validate its settings before recovery, clear the previous
   tool's options, preserve the snapshot and completed work, and retain the
@@ -62,6 +67,11 @@ to change that effort.
 
 ## Run navigation
 
+- [x] Pause new steps without interrupting the currently running agent. Show
+  the hold in the run monitor, preserve it across restart, and let the owner
+  change unstarted-step settings before explicitly resuming. Queued deliveries
+  and automatic recovery respect the durable hold. See
+  [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 - [x] Explain the workflow editor and run monitor in the navigation. Show the
   selected project, workflow, and run together so the owner can identify the
   work being inspected.

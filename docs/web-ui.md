@@ -195,6 +195,21 @@ artifact, and exact-model preflight before it creates a run.
 
 ## Monitor and control runs
 
+Choose **Pause new steps** to hold work before the next agent starts. An
+already running agent keeps its session and can finish normally. The header
+and history show **New steps paused**, including after reload or restart.
+The pause also holds automatic error recovery and quota retries; deadlines
+continue to apply. Choose **Resume new steps** explicitly when ready.
+
+While paused, **Unstarted agent steps** lists agents that have never begun an
+attempt. Choose **Change settings** to select a freshly advertised tool, model,
+effort, or permission mode. Defaults remain the provider defaults. A changed
+tool/model reveals editable **Handoff instructions** for the unstarted step;
+effort and permission changes alone keep that editor hidden. **Save settings**
+keeps the run paused. Completed work, captured instructions, saved outputs,
+and other stages stay unchanged. Settings for active or completed attempts
+cannot be changed through this control.
+
 The Runs tab lists history for the selected project. The header shows the
 current stages, progress, and next action. Pending requests appear before the
 graph; failed steps have Show step and Retry step controls. Agent failures also

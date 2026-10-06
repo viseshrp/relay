@@ -39,6 +39,10 @@ An owner can retry a stopped agent step with another installed tool and exact
 model. Relay validates the selection and keeps completed steps, prompts, and
 the original snapshot. See
 [Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
+Use **Pause new steps** to let current work finish while holding the next
+stage. Change an unstarted agent's settings, then resume explicitly; completed
+work and captured instructions stay saved. See
+[Pause new steps](docs/execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 ## Requirements
 

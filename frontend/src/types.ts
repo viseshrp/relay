@@ -119,6 +119,7 @@ export interface RunSummary {
   failure_code: string | null;
   failure_summary: string | null;
   entry_point: string | null;
+  dispatch_paused: boolean;
 }
 
 export interface RunNode {
@@ -134,6 +135,7 @@ export interface RunNode {
   dependencies: string[];
   controls: Array<{ target: string; label: string }>;
   retry_settings?: RetryConfiguration | null;
+  pending_settings?: RetryConfiguration | null;
 }
 
 export interface RunInteraction {

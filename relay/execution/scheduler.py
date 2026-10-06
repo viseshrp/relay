@@ -182,7 +182,10 @@ def advance_run_schedule(
             )
         )
     schedule = store.load_run_schedule(run_id, seeds)
-    if schedule.run_metadata.get("status") not in {"running", "paused_wait"}:
+    if (
+        schedule.run_metadata.get("status") not in {"running", "paused_wait"}
+        or schedule.run_metadata.get("dispatch_paused") is True
+    ):
         return ()
     rows = dict(schedule.nodes)
     entry_root = entry_node_for_scope(schedule.entry_point, None)

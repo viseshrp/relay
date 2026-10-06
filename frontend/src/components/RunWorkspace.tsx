@@ -73,6 +73,7 @@ const EVENT_TYPES = [
   "run.recovery_blocked",
   "run.recovery_exhausted",
   "run.recovery_canceled",
+  "run.dispatch_changed",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
   "resource.cleanup_succeeded",
@@ -88,6 +89,7 @@ const EVENT_TYPES = [
   "node.canceled",
   "node.interrupted",
   "node.pending",
+  "node.settings_changed",
   "attempt.started",
   "attempt.ended",
   "agent.message",
@@ -115,6 +117,7 @@ const EVENT_TYPES = [
 
 const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled"]);
 const PENDING_RECOVERY = new Set(["scheduled", "preparing"]);
+const PAUSABLE_RUNS = new Set(["pending", "running", "paused_wait", "failed", "interrupted"]);
 const OUTPUT_ROW_HEIGHT = 86;
 const OUTPUT_VIEW_HEIGHT = 430;
 const VIRTUAL_ROW_OVERSCAN = 3;
@@ -164,9 +167,18 @@ function mergeRecords<T extends { id: string }>(current: T[], incoming: T[]): T[
   return Array.from(records.values());
 }
 
+function runStatusLabel(run: RunSummary): string {
+  // A paused running run displays "New steps paused"; a finished one stays "Complete".
+  return run.dispatch_paused && PAUSABLE_RUNS.has(run.status)
+    ? "New steps paused" : statusLabel(run.status);
+}
+
 function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail | null {
   if (current === null) return null;
   const status = event.payload.status;
+  if (event.type === "run.dispatch_changed" && typeof event.payload.paused === "boolean") {
+    return { ...current, dispatch_paused: event.payload.paused };
+  }
   if (event.type.startsWith("run.") && typeof status === "string") {
     const failed = ["failed", "canceling"].includes(status);
     return {
@@ -298,6 +310,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
+  const [pendingSettings, setPendingSettings] = useState<RetryConfiguration | null>(null);
+  const [pauseBusy, setPauseBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
@@ -401,7 +415,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setDetail((current) => live.reduce(applyStateEvent, current));
     const interactionChanged = live.some((item) => item.type === "attempt.ended"
       || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
-    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
+    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type === "run.dispatch_changed" || item.type === "node.settings_changed" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
       void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
         setError(errorMessage(caught)),
       );
@@ -446,6 +460,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setSelectedStage(null);
     setStepFocusRequest(0);
     setRetrySettings(null);
+    setPendingSettings(null);
     setActivityLimit(30);
     setError(null);
     setNodeCursor(null);
@@ -569,6 +584,30 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     }
   }
 
+  async function configurePause(paused: boolean) {
+    if (selectedRun === null) return;
+    setPauseBusy(true);
+    try {
+      await api(`/api/runs/${encodeURIComponent(selectedRun)}/pause`, {
+        method: "POST", body: JSON.stringify({ paused, idempotency_key: crypto.randomUUID() }),
+      });
+      await Promise.all([refreshDetail(), loadHistory()]);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setPauseBusy(false);
+    }
+  }
+
+  async function savePendingSettings(scopePath: string, options: RetryOptions = {}) {
+    if (selectedRun === null) return;
+    await api(`/api/runs/${encodeURIComponent(selectedRun)}/step-settings`, {
+      method: "POST",
+      body: JSON.stringify({ scope_path: scopePath, idempotency_key: crypto.randomUUID(), ...options }),
+    });
+    await refreshDetail();
+  }
+
   async function cancelRun() {
     if (selectedRun === null) return;
     try {
@@ -677,6 +716,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const currentStages = detail?.nodes.filter((node) => ["waiting", "running", "failed"].includes(node.status)) ?? [];
   const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
   const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
+  const canPause = detail !== null && PAUSABLE_RUNS.has(detail.status);
+  const dispatchPaused = canPause && detail.dispatch_paused;
   const recovery = detail?.recovery?.current;
   const recoveryPending = PENDING_RECOVERY.has(recovery?.state ?? "");
   const active = detail && (["pending", "running", "paused_wait", "canceling"].includes(detail.status) || recoveryPending);
@@ -703,7 +744,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
               >
                 <ListItemText
                   primary={stageLabel(run.workflow_key.replace(/\.(yaml|yml)$/, ""))}
-                  secondary={`${statusLabel(detail?.id === run.id ? detail.status : run.status)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
+                  secondary={`${runStatusLabel(detail?.id === run.id ? detail : run)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
                 />
               </ListItemButton>
             ))}
@@ -733,16 +774,25 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                       {detail.project.display_name} · Started {detail.started_at ? new Date(detail.started_at).toLocaleString() : "just now"}
                     </Typography>
                   </Box>
-                  <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={statusLabel(detail.status)} />
+                  <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={runStatusLabel(detail)} />
                   <Button component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
+                  {canPause && (
+                    <Button variant="outlined" disabled={pauseBusy} onClick={() => void configurePause(!detail.dispatch_paused)}>
+                      {detail.dispatch_paused ? "Resume new steps" : "Pause new steps"}
+                    </Button>
+                  )}
                   {active && (
                     <Button color="error" variant="outlined" onClick={() => setStopOpen(true)}>
                       Stop work
                     </Button>
                   )}
                 </Stack>
+                {dispatchPaused && <Alert severity="info" sx={{ mt: 2 }}>
+                  New steps are paused. Running steps can finish; their sessions are not interrupted.
+                  Change an unstarted step's settings below, then choose Resume new steps when ready.
+                </Alert>}
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  <Typography variant="subtitle1">{recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
+                  <Typography variant="subtitle1">{dispatchPaused ? "New steps will wait until you resume. Current steps can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
                   {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
                   <LinearProgress variant="determinate" value={detail.nodes.length ? 100 * complete / detail.nodes.length : 0} />
                   <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
@@ -811,6 +861,19 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                 key={`${detail.id}:${retrySettings.scope_path}`}
                 problem={retrySettings} projectId={detail.project_id}
                 onClose={() => setRetrySettings(null)} onRetry={rerunNode}
+              />}
+              {dispatchPaused && detail.nodes.some((node) => node.pending_settings) && <Paper variant="outlined" className="section-card">
+                <Typography variant="h6">Unstarted agent steps</Typography>
+                {detail.nodes.filter((node) => node.pending_settings).map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
+                  <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)} · {node.pending_settings?.model_value}</Typography>
+                  <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
+                  <Button variant="outlined" disabled={refreshing} onClick={() => setPendingSettings(node.pending_settings ?? null)}>Change settings</Button>
+                </Stack>)}
+              </Paper>}
+              {pendingSettings && <RetrySettings
+                key={`${detail.id}:${pendingSettings.scope_path}:pending`}
+                purpose="pending" problem={pendingSettings} projectId={detail.project_id}
+                onClose={() => setPendingSettings(null)} onRetry={savePendingSettings}
               />}
 
               <Paper variant="outlined" className="section-card">

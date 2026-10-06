@@ -65,6 +65,12 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
 
     apply_migrations()
     patch = pytest.MonkeyPatch()
+    if assets_root := os.environ.get("RELAY_TEST_ASSETS_ROOT"):
+        from relay.web import static_view
+
+        # Scratch builds exercise new browser code without replacing live assets.
+        patch.setattr(static_view, "STATIC_ROOT", Path(assets_root))
+        patch.setattr(static_view, "_STATIC_ASSETS", static_view._asset_catalog())
     providers = FakeAgents(root / "agents", root / "provider-transcript.jsonl", patch)
     providers.directory.mkdir()
     providers.isolate_path()

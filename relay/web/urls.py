@@ -40,6 +40,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("api/runs/<str:run_id>/cancel", actions.cancel_run, name="run-cancel"),
     path("api/runs/<str:run_id>/recovery", actions.configure_run_recovery, name="run-recovery"),
+    path("api/runs/<str:run_id>/pause", actions.configure_dispatch_pause, name="run-pause"),
+    path(
+        "api/runs/<str:run_id>/step-settings",
+        actions.configure_pending_step,
+        name="run-step-settings",
+    ),
     path("api/runs/<str:run_id>/rerun-node", actions.rerun_node, name="run-rerun-node"),
     path(
         "api/attempts/<str:attempt_id>/permission",
