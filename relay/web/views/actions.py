@@ -397,6 +397,22 @@ def cancel_run(request: HttpRequest, run_id: str) -> HttpResponse:
     return _control_response(result)
 
 
+@api_errors
+@owner_required
+@require_POST
+def configure_run_recovery(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
+    body = json_body(request)
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        message = "enabled must be a boolean."
+        raise ConfigError(message)
+    result = DjangoExecutionStore().configure_recovery(
+        run_id, enabled, required_text(body, "idempotency_key")
+    )
+    return _control_response(result)
+
+
 def _answer_control(
     request: HttpRequest,
     attempt_id: str,

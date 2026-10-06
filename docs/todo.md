@@ -88,6 +88,17 @@ to change that effort.
 
 ## Workflow handoffs
 
+- [x] Reprompt the assigned agent after an eligible failure through an opt-in
+  recovery policy. Preserve failed reports and successful report handoffs,
+  append a bounded repair instruction separately from the captured prompts,
+  and keep the provider, model, effort, and permissions unchanged. Allow at
+  most two additional attempts per step, preserving that budget across
+  restarts and repeated failures. Unsafe failures and exhausted retries stop
+  visibly. The editor and run monitor expose recovery controls, progress,
+  blockers, and the exact instruction. Focused provider, API, engine, and
+  browser checks cover report recovery, idempotency, cancellation, nested
+  scopes, quota schedules, unchanged snapshots, and live updates. See
+  [Automatic step recovery](execution.md#automatic-step-recovery).
 - [x] Show the failed step, failure description or exit code, and the provider's
   last public message at the top of the run. Keep quota notices and reported
   reset times visible after reload, without replaying the entire activity log.

@@ -5,10 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol
 
+from relay.errors import OutputValidationError
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
+from relay.execution.state import AttemptStopReason
+from relay.paths import safe_resolve
 from relay.workflows.schema import AgentNode
 
-from .base import parse_node, validated_outputs
+from .base import declared_output_artifacts, parse_node, validated_outputs
 
 
 class AgentNodeDriver(Protocol):
@@ -28,9 +31,26 @@ class AgentExecutor:
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, AgentNode)
         outcome = self.driver.execute(context, node)
+        # Retain a rejected report as evidence even when its labels cannot be read.
+        # Missing files remain validation errors; escaping paths stop recovery.
+        artifacts = {
+            name: reference
+            for name, reference in declared_output_artifacts(node.outputs).items()
+            if safe_resolve(context.worktree, reference).is_file()
+        }
+        outcome = replace(outcome, declared_artifacts={**outcome.declared_artifacts, **artifacts})
         if outcome.kind is not OutcomeKind.SUCCEEDED:
             return outcome
-        outputs, artifacts = validated_outputs(context.worktree, node.outputs)
+        try:
+            outputs, artifacts = validated_outputs(context.worktree, node.outputs)
+        except OutputValidationError as error:
+            return replace(
+                outcome,
+                kind=OutcomeKind.FAILED,
+                stop_reason=AttemptStopReason.OUTPUT_INVALID,
+                error_code=error.error_code,
+                error_message=error.message,
+            )
         return replace(
             outcome,
             outputs=outputs,

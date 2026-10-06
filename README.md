@@ -25,8 +25,12 @@ The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, general failure retries, model fallback, automatic merge, or
+Redis, Postgres, model fallback, automatic merge, or
 bundled workflow templates.
+Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
+eligible agent failures up to twice with the same model and settings, retained
+reports, and a separate repair instruction. It stops on unsafe failures or an
+exhausted budget.
 Confirmed provider usage resets can resume a failed stage automatically while
 preserving its captured model, effort, and prompts. Unsupported or missing reset
 information remains visible for the owner. See

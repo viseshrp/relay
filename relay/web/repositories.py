@@ -17,9 +17,10 @@ import uuid
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, models, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from pydantic import ValidationError
 
 from relay.agents.models import ModelObservation
 from relay.constants import (
@@ -38,6 +39,7 @@ from relay.constants import (
     REVIEW_PREVIEW_MAX_BYTES,
     RUN_PROBLEM_MESSAGE_MAX_EVENTS,
     RUN_PROBLEM_TEXT_MAX_CHARS,
+    WORKFLOW_DOCUMENT_NAMES,
 )
 from relay.errors import (
     ConfigError,
@@ -46,6 +48,11 @@ from relay.errors import (
     ProjectDiscoveryError,
     ProjectRelinkError,
     RelayError,
+)
+from relay.execution.automatic import (
+    PENDING_RECOVERY_STATES,
+    RECOVERABLE_ERRORS,
+    recovery_instruction,
 )
 from relay.execution.control import (
     ClaimedControl,
@@ -110,7 +117,7 @@ from relay.paths import (
 )
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
-from relay.vcs.artifacts import PreservationResult
+from relay.vcs.artifacts import PreservationResult, RecoveryReport, preserve_recovery_reports
 from relay.vcs.git import git_stdout, run_git, run_git_to_file
 from relay.vcs.worktree import (
     reader_worktree_path,
@@ -120,7 +127,7 @@ from relay.vcs.worktree import (
 )
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text
-from relay.workflows.schema import NodeDefinition
+from relay.workflows.schema import NodeDefinition, RecoveryPolicy
 from relay.workflows.scope import (
     enclosing_scope,
     node_scope,
@@ -133,6 +140,7 @@ from relay.workflows.snapshot import SnapshotBundle
 from .models import (
     AgentModelObservation,
     Artifact,
+    AutomaticRetry,
     ControlRequest,
     DispatchClaim,
     EditorLease,
@@ -157,6 +165,41 @@ _CONTROL_INTERACTION_KINDS: dict[str, str] = {
     ControlKind.ELICITATION_ANSWER.value: InteractionKind.ELICITATION.value,
     ControlKind.WAIT_ANSWER.value: InteractionKind.WAIT.value,
 }
+
+
+def _recovery_policy(run: Run) -> RecoveryPolicy:
+    try:
+        return RecoveryPolicy.model_validate(_mapping(run, "recovery_policy"))
+    except ValidationError:
+        message = "The stored automatic recovery policy is invalid."
+        raise PersistenceError(message, context={"run": _identifier(run)}) from None
+
+
+def _recovery_record(retry: AutomaticRetry) -> dict[str, object]:
+    attempt = _related(retry, "attempt", NodeAttempt)
+    node = _related(attempt, "node_run", NodeRun)
+    return {
+        "scope_path": _string(node, "scope_path"),
+        "attempt_number": _integer(attempt, "attempt_number"),
+        "retry_number": _integer(retry, "retry_number"),
+        "state": _string(retry, "state"),
+        "instruction": _string(retry, "instruction"),
+        "instruction_sha256": _string(retry, "instruction_sha256"),
+        "message": _string(retry, "error_message"),
+    }
+
+
+def _run_recovery(run: Run) -> dict[str, object]:
+    latest = (
+        AutomaticRetry.objects.select_related("attempt__node_run")
+        .filter(attempt__node_run__run=run)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    return {
+        **_recovery_policy(run).model_dump(mode="json"),
+        "current": _recovery_record(latest) if latest is not None else None,
+    }
 
 
 class _ClaimContext(NamedTuple):
@@ -1017,6 +1060,7 @@ class DjangoReadStore:
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
             result["problem"] = _run_problem(run)
+            result["recovery"] = _run_recovery(run)
             result["event_cursor"] = _integer(run, "read_event_cursor")
             result["project"] = asdict(_record(_related(run, "project", Project)))
             result["snapshot"] = {
@@ -1528,6 +1572,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         run_id = str(uuid.uuid4())
         branch = run_branch(run_id)
         worktree = run_worktree_path(run_id)
+        policy = load_workflow_text(snapshot.workflow_yaml, source=Path(request.workflow_key))
         try:
             with transaction.atomic():
                 instance = Instance.objects.select_for_update().filter(singleton_key=1).first()
@@ -1554,6 +1599,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     launcher=request.launcher,
                     entry_point=request.entry_point,
                     recorded_head=source_commit,
+                    recovery_policy=policy.definition.recovery.model_dump(mode="json"),
                 )
                 RunSnapshot.objects.create(run=run, **snapshot.to_dict())
                 _append_event(
@@ -2114,6 +2160,22 @@ class DjangoExecutionStore(DjangoAgentStore):
             # ("Review the code",) becomes ("Review the code", "Continue...").
             # Captured prompt bytes remain intact; the retry instruction follows them.
             prompts = (*prompts, handoff)
+        instruction = _string(node, "recovery_instruction")
+        if instruction:
+            # ("Review the plan",) gains a separate recovery instruction while
+            # the immutable snapshot and provider configuration remain identical.
+            prompts = (*prompts, instruction)
+            previous = (
+                AutomaticRetry.objects.filter(attempt__node_run=node, state="resumed")
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+            if previous is not None:
+                metadata["recovery"] = {
+                    "source_attempt": _foreign_key_text(previous, "attempt"),
+                    "instruction_sha256": _string(previous, "instruction_sha256"),
+                    "retained_evidence": str(artifacts_dir() / _identifier(run)),
+                }
         return _ClaimContext(
             inputs,
             upstream,
@@ -2954,6 +3016,152 @@ class DjangoExecutionStore(DjangoAgentStore):
                 next_action="Keep the evidence directory and inspect the local Relay log.",
             ) from None
 
+    def capture_recovery_reports(self, target: RecoveryTarget) -> None:
+        """Retain older rejected root reports without replacing attempt evidence."""
+        if target.attempt_id is None:
+            return
+        node = NodeRun.objects.get(pk=target.node_run_id)
+        outputs = _mapping(node, "frozen_def").get("outputs", {})
+        references = set()
+        if isinstance(outputs, dict):
+            for selector in outputs.values():
+                if not isinstance(selector, dict):
+                    continue
+                for kind in ("label", "json_path", "yaml_path"):
+                    value = selector.get(kind)
+                    if isinstance(value, dict) and isinstance(value.get("artifact"), str):
+                        reference = value["artifact"]
+                        if reference in WORKFLOW_DOCUMENT_NAMES:
+                            references.add(reference)
+        files = preserve_recovery_reports(
+            Path(target.worktree_path),
+            target.run_id,
+            target.attempt_id,
+            tuple(sorted(references)),
+        )
+        with transaction.atomic():
+            attempt = NodeAttempt.objects.select_for_update().get(pk=target.attempt_id)
+            for item in files:
+                artifact, created = Artifact.objects.get_or_create(
+                    attempt=attempt,
+                    retained_path=item.retained_path,
+                    defaults={
+                        "declared_name": item.name,
+                        "source_path": item.source_path,
+                        "sha256": item.sha256,
+                        "media_type": item.media_type,
+                        "bytes": item.bytes,
+                        "preservation_state": PreservationState.PRESERVED.value,
+                    },
+                )
+                if created:
+                    run = Run.objects.get(pk=target.run_id)
+                    _append_event(
+                        run,
+                        "artifact.preserved",
+                        EventSource.SYSTEM,
+                        {
+                            "scope_path": target.scope_path,
+                            "name": item.name,
+                            "sha256": item.sha256,
+                            "bytes": item.bytes,
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
+                elif _string(artifact, "sha256") != item.sha256:
+                    message = "Recovery report metadata disagrees with retained evidence."
+                    raise PersistenceError(message)
+
+    def recovery_reports(self, target: RecoveryTarget) -> tuple[RecoveryReport, ...]:
+        """Restore successful handoffs plus this failed attempt's rejected report."""
+        reports = {}
+        rows = (
+            Artifact.objects.select_related("attempt__node_run")
+            .filter(
+                attempt__node_run__run_id=target.run_id,
+                preservation_state=PreservationState.PRESERVED.value,
+            )
+            .filter(
+                Q(attempt__node_run__status=NodeStatus.SUCCEEDED.value)
+                | Q(attempt_id=target.attempt_id)
+            )
+            .order_by("attempt__ended_at", "pk")
+        )
+        # Only exact root report exemptions can be rehydrated as untracked files.
+        # Other files remain retained evidence and cannot hide dirty source code.
+        for row in rows:
+            filename = Path(_string(row, "source_path")).name
+            attempt = _related(row, "attempt", NodeAttempt)
+            node = _related(attempt, "node_run", NodeRun)
+            run = _related(node, "run", Run)
+            source = Path(_string(row, "source_path"))
+            expected = (Path(_string(run, "worktree_path")) / filename).resolve()
+            if filename not in WORKFLOW_DOCUMENT_NAMES or source != expected:
+                continue
+            reports[filename] = RecoveryReport(
+                filename, _string(row, "retained_path"), _string(row, "sha256")
+            )
+        return tuple(reports.values())
+
+    def _schedule_automatic_retry(
+        self,
+        run: Run,
+        node: NodeRun,
+        attempt: NodeAttempt,
+        message: str,
+        *,
+        owner_request: bool = False,
+    ) -> None:
+        policy = _recovery_policy(run)
+        existing = AutomaticRetry.objects.filter(attempt=attempt).first()
+        if not policy.enabled:
+            return
+        if existing is not None and not (
+            owner_request and _string(existing, "state") == "canceled"
+        ):
+            return
+        stored_code = getattr(attempt, "error_code", None)
+        error_code = (
+            stored_code if isinstance(stored_code, str) else _string(attempt, "stop_reason")
+        )
+        if error_code == "agent_usage_limit":
+            return
+        used = AutomaticRetry.objects.filter(attempt__node_run=node, state="resumed").count()
+        state = "scheduled"
+        reason = ""
+        if _string(node, "node_type") != NodeType.AGENT.value:
+            state, reason = "blocked", "This failed step has no assigned recovery agent."
+        elif _mapping(node, "frozen_def").get("auto_retry", True) is False:
+            state, reason = "blocked", "Automatic recovery is disabled for this agent step."
+        elif error_code not in RECOVERABLE_ERRORS or _string(attempt, "stop_reason") in {
+            AttemptStopReason.CANCELED.value,
+            AttemptStopReason.INTERRUPTED.value,
+            AttemptStopReason.SOFT_DENIED.value,
+        }:
+            state, reason = "blocked", "This failure requires an owner decision or safe recovery."
+        elif used >= policy.max_retries:
+            state, reason = "exhausted", "The automatic retry budget for this step is exhausted."
+        instruction, digest = recovery_instruction(_string(node, "scope_path"), error_code, message)
+        retry, _created = AutomaticRetry.objects.update_or_create(
+            attempt=attempt,
+            defaults={
+                "retry_number": min(used + 1, policy.max_retries),
+                "state": state,
+                "instruction": instruction,
+                "instruction_sha256": digest,
+                "error_message": reason,
+            },
+        )
+        _append_event(
+            run,
+            f"run.recovery_{state}",
+            EventSource.RUN,
+            _recovery_record(retry),
+            node=node,
+            attempt=attempt,
+        )
+
     def _finish_node_transition(
         self, node: NodeRun, outcome: ExecutionOutcome
     ) -> tuple[str, str, str]:
@@ -3276,6 +3484,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                                     {**limit.payload(), "scope_path": _string(node, "scope_path")},
                                     node=node,
                                     attempt=attempt,
+                                )
+                            else:
+                                self._schedule_automatic_retry(
+                                    run,
+                                    node,
+                                    attempt,
+                                    failure_message or outcome.error_code or stop_reason,
                                 )
                             _append_event(
                                 run,
@@ -3934,6 +4149,16 @@ class DjangoExecutionStore(DjangoAgentStore):
                 if duplicate:
                     return ControlResult.ALREADY_APPLIED
                 status = _string(run, "status")
+                canceled_recovery = AutomaticRetry.objects.filter(
+                    attempt__node_run__run=run, state__in=PENDING_RECOVERY_STATES
+                ).update(state="canceled")
+                if canceled_recovery:
+                    _append_event(
+                        run,
+                        "run.recovery_canceled",
+                        EventSource.RUN,
+                        {"idempotency_key": idempotency_key},
+                    )
                 retry = (
                     UsageRetry.objects.select_for_update()
                     .filter(run=run, state="scheduled")
@@ -3950,6 +4175,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     )
                     if status == RunStatus.FAILED.value:
                         return ControlResult.ACCEPTED
+                if canceled_recovery and status == RunStatus.FAILED.value:
+                    return ControlResult.ACCEPTED
                 if status in {RunStatus.PENDING.value, RunStatus.INTERRUPTED.value}:
                     return ControlResult.STALE
                 if status in {
@@ -4095,6 +4322,187 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not find the requested failed-node rerun target."
             raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
 
+    def configure_recovery(self, run_id: str, enabled: bool, idempotency_key: str) -> ControlResult:
+        """Record an owner policy override without modifying the launch snapshot."""
+        from relay.execution.control import valid_idempotency_key
+
+        if not valid_idempotency_key(idempotency_key):
+            return ControlResult.INVALID
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="run.recovery_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                if _string(run, "status") in {RunStatus.SUCCEEDED.value, RunStatus.CANCELED.value}:
+                    return ControlResult.STALE
+                policy = _recovery_policy(run).model_copy(update={"enabled": enabled})
+                _set_model_field(run, "recovery_policy", policy.model_dump(mode="json"))
+                run.save(update_fields=("recovery_policy",))
+                _append_event(
+                    run,
+                    "run.recovery_changed",
+                    EventSource.RUN,
+                    {**policy.model_dump(mode="json"), "idempotency_key": idempotency_key},
+                )
+                if not enabled:
+                    changed = AutomaticRetry.objects.filter(
+                        attempt__node_run__run=run, state__in=PENDING_RECOVERY_STATES
+                    ).update(state="canceled")
+                    if changed:
+                        _append_event(run, "run.recovery_canceled", EventSource.RUN, {})
+                elif _string(run, "status") == RunStatus.FAILED.value:
+                    problem = _run_problem(run)
+                    if problem is not None:
+                        node = NodeRun.objects.get(run=run, scope_path=problem["scope_path"])
+                        attempt = (
+                            NodeAttempt.objects.filter(node_run=node)
+                            .order_by("-attempt_number")
+                            .first()
+                        )
+                        if attempt is not None:
+                            message = problem.get("message")
+                            self._schedule_automatic_retry(
+                                run,
+                                node,
+                                attempt,
+                                message if isinstance(message, str) else "The agent step failed.",
+                                owner_request=True,
+                            )
+                return ControlResult.ACCEPTED
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not save the run's automatic recovery policy."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def automatic_rerun_target(
+        self, run_id: str, scope_path: str, idempotency_key: str
+    ) -> RecoveryTarget | None:
+        """Authorize workspace preparation under the shared recovery lock."""
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=run_id)
+            if (
+                not _recovery_policy(run).enabled
+                or _string(run, "status") != RunStatus.FAILED.value
+            ):
+                return None
+            if RunLock.objects.filter(run=run).exists():
+                return None
+            target = self.manual_rerun_target(run_id, scope_path, idempotency_key)
+            if target is None:
+                return None
+            retry = (
+                AutomaticRetry.objects.select_for_update()
+                .filter(attempt_id=target.attempt_id, state__in=PENDING_RECOVERY_STATES)
+                .first()
+            )
+            if retry is None:
+                return None
+            unrelated = any(
+                not scope_is_ancestor(other, target.scope_path)
+                for other in NodeRun.objects.filter(
+                    run=run, status=NodeStatus.FAILED.value
+                ).values_list("scope_path", flat=True)
+            )
+            if unrelated:
+                message = "Another failed step must be resolved before automatic recovery."
+                raise PersistenceError(message)
+            if _string(retry, "state") != "preparing":
+                _set_model_field(retry, "state", "preparing")
+                retry.save(update_fields=("state",))
+                _append_event(
+                    run, "run.recovery_preparing", EventSource.RUN, _recovery_record(retry)
+                )
+            return target
+
+    def resume_automatic_retries(self) -> int:
+        """Recover settled failures once; crashes retain the same retry budget."""
+        from relay.execution.recovery import prepare_recovery_workspace
+        from relay.execution.resume import rerun_failed_node
+
+        if Instance.objects.filter(shutdown_requested=True).exists():
+            return 0
+        resumed = 0
+        retries = list(
+            AutomaticRetry.objects.select_related("attempt__node_run")
+            .filter(
+                state__in=PENDING_RECOVERY_STATES,
+                attempt__node_run__run__status=RunStatus.FAILED.value,
+            )
+            .order_by("created_at", "pk")[:RECONCILE_MAX_ITEMS]
+        )
+        for retry in retries:
+            attempt = _related(retry, "attempt", NodeAttempt)
+            node = _related(attempt, "node_run", NodeRun)
+            run_id = _foreign_key_text(node, "run")
+            try:
+                result = rerun_failed_node(
+                    self,
+                    run_id,
+                    _string(node, "scope_path"),
+                    f"automatic:{_identifier(attempt)}",
+                    lambda target: prepare_recovery_workspace(self, target),
+                    automatic_retry=True,
+                )
+                resumed += int(result is ControlResult.ACCEPTED)
+            except Exception as error:
+                LOGGER.exception("Automatic step recovery failed", extra={"run_id": run_id})
+                message = (
+                    error.message
+                    if isinstance(error, RelayError)
+                    else "Relay could not safely prepare this retry."
+                )
+                with transaction.atomic():
+                    changed = AutomaticRetry.objects.filter(
+                        pk=retry.pk, state__in=PENDING_RECOVERY_STATES
+                    ).update(state="blocked", error_message=message[:RUN_PROBLEM_TEXT_MAX_CHARS])
+                    if changed:
+                        run = Run.objects.get(pk=run_id)
+                        _append_event(
+                            run,
+                            "run.recovery_blocked",
+                            EventSource.RUN,
+                            {
+                                "scope_path": _string(node, "scope_path"),
+                                "message": message[:RUN_PROBLEM_TEXT_MAX_CHARS],
+                            },
+                        )
+        return resumed
+
+    def activate_automatic_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool:
+        """Recheck owner cancellation and the exact failed attempt before reopening."""
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=target.run_id)
+            retry = (
+                AutomaticRetry.objects.select_for_update()
+                .filter(attempt_id=target.attempt_id, state="preparing")
+                .first()
+            )
+            latest = (
+                NodeAttempt.objects.filter(node_run_id=target.node_run_id)
+                .order_by("-attempt_number")
+                .first()
+            )
+            if (
+                retry is None
+                or latest is None
+                or _identifier(latest) != target.attempt_id
+                or not _recovery_policy(run).enabled
+                or _string(run, "status") != RunStatus.FAILED.value
+                or Instance.objects.filter(shutdown_requested=True).exists()
+            ):
+                return False
+            activated = self.activate_recovery(
+                target, idempotency_key, recovery_note=_string(retry, "instruction")
+            )
+            if activated:
+                _set_model_field(retry, "state", "resumed")
+                retry.save(update_fields=("state",))
+                _append_event(run, "run.recovery_resumed", EventSource.RUN, _recovery_record(retry))
+            return activated
+
     def resume_usage_retries(self) -> int:
         """Recover due provider limits once through the existing failed-node path."""
         from relay.execution.recovery import prepare_recovery_workspace
@@ -4219,7 +4627,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 )
                 if retry is None or _string(run, "status") != RunStatus.FAILED.value:
                     return False
-                return self.activate_recovery(target, idempotency_key)
+                return self.activate_recovery(target, idempotency_key, preserve_recovery_note=True)
         except (DatabaseError, ObjectDoesNotExist):
             message = "Relay could not authorize the scheduled usage retry."
             raise PersistenceError(message, context={"run": target.run_id}) from None
@@ -4232,6 +4640,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         effort: RetryEffort | None = None,
         agent: RetryAgent | None = None,
         permission_mode: RetryPermissionMode | None = None,
+        recovery_note: str | None = None,
+        preserve_recovery_note: bool = False,
     ) -> bool:
         if target.interrupted:
             return self.activate_interrupted_run(target.run_id, idempotency_key)
@@ -4246,6 +4656,16 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ).exists()
                 if duplicate:
                     return False
+                pending = AutomaticRetry.objects.filter(
+                    attempt__node_run__run=run, state__in=PENDING_RECOVERY_STATES
+                )
+                if recovery_note is not None:
+                    pending = pending.exclude(attempt_id=target.attempt_id)
+                if pending.update(state="canceled"):
+                    _append_event(run, "run.recovery_canceled", EventSource.RUN, {})
+                if not preserve_recovery_note:
+                    _set_model_field(node, "recovery_instruction", recovery_note or "")
+                    node.save(update_fields=("recovery_instruction",))
                 if agent is not None or effort is not None or permission_mode is not None:
                     if _string(node, "node_type") != NodeType.AGENT.value:
                         message = "Retry configuration can only be changed for an agent step."

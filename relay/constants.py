@@ -66,6 +66,7 @@ HTTP_BAD_GATEWAY: Final = HTTPStatus.BAD_GATEWAY
 HTTP_SERVICE_UNAVAILABLE: Final = HTTPStatus.SERVICE_UNAVAILABLE
 
 MAX_LOOP_ITERATIONS: Final = 100
+MAX_AUTOMATIC_RETRIES: Final = 2
 MAX_EXPANDED_NODES: Final = 10_000
 API_MAX_PAGE: Final = 200
 API_MAX_PAGE_BYTES: Final = 1_048_576
@@ -87,6 +88,14 @@ DEFAULT_RETRY_HANDOFF_PROMPT: Final = (
     "completed work and successful stages. Finish the remaining work for this "
     "step and report fresh verification evidence. Use the current Relay agent "
     "and exact model for report provenance."
+)
+DEFAULT_RECOVERY_PROMPT: Final = (
+    "Recover only this failed step. Follow its original instructions and scope. "
+    "Read the retained evidence and existing reports before acting. Fix the "
+    "supplied error and preserve completed work. Do not start new feature work, "
+    "change models or permissions, weaken checks, invent evidence, or turn "
+    "failing verdicts into passes. Report genuine blockers when the original "
+    "scope cannot resolve them."
 )
 CONTROL_PAYLOAD_MAX_BYTES: Final = 65_536
 CONTROL_IDEMPOTENCY_KEY_MAX_CHARS: Final = 200

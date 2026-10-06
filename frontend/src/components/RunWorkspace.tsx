@@ -14,6 +14,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   InputLabel,
   List,
   ListItemButton,
@@ -23,6 +24,7 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -64,6 +66,13 @@ const EVENT_TYPES = [
   "run.retry_scheduled",
   "run.retry_blocked",
   "run.retry_canceled",
+  "run.recovery_changed",
+  "run.recovery_scheduled",
+  "run.recovery_preparing",
+  "run.recovery_resumed",
+  "run.recovery_blocked",
+  "run.recovery_exhausted",
+  "run.recovery_canceled",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
   "resource.cleanup_succeeded",
@@ -105,6 +114,7 @@ const EVENT_TYPES = [
 ] as const;
 
 const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled"]);
+const PENDING_RECOVERY = new Set(["scheduled", "preparing"]);
 const OUTPUT_ROW_HEIGHT = 86;
 const OUTPUT_VIEW_HEIGHT = 430;
 const VIRTUAL_ROW_OVERSCAN = 3;
@@ -288,6 +298,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [stepFocusRequest, setStepFocusRequest] = useState(0);
   const [activityLimit, setActivityLimit] = useState(30);
@@ -389,7 +400,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setDetail((current) => live.reduce(applyStateEvent, current));
     const interactionChanged = live.some((item) => item.type === "attempt.ended"
       || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
-    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type.startsWith("run.retry_"))) {
+    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
       void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
         setError(errorMessage(caught)),
       );
@@ -462,7 +473,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     previousRunStatus.current = detail.status;
     if (
       previous !== null && TERMINAL_RUNS.has(previous)
-      && !TERMINAL_RUNS.has(detail.status) && streamState === "complete"
+      && (!TERMINAL_RUNS.has(detail.status)
+        || detail.status === "failed" && (detail.problem?.retry?.state === "scheduled"
+          || PENDING_RECOVERY.has(detail.recovery?.current?.state ?? "")))
+      && streamState === "complete"
     ) setStreamEpoch((value) => value + 1);
   }, [detail, selectedRun, streamState]);
 
@@ -482,7 +496,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       completionCheck = loadDetailCollection("nodes", 0, "refresh")
         .then((run) => {
           if (disposed || currentRun.current !== selectedRun) return;
-          if (TERMINAL_RUNS.has(run.status) && run.problem?.retry?.state !== "scheduled") {
+          if (TERMINAL_RUNS.has(run.status) && run.problem?.retry?.state !== "scheduled"
+            && !PENDING_RECOVERY.has(run.recovery?.current?.state ?? "")) {
             source.close();
             setStreamState("complete");
           }
@@ -499,7 +514,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       setEvents((current) => mergeEvents(current, batch));
       applyLiveUpdates(batch);
       if (batch.some((item) => item.id > stateAfter.current && (
-        item.type.startsWith("run.retry_") || item.type.startsWith("run.")
+        item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_") || item.type.startsWith("run.")
           && typeof item.payload.status === "string" && TERMINAL_RUNS.has(item.payload.status)
       ))) checkCompletion();
     };
@@ -537,6 +552,21 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       source.close();
     };
   }, [applyLiveUpdates, loadDetailCollection, selectedRun, streamEpoch, streamRun]);
+
+  async function configureRecovery(enabled: boolean) {
+    if (selectedRun === null) return;
+    setRecoveryBusy(true);
+    try {
+      await api(`/api/runs/${encodeURIComponent(selectedRun)}/recovery`, {
+        method: "POST", body: JSON.stringify({ enabled, idempotency_key: crypto.randomUUID() }),
+      });
+      await refreshDetail();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
 
   async function cancelRun() {
     if (selectedRun === null) return;
@@ -641,7 +671,12 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const currentStages = detail?.nodes.filter((node) => ["waiting", "running", "failed"].includes(node.status)) ?? [];
   const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
   const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
-  const active = detail && ["pending", "running", "paused_wait", "canceling"].includes(detail.status);
+  const recovery = detail?.recovery?.current;
+  const recoveryPending = PENDING_RECOVERY.has(recovery?.state ?? "");
+  const active = detail && (["pending", "running", "paused_wait", "canceling"].includes(detail.status) || recoveryPending);
+  const recovering = recovery?.state === "resumed" && detail?.status === "running"
+    && detail.nodes.some((node) => node.scope_path === recovery.scope_path
+      && ["ready", "dispatched", "running", "waiting"].includes(node.status));
 
   return (
     <Stack spacing={2}>
@@ -701,7 +736,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   )}
                 </Stack>
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  <Typography variant="subtitle1">{pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
+                  <Typography variant="subtitle1">{recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
                   {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
                   <LinearProgress variant="determinate" value={detail.nodes.length ? 100 * complete / detail.nodes.length : 0} />
                   <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
@@ -714,6 +749,25 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                     Restarting <code>relay up</code> resumes this run from durable state as a fresh attempt.
                   </Alert>
                 )}
+                <FormControlLabel sx={{ mt: 2 }}
+                  control={<Switch checked={detail.recovery?.enabled === true}
+                    disabled={recoveryBusy || ["succeeded", "canceled"].includes(detail.status)}
+                    onChange={(event) => void configureRecovery(event.target.checked)} />}
+                  label="Automatic recovery" />
+                <Typography variant="body2" color="text.secondary">
+                  Eligible agent steps can retry up to {detail.recovery?.max_retries ?? 2} times.
+                  Retries keep their model, settings, and original instructions. Turning this
+                  off cancels queued recovery and keeps the remaining budget unchanged.
+                </Typography>
+                {recovery && ["blocked", "exhausted"].includes(recovery.state) &&
+                  <Alert severity="warning" sx={{ mt: 2 }}>{recovery.message}</Alert>}
+                {recovery?.instruction && <Accordion sx={{ mt: 2 }}>
+                  <AccordionSummary>Automatic retry instruction</AccordionSummary>
+                  <AccordionDetails>
+                    <Typography variant="body2">{stageLabel(recovery.scope_path)} · Retry {recovery.retry_number} of {detail.recovery.max_retries} · {recovery.state}</Typography>
+                    <Typography component="pre" className="activity-text">{recovery.instruction}</Typography>
+                  </AccordionDetails>
+                </Accordion>}
               </Paper>
 
               {(pendingInteractions.length > 0 || interactionCursor !== null) && (

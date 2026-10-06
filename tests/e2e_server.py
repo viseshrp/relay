@@ -127,10 +127,18 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         providers.install("codex", mode="feedback")
         return JsonResponse({"ok": True})
 
+    @owner_required
+    @require_POST
+    def recovery_provider(request: HttpRequest) -> JsonResponse:
+        del request
+        providers.install("codex", mode="configuration-recovery")
+        return JsonResponse({"ok": True})
+
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/commit", commit))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
+    urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
 
     # Close each SDK callback's database connection in its owning thread.
     original_to_thread = asyncio.to_thread
@@ -152,6 +160,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         try:
             while not stopped.wait(0.02):
                 engine.store.resolve_human_wait_controls()
+                engine.store.resume_automatic_retries()
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
                 for run_id in Run.objects.filter(status="running").values_list("id", flat=True):

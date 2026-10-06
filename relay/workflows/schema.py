@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from relay.constants import MAX_LOOP_ITERATIONS
+from relay.constants import MAX_AUTOMATIC_RETRIES, MAX_LOOP_ITERATIONS
 
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DURATION_PATTERN = re.compile(r"^[0-9]+(?:ms|s|m|h)$")
@@ -224,6 +224,7 @@ class AgentNode(NodeBase):
     agents: list[str] = Field(default_factory=list)
     permission_profile: str | None = None
     agent_options: dict[str, AgentOptions] = Field(default_factory=dict)
+    auto_retry: bool = True
 
 
 class CommandNode(NodeBase):
@@ -304,6 +305,13 @@ class EntryPoint(StrictModel):
     artifacts: dict[str, EntryArtifact] = Field(default_factory=dict)
 
 
+class RecoveryPolicy(StrictModel):
+    """Opt-in recovery with a lifetime budget for each failed agent step."""
+
+    enabled: bool = False
+    max_retries: int = Field(default=MAX_AUTOMATIC_RETRIES, ge=1, le=MAX_AUTOMATIC_RETRIES)
+
+
 class WorkflowDefinition(StrictModel):
     """One complete Relay workflow document."""
 
@@ -314,6 +322,7 @@ class WorkflowDefinition(StrictModel):
     agents: list[str] = Field(default_factory=list)
     nodes: dict[str, NodeDefinition]
     entrypoints: list[EntryPoint] = Field(default_factory=list)
+    recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> WorkflowDefinition:

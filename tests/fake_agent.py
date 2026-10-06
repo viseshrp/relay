@@ -59,6 +59,7 @@ class WireAgent:
     permission_mode: str = "ask"
     model_selections: int = 0
     prompt_count: int = 0
+    cwd: str = ""
 
     def configuration(self) -> list[dict[str, object]]:
         options = [selector(self.selected)]
@@ -139,6 +140,8 @@ class WireAgent:
                 },
             )
         elif method == "session/new":
+            cwd = params.get("cwd")
+            self.cwd = cwd if isinstance(cwd, str) else ""
             if self.mode == "auth" and not self.authenticated:
                 self.error(request_id, RequestError.auth_required())
             else:
@@ -196,6 +199,18 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "configuration-recovery":
+                blocks = params.get("prompt", [])
+                text = (
+                    "\n".join(
+                        str(block.get("text", "")) for block in blocks if isinstance(block, dict)
+                    )
+                    if isinstance(blocks, list)
+                    else ""
+                )
+                recovering = "Recover only this failed step." in text
+                content = "Created by: Fake provider\nReady: No\n" if recovering else "Ready: No\n"
+                (Path(self.cwd) / "PLAN_CRITIQUE.md").write_text(content, encoding="utf-8")
             if self.mode in {"quota", "quota-unknown"}:
                 self.update(
                     {

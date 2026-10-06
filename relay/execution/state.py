@@ -268,7 +268,7 @@ RUN_TRANSITIONS: tuple[Transition, ...] = (
     Transition(
         RunStatus.FAILED,
         "manual_rerun",
-        "owner_requested_or_confirmed_usage_reset",
+        "owner_or_confirmed_reset_or_configured_recovery",
         RunStatus.RUNNING,
         "run.rerun",
     ),
@@ -419,7 +419,7 @@ NODE_TRANSITIONS: tuple[Transition, ...] = (
     Transition(
         NodeStatus.FAILED,
         "rerun",
-        "owner_requested",
+        "owner_or_authorized_recovery",
         NodeStatus.READY,
         "node.ready",
     ),

@@ -419,14 +419,21 @@ def _execute_attempt(
                     ending_head = current_head(worktree)
             else:
                 ending_head = current_head(worktree)
+        except RelayError as error:
+            outcome = replace(_failure(error), declared_artifacts=outcome.declared_artifacts)
+            LOGGER.exception(
+                "Attempt validation failed",
+                extra={"attempt_id": claim.attempt_id},
+            )
+        # A commit/cleanliness failure still needs its partial work and reports
+        # retained before recovery may reset the checkout.
+        try:
+            ending_head = current_head(worktree)
             preservation = _preserve(claim, worktree, outcome, artifact_root=artifact_root)
             store.record_preservation(claim.attempt_id, preservation)
         except RelayError as error:
             outcome = _failure(error)
-            LOGGER.exception(
-                "Attempt validation or preservation failed",
-                extra={"attempt_id": claim.attempt_id},
-            )
+            LOGGER.exception("Attempt preservation failed", extra={"attempt_id": claim.attempt_id})
 
     # A reader checkout must disappear before its node can unlock downstream work.
     try:

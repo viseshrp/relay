@@ -29,7 +29,7 @@ target state already holds is a no-op.
 | `running` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `paused_wait` | `orderly_shutdown` | `shutdown_marker_set` | `interrupted` | `run.interrupted` |
 | `interrupted` | `restart_reconcile` | `snapshot_and_artifacts_valid` | `running` | `run.resumed` |
-| `failed` | `manual_rerun` | `owner_requested_or_confirmed_usage_reset` | `running` | `run.rerun` |
+| `failed` | `manual_rerun` | `owner_or_confirmed_reset_or_configured_recovery` | `running` | `run.rerun` |
 <!-- relay-transitions:run:end -->
 
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
@@ -66,7 +66,7 @@ or `failed`; restart never reopens canceled nodes.
 | `dispatched` | `fail_fast` | `run_canceling` | `canceled` | `node.canceled` |
 | `running` | `interrupt` | `orderly_shutdown` | `pending` | `node.interrupted` |
 | `waiting` | `interrupt` | `orderly_shutdown` | `pending` | `node.interrupted` |
-| `failed` | `rerun` | `owner_requested` | `ready` | `node.ready` |
+| `failed` | `rerun` | `owner_or_authorized_recovery` | `ready` | `node.ready` |
 | `canceled` | `recompute` | `canceled_only_by_fail_fast` | `pending` | `node.pending` |
 <!-- relay-transitions:node:end -->
 
@@ -120,7 +120,62 @@ If another caller already started, finished, or canceled it, the stale dispatch
 does nothing. Duplicate deliveries of an existing claim still create one attempt.
 `run_node_attempt` is declared with `retries=0`. Queue delivery never retries an
 attempt. A confirmed provider usage reset can authorize a fresh failed-node
-recovery as described below; other failures require an owner retry.
+recovery as described below. An explicitly enabled recovery policy also
+authorizes bounded retries for eligible agent failures.
+
+### Automatic step recovery
+
+Automatic recovery is disabled by default. The workflow's `recovery` policy
+sets a budget of one or two additional attempts per agent step. The owner can
+enable or disable it on an existing run through the browser or recovery API,
+without modifying the captured workflow. `auto_retry: false` opts a step out.
+
+Eligible error codes are `output_validation_error`, `commit_validation_error`,
+`dirty_repository_error`, `node_timeout`, and `agent_protocol_error`.
+Cancellation, interruption, permission refusal, unavailable models, unsafe
+paths, storage failures, preservation failures, and Git recovery failures
+never launch an automatic attempt. A standalone failed command stops; workflow
+checks that already route verdicts into a repair loop retain their own routing.
+
+`AutomaticRetry` records one decision for the initiating failed attempt. The
+run first completes its normal fail-fast drain. Reconciliation waits until all
+attempt admission locks are released, prepares the failed leaf's workspace,
+and reopens its failed loop or subworkflow parents. Completed nodes stay
+complete. Independent failed steps block recovery rather than selecting one.
+
+Preparing the retry preserves rejected reports, partial commits, diffs, and
+untracked files before reset. In a writer's primary worktree, verified
+successful upstream root reports and the failed step's rejected root report
+are restored from retained evidence. Readers keep their detached, clean
+checkout and read retained evidence through the recovery metadata.
+Only the existing report exemptions can be restored as untracked files.
+Conflicting files or invalid evidence stop recovery before another agent runs.
+
+Relay appends the error and the following instruction as a separate prompt:
+
+> Recover only this failed step. Follow its original instructions and scope.
+> Read the retained evidence and existing reports before acting. Fix the
+> supplied error and preserve completed work. Do not start new feature work,
+> change models or permissions, weaken checks, invent evidence, or turn failing
+> verdicts into passes. Report genuine blockers when the original scope cannot
+> resolve them.
+
+The text and its SHA-256 hash are recorded in the recovery decision and event.
+Original prompt bytes, snapshot hashes, routes, and settings stay unchanged.
+Run metadata points the agent to the retained attempt evidence. Model-switch
+handoff instructions remain a separate owner-selected control.
+
+The per-run kernel recovery lock serializes automatic, quota, and manual
+retries. The decision is rechecked after workspace preparation. Duplicate
+delivery, restarts, and repeated failures do not replenish the budget. A crash
+during preparation resumes that same decision; a third eligible failure after
+two retries records `exhausted` and stops. Owner cancellation or disabling the
+policy removes pending recovery. A manual retry supersedes it. Orderly
+shutdown suspends preparation and activation until restart.
+
+Provider quota schedules take precedence and keep their existing requirement
+for a structured, confirmed reset. A quota retry keeps any existing repair
+instruction and does not spend an additional error-recovery retry.
 
 ### Provider usage resets
 
@@ -251,7 +306,8 @@ and its loop or subworkflow parents so the synchronous scope can reach that
 leaf. Successful nodes remain complete. Nodes canceled only by fail-fast return
 to `pending` and have eligibility recomputed. If a separate concurrent failure
 remains, the run returns to `failed` after the selected rerun settles. This is a
-new attempt initiated by the owner or a confirmed provider usage reset.
+new attempt initiated by the owner, an enabled recovery policy, or a confirmed
+provider usage reset.
 
 An owner retry may explicitly change an agent step's effort to a value freshly
 advertised for its existing model, change its permission mode, or request the

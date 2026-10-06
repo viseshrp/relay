@@ -19,6 +19,7 @@ explain the format; Relay does not install them as templates.
 | `agents` | no | Ordered default agent IDs. |
 | `nodes` | yes | Node ID to node-definition map; an empty map is valid. |
 | `entrypoints` | no | Declared midstream scopes and their required evidence. |
+| `recovery` | no | `{enabled: false, max_retries: 2}` by default. `max_retries` accepts `1` or `2`. |
 
 Node and input IDs match `^[a-z][a-z0-9_]*$`. A node accepts `needs`, `if`,
 `timeout`, and `on_timeout` in addition to its type-specific fields. `needs` is
@@ -30,6 +31,29 @@ Durations contain digits followed by `ms`, `s`, `m`, or `h`: `250ms`, `30s`,
 Loop and subworkflow deadlines also bound their nested attempts. A timeout
 while a node is running fails that attempt; `on_timeout` is taken when a
 `human_wait` deadline expires while waiting.
+
+## Automatic recovery
+
+Set `recovery: {enabled: true}` to retry eligible failed agent steps without an
+owner action. Each step gets at most two additional attempts over the run's
+lifetime. Set `max_retries: 1` for one additional attempt. Agent nodes can opt
+out with `auto_retry: false`; they allow retries by default when the workflow
+policy is enabled. An omitted policy keeps existing workflows unchanged.
+The root workflow's policy applies to agent steps in loops and subworkflows;
+use the child agent's `auto_retry` field for an individual opt-out.
+
+Relay retries invalid reports, commit or cleanliness errors, timeouts, and
+protocol failures. Authentication, permissions, model availability, unsafe
+paths, storage, preservation, and Git recovery errors stop for inspection.
+Provider limits follow the separate confirmed-reset schedule. Neither policy
+changes the assigned model, effort, permissions, or original instructions.
+
+The same agent receives the error and a bounded repair instruction after its
+original instructions. Rejected reports and successful upstream report
+handoffs remain available. A failed command needs its existing workflow repair
+route; Relay does not choose a repair agent for a standalone command. Declared
+human waits still require the owner. See
+[Automatic step recovery](execution.md#automatic-step-recovery).
 
 ## Typed inputs
 

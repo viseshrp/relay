@@ -39,6 +39,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
         name="run-resources-clean",
     ),
     path("api/runs/<str:run_id>/cancel", actions.cancel_run, name="run-cancel"),
+    path("api/runs/<str:run_id>/recovery", actions.configure_run_recovery, name="run-recovery"),
     path("api/runs/<str:run_id>/rerun-node", actions.rerun_node, name="run-rerun-node"),
     path(
         "api/attempts/<str:attempt_id>/permission",

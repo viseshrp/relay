@@ -11,6 +11,7 @@ export interface WorkflowNodeValue {
   writes?: boolean;
   agents?: string[];
   agent_options?: Record<string, AgentOptions>;
+  auto_retry?: boolean;
   prompts?: Array<{ local?: string; global?: string }>;
   [key: string]: unknown;
 }
@@ -31,6 +32,7 @@ export interface WorkflowValue {
   inputs?: Record<string, InputDefinition>;
   nodes: Record<string, WorkflowNodeValue>;
   entrypoints?: Array<{ scope_path: string }>;
+  recovery?: { enabled: boolean; max_retries?: number };
 }
 
 export interface WorkflowNodeData extends Record<string, unknown> {

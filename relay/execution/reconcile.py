@@ -31,6 +31,7 @@ class ReconcileResult:
     controls: ControlRecovery
     attempts: AttemptRecovery
     usage_retries_resumed: int = 0
+    automatic_retries_resumed: int = 0
 
 
 class ReconcileStore(Protocol):
@@ -49,6 +50,8 @@ class ReconcileStore(Protocol):
     def reap_stale_attempts(self, *, orderly_shutdown: bool) -> AttemptRecovery: ...
 
     def resume_usage_retries(self) -> int: ...
+
+    def resume_automatic_retries(self) -> int: ...
 
 
 def reconcile_once(
@@ -74,8 +77,16 @@ def reconcile_once(
     controls = store.recover_control_claims()
     attempts = store.reap_stale_attempts(orderly_shutdown=orderly_shutdown)
     usage_retries = 0 if orderly_shutdown else store.resume_usage_retries()
+    automatic_retries = 0 if orderly_shutdown else store.resume_automatic_retries()
     return ReconcileResult(
-        enqueued, failures, human_controls, expired_waits, controls, attempts, usage_retries
+        enqueued,
+        failures,
+        human_controls,
+        expired_waits,
+        controls,
+        attempts,
+        usage_retries,
+        automatic_retries,
     )
 
 

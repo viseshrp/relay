@@ -528,6 +528,11 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
               )}
               {definition.type === "agent" && (
                 <>
+                  <FormControlLabel
+                    control={<Switch checked={definition.auto_retry !== false}
+                      onChange={(event) => setNodeField("auto_retry", event.target.checked)} />}
+                    label="Allow automatic retries for this step"
+                  />
                   <ModelPicker key={`${selectedNode}-${candidateIds.join(",")}`} agents={agents?.agents.filter((agent) => candidateIds.includes(agent.id)) ?? []} value={typeof definition.model === "string" ? definition.model : ""} project={requestProject} onChange={setAgentModel} />
                   <TextField
                     size="small"
@@ -660,6 +665,19 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
               Your tools work on a separate Git branch. Work continues automatically unless a workflow stage or tool asks for your input.
             </Typography>
           </Box>
+          <FormControlLabel
+            control={<Switch checked={parsed.value?.recovery?.enabled === true}
+              disabled={!leaseReady || parsed.value === null}
+              onChange={(event) => setYamlText(mutateWorkflow(yamlText, (document) => {
+                document.setIn(["recovery", "enabled"], event.target.checked);
+              }))} />}
+            label="Automatic recovery"
+          />
+          <Typography variant="body2" color="text.secondary">
+            Retry eligible agent failures up to twice. Relay keeps the same model,
+            settings, and original instructions, then adds the error and a repair
+            instruction. Unsafe failures and exhausted retries stop visibly.
+          </Typography>
           <Box className="field-grid">
             {Object.entries(inputDefinitions).map(([name, input]) => {
               const supplied = launchInputs[name];

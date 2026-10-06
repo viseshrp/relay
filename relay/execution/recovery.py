@@ -5,9 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from relay.errors import WorktreeError
+from relay.errors import ArtifactPreservationError, WorktreeError
 from relay.paths import artifacts_dir
-from relay.vcs.artifacts import PreservationResult, preserve_then_reset
+from relay.vcs.artifacts import (
+    PreservationResult,
+    RecoveryReport,
+    preserve_attempt_evidence,
+    restore_recovery_reports,
+    validate_recovery_reports,
+)
 from relay.vcs.cleanliness import require_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import remove_worktree, reset_worktree
@@ -23,6 +29,10 @@ class RecoveryEvidenceStore(Protocol):
         attempt_id: str,
         preservation: PreservationResult,
     ) -> None: ...
+
+    def capture_recovery_reports(self, target: RecoveryTarget) -> None: ...
+
+    def recovery_reports(self, target: RecoveryTarget) -> tuple[RecoveryReport, ...]: ...
 
 
 def prepare_recovery_workspace(
@@ -49,36 +59,28 @@ def prepare_recovery_workspace(
         return
 
     retained = artifacts_dir() / target.run_id / target.attempt_id
+    if not retained.is_dir():
+        preservation = preserve_attempt_evidence(
+            repository, worktree, target.run_id, target.attempt_id, target.starting_head
+        )
+        store.record_preservation(target.attempt_id, preservation)
+    elif not (retained / "manifest.json").is_file():
+        message = "The retained attempt evidence has no complete manifest."
+        raise ArtifactPreservationError(message)
+    # Retain ignored/rejected reports from older attempts before any reset.
+    # The database then selects the failed report and successful handoffs.
+    store.capture_recovery_reports(target)
+    reports = store.recovery_reports(target)
+    validate_recovery_reports(reports)
     if target.ephemeral_reader:
-        if not retained.is_dir():
-            preservation = preserve_then_reset(
-                repository,
-                worktree,
-                target.run_id,
-                target.attempt_id,
-                target.starting_head,
-                protected_head=target.protected_head,
-            )
-            store.record_preservation(target.attempt_id, preservation)
         remove_worktree(repository, worktree)
         return
-
-    if retained.is_dir():
-        reset_worktree(
-            worktree,
-            target.starting_head,
-            protected_head=target.protected_head,
-        )
-        return
-    preservation = preserve_then_reset(
-        repository,
+    reset_worktree(
         worktree,
-        target.run_id,
-        target.attempt_id,
         target.starting_head,
         protected_head=target.protected_head,
     )
-    store.record_preservation(target.attempt_id, preservation)
+    restore_recovery_reports(worktree, reports)
 
 
 __all__ = ["RecoveryEvidenceStore", "prepare_recovery_workspace"]

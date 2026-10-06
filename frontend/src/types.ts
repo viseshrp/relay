@@ -151,6 +151,19 @@ export interface RunInteraction {
 
 export interface RunDetail extends RunSummary {
   problem: RunProblem | null;
+  recovery: {
+    enabled: boolean;
+    max_retries: number;
+    current: {
+      scope_path: string;
+      attempt_number: number;
+      retry_number: number;
+      state: "scheduled" | "preparing" | "resumed" | "blocked" | "exhausted" | "canceled";
+      instruction: string;
+      instruction_sha256: string;
+      message: string;
+    } | null;
+  };
   event_cursor: number;
   project: ProjectRecord;
   snapshot: {

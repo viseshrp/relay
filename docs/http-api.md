@@ -251,6 +251,30 @@ returns `already_applied`. Manual `rerun-node` supersedes a pending schedule.
 | `POST /api/attempts/{id}/elicitation` | `{"idempotency_key":"e-1","value":{...}}` |
 | `POST /api/attempts/{id}/wait` | `{"idempotency_key":"w-1","value":...}` |
 | `POST /api/runs/{id}/rerun-node` | `{"scope_path":"root.failed","idempotency_key":"r-1"}` |
+| `POST /api/runs/{id}/recovery` | `{"enabled":true,"idempotency_key":"auto-1"}` |
+
+The recovery action records a run-level policy override separately from the
+immutable snapshot. `enabled` must be a JSON boolean. Enabling a failed run
+queues its eligible initiating agent failure; disabling cancels pending error
+recovery. It does not change a provider quota schedule or reset spent retries.
+Completed and canceled runs return `stale`; duplicate keys return
+`already_applied`. CSRF and owner controls match other run actions.
+
+Run detail includes `recovery` with `enabled`, `max_retries`, and `current`.
+`current` is null or the latest decision with `scope_path`, `attempt_number`,
+`retry_number`, `state`, `instruction`, `instruction_sha256`, and `message`.
+States are `scheduled`, `preparing`, `resumed`, `blocked`, `exhausted`, and
+`canceled`. The instruction fits within 8,192 UTF-8 bytes. Original prompts and
+snapshot hashes are unchanged.
+
+SSE exposes `run.recovery_changed`, `run.recovery_scheduled`,
+`run.recovery_preparing`, `run.recovery_resumed`, `run.recovery_blocked`,
+`run.recovery_exhausted`, and `run.recovery_canceled`. Decision events include
+the fields above; policy events include `enabled`, `max_retries`, and the
+idempotency key. Recovery preparation errors include their scope and public
+message. A failed run's stream stays open while error recovery is pending,
+as it does for a pending quota reset. Run cancellation and manual retry
+supersede queued error recovery through the existing recovery lock.
 
 An agent rerun accepts an optional `effort` field. For example,
 `{"scope_path":"root.review","idempotency_key":"r-2","effort":"medium"}`

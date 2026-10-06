@@ -161,6 +161,7 @@ class Run(RelayModel):
     failure_summary: models.TextField = models.TextField(null=True, blank=True)
     entry_point: models.TextField = models.TextField(null=True, blank=True)
     recorded_head: models.CharField = models.CharField(max_length=40)
+    recovery_policy: models.JSONField = models.JSONField(default=dict)
 
     class Meta:
         indexes: ClassVar[list[models.Index]] = [
@@ -199,6 +200,7 @@ class NodeRun(RelayModel):
     node_type: models.CharField = models.CharField(max_length=16, choices=NodeType.choices())
     frozen_def: models.JSONField = models.JSONField(default=dict)
     retry_options: models.JSONField = models.JSONField(default=dict)
+    recovery_instruction: models.TextField = models.TextField(blank=True, default="")
     scope_inputs: models.JSONField = models.JSONField(default=dict)
     outputs: models.JSONField = models.JSONField(default=dict)
     status: models.CharField = models.CharField(
@@ -439,6 +441,25 @@ class UsageRetry(RelayModel):
     class Meta:
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=("state", "reset_at"), name="relay_usage_retry_due_idx")
+        ]
+
+
+class AutomaticRetry(RelayModel):
+    """One durable recovery decision for a failed attempt; never reused."""
+
+    attempt: models.OneToOneField = models.OneToOneField(
+        NodeAttempt, on_delete=models.CASCADE, related_name="automatic_retry"
+    )
+    retry_number: models.PositiveIntegerField = models.PositiveIntegerField()
+    state: models.CharField = models.CharField(max_length=16, default="scheduled")
+    instruction: models.TextField = models.TextField(blank=True)
+    instruction_sha256: models.CharField = models.CharField(max_length=64, blank=True)
+    error_message: models.TextField = models.TextField(blank=True)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=("state",), name="relay_auto_retry_state_idx")
         ]
 
 

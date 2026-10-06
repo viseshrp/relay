@@ -50,6 +50,15 @@ class PreservationResult:
     files: tuple[PreservedArtifact, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveryReport:
+    """A retained root report that can safely be restored to a run worktree."""
+
+    filename: str
+    retained_path: str
+    sha256: str
+
+
 def _component(value: str, label: str) -> str:
     if _COMPONENT.fullmatch(value) is None or value in {".", ".."}:
         message = f"The {label} is not safe for retained evidence."
@@ -373,10 +382,91 @@ def preserve_then_reset(
     return result
 
 
+def preserve_recovery_reports(
+    worktree: Path, run_id: str, attempt_id: str, filenames: tuple[str, ...]
+) -> tuple[PreservedArtifact, ...]:
+    """Supplement older evidence without replacing its ref or manifest."""
+    target = (
+        artifacts_dir(create=True)
+        / _component(run_id, "run id")
+        / _component(attempt_id, "attempt id")
+        / "recovery-reports"
+    )
+    records = []
+    # The per-run recovery lock serializes this supplement with reset and retries.
+    # Existing bytes must agree; an interrupted copy cannot silently replace evidence.
+    for filename in filenames:
+        source = safe_resolve(worktree, filename)
+        if (worktree / filename).is_symlink() or not source.is_file():
+            continue
+        destination = safe_resolve(target, _component(filename, "report name"))
+        try:
+            if destination.exists():
+                digest, size = _hash_file(destination)
+                if (digest, size) != _hash_file(source):
+                    message = "Retained recovery report differs from the failed report."
+                    raise ArtifactPreservationError(message)
+            else:
+                ensure_private_dir(target)
+                digest, size = _copy_file(source, destination)
+            records.append(
+                _record(
+                    name=filename,
+                    source=str(source),
+                    retained=destination,
+                    digest=digest,
+                    size=size,
+                    kind="recovery_report",
+                )
+            )
+        except OSError:
+            message = "Relay could not preserve the rejected report before recovery."
+            raise ArtifactPreservationError(message) from None
+    return tuple(records)
+
+
+def validate_recovery_reports(reports: tuple[RecoveryReport, ...]) -> None:
+    """Check every retained report before destructive workspace preparation."""
+    for report in reports:
+        source = safe_resolve(artifacts_dir(), report.retained_path)
+        try:
+            if not source.is_file() or _hash_file(source)[0] != report.sha256:
+                message = "Retained recovery report failed its integrity check."
+                raise ArtifactPreservationError(message)
+        except OSError:
+            message = "Relay could not verify a retained recovery report."
+            raise ArtifactPreservationError(message) from None
+
+
+def restore_recovery_reports(worktree: Path, reports: tuple[RecoveryReport, ...]) -> None:
+    """Restore verified report bytes without overwriting different existing files."""
+    validate_recovery_reports(reports)
+    for report in reports:
+        source = safe_resolve(artifacts_dir(), report.retained_path)
+        if (worktree / report.filename).is_symlink():
+            message = "A symlink conflicts with the retained recovery report."
+            raise ArtifactPreservationError(message)
+        destination = safe_resolve(worktree, report.filename)
+        try:
+            if destination.exists():
+                if destination.is_symlink() or _hash_file(destination)[0] != report.sha256:
+                    message = "An existing file conflicts with the retained recovery report."
+                    raise ArtifactPreservationError(message)
+            else:
+                _copy_file(source, destination)
+        except OSError:
+            message = "Relay could not restore a retained recovery report."
+            raise ArtifactPreservationError(message) from None
+
+
 __all__ = [
     "PreservationResult",
     "PreservedArtifact",
+    "RecoveryReport",
     "preserve_attempt_evidence",
+    "preserve_recovery_reports",
     "preserve_then_reset",
+    "restore_recovery_reports",
     "retained_attempt_ref",
+    "validate_recovery_reports",
 ]

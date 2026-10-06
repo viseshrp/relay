@@ -104,9 +104,11 @@ applicable; do not silently change adjacent behavior.
   rather than ad hoc status assignments. Keep transactions short; run Git,
   network operations, and filesystem cleanup outside them.
 - Keep `run_node_attempt` at `retries=0`. Reconciliation repairs unstarted
-  delivery. Attempt recovery requires an owner retry or the documented,
-  structured confirmation of a future provider usage reset; prose and cached
-  usage observations never authorize automatic recovery.
+  delivery. Attempt recovery requires an owner retry, an enabled bounded
+  recovery policy, or structured confirmation of a future provider usage reset.
+  Prose and cached usage observations never authorize quota recovery. Keep
+  repair instructions separate from frozen prompts, preserve rejected reports,
+  and never reset the per-step automatic retry budget during restart or retry.
 - Preserve immutable launch snapshots, ordered prompt bytes, typed inputs, and
   frozen routes. An explicit retry-effort change is recorded separately; it
   must preserve the model, permissions, prompts, and completed upstream work.

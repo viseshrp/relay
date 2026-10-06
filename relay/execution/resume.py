@@ -132,6 +132,12 @@ class ResumeStore(Protocol):
 
     def activate_usage_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
 
+    def automatic_rerun_target(
+        self, run_id: str, scope_path: str, idempotency_key: str
+    ) -> RecoveryTarget | None: ...
+
+    def activate_automatic_recovery(self, target: RecoveryTarget, idempotency_key: str) -> bool: ...
+
     def activate_interrupted_run(self, run_id: str, idempotency_key: str) -> bool: ...
 
 
@@ -143,6 +149,7 @@ def rerun_failed_node(
     prepare_workspace: Callable[[RecoveryTarget], None],
     *,
     usage_reset: bool = False,
+    automatic_retry: bool = False,
     effort: RetryEffort | None = None,
     agent: RetryAgent | None = None,
     permission_mode: RetryPermissionMode | None = None,
@@ -166,13 +173,19 @@ def rerun_failed_node(
             lock.__enter__()
         except PersistenceError:
             return ControlResult.STALE
-        target = store.manual_rerun_target(run_id, scope_path, idempotency_key)
+        target = (
+            store.automatic_rerun_target(run_id, scope_path, idempotency_key)
+            if automatic_retry
+            else store.manual_rerun_target(run_id, scope_path, idempotency_key)
+        )
         if target is None:
             return ControlResult.ALREADY_APPLIED
         if agent is not None:
             agent = agent.for_target(target)
         prepare_workspace(target)
-        if usage_reset:
+        if automatic_retry:
+            activated = store.activate_automatic_recovery(target, idempotency_key)
+        elif usage_reset:
             activated = store.activate_usage_recovery(target, idempotency_key)
         elif agent is not None:
             activated = store.activate_recovery(target, idempotency_key, agent=agent)

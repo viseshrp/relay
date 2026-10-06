@@ -378,6 +378,26 @@ closes the request's database connections in their owning executor thread.
 Paginated history remains available at
 `GET /api/runs/{id}/events`.
 
+## Automatic step recovery
+
+**Automatic recovery** in Start work is off for existing workflows. Turn it
+on, save, and launch to retry eligible agent failures up to twice. Select an
+agent stage and turn off **Allow automatic retries for this step** to opt out.
+
+The run view also has **Automatic recovery**, including for an already failed
+run. Its policy override leaves the frozen workflow and prompts intact. It
+shows **Preparing retry** while the run drains or the workspace is restored,
+then **Retrying step — 1 of 2** when the same agent resumes. Unsafe failures
+and an exhausted budget show their blocking reason. Turning recovery off
+cancels queued error recovery. **Stop work** also cancels a pending retry.
+
+Open **Automatic retry instruction** to read the exact added instruction,
+source step, retry number, and decision state. The same model, effort, and
+permissions are retained. Completed work stays complete; rejected reports
+remain evidence. Changing a model through **Retry with settings** still uses
+its separate handoff editor. Provider quota resets retain their own notice and
+confirmed schedule. Automatic recovery never answers a declared human wait.
+
 ## Supervisor and shutdown
 
 The parent process owns one heartbeat-backed database lease and supervises two

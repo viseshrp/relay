@@ -143,7 +143,7 @@ reset and cleanup.
 
 ## Rerun and resume reset
 
-Manual rerun and interrupted resume use this order:
+Manual rerun, automatic recovery, and interrupted resume use this order:
 
 1. Stop the attempt process.
 2. Preserve its ref, commits, diff, untracked files, and declared artifacts.
@@ -154,6 +154,23 @@ Manual rerun and interrupted resume use this order:
 
 The protection check prevents a failed later attempt from erasing a successful
 upstream writer. Evidence remains available when the reset itself fails.
+
+Output extraction can reject a report without discarding its bytes. Existing
+files behind `label`, `json_path`, and `yaml_path` selectors are retained even
+when required labels or values are invalid. Missing files remain validation
+errors; escaping paths block recovery. Commit validation failures also retain
+the attempt's partial work before a retry can reset it.
+
+Recovery restores verified root report handoffs into the primary writer
+worktree from successful steps and the selected failed attempt. Detached
+readers use retained evidence without adding files to their checkout.
+Only names already exempted in
+`WORKFLOW_DOCUMENT_NAMES` are restored. Other source files remain evidence
+rather than untracked inputs. Relay checks each retained report's hash before
+reset and before restoration. Different existing bytes and symlinks block
+restoration instead of being overwritten. Older failed attempts may gain a
+`recovery-reports` supplement; their original retained ref, manifest, and file
+bytes remain unchanged.
 
 ## Completion cleanup
 

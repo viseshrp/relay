@@ -18,9 +18,10 @@ from relay.constants import (
     SSE_MAX_FRAME_BYTES,
     SSE_POLL_INTERVAL_SECONDS,
 )
+from relay.execution.automatic import PENDING_RECOVERY_STATES
 from relay.execution.state import TERMINAL_RUN_STATUSES
 
-from ..models import Run, RunEvent, UsageRetry
+from ..models import AutomaticRetry, Run, RunEvent, UsageRetry
 from . import log_context_value
 
 LOGGER = logging.getLogger(__name__)
@@ -106,9 +107,11 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
             if len(rows) == SSE_MAX_BATCH:
                 continue
             status = await Run.objects.filter(pk=run_id).values_list("status", flat=True).afirst()
-            scheduled = (
-                status == "failed"
-                and await UsageRetry.objects.filter(run_id=run_id, state="scheduled").aexists()
+            scheduled = status == "failed" and (
+                await UsageRetry.objects.filter(run_id=run_id, state="scheduled").aexists()
+                or await AutomaticRetry.objects.filter(
+                    attempt__node_run__run_id=run_id, state__in=PENDING_RECOVERY_STATES
+                ).aexists()
             )
             if status is None or (status in _TERMINAL and not scheduled):
                 return
