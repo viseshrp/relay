@@ -212,6 +212,8 @@ The selected run's history entry uses its live status, so it agrees with the
 detail view when work waits, finishes, stops, or restarts. Refresh reloads the
 history list and selected run's state, requests, saved files, and recent events.
 It reconnects live updates when another owner client retried a stopped run.
+Refresh and the failed-step retry controls stay disabled until these reads
+finish, so a retry dialog uses the refreshed effort and permission settings.
 Workflows continue automatically until a configured stage or tool requests input.
 Retrying a failed child also marks its enclosing failed loop iterations
 **In progress**. Their earlier failure stays in history; completed steps and

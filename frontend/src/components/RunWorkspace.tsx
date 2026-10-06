@@ -298,6 +298,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [stepFocusRequest, setStepFocusRequest] = useState(0);
@@ -598,6 +599,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   }
 
   async function refreshRuns() {
+    // Keep retry dialogs from capturing settings before another client's
+    // latest attempt and configuration finish loading.
+    setRefreshing(true);
     try {
       await Promise.all([loadHistory(), refreshDetail(true)]);
       const history = await loadEvents(eventAfter.current);
@@ -610,6 +614,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       }
     } catch (caught) {
       setError(errorMessage(caught));
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -685,7 +691,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
         <Paper variant="outlined" className="history-panel">
           <Stack direction="row" sx={{ alignItems: "center", p: 2 }}>
             <Typography variant="h6" sx={{ flex: 1 }}>Run history</Typography>
-            <Button size="small" onClick={() => void refreshRuns()}>Refresh</Button>
+            <Button size="small" disabled={refreshing} onClick={() => void refreshRuns()}>Refresh</Button>
           </Stack>
           <Divider />
           <List disablePadding>
@@ -796,9 +802,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                 {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
                   <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
                   <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
-                  <Button variant="outlined" disabled={detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path).catch(() => undefined)}>Retry step</Button>
+                  <Button variant="outlined" disabled={refreshing || detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path).catch(() => undefined)}>Retry step</Button>
                   {node.retry_settings &&
-                    <Button disabled={detail.status !== "failed"} onClick={() => setRetrySettings(node.retry_settings ?? null)}>Retry with settings</Button>}
+                    <Button disabled={refreshing || detail.status !== "failed"} onClick={() => setRetrySettings(node.retry_settings ?? null)}>Retry with settings</Button>}
                 </Stack>)}
               </Paper>}
               {retrySettings && <RetrySettings

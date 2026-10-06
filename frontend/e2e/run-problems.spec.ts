@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { stringify } from "yaml";
 
+test.afterEach(async ({ page }) => {
+  // Finish route.fetch callbacks before the test runner closes their page.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows and cancels its scheduled retry" : "shows its provider limit and clears it on retry"}`, async ({ page }, testInfo) => {
   await page.request.get("/api/auth");
   const csrf = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
@@ -171,7 +176,25 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
     const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
     return [run.status, run.problem?.attempt_number];
   }).toEqual(["failed", 3]);
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  // Hold the refreshed state so this race does not depend on request timing.
+  let markRefreshStarted!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
+    const response = await route.fetch();
+    markRefreshStarted();
+    await refreshGate;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await refreshStarted;
+    await expect(page.getByRole("button", { name: "Retry with settings", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Retry step", exact: true })).toBeDisabled();
+  } finally {
+    releaseRefresh();
+  }
   await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("Keep current effort (low)");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
