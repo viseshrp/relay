@@ -79,7 +79,13 @@ from relay.execution.machine import (
 from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
 from relay.execution.resources import cleanup_run_resources
-from relay.execution.resume import RecoveryTarget, RetryAgent, RetryEffort, RetryPermissionMode
+from relay.execution.resume import (
+    RecoveryTarget,
+    RetryAgent,
+    RetryEffort,
+    RetryPermissionMode,
+    recovery_workspace_lock,
+)
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.scheduler import (
     RunSchedule,
@@ -472,6 +478,11 @@ def _reject_schedule_mismatch(run_id: str) -> NoReturn:
 def _reject_active_cleanup(project_id: str) -> NoReturn:
     message = "Relay will not clean data while this project has an active run."
     raise PermissionFlowError(message, context={"project": project_id})
+
+
+def _reject_incomplete_cleanup_evidence(run_id: str) -> NoReturn:
+    message = "Relay retained the run worktree because its evidence is incomplete."
+    raise PersistenceError(message, context={"run": run_id})
 
 
 def _reject_branch_with_worktree(run_id: str) -> NoReturn:
@@ -1851,8 +1862,20 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not enumerate active runs for scheduling."
             raise PersistenceError(message) from None
 
-    def clean_project_data(self, project_id: str, scope: str) -> dict[str, int]:
-        """Delete one confirmed category for the current project in preservation order."""
+    def clean_project_data(
+        self, project_id: str, scope: str, *, run_id: str | None = None
+    ) -> dict[str, int]:
+        """Clean a confirmed category for the project or one explicitly selected run."""
+        if run_id is not None:
+            # Recovery must not reopen the selected run while its checkout is removed.
+            with recovery_workspace_lock(run_id):
+                return self._clean_project_data(project_id, scope, run_id=run_id)
+        return self._clean_project_data(project_id, scope)
+
+    def _clean_project_data(
+        self, project_id: str, scope: str, *, run_id: str | None = None
+    ) -> dict[str, int]:
+        """Apply the selected cleanup in worktree, ref, then record order."""
         if scope not in {"runs", "worktrees", "branches", "all"}:
             message = "scope must be runs, worktrees, branches, or all."
             raise PermissionFlowError(message)
@@ -1868,7 +1891,18 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             if active.exists():
                 _reject_active_cleanup(project_id)
-            runs = list(Run.objects.filter(project=project).order_by("started_at", "pk"))
+            candidates = Run.objects.filter(project=project)
+            if run_id is not None:
+                # An unknown or foreign run must never fall back to project-wide cleanup.
+                runs = [_require_run(candidates.filter(pk=run_id).first(), run_id)]
+            else:
+                runs = list(candidates.order_by("started_at", "pk"))
+            if run_id is not None and scope == "worktrees":
+                pending_evidence = Artifact.objects.filter(attempt__node_run__run=runs[0]).exclude(
+                    preservation_state=PreservationState.PRESERVED.value
+                )
+                if pending_evidence.exists():
+                    _reject_incomplete_cleanup_evidence(run_id)
             repository = Path(_string(project, "git_root"))
             deleted = {
                 "runs": 0,
@@ -1886,7 +1920,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                             deleted["worktrees"] += 1
                     if _string(run, "worktree_state") != WorktreeState.REMOVED.value:
                         _set_model_field(run, "worktree_state", WorktreeState.REMOVED.value)
-                        run.save(update_fields=("worktree_state",))
+                        with transaction.atomic():
+                            run.save(update_fields=("worktree_state",))
+                            if run_id is not None:
+                                _append_event(
+                                    run,
+                                    "run.cleanup_succeeded",
+                                    EventSource.SYSTEM,
+                                    {"worktree_state": WorktreeState.REMOVED.value},
+                                )
             if scope in {"branches", "all"}:
                 for run in runs:
                     worktree = safe_resolve(worktrees_dir(), _string(run, "worktree_path"))
@@ -1929,7 +1971,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         deleted["artifact_roots"] += 1
                 deleted["runs"] = len(runs)
                 Run.objects.filter(pk__in=[run.pk for run in runs]).delete()
-            if scope == "all":
+            # Process logs are shared across runs; selected-run deletion cannot clear them.
+            if scope == "all" and run_id is None:
                 deleted["logs"] = clear_application_logs()
         except (PermissionFlowError, PersistenceError, ProjectDiscoveryError):
             raise

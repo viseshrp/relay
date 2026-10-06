@@ -33,6 +33,15 @@ def _release_local_rerun(run_id: str) -> None:
         _ACTIVE_RERUNS.discard(run_id)
 
 
+def recovery_workspace_lock(run_id: str) -> MigrationLock:
+    """Serialize recovery and confirmed cleanup of the same run workspace."""
+    # `../run` becomes a hexadecimal filename rather than a path component.
+    filename = sha256(run_id.encode()).hexdigest()
+    return MigrationLock(
+        data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0, purpose="run recovery"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RetryEffort:
     """An explicit owner choice; None requests the provider's default effort."""
@@ -163,11 +172,7 @@ def rerun_failed_node(
         return ControlResult.STALE
     # The consumer's scheduled recovery and the web owner's manual retry share
     # this kernel lock. It is released by the OS even if either process crashes.
-    # `../run` becomes a fixed hexadecimal filename, never a path component.
-    filename = sha256(run_id.encode()).hexdigest()
-    lock = MigrationLock(
-        data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0, purpose="run recovery"
-    )
+    lock = recovery_workspace_lock(run_id)
     try:
         try:
             lock.__enter__()
@@ -236,6 +241,7 @@ __all__ = [
     "RetryAgent",
     "RetryEffort",
     "RetryPermissionMode",
+    "recovery_workspace_lock",
     "rerun_failed_node",
     "resume_interrupted",
 ]

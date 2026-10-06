@@ -192,6 +192,14 @@ The execution store refuses completion cleanup if any artifact record has not
 been preserved. Confirmed data cleanup removes known worktrees deepest first,
 so reader paths precede the primary.
 
+The [cleanup API](http-api.md#cleanup) can select a single run with `run_id`.
+Use `scope: "worktrees"` to discard its checkout while retaining history,
+artifact bytes, the protected run branch, and attempt refs. Other runs remain
+unchanged. This selection requires preserved artifact records and holds the
+same workspace lock as recovery, so a retry cannot reopen the checkout during
+removal. The project must have no active runs. Deleting a selected run with
+`scope: "all"` leaves shared process logs in place.
+
 ## Privacy and storage
 
 Diffs, untracked files, declared artifacts, commit metadata, and manifests may

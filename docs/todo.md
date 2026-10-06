@@ -137,6 +137,11 @@ to change that effort.
 - [x] Clean up run-owned temporary files, browser profiles, and processes
   through Relay after the run finishes. Preserve personal browser sessions,
   credentials, unrelated files, and the owner's existing Relay data.
+- [x] Select one terminal run for confirmed cleanup through the API. Preserve
+  earlier runs, shared logs, and retained reports when removing a checkout.
+  Reject missing, malformed, and foreign run selections without broadening
+  deletion, and serialize selected cleanup with recovery. Focused API checks
+  cover these boundaries and incomplete evidence.
 
 The [web guide](web-ui.md) covers project selection, workflow creation, run
 progress, report previews, explicit review decisions, and readable activity.

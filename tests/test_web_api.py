@@ -15,15 +15,24 @@ import pytest
 
 from relay.agents.models import ModelObservation
 from relay.constants import (
+    APPLICATION_LOG_OWNERSHIP_LINE,
     DATABASE_INTEGER_MAX,
     RUN_PROBLEM_MESSAGE_MAX_EVENTS,
     RUN_PROBLEM_TEXT_MAX_CHARS,
 )
+from relay.execution.resume import recovery_workspace_lock
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, EventSensitivity, EventSource
 from relay.web.models import Artifact, HumanInteraction, Run, RunEvent
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
-from tests.support import FakeAgents, InlineEngine, RelayProject, fake_executable, run_status
+from tests.support import (
+    FakeAgents,
+    InlineEngine,
+    RelayProject,
+    create_project,
+    fake_executable,
+    run_status,
+)
 
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
 
@@ -909,6 +918,127 @@ def test_all_cleanup_removes_a_terminal_runs_rows_and_worktree(
     deleted = response.json()["deleted"]
     assert (deleted["runs"], deleted["worktrees"], deleted["branches"]) == (1, 1, 1)
     assert not Run.objects.filter(pk=finished_run).exists()
+
+
+def test_selected_worktree_cleanup_preserves_other_runs_and_retained_evidence(
+    owner: Client, finished_run: str, served: RelayProject, engine: InlineEngine
+) -> None:
+    other_id = engine.launch(served, "done")
+    engine.drain(other_id)
+    other_before = owner.get(f"/api/runs/{other_id}").json()
+    artifacts_before = owner.get(f"/api/runs/{finished_run}/artifacts").json()
+    checkout = Path(Run.objects.get(pk=finished_run).worktree_path)
+    other_checkout = Path(Run.objects.get(pk=other_id).worktree_path)
+
+    response = post(
+        owner,
+        "/api/data/clean",
+        {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"]["worktrees"] == 1
+    assert not checkout.exists()
+    assert other_checkout.exists()
+    assert owner.get(f"/api/runs/{other_id}").json() == other_before
+    assert owner.get(f"/api/runs/{finished_run}/artifacts").json() == artifacts_before
+    assert Run.objects.get(pk=finished_run).worktree_state == "removed"
+    assert RunEvent.objects.get(run_id=finished_run, type="run.cleanup_succeeded").payload == {
+        "worktree_state": "removed"
+    }
+
+
+def test_selected_all_cleanup_preserves_other_runs_and_shared_logs(
+    owner: Client,
+    finished_run: str,
+    served: RelayProject,
+    engine: InlineEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    other_id = engine.launch(served, "done")
+    engine.drain(other_id)
+    other_before = owner.get(f"/api/runs/{other_id}").json()
+    log = tmp_path / "shared.log"
+    log_bytes = f"{APPLICATION_LOG_OWNERSHIP_LINE}\nRetained diagnostics\n".encode()
+    log.write_bytes(log_bytes)
+    monkeypatch.setenv("RELAY_LOG_PATH", str(log))
+
+    response = post(
+        owner, "/api/data/clean", {"scope": "all", "run_id": finished_run, "confirm": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"]["runs"] == 1
+    assert response.json()["deleted"]["logs"] == 0
+    assert owner.get(f"/api/runs/{finished_run}").status_code == 404
+    assert owner.get(f"/api/runs/{other_id}").json() == other_before
+    assert Path(Run.objects.get(pk=other_id).worktree_path).exists()
+    assert log.read_bytes() == log_bytes
+
+
+@pytest.mark.parametrize(
+    "selector", [None, "", 7, "not-a-run", "00000000-0000-0000-0000-000000000000"]
+)
+def test_invalid_cleanup_selection_never_deletes_the_project(
+    owner: Client, finished_run: str, selector: object
+) -> None:
+    before = owner.get(f"/api/runs/{finished_run}").json()
+
+    response = post(owner, "/api/data/clean", {"scope": "all", "run_id": selector, "confirm": True})
+
+    assert response.status_code in {400, 404}
+    assert owner.get(f"/api/runs/{finished_run}").json() == before
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
+def test_cleanup_rejects_a_run_from_another_project(
+    owner: Client, finished_run: str, engine: InlineEngine, tmp_path: Path
+) -> None:
+    other_project = create_project(tmp_path / "other-project")
+    other_project.write_workflow(
+        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+    )
+    other_id = engine.launch(other_project, "done")
+    engine.drain(other_id)
+
+    response = post(owner, "/api/data/clean", {"scope": "all", "run_id": other_id, "confirm": True})
+
+    assert (response.status_code, response.json()["code"]) == (404, "project_discovery_error")
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+    assert Path(Run.objects.get(pk=other_id).worktree_path).exists()
+
+
+def test_selected_worktree_cleanup_waits_for_evidence_preservation(
+    owner: Client, finished_run: str
+) -> None:
+    Artifact.objects.filter(attempt__node_run__run_id=finished_run).update(
+        preservation_state="pending"
+    )
+
+    response = post(
+        owner,
+        "/api/data/clean",
+        {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+    )
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert Run.objects.get(pk=finished_run).worktree_state == "created"
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
+def test_selected_cleanup_cannot_remove_a_workspace_during_recovery(
+    owner: Client, finished_run: str
+) -> None:
+    with recovery_workspace_lock(finished_run):
+        response = post(
+            owner,
+            "/api/data/clean",
+            {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+        )
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
 
 
 @pytest.mark.usefixtures("registry_network")

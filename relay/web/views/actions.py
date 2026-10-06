@@ -557,9 +557,14 @@ def clean_data(request: HttpRequest) -> HttpResponse:
             next_action="Review the selected scope before confirming deletion.",
         )
     _relay_root, project = current_project(request)
+    # A supplied null or malformed selector must not widen deletion to the project.
+    selected_run = (
+        canonical_uuid(required_text(body, "run_id"), resource="run") if "run_id" in body else None
+    )
     deleted = DjangoExecutionStore().clean_project_data(
         project.id,
         required_text(body, "scope"),
+        run_id=selected_run,
     )
     return JsonResponse({"deleted": deleted})
 

@@ -384,6 +384,28 @@ Relay process logs and rotations in place, keeping their `Relay process log`
 first line, so open append handlers can continue writing. Files without that
 line are left alone. Cleanup never changes the launch branch.
 
+To select one run, include its UUID as `run_id`:
+
+```json
+{
+  "scope": "worktrees",
+  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "confirm": true
+}
+```
+
+Omitting `run_id` retains project-wide cleanup. A supplied null, empty, or
+non-string selector returns `400`; a malformed, unknown, or foreign-project
+UUID returns `404`. None of these failures broadens the selection. The active
+project-run check still applies. Selected cleanup shares the run's recovery
+lock; an overlapping recovery returns `503` without removing the workspace.
+
+Selected `worktrees` cleanup requires preserved artifact records and keeps
+the run's history, artifacts, branch, and attempt refs. It records
+`run.cleanup_succeeded` after removal. Selected `branches` or `runs` cleanup
+retains the ordering requirements above. Selected `all` removes only that
+run's resources and keeps process logs, which may contain other runs' output.
+
 ## Errors and limits
 
 Every JSON failure has this Relay-owned envelope:
