@@ -372,6 +372,8 @@ The graph uses captured dependencies and control targets, so editing today's
 workflow cannot redraw a past run's connections. Connected rows show stage
 order and branches. Nested workflows and loop iterations keep their concrete
 scope paths; completion junctions join child branches and order iterations.
+Progress updates and **Refresh** retain each unchanged job's measured layout,
+so its connections stay visible while the run detail is reloaded.
 
 The monitor combines the SSE stream with paginated database reads:
 

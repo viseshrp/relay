@@ -40,10 +40,14 @@ export function FlowCanvas({ nodes, edges, selectedId, onSelect, followSelection
 
   useEffect(() => {
     setNodes((current) => {
-      const positions = new Map(current.map((node) => [node.id, node.position]));
+      const previous = new Map(current.map((node) => [node.id, node]));
       return nodes.map((node) => ({
         ...node,
-        position: followSelection ? node.position : positions.get(node.id) ?? node.position,
+        // A status refresh keeps the same renderer and its measured handles.
+        // ResizeObserver reports actual size changes; clearing measurements
+        // can hide edges when the node's size has not changed.
+        measured: node.measured ?? (previous.get(node.id)?.type === node.type ? previous.get(node.id)?.measured : undefined),
+        position: followSelection ? node.position : previous.get(node.id)?.position ?? node.position,
         selected: node.id === selectedId,
       }));
     });
