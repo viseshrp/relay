@@ -1459,6 +1459,8 @@ def test_failed_job_settings_match_the_existing_run_record(
     assert run_status(run_id) == "failed"
     detail = owner.get(f"/api/runs/{run_id}").json()["run"]
     job = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    assert job["working_folder"] == Run.objects.get(pk=run_id).worktree_path
+    assert detail["working_folder"] == job["working_folder"]
     assert job["retry_settings"] == detail["nodes"][0]["retry_settings"]
     assert job["retry_settings"]["agent_id"] == "codex"
     assert job["retry_settings"]["model_value"] == "m1"

@@ -4,11 +4,11 @@ import {
 } from "@mui/material";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
-import { activityMessages } from "../activity";
-import { ansiSpans, commandLines, jobDuration, type AnsiStyle } from "../job";
+import { ansiSpans, commandLines, jobDuration } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
 import type { JobAttempt, JobChanges, RetryConfiguration, RunEvent, RunJob } from "../types";
 import { DiffViewer } from "./DiffViewer";
+import { ActivityFeed } from "./ActivityFeed";
 
 interface JobPage { job: RunJob; next: number | null }
 interface EventPage { events: RunEvent[]; next: number | null }
@@ -139,8 +139,6 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
   }
   const lines = commandLines(events);
   const lastError = lines.filter((line) => line.stream === "stderr").slice(-12).map((line) => ansiSpans(line.text).map((span) => span.text).join("")).join("\n");
-  const messages = activityMessages(events);
-  const terminalStyle: AnsiStyle = { bold: false };
   if (!job) return <Paper className="section-card" aria-busy={!error}>{error ? <Alert severity="error">{error}</Alert> : "Loading job…"}</Paper>;
   return <Stack spacing={2} component="section" aria-label="Job log">
     <Paper variant="outlined" className="section-card">
@@ -181,20 +179,12 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
     <Accordion key={`${attempt?.number}-${failed}`} defaultExpanded={failed || job.node_type === "command" || job.node_type === "agent"}>
       <AccordionSummary>{job.node_type === "command" ? "Command output" : "Agent conversation"}</AccordionSummary>
       <AccordionDetails>
-        {older !== null && <Button onClick={() => void olderOutput()}>Load earlier output</Button>}
-        {job.node_type === "command" ? <>
+        {job.node_type === "command" && <>
           <Stack direction="row" spacing={1} sx={{ mb: 1 }}><Button disabled={busy || !attempt} onClick={() => void exportOutput(false)}>Copy output</Button><Button disabled={busy || !attempt} onClick={() => void exportOutput(true)}>Download output</Button></Stack>
-          <Box component="ol" aria-label="Command output lines" sx={{ bgcolor: "#0f172a", color: "#f1f5f9", fontFamily: "monospace", maxHeight: 430, overflow: "auto", p: 2, pl: 7, m: 0 }}>
-            {lines.map((line, index) => <Box component="li" key={index} sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", pl: 1 }}>
-              <Box component="span" sx={{ color: line.stream === "stderr" ? "#fca5a5" : "#94a3b8", mr: 1 }}>{line.stream}</Box>
-              {ansiSpans(line.text, terminalStyle).map((span, part) => <Box component="span" key={part} sx={{ color: span.color, fontWeight: span.bold ? 700 : 400 }}>{span.text}</Box>)}
-            </Box>)}
-          </Box>
-        </> : <Stack spacing={1}>{messages.map((message) => <Paper key={message.id} variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="subtitle2">{stageLabel(message.kind.replace(/^(agent|command)\./, ""))}</Typography>
-          <Box component="pre" className="activity-text">{message.text}</Box>
-        </Paper>)}</Stack>}
-        {!lines.length && !messages.length && <Typography>There is no output for this attempt yet.</Typography>}
+        </>}
+        <ActivityFeed key={`${runId}:${scope}:${attempt?.number}`} events={events} workingFolder={job.working_folder}
+          live={attempt?.status === "running" || attempt?.status === "waiting"} command={job.node_type === "command"}
+          hasMore={older !== null} onMore={olderOutput} />
       </AccordionDetails>
     </Accordion>
     <Accordion><AccordionSummary>Outputs</AccordionSummary><AccordionDetails>

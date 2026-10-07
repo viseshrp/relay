@@ -48,7 +48,6 @@ import type {
 } from "../types";
 import { capturedRunGraph, repairOwnership, visibleRunStages } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
-import { activityMessages } from "../activity";
 import { parseWorkflow, type WorkflowNodeData, type WorkflowValue } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { ReviewEvidence } from "./RunReview";
@@ -60,6 +59,7 @@ import { JobList } from "./JobList";
 import { JobWorkspace } from "./JobWorkspace";
 import { RunActions } from "./RunActions";
 import { LaunchPanel } from "./LaunchPanel";
+import { ActivityFeed } from "./ActivityFeed";
 
 const EVENT_TYPES = [
   "run.created",
@@ -342,7 +342,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [stepFocusRequest, setStepFocusRequest] = useState(0);
-  const [activityLimit, setActivityLimit] = useState(30);
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
@@ -491,7 +490,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     setStepFocusRequest(0);
     setRetrySettings(null);
     setPendingSettings(null);
-    setActivityLimit(30);
     setError(null);
     setNodeCursor(null);
     setInteractionCursor(null);
@@ -778,7 +776,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     }
     return groups;
   }, [detail, repairOwners]);
-  const activity = useMemo(() => activityMessages(events), [events]);
   const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending" && item.respondable !== false).map((item) => [item.id, item])).values());
   const interactionRevision = pendingInteractions.map((request) => request.id).join(",");
   useEffect(() => attentionChanged(), [interactionRevision, detail?.status]);
@@ -978,14 +975,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1.5 }}>Activity</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Messages and tool results from this run, in order.</Typography>
-                {activity.length > activityLimit && <Button onClick={() => setActivityLimit((current) => current + 30)}>Show earlier messages</Button>}
-                <Stack spacing={2} className="activity-feed">{activity.slice(-activityLimit).map((message) => <Paper key={message.id} variant="outlined" className="activity-message">
-                  <Typography variant="subtitle2">{stageLabel(message.scope)} · {message.agent || (message.kind.startsWith("command.") ? "Command" : "Agent")} · {stageLabel(message.kind.replace(/^(agent|command)\./, ""))}</Typography>
-                  <Typography variant="caption" color="text.secondary">{new Date(message.timestamp).toLocaleTimeString()}{message.attempt !== null ? ` · Attempt ${message.attempt}` : ""}</Typography>
-                  <Typography component="pre" className="activity-text">{message.text}</Typography>
-                </Paper>)}</Stack>
-                {activity.length === 0 && <Typography color="text.secondary">Messages will appear here when a tool starts.</Typography>}
-                {eventCursor !== null && <Button onClick={() => void loadEvents(eventCursor)}>Load more activity</Button>}
+                <ActivityFeed key={detail.id} events={events} nodes={detail.nodes} workingFolder={detail.working_folder}
+                  live={!TERMINAL_RUNS.has(detail.status)} hasMore={eventCursor !== null}
+                  onMore={async () => { if (eventCursor !== null) await loadEvents(eventCursor); }} />
               </Paper>
 
               {pendingInteractions.length === 0 && <Paper variant="outlined" className="section-card"><ReviewEvidence runId={detail.id} artifacts={artifacts} /></Paper>}
@@ -996,6 +988,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                 <Typography variant="body2">Relay cleans its temporary files, private browser profiles, and process groups automatically. You can retry folder cleanup here. Saved reports, code, credentials, and personal browser profiles are kept.</Typography>
                 <Button onClick={() => void api(`/api/runs/${detail.id}/resources/clean`, { method: "POST", body: JSON.stringify({ confirm: true }) }).then(async () => { await refreshDetail(); await loadEvents(); }).catch((caught: unknown) => setError(errorMessage(caught)))}>Retry temporary resource cleanup</Button>
               </Paper>}
+              <Box component="details" aria-label="Raw event details"><Box component="summary">Details</Box>
               <Paper variant="outlined" className="section-card">
                 <Typography variant="body2" className="mono-wrap">Run {detail.id} · {detail.run_branch} · {detail.status} · SSE {streamState}</Typography>
                 <Stack direction="row" sx={{ alignItems: "center", mb: 1 }}>
@@ -1006,6 +999,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                 </Stack>
                 <VirtualEvents key={`history-${detail.id}`} events={events} mode="history" />
               </Paper>
+              </Box>
 
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1 }}>Artifacts</Typography>

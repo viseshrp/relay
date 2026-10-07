@@ -57,15 +57,18 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
 
     from relay.agents import discovery, registry
     from relay.agents.driver import RoutedAgentNodeDriver
+    from relay.errors import ConfigError
     from relay.execution.nodes import node_executors
     from relay.execution.scheduler import dispatch_ready_nodes
+    from relay.execution.state import EventSource
     from relay.manage import apply_migrations
     from relay.paths import artifacts_dir
     from relay.projects.service import initialize_project
     from relay.web.auth import owner_required
-    from relay.web.models import EditorLease, Installation, Run, WorkflowDraft
+    from relay.web.models import EditorLease, Installation, NodeAttempt, Run, WorkflowDraft
+    from relay.web.repositories import DjangoExecutionStore
     from relay.web.urls import urlpatterns
-    from relay.web.views import actions, json_body
+    from relay.web.views import actions, api_errors, json_body
     from tests.support import (
         FakeAgents,
         InlineEngine,
@@ -191,6 +194,37 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         providers.install("codex", mode="configuration-recovery")
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def activity(request: HttpRequest) -> JsonResponse:
+        body = json_body(request)
+        run_id, scope, event_type, payload = (
+            body.get(field) for field in ("run_id", "scope", "type", "payload")
+        )
+        allowed = {"agent.message", "agent.thought", "agent.tool_call", "agent.tool_result"}
+        if (
+            not isinstance(run_id, str)
+            or not isinstance(scope, str)
+            or not isinstance(event_type, str)
+            or event_type not in allowed
+            or not isinstance(payload, dict)
+        ):
+            message = "The browser-test activity record is invalid."
+            raise ConfigError(message)
+        attempt = (
+            NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__scope_path=scope)
+            .order_by("-attempt_number")
+            .first()
+        )
+        if attempt is None:
+            message = "The browser-test job has no attempt."
+            raise ConfigError(message)
+        DjangoExecutionStore().append_attempt_event(
+            str(attempt.pk), event_type, EventSource.AGENT, payload
+        )
+        return JsonResponse({"ok": True})
+
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
@@ -198,6 +232,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
+    urlpatterns.insert(0, path("__test__/activity", activity))
 
     # Close each SDK callback's database connection in its owning thread.
     original_to_thread = asyncio.to_thread

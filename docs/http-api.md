@@ -349,6 +349,11 @@ public configuration fields as the existing run-detail node record. It is
 `null` for other job types and states. Opening the settings dialog reads the
 job again so another client's configuration change is reflected.
 
+Run and job detail include `working_folder`, the recorded primary run folder.
+The browser uses it to shorten paths in visible activity, including nested
+`r-{attempt}` reader folders. This field does not read files or change paths;
+original events and downloaded command output keep their recorded bytes.
+
 Run cancel and rerun keys are stored in an indexed event column; duplicate
 requests do not scan event payloads. Canceling a run still preparing its
 worktree (`pending`) or awaiting restart reconciliation (`interrupted`) returns

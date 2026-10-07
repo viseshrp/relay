@@ -1307,6 +1307,7 @@ class DjangoReadStore:
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            result["working_folder"] = _string(run, "worktree_path")
             result["problem"] = _run_problem(run)
             result["recovery"] = _run_recovery(run)
             result["event_cursor"] = _integer(run, "read_event_cursor")
@@ -1459,6 +1460,7 @@ class DjangoReadStore:
                 records, more = _bounded_page(attempts, bounded, _job_attempt_record)
                 result = {
                     "scope_path": scope_path,
+                    "working_folder": _string(run, "worktree_path"),
                     "node_type": _string(node, "node_type"),
                     "status": _string(node, "status"),
                     "writes": _boolean(node, "writes"),

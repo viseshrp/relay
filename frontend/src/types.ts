@@ -223,6 +223,7 @@ export interface JobAttempt {
 }
 
 export interface RunJob {
+  working_folder: string;
   scope_path: string;
   node_type: string;
   status: string;
@@ -259,6 +260,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  working_folder: string;
   problem: RunProblem | null;
   recovery: {
     enabled: boolean;

@@ -141,7 +141,7 @@ test("permission requests send owner feedback through the same agent session", a
   await page.getByLabel("Feedback for the agent (optional)").fill("Also check the selected project.");
   await page.getByRole("button", { name: "Send response and continue" }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await expect(page.locator(".activity-text").filter({ hasText: "ready" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Activity feed", exact: true }).getByText("ready", { exact: true })).toBeVisible();
 });
 
 test("a review completed during initial loading updates progress before the stream opens", async ({ page }) => {

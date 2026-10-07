@@ -9,8 +9,17 @@ body {
   min-width: 320px;
 }
 
-.activity-feed { max-height: 650px; overflow: auto; }
 .activity-message { padding: 16px; }
+.activity-tool summary { cursor: pointer; overflow-wrap: anywhere; }
+.markdown-text { overflow-wrap: anywhere; }
+.markdown-text p, .markdown-text blockquote { white-space: pre-wrap; }
+.markdown-text h1, .markdown-text h2 { font-size: 1.25rem; }
+.markdown-text h3, .markdown-text h4, .markdown-text h5, .markdown-text h6 { font-size: 1rem; }
+.markdown-text pre { overflow-x: auto; white-space: pre-wrap; padding: 12px; background: #f6f7fb; border-radius: 4px; }
+.markdown-text code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.markdown-text table { border-collapse: collapse; width: 100%; }
+.markdown-text th, .markdown-text td { padding: 8px; border: 1px solid #dce1ec; text-align: left; }
+.markdown-text blockquote { border-left: 3px solid #dce1ec; padding-left: 12px; margin-left: 0; }
 .activity-text, .review-preview { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
 .activity-text { font: inherit; line-height: 1.65; }
 .review-preview { max-height: 500px; overflow: auto; padding: 16px; background: #f6f7fb; font-size: 0.85rem; }

@@ -315,7 +315,9 @@ and **Re-run job** when the existing retry service allows it. Sections show
 **Command output**, declared **Outputs**, this attempt's committed **Changes**,
 and **Complete**. A failed attempt opens its output and places its public
 error and recent stderr at the top, independently of whole-run event pages.
-Older output and attempts have separate load controls. Command lines show
+One **Load earlier messages** control reveals earlier visible messages or
+fetches the next event page. Attempts keep their own load control. Command
+lines show
 line numbers, stdout/stderr labels, and safe ANSI colors; escape sequences
 never become HTML or links. **Copy output** and **Download output** read the
 complete selected attempt's command streams, including earlier pages.
@@ -357,14 +359,30 @@ The monitor combines the SSE stream with paginated database reads:
   `"world\n"` becomes `"Hello world\n"` within one message;
   opaque tool IDs remain in diagnostics, and duplicate command titles appear
   once. For example, a `git status` title and command show one `git status`;
-- original events and complete provider payloads remain available under
-  Advanced diagnostics and saved files;
+- original events and normalized public provider payloads remain available
+  under **Advanced diagnostics and saved files > Details**;
 - event history loads forward by the last durable event ID, then starts its
   live stream after the last loaded event;
 - node, interaction, and artifact lists load bounded pages by record ID;
 - pending permission, elicitation, and human-wait records show distinct forms;
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
+
+Activity renders Markdown headings, emphasis, lists, quotes, tables, and code
+blocks through React. Raw HTML and images stay inert; links accept only HTTP,
+HTTPS, email, or fragment targets. Tool calls and their results become one
+expandable row, matched by job, attempt, turn, and tool ID. Each row has a short
+title, a status symbol and text, and expandable input and output. Recorded run
+and reader-folder prefixes become relative paths in the display; other paths
+and original event bytes remain unchanged. Thoughts are collapsed by default.
+
+**Filter by job** and **Search activity** search the loaded Summary messages.
+Job logs use the same search and display, scoped to their selected attempt.
+The feed and command output use the page's vertical scroll. **Follow latest**
+keeps new output visible while reading a live feed; opening a run leaves its
+header and requests in view. Scrolling up stops following. **Jump to latest**
+returns to the tail and resumes following. Filters and loading earlier output
+also stop following so the page keeps the owner's reading position.
 
 Pending owner requests appear above Summary and job logs in a yellow
 **Waiting for you** banner. Each banner names the job, shows its question,
