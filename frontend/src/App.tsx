@@ -24,6 +24,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, errorMessage } from "./api";
+import { useAttention } from "./attention";
 import { AuthView } from "./components/AuthView";
 import { GetStarted } from "./components/GetStarted";
 import { readLocation, saveLocation, type LocationState } from "./navigation";
@@ -73,6 +74,13 @@ export function App() {
   const selectRun = useCallback((run: string | null) => {
     setLocation((current) => ({ ...current, run, interaction: run === current.run ? current.interaction : null, job: run === current.run ? current.job : null }));
   }, []);
+  async function openWaitingRun(run: string, project?: string): Promise<void> {
+    try {
+      const projectId = project ?? (await api<{ run: { project_id: string } }>(`/api/runs/${run}?limit=1`)).run.project_id;
+      await navigateSafely({ view: "runs", run, project: projectId, job: null, interaction: null });
+    } catch (caught) { setProjectError(errorMessage(caught)); }
+  }
+  const attention = useAttention(auth?.authenticated === true, (run, project) => void openWaitingRun(run, project));
 
   useEffect(() => saveLocation(location, true), [location]);
 
@@ -178,11 +186,15 @@ export function App() {
           <Typography variant="h5" color="primary" sx={{ mr: 3 }}>Relay</Typography>
           <Tabs
             value={location.view}
-            onChange={(_event, value: LocationState["view"]) => void navigateSafely({ view: value })}
+            onChange={(_event, value: LocationState["view"]) => {
+              const waiting = location.run && attention.attention.waiting_runs.includes(location.run) ? location.run : attention.attention.waiting_runs[0];
+              if (value === "runs" && waiting && location.view !== "runs") void openWaitingRun(waiting);
+              else void navigateSafely({ view: value });
+            }}
             sx={{ flex: 1 }}
           >
             <Tab value="author" label="Workflows" />
-            <Tab value="runs" label="Runs" />
+            <Tab value="runs" label={attention.attention.waiting_count ? `Runs (${attention.attention.waiting_count})` : "Runs"} />
           </Tabs>
           <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
             {loginRequired ? auth.username : "Login disabled"}
@@ -193,11 +205,13 @@ export function App() {
           <Button aria-haspopup="menu" aria-expanded={helpAnchor !== null} onClick={(event) => setHelpAnchor(event.currentTarget)}>Help</Button>
           <Menu anchorEl={helpAnchor} open={helpAnchor !== null} onClose={() => setHelpAnchor(null)}>
             <MenuItem onClick={() => { setSetupForced(true); setHelpAnchor(null); }}>Get started</MenuItem>
+            <MenuItem onClick={() => { void attention.toggleNotifications(); setHelpAnchor(null); }}>{attention.notifications ? "Disable desktop notifications" : "Enable desktop notifications"}</MenuItem>
           </Menu>
         </Toolbar>
       </AppBar>
       <Container maxWidth={false} className="app-content">
         {renderProjectContext()}
+        {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
         {projectReady && selectedProject && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
           forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
           onWorkflowCreated={async (key) => {
@@ -231,6 +245,7 @@ export function App() {
               project={selectedProject}
               selectedInteraction={location.interaction}
               selectedJob={location.job}
+              waitingRuns={attention.attention.waiting_runs}
               onSelectJob={(job) => navigate({ job })}
               onRunSucceeded={runSucceeded}
               onSelectRun={selectRun}

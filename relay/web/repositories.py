@@ -725,6 +725,7 @@ def _run_record(run: Run) -> dict[str, object]:
         "failure_summary": run.failure_summary,
         "entry_point": run.entry_point,
         "dispatch_paused": _boolean(run, "dispatch_paused"),
+        "waiting_count": _integer(run, "read_waiting_count"),
     }
 
 
@@ -988,6 +989,9 @@ def _interaction_record(interaction: HumanInteraction) -> dict[str, object]:
             else None
         ),
         "status": _string(interaction, "status"),
+        "respondable": _string(interaction, "status") == InteractionStatus.PENDING.value
+        and _string(_related(interaction, "attempt", NodeAttempt), "status")
+        == AttemptStatus.WAITING.value,
         "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
         "created_at": _datetime_text(_datetime_field(interaction, "created_at")),
         "answered_at": _datetime_text(_datetime_field(interaction, "answered_at")),
@@ -1074,6 +1078,55 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
 
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
+
+    def attention(self, since: int | None) -> dict[str, object]:
+        """Read owner requests and new completion facts without event payloads."""
+        try:
+            with transaction.atomic():
+                pending = HumanInteraction.objects.filter(
+                    status=InteractionStatus.PENDING.value,
+                    attempt__status=AttemptStatus.WAITING.value,
+                )
+                waiting_runs = pending.values_list("run_id", flat=True).distinct()
+                latest = RunEvent.objects.order_by("-id").first()
+                cursor = _integer(latest, "id") if latest is not None else 0
+                finished: list[dict[str, object]] = []
+                more = False
+                if since is not None:
+                    rows = list(
+                        RunEvent.objects.select_related("run")
+                        .filter(
+                            id__gt=since,
+                            type__in=("run.succeeded", "run.failed", "run.canceled"),
+                        )
+                        .order_by("id")[: API_MAX_PAGE + 1]
+                    )
+                    finished, more = _bounded_page(
+                        rows,
+                        API_MAX_PAGE,
+                        lambda event: {
+                            "id": _integer(event, "id"),
+                            "run_id": _foreign_key_text(event, "run"),
+                            "project_id": _foreign_key_text(_related(event, "run", Run), "project"),
+                            "workflow_key": _string(_related(event, "run", Run), "workflow_key"),
+                            "status": _string(event, "type").removeprefix("run."),
+                        },
+                    )
+                    if more and finished:
+                        cursor = int(str(finished[-1]["id"]))
+                    cursor = max(since, cursor)
+                waiting_count = waiting_runs.count()
+                return {
+                    "waiting_count": waiting_count,
+                    "waiting_runs": [str(value) for value in waiting_runs[:API_MAX_PAGE]],
+                    "waiting_runs_truncated": waiting_count > API_MAX_PAGE,
+                    "finished": finished,
+                    "event_cursor": cursor,
+                    "more": more,
+                }
+        except DatabaseError:
+            message = "Relay could not read waiting requests."
+            raise PersistenceError(message) from None
 
     def run_changes(
         self, run_id: str, *, scope_path: str | None = None, attempt_number: int | None = None
@@ -1163,7 +1216,15 @@ class DjangoReadStore:
     ) -> tuple[list[dict[str, object]], str | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            query = Run.objects.order_by("-started_at", "-pk")
+            query = Run.objects.annotate(
+                read_waiting_count=models.Count(
+                    "interactions",
+                    filter=models.Q(
+                        interactions__status=InteractionStatus.PENDING.value,
+                        interactions__attempt__status=AttemptStatus.WAITING.value,
+                    ),
+                )
+            ).order_by("-started_at", "-pk")
             if project_id is not None:
                 query = query.filter(project_id=project_id)
             if status is not None:
@@ -1209,9 +1270,16 @@ class DjangoReadStore:
             run = _require_run(
                 Run.objects.select_related("snapshot", "project")
                 .annotate(
+                    read_waiting_count=models.Count(
+                        "interactions",
+                        filter=models.Q(
+                            interactions__status=InteractionStatus.PENDING.value,
+                            interactions__attempt__status=AttemptStatus.WAITING.value,
+                        ),
+                    ),
                     read_event_cursor=Coalesce(
                         models.Subquery(latest_event), 0, output_field=models.BigIntegerField()
-                    )
+                    ),
                 )
                 .filter(pk=run_id)
                 .first(),

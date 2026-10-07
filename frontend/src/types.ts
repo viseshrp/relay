@@ -158,6 +158,7 @@ export interface RunSummary {
   failure_summary: string | null;
   entry_point: string | null;
   dispatch_paused: boolean;
+  waiting_count?: number;
 }
 
 export interface RunNode {
@@ -238,6 +239,7 @@ export interface RunInteraction {
   request: Record<string, JsonValue>;
   response: Record<string, JsonValue> | null;
   status: string;
+  respondable?: boolean;
   deadline: string | null;
   created_at: string;
   answered_at: string | null;

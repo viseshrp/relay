@@ -30,6 +30,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
         name="agent-configuration",
     ),
     path("api/runs", actions.runs_collection, name="runs"),
+    path("api/attention", pages.attention, name="attention"),
     path("api/runs/<str:run_id>", pages.run_detail, name="run-detail"),
     path("api/runs/<str:run_id>/stream", stream.run_stream, name="run-stream"),
     path("api/runs/<str:run_id>/events", pages.run_events, name="run-events"),

@@ -332,10 +332,38 @@ The monitor combines the SSE stream with paginated database reads:
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
 
+Pending owner requests appear above Summary and job logs in a yellow
+**Waiting for you** banner. Each banner names the job, shows its question,
+and has a **Respond** button that opens the response form in place and moves
+keyboard focus to its first field. This applies to approvals, tool permissions,
+and agent questions, including requests inside loops, child workflows, and
+repair rounds. Request links open their form directly. A waiting coordinator
+without a pending request uses neutral **Waiting** text. A dispatch pause uses
+**New jobs paused**; a failed job keeps its error status.
+
+The **Runs** tab and browser title show the count of waiting runs across
+projects. Run history marks those runs with a waiting symbol and
+**Waiting for you** text. Counts refresh every five seconds, when the window
+gets focus, and when the open run's requests change. Selecting **Runs** from
+Workflows opens a waiting run when one exists. The count depends on actual
+pending requests, including those beyond a detail page's first 200 records.
+
+**Help > Enable desktop notifications** asks for browser permission after
+you choose it. Notifications report new waiting runs and run completion;
+opening one selects its run. They contain no request text or provider output.
+The choice is saved for this browser. **Disable desktop notifications** stops
+them; a denied permission shows how to allow notifications in site settings.
+The first attention read after opening Relay establishes a baseline, so old
+completions do not produce notifications.
+
+When an approval is pending, its response form includes review instructions
+and retained material. At other times the panel is titled
+**Changes and documents** and does not ask for a response.
+
 When a step fails, the run header shows its name, the failure description or
 exit code, and the provider's last public message when available. **Show stopped
-step** brings the progress view into sight and centers the failed step, including
-when it is already selected. Provider quota notices and reset
+step** opens that job's log and error, including when it is already selected.
+Provider quota notices and reset
 times stay visible above Activity, including after a reload and in older runs
 whose saved failure summary is empty. Reset times and time zones keep the
 provider's wording. Relay does not infer subscription limits from context-token

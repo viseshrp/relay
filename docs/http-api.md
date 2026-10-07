@@ -110,6 +110,7 @@ renews it; another holder gets `409` until expiry.
 | `POST /api/agents/{agent-id}/configuration` | `{"model":"exact-value"}` | `200` configuration object below |
 | `POST /api/runs` | launch object below | `201 {"run_id":"..."}` |
 | `GET /api/runs` | optional query below | `200 {"runs":[...],"next":...}` |
+| `GET /api/attention` | optional `?since={event-id}` | Waiting run count, run IDs, and new completion facts |
 | `GET /api/runs/{id}` | `?collection=nodes\|interactions&since=0&limit=200` | `200 {"run":...,"next":...}` |
 | `GET /api/runs/{id}/events` | `?since=0&limit=100` | `200 {"events":[...],"next":...}` |
 | `GET /api/runs/{id}/job` | `?job=root.check&since=0&limit=100` | `200 {"job":...,"next":...}` |
@@ -170,6 +171,22 @@ each event ID as its replay cursor. The initial connection may use
 `GET /api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
 `Last-Event-ID` takes precedence over `since`; omitting both starts at zero.
 Both cursors must fit the same nonnegative database integer range.
+
+Run history and detail include `waiting_count`, the number of pending owner
+requests attached to waiting attempts. Interaction records add `respondable`
+with the same rule. A dispatch pause alone does not create a request or count
+as waiting for the owner. Existing status values and control rules stay intact.
+
+`GET /api/attention` counts waiting runs across registered projects and returns
+`waiting_count`, up to 200 `waiting_runs` IDs, and `waiting_runs_truncated`.
+It also returns `event_cursor`, `finished`, and `more`. Without `since`, it
+establishes a current cursor and returns no historical completions. With a
+nonnegative event cursor, it reads up to 200 later run completion events.
+Each completion contains its event `id`, `run_id`, `project_id`,
+`workflow_key`, and `status`. Request text, event payloads, and provider
+content are omitted. Use `event_cursor` as the next `since`, immediately when
+`more` is true. This owner-only GET uses the existing integer bounds and
+error envelopes; reading it never changes a request or run.
 
 Run detail pages one collection at a time. `collection=nodes` is the default;
 `collection=interactions` returns permission, elicitation, and wait records.

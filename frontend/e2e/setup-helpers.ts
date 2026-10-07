@@ -37,6 +37,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
   const response = await launched;
   expect(response.status(), await response.text()).toBe(201);
   if (id === "plan-approve-implement") {
+    await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
     await page.getByLabel("Your response", { exact: true }).fill("Approved");
     await page.getByRole("button", { name: "Send response and continue", exact: true }).click();

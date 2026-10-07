@@ -179,6 +179,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
 
     @owner_required
     @require_POST
+    def elicitation_provider(request: HttpRequest) -> JsonResponse:
+        del request
+        providers.install("codex", mode="elicitation")
+        return JsonResponse({"ok": True})
+
+    @owner_required
+    @require_POST
     def recovery_provider(request: HttpRequest) -> JsonResponse:
         del request
         providers.install("codex", mode="configuration-recovery")
@@ -189,6 +196,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/commit", commit))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
+    urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
 
     # Close each SDK callback's database connection in its owning thread.

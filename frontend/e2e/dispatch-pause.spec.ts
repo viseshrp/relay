@@ -25,6 +25,7 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   expect(launch.ok(), await launch.text()).toBeTruthy();
   const { run_id: runId } = await launch.json();
   await page.goto(`/?view=runs&run=${runId}`);
+  await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "A tool needs your permission" })).toBeVisible();
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   await page.getByRole("button", { name: "Pause new steps", exact: true }).click();
@@ -38,6 +39,9 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
     const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
     return run.nodes.find((node: { scope_path: string }) => node.scope_path === "root.work").status;
   }).toBe("succeeded");
+  await expect(page.getByRole("region", { name: "Waiting for you", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/needs (your )?input/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Pause review New jobs paused/ })).toBeVisible();
   await page.getByRole("button", { name: "Change settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("textbox", { name: "Handoff instructions", exact: true })).toHaveCount(0);

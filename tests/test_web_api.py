@@ -1469,3 +1469,130 @@ def test_job_database_failure_keeps_the_public_error_envelope(
     assert response.status_code == 503
     assert response.json()["code"] == "persistence_error"
     assert "Private database trace" not in response.content.decode()
+
+
+@pytest.mark.parametrize("kind", ["permission", "elicitation"])
+def test_attention_counts_only_requests_on_waiting_attempts(
+    owner: Client, served: RelayProject, engine: InlineEngine, kind: str
+) -> None:
+    served.write_workflow(
+        "attention",
+        "version: 1\nname: Attention\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "attention")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    before = owner.get("/api/attention").json()
+    assert before["waiting_count"] == 0
+    interaction_id = engine.store.request_agent_interaction(
+        attempt.attempt_id, kind, "Answer this request.", ({"id": "allow"},)
+    )
+    attention = owner.get("/api/attention").json()
+    assert attention["waiting_count"] == 1
+    assert attention["waiting_runs"] == [run_id]
+    assert attention["finished"] == []
+    assert "Answer this request" not in json.dumps(attention)
+    detail = owner.get(f"/api/runs/{run_id}?collection=interactions&pending=true").json()["run"]
+    assert detail["waiting_count"] == 1
+    assert detail["interactions"][0]["respondable"] is True
+    assert detail["interactions"][0]["id"] == interaction_id
+    assert owner.get("/api/runs").json()["runs"][0]["waiting_count"] == 1
+    engine.store.finish_attempt(
+        attempt.attempt_id, ExecutionOutcome(OutcomeKind.FAILED), attempt.starting_head
+    )
+    assert owner.get("/api/attention").json()["waiting_count"] == 0
+    finished = owner.get(f"/api/attention?since={before['event_cursor']}").json()
+    assert finished["finished"][0]["status"] == "failed"
+    assert finished["finished"][0]["run_id"] == run_id
+
+
+def test_attention_reads_nested_human_waits_and_excludes_dispatch_pauses(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "nested-wait",
+        "version: 1\nname: Nested wait\nnodes:\n"
+        "  approvals:\n    type: loop\n    max_iterations: 1\n    until: '${{ loop.index >= 1 }}'\n"
+        "    exhausted: fallback\n    body:\n"
+        "      approval: {type: human_wait, prompt: Read the report.}\n"
+        "  fallback: {type: command, needs: [approvals], run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "nested-wait")
+    engine.drain(run_id)
+    response = post(
+        owner, f"/api/runs/{run_id}/pause", {"paused": True, "idempotency_key": "pause"}
+    )
+    assert response.status_code == 202
+    assert owner.get("/api/attention").json()["waiting_runs"] == [run_id]
+    detail = owner.get(f"/api/runs/{run_id}?collection=interactions&pending=true").json()["run"]
+    assert detail["interactions"][0]["scope_path"] == "root.approvals#1.approval"
+    assert detail["interactions"][0]["respondable"] is True
+    assert detail["dispatch_paused"] is True
+    response = post(owner, f"/api/runs/{run_id}/cancel", {"idempotency_key": "cancel-wait"})
+    assert response.status_code == 202
+    engine.store.resolve_human_wait_controls()
+    engine.drain(run_id)
+    assert owner.get("/api/attention").json()["waiting_count"] == 0
+
+
+def test_attention_completion_cursor_is_bounded_and_omits_payloads(
+    owner: Client, finished_run: str
+) -> None:
+    last = owner.get("/api/attention").json()
+    assert last["finished"] == []
+    RunEvent.objects.bulk_create(
+        [
+            RunEvent(
+                run_id=finished_run,
+                type="run.succeeded",
+                source=EventSource.SYSTEM.value,
+                payload={"private": "Do not return event payloads."},
+            )
+            for _ in range(201)
+        ]
+    )
+    page = owner.get(f"/api/attention?since={last['event_cursor']}").json()
+    assert len(page["finished"]) == 200
+    assert page["more"] is True
+    assert "Do not return" not in json.dumps(page)
+    next_page = owner.get(f"/api/attention?since={page['event_cursor']}").json()
+    assert len(next_page["finished"]) == 1
+    assert next_page["more"] is False
+    assert next_page["finished"][0]["id"] > page["finished"][-1]["id"]
+
+
+def test_attention_requires_owner_access_and_valid_cursors(owner: Client) -> None:
+    assert Client().get("/api/attention").status_code == 401
+    assert owner.post("/api/attention").status_code == 405
+    for cursor in ("bad", "-1", str(DATABASE_INTEGER_MAX + 1)):
+        assert owner.get(f"/api/attention?since={cursor}").status_code == 400
+
+
+def test_attention_counts_runs_independently_of_their_request_count(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "two-approvals",
+        "version: 1\nname: Two approvals\nnodes:\n"
+        "  first: {type: human_wait, prompt: First approval}\n"
+        "  second: {type: human_wait, prompt: Second approval}\n",
+    )
+    run_id = engine.launch(served, "two-approvals")
+    engine.drain(run_id)
+    assert owner.get(f"/api/runs/{run_id}").json()["run"]["waiting_count"] == 2
+    assert owner.get("/api/attention").json()["waiting_count"] == 1
+
+
+def test_attention_database_errors_keep_the_public_envelope(
+    owner: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        message = "Private database trace"
+        raise DatabaseError(message)
+
+    monkeypatch.setattr(HumanInteraction.objects, "filter", unavailable)
+    response = owner.get("/api/attention")
+    assert response.status_code == 503
+    assert response.json()["code"] == "persistence_error"
+    assert "Private database trace" not in response.content.decode()

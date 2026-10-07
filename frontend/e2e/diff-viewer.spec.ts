@@ -98,6 +98,7 @@ async function review(page: Page, key: string, text: string, truncated = false) 
   // Replace only the patch response; the run and human review use the real server.
   await page.route(`**/api/runs/${runId}/changes`, (route) => route.fulfill({ json: { text, truncated } }));
   await page.goto(`/?view=runs&run=${runId}`);
+  await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
   await page.getByRole("button", { name: "Open review material", exact: true }).click();
   await expect(page.locator(".diff-viewer")).toBeVisible();
@@ -145,7 +146,7 @@ test("review switches files and layouts, expands, and preserves an unsent respon
 test("truncated changes remain explicitly partial in the expanded view", async ({ page }) => {
   await review(page, "diff-review-partial", patch, true);
   await expect(page.getByText("2 changed files in preview")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Counts cover only the displayed changes");
+  await expect(page.locator(".diff-viewer").getByRole("alert")).toContainText("Counts cover only the displayed changes");
   await page.getByRole("button", { name: "Full screen", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("partial preview");
   await page.getByRole("button", { name: "Close full screen" }).click();
@@ -156,7 +157,7 @@ test("truncated changes remain explicitly partial in the expanded view", async (
 test("a preview cut before a file's lines does not claim the file has no changes", async ({ page }) => {
   await review(page, "diff-review-partial-header", "diff --git a/app.ts b/app.ts\nindex 1234567..abcdef0 100644\n--- a/app.ts\n+++ b/app.ts\n", true);
   await expect(page.getByText("No text changes in this preview.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("partial preview");
+  await expect(page.locator(".diff-viewer").getByRole("alert")).toContainText("partial preview");
 });
 
 test("file selection and long lines stay inside a narrow review screen", async ({ page }) => {
@@ -205,7 +206,7 @@ test("a viewer load failure leaves the patch and review response available", asy
 test("unsupported patches retain their original text as an inert fallback", async ({ page }) => {
   const original = "Unrecognized patch\n<script>alert('not executable')</script>\n";
   await review(page, "diff-review-fallback", original);
-  await expect(page.getByRole("alert")).toContainText("cannot be formatted");
+  await expect(page.locator(".diff-viewer").getByRole("alert")).toContainText("cannot be formatted");
   expect(await page.locator(".diff-original").textContent()).toBe(original);
   await expect(page.locator(".diff-viewer script")).toHaveCount(0);
 });

@@ -48,7 +48,9 @@ import { projectPath, stageLabel, statusLabel } from "../navigation";
 import { activityMessages } from "../activity";
 import type { WorkflowNodeData } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
-import { ReviewRequest, ReviewEvidence } from "./RunReview";
+import { ReviewEvidence } from "./RunReview";
+import { WaitingRequests } from "./WaitingRequests";
+import { attentionChanged } from "../attention";
 import { RunProblemNotice } from "./RunProblemNotice";
 import { RetrySettings } from "./RetrySettings";
 import { JobList } from "./JobList";
@@ -133,6 +135,7 @@ interface RunWorkspaceProps {
   selectedInteraction: string | null;
   selectedJob: string | null;
   onSelectJob: (scope: string | null) => void;
+  waitingRuns: string[];
   onRunSucceeded?: () => void;
 }
 
@@ -175,9 +178,9 @@ function mergeRecords<T extends { id: string }>(current: T[], incoming: T[]): T[
 }
 
 function runStatusLabel(run: RunSummary): string {
-  // A paused running run displays "New steps paused"; a finished one stays "Complete".
-  return run.dispatch_paused && PAUSABLE_RUNS.has(run.status)
-    ? "New steps paused" : statusLabel(run.status);
+  // Owner requests take priority over a dispatch pause; finished runs keep their result.
+  return run.waiting_count ? "Waiting for you" : run.dispatch_paused && PAUSABLE_RUNS.has(run.status)
+    ? "New jobs paused" : statusLabel(run.status);
 }
 
 function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail | null {
@@ -300,7 +303,7 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, selectedJob, onSelectJob, onRunSucceeded }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -735,7 +738,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     return groups;
   }, [detail, repairOwners]);
   const activity = useMemo(() => activityMessages(events), [events]);
-  const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending").map((item) => [item.id, item])).values());
+  const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending" && item.respondable !== false).map((item) => [item.id, item])).values());
+  const interactionRevision = pendingInteractions.map((request) => request.id).join(",");
+  useEffect(() => attentionChanged(), [interactionRevision, detail?.status]);
   const complete = visibleStages.filter((node) => node.status === "succeeded" || node.status === "skipped").length;
   const currentStages = visibleStages.filter((node) => ["waiting", "running", "failed", "repairing", "repair_stopped"].includes(node.status));
   const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
@@ -771,7 +776,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
               >
                 <ListItemText
                   primary={stageLabel(run.workflow_key.replace(/\.(yaml|yml)$/, ""))}
-                  secondary={`${runStatusLabel(detail?.id === run.id ? detail : run)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
+                  secondary={`${waitingRuns.includes(run.id) ? "! Waiting for you" : runStatusLabel(detail?.id === run.id ? detail : run)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
                 />
               </ListItemButton>
             ))}
@@ -783,6 +788,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
         </Paper>
 
         <Stack ref={jobContent} spacing={2} sx={{ minWidth: 0, scrollMarginTop: 80 }}>
+          {detail && <WaitingRequests key={detail.id} requests={pendingInteractions} runId={detail.id} artifacts={artifacts}
+            selected={selectedInteraction} hasMore={interactionCursor !== null} onMore={() => void loadMoreInteractions()}
+            onAnswered={async () => { await refreshDetail(); attentionChanged(); }} />}
           {detail === null ? (
             <Paper variant="outlined" className="empty-panel">
               <Typography color="text.secondary">Select a run to inspect it.</Typography>
@@ -822,7 +830,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   Change an unstarted step's settings below, then choose Resume new steps when ready.
                 </Alert>}
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  <Typography variant="subtitle1">{dispatchPaused ? "New steps will wait until you resume. Current steps can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
+                  <Typography variant="subtitle1">{pendingInteractions.length ? "Choose Respond above to continue this job." : dispatchPaused ? "New jobs will wait until you resume. Current jobs can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
                   {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
                   <LinearProgress variant="determinate" value={visibleStages.length ? 100 * complete / visibleStages.length : 0} />
                   <Typography variant="body2" color="text.secondary">{complete} of {visibleStages.length} {nodeCursor !== null ? "loaded " : ""}stages complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
@@ -856,25 +864,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                 </Accordion>}
               </Paper>
 
-              {(pendingInteractions.length > 0 || interactionCursor !== null) && (
-                <Stack spacing={1}>
-                  <Box className="interaction-grid">
-                    {pendingInteractions.map((interaction) => (
-                      <ReviewRequest
-                        key={interaction.id}
-                        interaction={interaction}
-                        runId={detail.id} artifacts={artifacts} selected={interaction.id === selectedInteraction}
-                        onAnswered={async () => { await refreshDetail(); }}
-                      />
-                    ))}
-                  </Box>
-                  {interactionCursor !== null && (
-                    <Button onClick={() => void loadMoreInteractions()}>
-                      Load more interactions
-                    </Button>
-                  )}
-                </Stack>
-              )}
               {selectedInteraction && linkedRequest && linkedRequest.status !== "pending" && <Alert severity="info">The linked request has already been {linkedRequest.status}. Any current requests appear above.</Alert>}
 
               {detail.nodes.some((node) => node.status === "failed") && <Paper variant="outlined" className="section-card">

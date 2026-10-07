@@ -46,8 +46,9 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   const created = await launch;
   expect(created.status()).toBe(201);
   const { run_id: runId } = await created.json();
+  await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
-  await expect(page.getByText("Next: review the request below and send your response.")).toBeVisible();
+  await expect(page.getByText("Choose Respond above to continue this job.")).toBeVisible();
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
   const href = await page.getByRole("link", { name: "Link to request" }).getAttribute("href");
@@ -56,7 +57,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.goto(href!);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Owner review · Needs your input", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Owner review · Waiting", exact: true })).toBeVisible();
   const detail = (await (await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`)).json()).run;
   expect(detail.status).toBe("paused_wait");
   expect(detail.interactions).toHaveLength(1);
@@ -71,7 +72,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.route(stream, (route) => route.fulfill({ contentType: "text/event-stream", body: frames.map((item) => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join("") }));
   await page.reload();
   await expect(page.getByText("New output after an old failed attempt.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Owner review · Needs your input", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Owner review · Waiting", exact: true })).toBeVisible();
   await page.unroute(stream);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
@@ -80,7 +81,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByRole("button", { name: "Send response and continue" }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Guided browser flow Complete ·/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open review material" }).click();
+  await page.getByRole("button", { name: "Open changes and documents" }).click();
   await expect(page.getByText("No committed code changes yet.")).toBeVisible();
   await page.getByText("Advanced diagnostics and saved files", { exact: true }).click();
   await page.getByRole("button", { name: "Retry temporary resource cleanup" }).click();
@@ -110,6 +111,7 @@ test("report handoffs explain retention and review material is readable beside t
   await expect(page.getByRole("dialog", { name: "Keep a report for the next stage" })).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
   await page.getByRole("combobox", { name: "Review material" }).click();
   await page.getByRole("option", { name: "REVIEW.md", exact: true }).click();
@@ -129,6 +131,7 @@ test("permission requests send owner feedback through the same agent session", a
   expect(created.ok()).toBeTruthy();
   await page.goto("/?view=author&workflow=agent-feedback.yaml");
   await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "A tool needs your permission" })).toBeVisible();
   await page.getByRole("combobox", { name: "Your decision" }).click();
   await page.getByRole("option", { name: "Allow once", exact: true }).click();

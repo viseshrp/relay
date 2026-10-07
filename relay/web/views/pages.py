@@ -102,6 +102,19 @@ def projects(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def attention(request: HttpRequest) -> HttpResponse:
+    value = request.GET.get("since")
+    since = (
+        _nonnegative_int(value, field="since", default=0, maximum=DATABASE_INTEGER_MAX)
+        if value is not None
+        else None
+    )
+    return JsonResponse(DjangoReadStore().attention(since))
+
+
+@api_errors
+@owner_required
+@require_GET
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
     return JsonResponse({"project": asdict(project)})

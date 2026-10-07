@@ -55,7 +55,7 @@ export function stageLabel(scope: string): string {
 export function statusLabel(status: string): string {
   return ({
     pending: "Not started", ready: "Ready", dispatched: "Starting", running: "In progress",
-    waiting: "Needs your input", paused_wait: "Needs your input", succeeded: "Complete",
+    waiting: "Waiting", paused_wait: "Waiting", succeeded: "Complete",
     failed: "Needs attention", skipped: "Skipped", canceled: "Stopped", canceling: "Stopping",
     failing: "Finishing after an error", interrupted: "Resuming after restart",
     repairing: "Repairing", repair_stopped: "Repairs stopped",
