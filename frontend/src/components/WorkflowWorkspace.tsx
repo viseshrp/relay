@@ -682,7 +682,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
         onChange={setRepairs} onClose={() => setRepairOpen(false)} />}
 
       <LaunchPanel key={`${project.id}:${loadedKey}`} open={launchOpen} workflowKey={loadedKey}
-        workflow={parsed.value} project={project} requestProject={requestProject} modelOptions={modelOptions}
+        workflow={parsed.value} project={project} requestProject={requestProject} modelOptions={modelOptions} previousRun={null}
         blockedReason={busy ? "Wait for the current workflow operation to finish."
           : loadedKey === null ? "Choose or create a workflow first."
           : promptDirty ? "Save the job's instructions in the editor first."

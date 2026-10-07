@@ -334,6 +334,21 @@ it splits on Unicode character boundaries and accounts for JSON escaping.
 
 ## Controls
 
+`GET /api/runs/{id}/launch-inputs` returns `project_id`, a canonical
+`workflow_key` (including its YAML suffix), `status`, and the previous typed
+`inputs`. It is available only for failed, successful, or canceled runs;
+active runs return `400 config_error`. The response excludes captured YAML,
+prompts, and provider routes, and rejects inputs beyond the 1 MiB read limit.
+The owner reviews these values in **Run workflow**, then posts to the existing
+`/api/runs` launch endpoint. That request validates the current saved workflow,
+Git source, inputs, artifacts, and fresh exact-model choices, and creates a new
+snapshot. It does not reuse the previous snapshot or entry point.
+
+Job detail also includes `retry_settings` for a failed agent job, with the same
+public configuration fields as the existing run-detail node record. It is
+`null` for other job types and states. Opening the settings dialog reads the
+job again so another client's configuration change is reflected.
+
 Run cancel and rerun keys are stored in an indexed event column; duplicate
 requests do not scan event payloads. Canceling a run still preparing its
 worktree (`pending`) or awaiting restart reconciliation (`interrupted`) returns

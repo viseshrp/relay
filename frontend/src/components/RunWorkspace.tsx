@@ -33,6 +33,8 @@ import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from 
 import { api, errorMessage } from "../api";
 import type {
   ArtifactRecord,
+  AgentsResponse,
+  WorkflowDocumentResponse,
   JsonValue,
   RunDetail,
   RunEvent,
@@ -40,13 +42,14 @@ import type {
   RunNode,
   RunSummary,
   ProjectRecord,
+  PreviousRunInputs,
   RetryConfiguration,
   RetryOptions,
 } from "../types";
 import { capturedRunGraph, repairOwnership, visibleRunStages } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
 import { activityMessages } from "../activity";
-import type { WorkflowNodeData } from "../workflow";
+import { parseWorkflow, type WorkflowNodeData, type WorkflowValue } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { ReviewEvidence } from "./RunReview";
 import { WaitingRequests } from "./WaitingRequests";
@@ -55,6 +58,8 @@ import { RunProblemNotice } from "./RunProblemNotice";
 import { RetrySettings } from "./RetrySettings";
 import { JobList } from "./JobList";
 import { JobWorkspace } from "./JobWorkspace";
+import { RunActions } from "./RunActions";
+import { LaunchPanel } from "./LaunchPanel";
 
 const EVENT_TYPES = [
   "run.created",
@@ -320,6 +325,15 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const [error, setError] = useState<string | null>(null);
   const [cleanupScope, setCleanupScope] = useState("all");
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [relaunchBusy, setRelaunchBusy] = useState(false);
+  const [runAgain, setRunAgain] = useState<{ source: PreviousRunInputs; workflow: WorkflowValue; models: string[]; open: boolean } | null>(null);
+  const relaunchButton = useRef<HTMLButtonElement>(null);
+  const relaunchRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setRunAgain(null);
+    setRelaunchBusy(false);
+    return () => { relaunchRequest.current?.abort(); relaunchRequest.current = null; };
+  }, [selectedRun, project.id]);
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
   const [pendingSettings, setPendingSettings] = useState<RetryConfiguration | null>(null);
@@ -637,6 +651,32 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     }
   }
 
+  async function rerunAll(): Promise<void> {
+    if (selectedRun === null) return;
+    const controller = new AbortController();
+    relaunchRequest.current?.abort();
+    relaunchRequest.current = controller;
+    setRelaunchBusy(true);
+    try {
+      const source = await api<PreviousRunInputs>(`/api/runs/${encodeURIComponent(selectedRun)}/launch-inputs`, { signal: controller.signal });
+      const [document, agents] = await Promise.all([
+        api<WorkflowDocumentResponse>(projectPath(`/api/workflows/${source.workflow_key.split("/").map(encodeURIComponent).join("/")}`, source.project_id), { signal: controller.signal }),
+        api<AgentsResponse>("/api/agents", { signal: controller.signal }).catch(() => null),
+      ]);
+      if (controller.signal.aborted) return;
+      const parsed = parseWorkflow(document.yaml);
+      if (parsed.value === null) throw new Error(`Fix the saved workflow's YAML before running it again. ${parsed.errors.join(" ")}`);
+      setRunAgain({ source, workflow: parsed.value, open: true,
+        models: Array.from(new Set(agents?.agents.flatMap((agent) => agent.models.map((model) => model.value)) ?? [])).sort() });
+    } catch (caught) { if (!controller.signal.aborted) setError(errorMessage(caught)); }
+    finally {
+      if (relaunchRequest.current === controller) {
+        relaunchRequest.current = null;
+        setRelaunchBusy(false);
+      }
+    }
+  }
+
   async function rerunNode(scopePath: string, options: RetryOptions = {}) {
     if (selectedRun === null) return;
     try {
@@ -750,7 +790,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const dispatchPaused = canPause && detail.dispatch_paused;
   const recovery = detail?.recovery?.current;
   const recoveryPending = PENDING_RECOVERY.has(recovery?.state ?? "");
-  const active = detail && (["pending", "running", "paused_wait", "canceling"].includes(detail.status) || recoveryPending);
   const recovering = recovery?.state === "resumed" && detail?.status === "running"
     && detail.nodes.some((node) => node.scope_path === recovery.scope_path
       && ["ready", "dispatched", "running", "waiting"].includes(node.status));
@@ -761,6 +800,17 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
         <Typography variant="h5">{stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Typography>
         <Button variant="contained" onClick={() => onRunWorkflow(detail.workflow_key)}>Run workflow</Button>
       </Stack>}
+      {detail && <RunActions run={detail} busy={pauseBusy || relaunchBusy || refreshing}
+        onPause={() => void configurePause(!detail.dispatch_paused)} onCancel={() => setStopOpen(true)}
+        onRerunAll={() => void rerunAll()} rerunAllRef={relaunchButton} />}
+      {runAgain && <LaunchPanel open={runAgain.open} workflowKey={runAgain.source.workflow_key} workflow={runAgain.workflow}
+        project={project} requestProject={runAgain.source.project_id} modelOptions={runAgain.models} previousRun={runAgain.source}
+        blockedReason={Object.keys(runAgain.workflow.nodes).length === 0 ? "Add a job to this empty workflow before running it." : null}
+        saveError={null} onClose={() => setRunAgain((current) => current ? { ...current, open: false } : null)}
+        onExited={() => { setRunAgain(null); relaunchButton.current?.focus(); }}
+        onRunLaunched={(id) => { setRunAgain(null); onSelectRun(id); }} />}
+      {retrySettings && detail && <RetrySettings key={`${detail.id}:${retrySettings.scope_path}`}
+        problem={retrySettings} projectId={detail.project_id} onClose={() => setRetrySettings(null)} onRetry={rerunNode} />}
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       <Box className="run-layout">
         <Paper variant="outlined" className="history-panel">
@@ -802,7 +852,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
             </Paper>
           ) : selectedJob ? (
             <JobWorkspace key={`${detail.id}:${selectedJob}`} runId={detail.id} scope={selectedJob}
-              liveEvents={events} canRetry={detail.status === "failed"} onRetry={rerunNode} />
+              liveEvents={events} canRetry={detail.status === "failed"} refreshing={refreshing}
+              onRetry={rerunNode} onRetrySettings={setRetrySettings} />
           ) : (
             <>
               <Paper variant="outlined" className="section-card">
@@ -819,20 +870,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                   </Box>
                   <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={runStatusLabel(detail)} />
                   <Button component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
-                  {canPause && (
-                    <Button variant="outlined" disabled={pauseBusy} onClick={() => void configurePause(!detail.dispatch_paused)}>
-                      {detail.dispatch_paused ? "Resume new steps" : "Pause new steps"}
-                    </Button>
-                  )}
-                  {active && (
-                    <Button color="error" variant="outlined" onClick={() => setStopOpen(true)}>
-                      Stop work
-                    </Button>
-                  )}
                 </Stack>
                 {dispatchPaused && <Alert severity="info" sx={{ mt: 2 }}>
-                  New steps are paused. Running steps can finish; their sessions are not interrupted.
-                  Change an unstarted step's settings below, then choose Resume new steps when ready.
+                  New jobs are paused. Running jobs can finish; their sessions are not interrupted.
+                  Change an unstarted job's settings below, then choose Resume when ready.
                 </Alert>}
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
                   <Typography variant="subtitle1">{pendingInteractions.length ? "Choose Respond above to continue this job." : dispatchPaused ? "New jobs will wait until you resume. Current jobs can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
@@ -872,20 +913,12 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
               {selectedInteraction && linkedRequest && linkedRequest.status !== "pending" && <Alert severity="info">The linked request has already been {linkedRequest.status}. Any current requests appear above.</Alert>}
 
               {detail.nodes.some((node) => node.status === "failed") && <Paper variant="outlined" className="section-card">
-                <Typography variant="h6">Steps that need attention</Typography>
+                <Typography variant="h6">Jobs that need attention</Typography>
                 {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
                   <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
-                  <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
-                  <Button variant="outlined" disabled={refreshing || detail.status !== "failed"} onClick={() => void rerunNode(node.scope_path).catch(() => undefined)}>Retry step</Button>
-                  {node.retry_settings &&
-                    <Button disabled={refreshing || detail.status !== "failed"} onClick={() => setRetrySettings(node.retry_settings ?? null)}>Retry with settings</Button>}
+                  <Button onClick={() => showStep(node.scope_path)}>Open job log</Button>
                 </Stack>)}
               </Paper>}
-              {retrySettings && <RetrySettings
-                key={`${detail.id}:${retrySettings.scope_path}`}
-                problem={retrySettings} projectId={detail.project_id}
-                onClose={() => setRetrySettings(null)} onRetry={rerunNode}
-              />}
               {dispatchPaused && detail.nodes.some((node) => node.pending_settings) && <Paper variant="outlined" className="section-card">
                 <Typography variant="h6">Unstarted agent steps</Typography>
                 {detail.nodes.filter((node) => node.pending_settings).map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
@@ -1066,9 +1099,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
         </DialogActions>
       </Dialog>
       <Dialog open={stopOpen} onClose={() => setStopOpen(false)}>
-        <DialogTitle>Stop this run?</DialogTitle>
-        <DialogContent><DialogContentText>Relay stops active tools and skips remaining work. Finished steps keep their results and committed changes. You can still review the saved evidence.</DialogContentText></DialogContent>
-        <DialogActions><Button onClick={() => setStopOpen(false)}>Keep working</Button><Button color="error" onClick={() => { setStopOpen(false); void cancelRun(); }}>Stop run</Button></DialogActions>
+        <DialogTitle>Cancel this run?</DialogTitle>
+        <DialogContent><DialogContentText>Relay stops active tools and skips remaining work. Finished jobs keep their results and committed changes. You can still review the saved evidence.</DialogContentText></DialogContent>
+        <DialogActions><Button onClick={() => setStopOpen(false)}>Keep working</Button><Button color="error" onClick={() => { setStopOpen(false); void cancelRun(); }}>Cancel run</Button></DialogActions>
       </Dialog>
     </Stack>
   );

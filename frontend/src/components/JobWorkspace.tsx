@@ -7,7 +7,7 @@ import { api, errorMessage } from "../api";
 import { activityMessages } from "../activity";
 import { ansiSpans, commandLines, jobDuration, type AnsiStyle } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
-import type { JobAttempt, JobChanges, RunEvent, RunJob } from "../types";
+import type { JobAttempt, JobChanges, RetryConfiguration, RunEvent, RunJob } from "../types";
 import { DiffViewer } from "./DiffViewer";
 
 interface JobPage { job: RunJob; next: number | null }
@@ -36,9 +36,11 @@ function JobChangesView({ runId, scope, attempt }: { runId: string; scope: strin
   </Stack>;
 }
 
-export function JobWorkspace({ runId, scope, liveEvents, canRetry, onRetry }: {
+export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, onRetry, onRetrySettings }: {
   runId: string; scope: string; liveEvents: RunEvent[]; canRetry: boolean;
+  refreshing: boolean;
   onRetry: (scope: string) => Promise<void>;
+  onRetrySettings: (settings: RetryConfiguration) => void;
 }) {
   const [job, setJob] = useState<RunJob | null>(null);
   const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
@@ -47,6 +49,7 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, onRetry }: {
   const [older, setOlder] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingJob, setLoadingJob] = useState(true);
   const [changesOpen, setChangesOpen] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const relevant = useMemo(() => liveEvents.filter((event) => event.payload.scope_path === scope), [liveEvents, scope]);
@@ -58,12 +61,25 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, onRetry }: {
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoadingJob(true);
     void api<JobPage>(`/api/runs/${runId}/job?${query}`, { signal: controller.signal }).then((value) => {
+      if (controller.signal.aborted) return;
       setJob((current) => ({ ...value.job, attempts: Array.from(new Map([...(current?.attempts ?? []), ...value.job.attempts].map((row) => [row.number, row])).values()) }));
       setAttemptCursor(value.next);
-    }).catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); });
+    }).catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); })
+      .finally(() => { if (!controller.signal.aborted) setLoadingJob(false); });
     return () => controller.abort();
-  }, [runId, query, revision]);
+  }, [runId, query, revision, refreshing]);
+
+  async function openRetrySettings(): Promise<void> {
+    setBusy(true);
+    try {
+      const current = await api<JobPage>(`/api/runs/${runId}/job?${query}`);
+      if (current.job.retry_settings) onRetrySettings(current.job.retry_settings);
+      else setError("This job no longer has retry settings. Refresh the run to see its current state.");
+    } catch (caught) { setError(errorMessage(caught)); }
+    finally { setBusy(false); }
+  }
   useEffect(() => {
     if (!job) return;
     heading.current?.scrollIntoView({ block: "start" });
@@ -140,7 +156,10 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, onRetry }: {
           <Select labelId="job-attempt" label="Attempt" value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
             {attempts.map((row) => <MenuItem key={row.number} value={row.number}>Attempt {row.number} · {row.stop_reason ? stageLabel(row.stop_reason) : statusLabel(row.status)}</MenuItem>)}
           </Select></FormControl>
-        {canRetry && job.status === "failed" && <Button variant="outlined" disabled={busy} onClick={() => { setBusy(true); void onRetry(scope).catch((caught: unknown) => setError(errorMessage(caught))).finally(() => setBusy(false)); }}>Re-run job</Button>}
+        {canRetry && job.status === "failed" && <>
+          <Button variant="outlined" disabled={busy || refreshing || loadingJob} onClick={() => { setBusy(true); void onRetry(scope).catch((caught: unknown) => setError(errorMessage(caught))).finally(() => setBusy(false)); }}>Re-run job</Button>
+          {job.retry_settings && <Button disabled={busy || refreshing || loadingJob} onClick={() => void openRetrySettings()}>Re-run with settings</Button>}
+        </>}
         {attemptCursor !== null && <Button onClick={() => void moreAttempts()}>Load more attempts</Button>}
       </Stack>
     </Paper>

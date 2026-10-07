@@ -28,8 +28,8 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "A tool needs your permission" })).toBeVisible();
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
-  await page.getByRole("button", { name: "Pause new steps", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Resume new steps", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
   // The provider is still awaiting its own permission answer in the same attempt.
   await page.getByRole("combobox", { name: "Your decision" }).click();
   await page.getByRole("option", { name: "Allow once", exact: true }).click();
@@ -59,16 +59,16 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   await dialog.getByRole("button", { name: "Save settings", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Resume new steps", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
   const held = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   expect(held.snapshot).toEqual(before.snapshot);
   const review = held.nodes.find((node: { scope_path: string }) => node.scope_path === "root.review");
   expect(review.status).toBe("pending");
   expect(review.pending_settings).toMatchObject({ agent_id: "antigravity", model_value: "gemini-test-low" });
   await page.screenshot({ path: testInfo.outputPath("reviewer-saved-run-paused.png"), fullPage: true });
-  await page.getByRole("button", { name: "Resume new steps", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Resume new steps", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toHaveCount(0);
   const after = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   expect(after.snapshot).toEqual(before.snapshot);
   const events = (await (await page.request.get(`/api/runs/${runId}/events?limit=200`)).json()).events;

@@ -79,6 +79,7 @@ from relay.execution.machine import (
 )
 from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
+from relay.execution.relaunch import PreviousRunInputs
 from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import (
     RecoveryTarget,
@@ -1079,6 +1080,25 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
+    def previous_run_inputs(self, run_id: str) -> PreviousRunInputs:
+        """Read launch input values without returning prompts or provider routes."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("snapshot", "project").filter(pk=run_id).first(), run_id
+            )
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            source = PreviousRunInputs(
+                project_id=_identifier(_related(run, "project", Project)),
+                workflow_key=_string(run, "workflow_key"),
+                status=_string(run, "status"),
+                inputs=_mapping(snapshot, "typed_inputs"),
+            )
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not read the previous run's inputs."
+            raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return source
+
     def attention(self, since: int | None) -> dict[str, object]:
         """Read owner requests and new completion facts without event payloads."""
         try:
@@ -1443,6 +1463,12 @@ class DjangoReadStore:
                     "status": _string(node, "status"),
                     "writes": _boolean(node, "writes"),
                     "command": frozen.get("run"),
+                    "retry_settings": (
+                        _retry_configuration(node, snapshot)
+                        if _string(node, "node_type") == NodeType.AGENT.value
+                        and _string(node, "status") == NodeStatus.FAILED.value
+                        else None
+                    ),
                     "prompt": frozen.get("prompt"),
                     "instructions": instructions,
                     "outputs": _mapping(node, "outputs"),

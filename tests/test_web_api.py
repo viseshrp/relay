@@ -23,7 +23,7 @@ from relay.constants import (
 from relay.execution.resume import recovery_workspace_lock
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, EventSensitivity, EventSource
-from relay.web.models import Artifact, HumanInteraction, NodeRun, Run, RunEvent
+from relay.web.models import Artifact, HumanInteraction, NodeRun, Run, RunEvent, RunSnapshot
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
 from relay.web.views import actions
 from tests.support import (
@@ -715,6 +715,102 @@ def test_project_context_launch_source_requires_owner_login(client: Client) -> N
     assert client.get("/api/projects/current").status_code == 401
 
 
+@pytest.mark.parametrize("status", ["succeeded", "failed", "canceled"])
+def test_previous_run_inputs_returns_only_the_launch_choices(
+    owner: Client, finished_run: str, status: str
+) -> None:
+    Run.objects.filter(pk=finished_run).update(status=status)
+    inputs = {"task": "Owner choice", "count": 0, "ratio": 0.5, "approved": False, "empty": None}
+    RunSnapshot.objects.filter(run_id=finished_run).update(
+        typed_inputs=inputs, resolved_prompts=[{"private": "captured instructions"}]
+    )
+    run = Run.objects.get(pk=finished_run)
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert response.status_code == 200
+    assert response.json() == {
+        "project_id": str(run.project_id),
+        "workflow_key": "done.yaml",
+        "status": status,
+        "inputs": inputs,
+    }
+    assert RunSnapshot.objects.get(run_id=finished_run).typed_inputs == inputs
+
+
+@pytest.mark.parametrize(
+    "status", ["pending", "running", "paused_wait", "canceling", "interrupted"]
+)
+def test_previous_run_inputs_rejects_a_run_that_has_not_finished(
+    owner: Client, finished_run: str, status: str
+) -> None:
+    Run.objects.filter(pk=finished_run).update(status=status)
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (400, "config_error")
+    assert "Wait for this run to finish" in response.json()["message"]
+
+
+def test_previous_run_inputs_keeps_authentication_bounds_and_missing_run_errors(
+    client: Client, owner: Client, finished_run: str
+) -> None:
+    unauthenticated = Client()
+    assert unauthenticated.get(f"/api/runs/{finished_run}/launch-inputs").status_code == 401
+    assert owner.get("/api/runs/not-a-uuid/launch-inputs").status_code == 404
+    assert (
+        owner.get("/api/runs/00000000-0000-0000-0000-000000000000/launch-inputs").status_code == 404
+    )
+    RunSnapshot.objects.filter(run_id=finished_run).update(typed_inputs={"task": "x" * 1_048_576})
+    assert client.get(f"/api/runs/{finished_run}/launch-inputs").status_code == 400
+
+
+def test_previous_run_inputs_database_errors_keep_the_public_envelope(
+    owner: Client, finished_run: str
+) -> None:
+    def unavailable(
+        execute: Callable[..., object], sql: str, params: object, many: bool, context: object
+    ) -> object:
+        if Run._meta.db_table in sql:
+            message = "private third-party failure"
+            raise DatabaseError(message)
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(unavailable):
+        response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert "private third-party" not in response.content.decode()
+
+
+def test_previous_run_inputs_missing_snapshot_keeps_the_public_envelope(
+    owner: Client, finished_run: str
+) -> None:
+    RunSnapshot.objects.filter(run_id=finished_run).delete()
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+
+
+def test_previous_inputs_launch_through_fresh_source_capture(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
+    source = (
+        "version: 1\nname: Previous\ninputs:\n  task: {type: string, default: Original}\n"
+        "nodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    served.write_workflow("repeat", source)
+    previous = engine.launch(served, "repeat", inputs={"task": "Owner choice"})
+    engine.drain(previous)
+    old_snapshot = RunSnapshot.objects.get(run_id=previous).workflow_yaml
+    choices = owner.get(f"/api/runs/{previous}/launch-inputs").json()
+    served.write_workflow("repeat", source.replace("Previous", "Current"))
+    served.commit("Commit the current workflow")
+    result = post(owner, "/api/runs", choices)
+    assert result.status_code == 201
+    current = result.json()["run_id"]
+    assert current != previous
+    assert Run.objects.get(pk=current).source_commit == git(served.repository, "rev-parse", "HEAD")
+    assert RunSnapshot.objects.get(run_id=current).typed_inputs == {"task": "Owner choice"}
+    assert RunSnapshot.objects.get(run_id=current).workflow_yaml != old_snapshot
+    assert RunSnapshot.objects.get(run_id=previous).workflow_yaml == old_snapshot
+
+
 def test_opening_a_registered_project_keeps_its_identity(
     owner: Client, project: RelayProject
 ) -> None:
@@ -1346,6 +1442,26 @@ def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
     assert response["latest_attempt"] is None
     assert response["command"] is None
     assert response["outputs"] == {}
+
+
+def test_failed_job_settings_match_the_existing_run_record(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    served.write_workflow(
+        "failed-settings",
+        "version: 1\nname: Failed settings\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work:\n    type: agent\n    outputs:\n"
+        "      verdict: {json_path: {artifact: missing.json, path: verdict}}\n",
+    )
+    run_id = engine.launch(served, "failed-settings")
+    engine.drain(run_id)
+    assert run_status(run_id) == "failed"
+    detail = owner.get(f"/api/runs/{run_id}").json()["run"]
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    assert job["retry_settings"] == detail["nodes"][0]["retry_settings"]
+    assert job["retry_settings"]["agent_id"] == "codex"
+    assert job["retry_settings"]["model_value"] == "m1"
 
 
 @pytest.mark.parametrize(

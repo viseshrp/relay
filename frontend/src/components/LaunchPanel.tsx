@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath, stageLabel } from "../navigation";
-import type { ProjectLaunchSource, ProjectRecord } from "../types";
+import type { PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
 import type { WorkflowValue } from "../workflow";
 import { LaunchInputs, type LaunchValues } from "./LaunchInputs";
 
@@ -20,10 +20,11 @@ interface LaunchPanelProps {
   onClose: () => void;
   onExited: () => void;
   onRunLaunched: (runId: string) => void;
+  previousRun: PreviousRunInputs | null;
 }
 
-export function LaunchPanel({ open, workflowKey, workflow, project, requestProject, modelOptions, blockedReason, saveError, onSave, onClose, onExited, onRunLaunched }: LaunchPanelProps) {
-  const [inputs, setInputs] = useState<LaunchValues>({});
+export function LaunchPanel({ open, workflowKey, workflow, project, requestProject, modelOptions, blockedReason, saveError, onSave, onClose, onExited, onRunLaunched, previousRun }: LaunchPanelProps) {
+  const [inputs, setInputs] = useState<LaunchValues>(previousRun?.inputs ?? {});
   const [model, setModel] = useState("");
   const [cleanup, setCleanup] = useState("clean_on_success");
   const [entryPoint, setEntryPoint] = useState("");
@@ -32,6 +33,8 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
   const [sourceRevision, setSourceRevision] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+
+  useEffect(() => { setInputs(previousRun?.inputs ?? {}); }, [previousRun]);
 
   useEffect(() => {
     if (!open) return;
@@ -72,6 +75,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
     <form onSubmit={(event) => { event.preventDefault(); void launch(); }}>
       <DialogContent><Stack spacing={2}>
         <Typography variant="h6">{workflow?.name ?? "Choose a workflow"}</Typography>
+        {previousRun && <Alert severity="info">Previous inputs are prefilled. This creates a new run using the saved workflow, current branch, and fresh agent checks. Changed input definitions are validated again.</Alert>}
         {source?.commit && <Typography>Runs on a new branch from <strong>{source.branch ?? `commit ${source.commit.slice(0, 12)}`}</strong>.</Typography>}
         {sourceError && <Alert severity="error">{sourceError}</Alert>}
         {reason && <Alert severity="info" action={onSave ? <Button onClick={onSave}>Save</Button>

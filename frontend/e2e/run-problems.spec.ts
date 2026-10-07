@@ -63,7 +63,7 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
     await expect(log.getByRole("alert")).toContainText("unknown-command");
     await expect(page).toHaveURL(/job=root.review/);
     await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
-    await page.getByRole("button", { name: "Show step", exact: true }).click();
+    await page.getByRole("button", { name: "Open job log", exact: true }).click();
     await expect(log.getByRole("alert")).toBeInViewport();
     await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
   }
@@ -88,11 +88,12 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
     await retryGate;
     await route.continue();
   });
-  await page.getByRole("button", { name: "Retry step", exact: true }).click();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run job", exact: true }).click();
   await page.unroute(`**/api/runs/${runId}?collection=*`);
   releaseRetry();
   await expect(page.getByText("You've hit your session limit · resets 1:50pm (UTC)", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("alert")).toContainText("The tool exited with code 1.");
+  await expect(page.getByRole("region", { name: "Job log", exact: true }).getByRole("alert")).toContainText("Job failed with exit code 1.");
 });
 
 test("an owner can retry an agent with advertised effort while keeping its snapshot", async ({ page }, testInfo) => {
@@ -127,7 +128,8 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   await page.goto(`/?view=runs&run=${runId}`);
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
   await expect(dialog).toContainText("Keep current effort (low)");
@@ -184,12 +186,12 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   try {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await refreshStarted;
-    await expect(page.getByRole("button", { name: "Retry with settings", exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Retry step", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Re-run with settings", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Re-run job", exact: true })).toBeDisabled();
   } finally {
     releaseRefresh();
   }
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("Keep current effort (low)");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("retry-effort.png"), fullPage: true });
@@ -243,7 +245,8 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   }
   await page.goto(`/?view=runs&run=${runId}`);
   if (!native) await expect(page.getByRole("heading", { name: "Other stopped", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Tool", exact: true })).toBeEnabled();
   await dialog.getByRole("combobox", { name: "Tool", exact: true }).click();

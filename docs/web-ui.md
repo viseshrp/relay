@@ -244,11 +244,29 @@ before it creates a run.
 
 ## Monitor and control runs
 
-Choose **Pause new steps** to hold work before the next agent starts. An
-already running agent keeps its session and can finish normally. The header
-and history show **New steps paused**, including after reload or restart.
-The pause also holds automatic error recovery and quota retries; deadlines
-continue to apply. Choose **Resume new steps** explicitly when ready.
+The run header keeps its controls visible in both **Summary** and a job log.
+Active runs offer **Pause** and **Cancel run**; pausing changes the action to
+**Resume**. A pending launch can be paused, but cannot be canceled until its
+worktree is ready. Canceling and interrupted runs show no new control action.
+The cancellation confirmation keeps finished jobs, reports, and commits.
+
+Finished runs offer **Re-run all jobs**. It opens **Run workflow** with the
+previous typed inputs prefilled, using the current saved workflow and branch.
+This creates a new run through the usual preflight and snapshot capture. Input
+names removed from the workflow are omitted; changed definitions are validated
+again. The previous run and its snapshot remain unchanged. A stale request
+shows an error instead of creating a run.
+
+A failed run offers **Open job log** beside each failed job. **Re-run job** and
+**Re-run with settings** live in that job's view and use the existing retry
+service. Settings are read again when the dialog opens. Re-running one job
+preserves completed upstream work and the original launch snapshot.
+
+Choose **Pause** to hold work before the next agent starts. An already running
+agent keeps its session and can finish normally. The header and history show
+**New jobs paused**, including after reload or restart. The pause also holds
+automatic error recovery and quota retries; deadlines continue to apply.
+Choose **Resume** explicitly when ready.
 
 While paused, **Unstarted agent steps** lists agents that have never begun an
 attempt. Choose **Change settings** to select a freshly advertised tool, model,

@@ -22,6 +22,7 @@ from relay.constants import (
     REVIEW_PREVIEW_MAX_BYTES,
 )
 from relay.errors import ConfigError, RelayError
+from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import RunStatus
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
@@ -269,6 +270,15 @@ def runs(request: HttpRequest) -> HttpResponse:
         limit=limit,
     )
     return JsonResponse({"runs": records, "next": next_value})
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_launch_inputs(request: HttpRequest, run_id: str) -> HttpResponse:
+    del request
+    run_id = canonical_uuid(run_id, resource="run")
+    return JsonResponse(asdict(read_previous_inputs(DjangoReadStore(), run_id)))
 
 
 @api_errors

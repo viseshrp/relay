@@ -51,6 +51,13 @@ export interface ProjectLaunchSource {
   commit: string | null;
 }
 
+export interface PreviousRunInputs {
+  project_id: string;
+  workflow_key: string;
+  status: string;
+  inputs: Record<string, JsonScalar>;
+}
+
 export interface HandoffWarning {
   workflow_key?: string;
   scope_path: string;
@@ -220,6 +227,7 @@ export interface RunJob {
   node_type: string;
   status: string;
   writes: boolean;
+  retry_settings: RetryConfiguration | null;
   command: string[] | null;
   prompt: string | null;
   instructions: Array<{ reference: { local?: string; global?: string }; text: string; truncated: boolean }>;

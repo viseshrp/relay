@@ -120,8 +120,8 @@ test("report handoffs explain retention and review material is readable beside t
   await expect(page.locator(".review-preview")).toContainText("Ready: Yes");
   await expect(page.locator(".review-preview")).toContainText("Read this report before approving.");
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
-  await page.getByRole("button", { name: "Stop work" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Stop run" }).click();
+  await page.getByRole("button", { name: "Cancel run" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel run" }).click();
   await expect(page.getByText("Work stopped. Finished steps and their changes remain available for review.")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Retained review Stopped ·/ })).toBeVisible();
 });
