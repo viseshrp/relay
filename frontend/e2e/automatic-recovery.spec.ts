@@ -53,6 +53,7 @@ test("workflow and agent recovery toggles survive save and reload", async ({ pag
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/");
+  await page.getByText("Advanced workflow settings and YAML", { exact: true }).click();
   await page.getByRole("switch", { name: "Automatic recovery", exact: true }).check();
   await page.locator('.react-flow__node[data-id="work"]').click();
   await page.getByRole("switch", { name: "Allow automatic retries for this step", exact: true }).uncheck();
@@ -61,6 +62,7 @@ test("workflow and agent recovery toggles survive save and reload", async ({ pag
   if (await confirmation.isVisible()) await confirmation.click();
   await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
   await page.reload();
+  await page.getByText("Advanced workflow settings and YAML", { exact: true }).click();
   await expect(page.getByRole("switch", { name: "Automatic recovery", exact: true })).toBeChecked();
   await page.locator('.react-flow__node[data-id="work"]').click();
   await expect(page.getByRole("switch", { name: "Allow automatic retries for this step", exact: true })).not.toBeChecked();

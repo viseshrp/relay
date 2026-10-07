@@ -132,7 +132,8 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
-  await expect(dialog).toContainText("Keep current effort (low)");
+  await expect(dialog).toContainText("Keep current effort (Low)");
+  await expect(dialog).toContainText("Keep current permission mode (Auto)");
   await expect(dialog.getByRole("textbox", { name: "Handoff instructions", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toBeEnabled();
   await dialog.getByRole("combobox", { name: "Model", exact: true }).click();
@@ -192,7 +193,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
     releaseRefresh();
   }
   await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("Keep current effort (low)");
+  await expect(page.getByRole("dialog")).toContainText("Keep current effort (Low)");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("retry-effort.png"), fullPage: true });
 });
