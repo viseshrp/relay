@@ -56,5 +56,6 @@ export function statusLabel(status: string): string {
     waiting: "Needs your input", paused_wait: "Needs your input", succeeded: "Complete",
     failed: "Needs attention", skipped: "Skipped", canceled: "Stopped", canceling: "Stopping",
     failing: "Finishing after an error", interrupted: "Resuming after restart",
+    repairing: "Repairing", repair_stopped: "Repairs stopped",
   } as Record<string, string>)[status] ?? status;
 }

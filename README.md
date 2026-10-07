@@ -31,6 +31,9 @@ Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
 eligible agent failures up to twice with the same model and settings, retained
 reports, and a separate repair instruction. It stops on unsafe failures or an
 exhausted budget.
+Configure [stage repair rules](docs/workflows.md#stage-repair-rules) to run a
+selected fixer and verifier after a rejected verdict. The map keeps the main
+stages; the Repairs panel shows each round, its settings, and retained reports.
 Confirmed provider usage resets can resume a failed stage automatically while
 preserving its captured model, effort, and prompts. Unsupported or missing reset
 information remains visible for the owner. See

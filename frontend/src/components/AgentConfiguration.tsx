@@ -16,9 +16,10 @@ interface AgentConfigurationProps {
   options: AgentOptions;
   onChange: (field: keyof AgentOptions, value: string) => void;
   project: string | null;
+  disabled?: boolean;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange, project }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;
@@ -80,7 +81,7 @@ export function AgentConfiguration({ agent, model, options, onChange, project }:
           renderValue={(selectedValue) => selectedValue === "" ? "Provider default"
             : choices.find((choice) => choice.value === selectedValue)?.name ?? selectedValue}
           value={value}
-          disabled={loading || (!supported && value === "")}
+          disabled={disabled || loading || (!supported && value === "")}
           onChange={(event) => onChange(field, event.target.value)}
         >
           <MenuItem value="">Provider default</MenuItem>
@@ -95,7 +96,7 @@ export function AgentConfiguration({ agent, model, options, onChange, project }:
   return (
     <Stack component="section" aria-label={`${agent.display_name} configuration`} spacing={1.5}>
       <Typography variant="subtitle2">{agent.display_name}</Typography>
-      {error && <Alert severity="error" action={<Button onClick={() => setRefresh((current) => current + 1)}>Retry</Button>}>{error}</Alert>}
+      {error && <Alert severity="error" action={<Button disabled={disabled} onClick={() => setRefresh((current) => current + 1)}>Retry</Button>}>{error}</Alert>}
       <Box className="field-grid">
         {selector("effort", "Effort", configuration?.effort ?? null)}
         {selector("permission_mode", "Permission mode", configuration?.permission_mode ?? null)}

@@ -28,6 +28,14 @@ export interface WorkflowDocumentResponse {
   base_hash: string;
   project: ProjectRecord;
   warnings: HandoffWarning[];
+  repair_defaults: RepairDefaults;
+}
+
+export interface RepairDefaults {
+  max_rounds: number;
+  max_allowed_rounds: number;
+  fix_instruction: string;
+  verify_instruction: string;
 }
 
 export interface ProjectRecord {
@@ -134,6 +142,19 @@ export interface RunNode {
   parent_scope: string | null;
   dependencies: string[];
   controls: Array<{ target: string; label: string }>;
+  repair_for?: string | null;
+  repair_settings?: {
+    legacy: boolean;
+    max_rounds: number;
+    accepted_output: string | null;
+    accepted_value: JsonScalar;
+    fix_instruction: string | null;
+    verify_instruction: string | null;
+    roles: Record<string, {
+      type: string; model: string | null; agents: string[] | null;
+      agent_options: Record<string, AgentOptions> | null; writes: boolean | null;
+    }>;
+  } | null;
   retry_settings?: RetryConfiguration | null;
   pending_settings?: RetryConfiguration | null;
 }

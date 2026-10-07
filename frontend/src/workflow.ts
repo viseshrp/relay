@@ -13,6 +13,7 @@ export interface WorkflowNodeValue {
   agent_options?: Record<string, AgentOptions>;
   auto_retry?: boolean;
   prompts?: Array<{ local?: string; global?: string }>;
+  outputs?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -33,6 +34,18 @@ export interface WorkflowValue {
   nodes: Record<string, WorkflowNodeValue>;
   entrypoints?: Array<{ scope_path: string }>;
   recovery?: { enabled: boolean; max_retries?: number };
+  repairs?: Record<string, RepairRuleValue>;
+}
+
+export interface RepairRuleValue {
+  enabled?: boolean;
+  max_rounds?: number;
+  accepted_output: string;
+  accepted_value?: string | number | boolean | null;
+  fix: WorkflowNodeValue;
+  verify: WorkflowNodeValue;
+  fix_instruction?: string;
+  verify_instruction?: string;
 }
 
 export interface WorkflowNodeData extends Record<string, unknown> {
@@ -47,7 +60,7 @@ export interface ParsedWorkflow {
   errors: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

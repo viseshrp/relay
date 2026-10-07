@@ -37,12 +37,13 @@ import type {
   RunDetail,
   RunEvent,
   RunInteraction,
+  RunNode,
   RunSummary,
   ProjectRecord,
   RetryConfiguration,
   RetryOptions,
 } from "../types";
-import { capturedRunGraph } from "../graph";
+import { capturedRunGraph, repairOwnership, visibleRunStages } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
 import { activityMessages } from "../activity";
 import type { WorkflowNodeData } from "../workflow";
@@ -74,6 +75,7 @@ const EVENT_TYPES = [
   "run.recovery_exhausted",
   "run.recovery_canceled",
   "run.dispatch_changed",
+  "run.repairs_changed",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
   "resource.cleanup_succeeded",
@@ -415,7 +417,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
     setDetail((current) => live.reduce(applyStateEvent, current));
     const interactionChanged = live.some((item) => item.type === "attempt.ended"
       || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
-    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type === "run.dispatch_changed" || item.type === "node.settings_changed" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
+    if (interactionChanged || live.some((item) => item.type === "node.created" || item.type === "run.dispatch_changed" || item.type === "run.repairs_changed" || item.type === "node.settings_changed" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
       void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
         setError(errorMessage(caught)),
       );
@@ -710,10 +712,24 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   }
 
   const graph = useMemo(() => runGraph(detail), [detail]);
+  const visibleStages = useMemo(() => visibleRunStages(detail?.nodes ?? []), [detail]);
+  const repairOwners = useMemo(() => repairOwnership(detail?.nodes ?? []), [detail]);
+  const repairGroups = detail?.nodes.filter((node) => node.repair_for && node.repair_settings) ?? [];
+  const repairChildren = useMemo(() => {
+    const groups = new Map<string, RunNode[]>();
+    for (const node of detail?.nodes ?? []) {
+      const owner = repairOwners.get(node.scope_path);
+      if (!owner || node.repair_settings) continue;
+      const group = groups.get(owner) ?? [];
+      group.push(node);
+      groups.set(owner, group);
+    }
+    return groups;
+  }, [detail, repairOwners]);
   const activity = useMemo(() => activityMessages(events), [events]);
   const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending").map((item) => [item.id, item])).values());
-  const complete = detail?.nodes.filter((node) => node.status === "succeeded" || node.status === "skipped").length ?? 0;
-  const currentStages = detail?.nodes.filter((node) => ["waiting", "running", "failed"].includes(node.status)) ?? [];
+  const complete = visibleStages.filter((node) => node.status === "succeeded" || node.status === "skipped").length;
+  const currentStages = visibleStages.filter((node) => ["waiting", "running", "failed", "repairing", "repair_stopped"].includes(node.status));
   const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
   const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
   const canPause = detail !== null && PAUSABLE_RUNS.has(detail.status);
@@ -794,11 +810,11 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
                   <Typography variant="subtitle1">{dispatchPaused ? "New steps will wait until you resume. Current steps can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : pendingInteractions.length ? "Next: review the request below and send your response." : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
                   {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
-                  <LinearProgress variant="determinate" value={detail.nodes.length ? 100 * complete / detail.nodes.length : 0} />
-                  <Typography variant="body2" color="text.secondary">{complete} of {detail.nodes.length} {nodeCursor !== null ? "loaded " : ""}steps complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
+                  <LinearProgress variant="determinate" value={visibleStages.length ? 100 * complete / visibleStages.length : 0} />
+                  <Typography variant="body2" color="text.secondary">{complete} of {visibleStages.length} {nodeCursor !== null ? "loaded " : ""}stages complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
                 </Stack>
                 {detail.problem && ["failed", "canceling"].includes(detail.status)
-                  ? <RunProblemNotice problem={detail.problem} onShowStep={showStep} onCancelRetry={() => void cancelRun()} />
+                  ? <RunProblemNotice problem={detail.problem} displayScope={repairOwners.get(detail.problem.scope_path)} onShowStep={showStep} onCancelRetry={() => void cancelRun()} />
                   : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>
@@ -878,15 +894,33 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
 
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1 }}>Steps and progress</Typography>
-                <Box className="stage-list">{detail.nodes.map((node) => <Button key={node.id} variant={focusStage === node.scope_path ? "outlined" : "text"} color={node.status === "failed" ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => showStep(node.scope_path)}>
+                <Box className="stage-list">{visibleStages.map((node) => <Button key={node.id} variant={(repairOwners.get(focusStage ?? "") ?? focusStage) === node.scope_path ? "outlined" : "text"} color={["failed", "repair_stopped"].includes(node.status) ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => showStep(node.scope_path)}>
                   {stageLabel(node.scope_path)} · {statusLabel(node.status)}
                 </Button>)}</Box>
                 {nodeCursor !== null && <Button onClick={() => void loadMoreNodes()}>Load more steps</Button>}
               </Paper>
 
               <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
-                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection focusRequest={stepFocusRequest} />
+                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection focusRequest={stepFocusRequest} />
               </Paper>
+
+              {repairGroups.length > 0 && <Accordion><AccordionSummary><Typography>Repairs · {repairGroups.length} configured</Typography></AccordionSummary><AccordionDetails><Stack spacing={2}>
+                <Typography variant="body2">Relay handles these repairs behind each stage. Reports, attempts, and tool messages remain saved. Settings for this run are captured; edit the workflow to change future runs.</Typography>
+                {repairGroups.map((group) => {
+                  const settings = group.repair_settings!;
+                  const children = repairChildren.get(group.repair_for!) ?? [];
+                  const round = Math.max(0, ...children.map((node) => node.loop_index ?? 0));
+                  return <Paper key={group.id} variant="outlined" className="section-card" role="region" aria-label={`Repairs for ${stageLabel(group.repair_for!)}`}>
+                    <Typography variant="h6">{stageLabel(group.repair_for!)} · {statusLabel(group.status)}</Typography>
+                    <Typography variant="body2">{round ? `Round ${round} of ${settings.max_rounds}` : `Up to ${settings.max_rounds} rounds`}{settings.legacy ? " · Existing workflow loop" : ` · ${settings.accepted_output} must equal ${JSON.stringify(settings.accepted_value)}`}</Typography>
+                    {Object.entries(settings.roles).map(([role, value]) => <Typography key={role} variant="body2">{stageLabel(role)}: {value.model ?? (value.type === "agent" ? "Captured workflow model" : "Command")}{value.agents?.length ? ` · ${value.agents.join(", ")}` : ""}{value.agent_options ? ` · ${JSON.stringify(value.agent_options)}` : ""}</Typography>)}
+                    {settings.fix_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Fixer instructions: {settings.fix_instruction}</Typography>}
+                    {settings.verify_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Verifier instructions: {settings.verify_instruction}</Typography>}
+                    <Stack spacing={1} sx={{ mt: 1 }}>{children.map((node) => <Button key={node.id} onClick={() => showStep(node.scope_path)}>{stageLabel(node.scope_path)} · {statusLabel(node.status)}</Button>)}</Stack>
+                  </Paper>;
+                })}
+                <Button href={`/?view=author&project=${encodeURIComponent(detail.project_id)}&workflow=${encodeURIComponent(detail.workflow_key)}`}>Edit repairs for future runs</Button>
+              </Stack></AccordionDetails></Accordion>}
 
               <Paper variant="outlined" className="section-card">
                 <Typography variant="h6" sx={{ mb: 1.5 }}>Activity</Typography>

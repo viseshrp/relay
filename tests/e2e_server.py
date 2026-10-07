@@ -11,6 +11,7 @@ import asyncio
 from collections.abc import Callable
 import os
 from pathlib import Path
+import sys
 import tempfile
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -109,7 +110,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
         project.write_workflow("workflow", WORKFLOW)
-        return JsonResponse({"ok": True})
+        return JsonResponse({"ok": True, "python": sys.executable})
 
     @owner_required
     @require_POST

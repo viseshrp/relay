@@ -67,6 +67,12 @@ to change that effort.
 
 ## Run navigation
 
+- [x] Configure fix-and-verify repair rules on a stage. Relay runs rejected
+  verdicts through the selected fixer and verifier, preserves each report,
+  and stops when the configured budget is exhausted. Keep repair work out of
+  the main map and expose its settings and attempts in a Repairs panel.
+  Existing captured loops can be explicitly grouped without changing their
+  execution. See [Stage repair rules](workflows.md#stage-repair-rules).
 - [x] Pause new steps without interrupting the currently running agent. Show
   the hold in the run monitor, preserve it across restart, and let the owner
   change unstarted-step settings before explicitly resuming. Queued deliveries

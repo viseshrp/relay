@@ -427,6 +427,32 @@ remain evidence. Changing a model through **Retry with settings** still uses
 its separate handoff editor. Provider quota resets retain their own notice and
 confirmed schedule. Automatic recovery never answers a declared human wait.
 
+## Stage repairs
+
+Select an agent or command stage in the editor and open **Repairs**. Enable
+automatic repairs, choose the verdict output and accepted value, and set the
+number of fix-and-verify rounds. Configure the **Fixer** and **Verifier** with
+their own tools, exact models, effort, permissions, and instructions. Agent
+settings start at the provider defaults. Report fields choose the retained
+file and selector without requiring YAML edits.
+
+Save unsaved prompt text before changing settings or closing the dialog. **Done**
+returns to the workflow editor; **Save** validates and persists the policy.
+Deleting a stage or choosing an action that cannot use repairs removes its
+rule. Agent and command stages require the configured result output. See
+[Stage repair rules](workflows.md#stage-repair-rules) for defaults and bounds.
+
+The run map and stage list show the main stages. **Repairing** and **Repairs
+stopped** identify a source stage whose repair work is active or failed. Open
+the **Repairs** panel to inspect its round, budget, roles, instructions, and
+child attempt statuses. Reports and activity remain available. Run settings
+are captured; **Edit repairs for future runs** opens the editable workflow.
+
+An existing captured loop can be grouped through the
+[repair presentation API](http-api.md#repair-presentation) while dispatch is
+paused. This changes its display without changing prompts, attempts, outputs,
+or execution order. Ordinary loops stay visible unless explicitly grouped.
+
 ## Supervisor and shutdown
 
 The parent process owns one heartbeat-backed database lease and supervises two

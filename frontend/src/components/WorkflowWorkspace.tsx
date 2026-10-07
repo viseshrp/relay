@@ -31,7 +31,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import { api, errorMessage, RelayApiError } from "../api";
 import { projectPath, stageLabel } from "../navigation";
-import type { AgentOptions, AgentsResponse, HandoffWarning, JsonScalar, ProjectRecord, WorkflowDocumentResponse, WorkflowDraft } from "../types";
+import type { AgentOptions, AgentsResponse, HandoffWarning, JsonScalar, ProjectRecord, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
   canonicalYaml,
   flowElements,
@@ -40,11 +40,13 @@ import {
   nodeDefaults,
   parseWorkflow,
   type WorkflowNodeValue,
+  type RepairRuleValue,
 } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { AgentConfiguration } from "./AgentConfiguration";
 import { PromptEditor } from "./PromptEditor";
 import { ModelPicker } from "./ModelPicker";
+import { RepairSettings } from "./RepairSettings";
 
 const YamlEditor = lazy(() =>
   import("./YamlEditor").then((module) => ({ default: module.YamlEditor })),
@@ -101,6 +103,8 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
   const [warnings, setWarnings] = useState<HandoffWarning[]>([]);
   const [handoffHelp, setHandoffHelp] = useState(false);
   const [promptDirty, setPromptDirty] = useState(false);
+  const [repairOpen, setRepairOpen] = useState(false);
+  const [repairDefaults, setRepairDefaults] = useState<RepairDefaults | null>(null);
   const [workflowKey, setWorkflowKey] = useState("workflow");
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [yamlText, setYamlText] = useState("");
@@ -171,6 +175,8 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     setBaseHash(document.base_hash);
     setDraft(document.draft);
     setWarnings(document.warnings);
+    setRepairDefaults(document.repair_defaults);
+    setRepairOpen(false);
     setSelectedNode(null);
     setStageFilter("");
     setStageFocusRequest(0);
@@ -279,6 +285,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     if (selectedNode === null) return;
     mutate((document, value) => {
       document.deleteIn(["nodes", selectedNode]);
+      document.deleteIn(["repairs", selectedNode]);
       for (const [id, node] of Object.entries(value.nodes)) {
         if (id !== selectedNode && node.needs?.includes(selectedNode)) {
           document.setIn(
@@ -303,12 +310,40 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     if (promptDirty) { setError("Save the agent's instructions before changing this stage's action."); return; }
     if (selectedNode === null) return;
     const needs = definition?.needs;
-    mutate((document) =>
+    mutate((document) => {
       document.setIn(["nodes", selectedNode], {
         ...nodeDefaults(type),
         ...(needs && needs.length > 0 ? { needs } : {}),
-      }),
-    );
+      });
+      if (!["agent", "command"].includes(type)) document.deleteIn(["repairs", selectedNode]);
+    });
+  }
+
+  function setRepairs(rule: RepairRuleValue) {
+    if (selectedNode === null) return;
+    mutate((document) => document.setIn(["repairs", selectedNode], rule));
+  }
+
+  function openRepairs() {
+    if (promptDirty) { setError("Save the stage instructions before opening repairs."); return; }
+    if (!selectedNode || !definition || !repairDefaults) return;
+    if (!parsed.value?.repairs?.[selectedNode]) {
+      const outputs = definition.outputs && typeof definition.outputs === "object" ? definition.outputs : {};
+      const acceptedOutput = Object.keys(outputs)[0] ?? "ready";
+      const rule = { accepted_output: acceptedOutput, accepted_value: "Yes", fix: {
+        type: "agent", writes: true, model: definition.model, agents: definition.agents,
+        agent_options: definition.agent_options,
+      }, verify: {
+        type: "agent", writes: true, allow_no_commit: true, model: definition.model,
+        agents: definition.agents, agent_options: definition.agent_options,
+        outputs: { [acceptedOutput]: { label: { artifact: "REVIEW_FIX_VERIFICATION.md", label: "Ready" } } },
+      } };
+      mutate((document) => {
+        document.setIn(["repairs", selectedNode], rule);
+        if (!Object.keys(outputs).length) document.setIn(["nodes", selectedNode, "outputs", acceptedOutput], { label: { artifact: "REVIEW.md", label: "Ready" } });
+      });
+    }
+    setRepairOpen(true);
   }
 
   function setAgentOption(agentId: string, field: keyof AgentOptions, value: string) {
@@ -498,7 +533,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
               <TextField fullWidth size="small" label="Find a stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} />
               <List sx={{ maxHeight: { xs: 210, md: 490 }, overflowY: "auto", mt: 1 }}>
                 {matchingStages.map((node) => <ListItemButton key={node.id} component="button" selected={selectedNode === node.id} aria-pressed={selectedNode === node.id} onClick={() => selectStage(node.id, true)} sx={{ width: "100%", textAlign: "left" }}>
-                  <ListItemText primary={node.data.label} />
+                  <ListItemText primary={node.data.label} secondary={parsed.value?.repairs?.[node.id]?.enabled !== false && parsed.value?.repairs?.[node.id] ? "Automatic repairs configured" : undefined} />
                 </ListItemButton>)}
               </List>
               {matchingStages.length === 0 && graph.nodes.length > 0 && <Typography variant="body2" sx={{ p: 1 }}>No stages match. Try another name.</Typography>}
@@ -538,6 +573,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
             <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
               <Typography variant="h6" sx={{ flex: 1 }}>{stageLabel(selectedNode)}</Typography>
               <Button color="error" onClick={deleteNode}>Remove stage</Button>
+              {["agent", "command"].includes(definition.type) && <Button variant="outlined" disabled={!leaseReady || promptDirty || !repairDefaults} onClick={openRepairs}>Repairs</Button>}
             </Stack>
             <Box className="field-grid">
               <FormControl size="small">
@@ -667,7 +703,7 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
                 />
               )}
             </Box>
-            {definition.type === "agent" && loadedKey && selectedNode && (
+            {definition.type === "agent" && loadedKey && selectedNode && !repairOpen && (
               <PromptEditor
                 key={`${loadedKey}-${selectedNode}`}
                 workflowPath={workflowPath(loadedKey)}
@@ -700,6 +736,16 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
           </Stack>
         </Paper>
       )}
+
+      {repairOpen && selectedNode && loadedKey && repairDefaults && parsed.value?.repairs?.[selectedNode] && <RepairSettings
+        stage={selectedNode} rule={parsed.value.repairs[selectedNode]} defaults={repairDefaults}
+        sourceOutputs={definition?.outputs && typeof definition.outputs === "object" ? definition.outputs : {}}
+        onSourceOutput={(output, selector) => mutate((document) => document.setIn(["nodes", selectedNode, "outputs", output], selector))}
+        agents={agents} model={typeof parsed.value.model === "string" ? parsed.value.model : launchModel}
+        preferences={parsed.value.agents?.length ? parsed.value.agents : agents?.preferences ?? []}
+        workflowPath={workflowPath(loadedKey)} workflowKey={loadedKey} project={requestProject}
+        holder={holder.current} disabled={!leaseReady} onDirty={setPromptDirty}
+        onChange={setRepairs} onClose={() => setRepairOpen(false)} />}
 
       <Paper className="section-card" variant="outlined">
         <Stack spacing={2}>
