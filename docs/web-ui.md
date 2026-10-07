@@ -109,7 +109,8 @@ selection; changing projects does not change another browser's selection.
 **Workflows** sets up stages, instructions, and inputs. **Runs** shows work
 already started. The run header names its captured workflow and project,
 shows its run number and source branch, and states what happens next.
-Internal IDs, provider JSON, and cleanup controls are under advanced views.
+Internal IDs and provider JSON are under advanced views. Cleanup controls live
+in **Settings > Storage**.
 
 **New workflow** opens the same six-starter gallery as the checklist. Each
 card shows its purpose, job graph preview, required agent, and input types.
@@ -512,9 +513,13 @@ ordered pages merge without sorting the entire history for each event.
 ## History, artifacts, and cleanup
 
 Relay automatically releases attempt scratch folders and surviving processes.
-Terminal runs expose **Retry temporary resource cleanup** under Advanced
-diagnostics. This touches only marked attempt folders; it keeps code,
-evidence, credentials, and personal browser profiles. See
+**Settings > Storage** exposes **Retry temporary resource cleanup** after you
+choose a completed run. The list includes succeeded, failed, and canceled runs
+from the selected project, with pagination for older runs. No run is selected
+initially. Confirmation names the run and explains what stays. This touches
+only marked folders from ended attempts; it keeps code, evidence, credentials,
+and personal browser profiles. The server checks eligibility again, so a run
+that starts retrying after selection cannot bypass its cleanup guard. See
 [Run-owned resources](projects-and-storage.md#run-owned-resources).
 
 History, snapshots, output, interactions, and artifacts remain until explicit
@@ -740,8 +745,11 @@ Changes to login, loopback address, port, and workers show a restart notice;
 startup flags still override saved choices. Notifications retain the existing
 browser-specific permission and preference. Storage shows installation paths
 and the selected project's sizes, counts, and confirmed cleanup controls.
-Project-wide cleanup no longer appears on run pages; attempt temporary-resource
-cleanup remains with its run diagnostics.
+All cleanup actions live in Storage, including retries for temporary run
+resources. Run summaries, job logs, and advanced diagnostics have no cleanup
+controls. Failed cleanup keeps its confirmation open with the Relay error;
+canceling returns focus to the button. The completed-run list can be refreshed
+or paged without changing the selected deletion category.
 
 Run workflow leaves cleanup unspecified until you select an override, allowing
 project/global defaults to apply. Job effort and permission menus offer

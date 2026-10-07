@@ -173,7 +173,9 @@ Relay never redirects or deletes the owner's personal browser profile.
 
 Completion removes only the allocation Relay created. Terminal-run cleanup
 also removes marked allocations for ended attempts and can be retried from
-the run's advanced view. A replaced directory, symlinked marker, wrong run,
+**Settings > Storage** by selecting a completed run and confirming. The browser
+loads only the selected project's succeeded, failed, and canceled runs, with
+bounded pages for older runs. A replaced directory, symlinked marker, wrong run,
 or mismatched token is not followed. Inner links are unlinked without deleting
 their targets. Unmarked files are preserved, including during confirmed run
 record deletion. Worktrees, retained evidence, provider credentials, and other

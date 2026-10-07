@@ -86,7 +86,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByRole("button", { name: "Open changes and documents" }).click();
   await expect(page.getByText("No committed code changes yet.")).toBeVisible();
   await page.getByText("Advanced diagnostics and saved files", { exact: true }).click();
-  await page.getByRole("button", { name: "Retry temporary resource cleanup" }).click();
+  await expect(page.getByRole("button", { name: /^(Retry temporary resource cleanup|Clean data|Review deletion)$/i })).toHaveCount(0);
 });
 
 test("report handoffs explain retention and review material is readable beside the response", async ({ page }) => {

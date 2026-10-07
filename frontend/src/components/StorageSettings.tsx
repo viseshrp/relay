@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type { ProjectRecord, StorageUsage } from "../types";
+import { TemporaryResourceCleanup } from "./TemporaryResourceCleanup";
 
 const scopes = {
   worktrees: { label: "Working copies", description: "Folders Relay used to run jobs. Your repository is not touched. Evidence is preserved before removal." },
@@ -60,6 +61,7 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
       {scope && <Typography>{scopes[scope].description}</Typography>}
       <Button color="error" variant="outlined" disabled={!scope || usage.cleanup_blocked || busy} onClick={() => { setName(""); setOpen(true); }}>Review deletion</Button>
     </>}
+    <TemporaryResourceCleanup key={`${project.id}:${revision}`} projectId={project.id} />
     <Dialog open={open} onClose={() => { if (!busy) setOpen(false); }} fullWidth aria-labelledby="storage-delete-title">
       <DialogTitle id="storage-delete-title">Delete retained data for {project.display_name}?</DialogTitle><DialogContent><Stack spacing={2}>
         <Typography>{scope ? scopes[scope].description : "Choose a deletion category."}</Typography>

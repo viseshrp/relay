@@ -994,11 +994,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
               {pendingInteractions.length === 0 && <Paper variant="outlined" className="section-card"><ReviewEvidence runId={detail.id} artifacts={artifacts} /></Paper>}
 
               <Accordion><AccordionSummary>Advanced diagnostics and saved files</AccordionSummary><AccordionDetails><Stack spacing={2}>
-              {TERMINAL_RUNS.has(detail.status) && <Paper variant="outlined" className="section-card">
-                <Typography variant="h6">Temporary run resources</Typography>
-                <Typography variant="body2">Relay cleans its temporary files, private browser profiles, and process groups automatically. You can retry folder cleanup here. Saved reports, code, credentials, and personal browser profiles are kept.</Typography>
-                <Button onClick={() => void api(`/api/runs/${detail.id}/resources/clean`, { method: "POST", body: JSON.stringify({ confirm: true }) }).then(async () => { await refreshDetail(); await loadEvents(); }).catch((caught: unknown) => setError(errorMessage(caught)))}>Retry temporary resource cleanup</Button>
-              </Paper>}
               <Box component="details" aria-label="Raw event details"><Box component="summary">Details</Box>
               <Paper variant="outlined" className="section-card">
                 <Typography variant="body2" className="mono-wrap">Run {detail.id} · {detail.run_branch} · {detail.status} · SSE {streamState}</Typography>

@@ -129,6 +129,9 @@ test("storage has no deletion selected, explains retained data, and notification
   await expect(panel.getByRole("region", { name: "Project storage" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Review deletion", exact: true })).toBeDisabled();
   await expect(panel.getByText(/Your repository is not touched/)).toBeVisible();
+  const resources = panel.getByRole("region", { name: "Temporary run resources", exact: true });
+  await expect(resources.getByText("No completed runs are available for temporary cleanup in this project.")).toBeVisible();
+  await expect(resources.getByRole("button", { name: "Retry temporary resource cleanup", exact: true })).toBeDisabled();
   await page.screenshot({ path: info.outputPath("settings-storage.png"), fullPage: true, animations: "disabled" });
   await panel.getByRole("combobox", { name: "Data to delete", exact: true }).click();
   await page.getByRole("option", { name: "Everything for this project", exact: true }).click();

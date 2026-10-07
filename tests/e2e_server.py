@@ -179,6 +179,25 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @api_errors
     @owner_required
     @require_POST
+    def resource_remnant(request: HttpRequest) -> JsonResponse:
+        from relay.execution.resources import allocate_attempt_resources
+
+        run_id = json_body(request).get("run_id")
+        if not isinstance(run_id, str):
+            message = "The test resource requires a run ID."
+            raise ConfigError(message)
+        attempt = NodeAttempt.objects.filter(
+            node_run__run_id=run_id, ended_at__isnull=False
+        ).first()
+        if attempt is None:
+            message = "The test resource requires an ended attempt."
+            raise ConfigError(message)
+        allocate_attempt_resources(run_id, str(attempt.pk))
+        return JsonResponse({"created": True})
+
+    @api_errors
+    @owner_required
+    @require_POST
     def launch_files(request: HttpRequest) -> JsonResponse:
         mode = json_body(request).get("mode")
         if mode == "blockers":
@@ -263,6 +282,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
     urlpatterns.insert(0, path("__test__/storage-project", storage_project))
+    urlpatterns.insert(0, path("__test__/resource-remnant", resource_remnant))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
