@@ -278,6 +278,14 @@ work cannot outlive the enclosing node. A running timeout fails with stop
 reason `timeout`; a waiting `human_wait` may instead select its declared
 `on_timeout` edge.
 
+Command output is retained while the process runs, using separate readers
+for stdout and stderr so reading cannot change the child's write offsets.
+Each control poll drains a bounded number of chunks before checking timeout,
+cancellation, and worker ownership. An incremental UTF-8 decoder preserves
+characters split across reads. Process exit drains the remaining bytes,
+including output from canceled or timed-out commands. Child programs must
+flush their own buffers for immediate output.
+
 Agent and command nodes extract every declared output before success. Files
 used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
 Relay copies them to central evidence storage with their SHA-256 hashes. An

@@ -204,6 +204,9 @@ to the selected project's effective policy. For `merge_on_success`, every
 changed file blocks launch, including usual workflow/report exemptions.
 `GET /api/projects/current` adds the resolved `cleanup_policy` for the panel.
 
+Command stdout and stderr events arrive while a command runs. Chunk
+payloads and replay ordering are unchanged; clients merge them by event ID.
+
 Run history accepts `project`, `status`, `since`, and `limit`, plus optional
 `workflow`, `branch`, and `query` filters. Workflow and source branch filters
 match exactly, with the existing `review` / `review.yaml` workflow alias.

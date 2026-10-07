@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 import time
@@ -24,7 +26,7 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.schema import CommandNode
 
-from .base import emit_output_stream, parse_node, validated_outputs
+from .base import parse_node, validated_outputs
 
 
 def _creation_flags() -> int:
@@ -69,14 +71,46 @@ def _launch(
         ) from None
 
 
+class _CommandOutput:
+    stream: IO[bytes]
+    event_type: str
+    decoder: codecs.IncrementalDecoder
+
+    def __init__(self, stream: IO[bytes], event_type: str) -> None:
+        self.stream = stream
+        self.event_type = event_type
+        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="backslashreplace")
+
+    def emit(self, context: AttemptContext, *, final: bool = False) -> None:
+        # A busy producer must not starve cancellation or ownership heartbeats.
+        remaining = 8
+        while final or remaining > 0:
+            chunk = self.stream.read(8192)
+            if not chunk:
+                break
+            remaining -= 1
+            self._append(context, self.decoder.decode(chunk))
+        if final:
+            self._append(context, self.decoder.decode(b"", final=True))
+
+    def _append(self, context: AttemptContext, text: str) -> None:
+        if text:
+            context.runtime.append_attempt_event(
+                context.attempt.attempt_id, self.event_type, EventSource.COMMAND, {"chunk": text}
+            )
+
+
 def _wait(
     context: AttemptContext,
     process: subprocess.Popen[bytes],
     timeout_seconds: float | None,
+    outputs: tuple[_CommandOutput, _CommandOutput],
 ) -> AttemptStopReason | None:
     started = time.monotonic()
     heartbeat_due = started + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
     while process.poll() is None:
+        for output in outputs:
+            output.emit(context)
         elapsed = time.monotonic() - started
         if timeout_seconds is not None and elapsed >= timeout_seconds:
             terminate_process_tree(process)
@@ -116,21 +150,31 @@ class CommandExecutor:
         node = parse_node(context, CommandNode)
         timeout = context.remaining_seconds()
         started = time.monotonic()
-        with (
-            tempfile.TemporaryFile(mode="w+b") as stdout,
-            tempfile.TemporaryFile(mode="w+b") as stderr,
-        ):
-            process = _launch(context, node, stdout, stderr)
-            context.runtime.record_attempt_process(context.attempt.attempt_id, process.pid)
-            try:
-                stop_reason = _wait(context, process, timeout)
-            finally:
-                if process.poll() is None:
-                    terminate_process_tree(process)
-                release_process_group(process.pid)
-                context.runtime.record_attempt_process(context.attempt.attempt_id, None)
-            emit_output_stream(context, stdout, "command.stdout")
-            emit_output_stream(context, stderr, "command.stderr")
+        with tempfile.TemporaryDirectory(prefix="relay-command-") as directory:
+            stdout_path = Path(directory) / "stdout"
+            stderr_path = Path(directory) / "stderr"
+            with (
+                stdout_path.open("wb") as stdout,
+                stderr_path.open("wb") as stderr,
+                stdout_path.open("rb") as stdout_reader,
+                stderr_path.open("rb") as stderr_reader,
+            ):
+                # Independent readers cannot change the subprocesses' write offsets.
+                outputs = (
+                    _CommandOutput(stdout_reader, "command.stdout"),
+                    _CommandOutput(stderr_reader, "command.stderr"),
+                )
+                process = _launch(context, node, stdout, stderr)
+                try:
+                    context.runtime.record_attempt_process(context.attempt.attempt_id, process.pid)
+                    stop_reason = _wait(context, process, timeout, outputs)
+                finally:
+                    if process.poll() is None:
+                        terminate_process_tree(process)
+                    release_process_group(process.pid)
+                    context.runtime.record_attempt_process(context.attempt.attempt_id, None)
+                for output in outputs:
+                    output.emit(context, final=True)
 
         duration_ms = round((time.monotonic() - started) * 1_000)
         context.runtime.append_attempt_event(
