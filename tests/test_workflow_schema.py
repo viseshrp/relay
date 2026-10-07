@@ -76,11 +76,17 @@ def test_every_node_type_validates() -> None:
         (_workflow(extra=True), ("extra_forbidden", ("extra",))),
         (
             _workflow(nodes={"a": {"type": "command", "run": "git status"}}),
-            ("list_type", ("nodes", "a", "command", "run")),
+            [
+                ("list_type", ("nodes", "a", "command", "run", "list[str]")),
+                ("model_type", ("nodes", "a", "command", "run", "SharedCommandReference")),
+            ],
         ),
         (
             _workflow(nodes={"a": {"type": "command", "run": []}}),
-            ("too_short", ("nodes", "a", "command", "run")),
+            [
+                ("too_short", ("nodes", "a", "command", "run", "list[str]")),
+                ("model_type", ("nodes", "a", "command", "run", "SharedCommandReference")),
+            ],
         ),
         (
             _workflow(nodes={"a": {"type": "command", "run": ["x"], "timeout": "5"}}),
@@ -110,9 +116,12 @@ def test_every_node_type_validates() -> None:
     ],
 )
 def test_an_invalid_field_is_rejected_at_its_location(
-    document: dict[str, object], expected: tuple[str, tuple[str | int, ...]]
+    document: dict[str, object],
+    expected: tuple[str, tuple[str | int, ...]] | list[tuple[str, tuple[str | int, ...]]],
 ) -> None:
-    assert _errors(WorkflowDefinition, document) == [expected]
+    assert _errors(WorkflowDefinition, document) == (
+        expected if isinstance(expected, list) else [expected]
+    )
 
 
 @pytest.mark.parametrize(

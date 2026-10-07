@@ -11,10 +11,12 @@ import { AgentConfiguration } from "./AgentConfiguration";
 import { ModelPicker } from "./ModelPicker";
 import { PromptEditor } from "./PromptEditor";
 import { RepairReportSelector } from "./RepairReportSelector";
+import { CommandFields } from "./CommandFields";
 
-export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, model, preferences, project, workflowPath,
+export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, commands, model, preferences, project, workflowPath,
   workflowKey, holder, disabled, onChange, onSourceOutput, onClose, onDirty }: {
   stage: string; rule: RepairRuleValue; defaults: RepairDefaults; agents: AgentsResponse | null;
+  commands: Record<string, string[]>;
   model: string; preferences: string[]; project: string | null; workflowPath: string;
   workflowKey: string; holder: string; disabled: boolean;
   onChange: (rule: RepairRuleValue) => void; onClose: () => void; onDirty: (dirty: boolean) => void;
@@ -88,13 +90,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, m
             onDirty={handleDirty}
             onSaved={(reference) => setNode({ ...node, prompts: [...(node.prompts ?? []).filter((prompt) => prompt.local !== reference), { local: reference }] })} />
         </>}
-        {node.type === "command" && <>
-          <TextField label="Program" value={Array.isArray(node.run) ? node.run[0] : ""} disabled={settingsDisabled} onChange={(event) => setNode({ ...node, run: [event.target.value, ...(Array.isArray(node.run) ? node.run.slice(1) : [])] })} />
-          <TextField label="Arguments (one per line)" multiline value={Array.isArray(node.run) ? node.run.slice(1).join("\n") : ""} disabled={settingsDisabled} onChange={(event) => {
-            // "status\n--short" becomes ["status", "--short"], without shell parsing.
-            setNode({ ...node, run: [Array.isArray(node.run) ? node.run[0] : "", ...(event.target.value ? event.target.value.split("\n") : [])] });
-          }} />
-        </>}
+        {node.type === "command" && <CommandFields key={role} node={node} commands={commands} disabled={settingsDisabled} onChange={setNode} />}
         <TextField label={role === "fix" ? "Fixer repair instructions" : "Verifier repair instructions"} multiline minRows={3} disabled={settingsDisabled}
           value={role === "fix" ? rule.fix_instruction ?? defaults.fix_instruction : rule.verify_instruction ?? defaults.verify_instruction}
           onChange={(event) => onChange({ ...rule, [`${role}_instruction`]: event.target.value || undefined })}

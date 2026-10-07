@@ -49,8 +49,9 @@ installations.
 ## Administration
 
 Open **Settings** in the browser to choose default agents, models, thinking
-effort, recovery, and cleanup for every project. Projects and workflows can
-override these choices. Server and login changes show when a restart is needed.
+effort, shared commands, environment variables, recovery, and cleanup for every
+project. Projects and workflows can override these choices. Server and login
+changes show when a restart is needed.
 See the [settings inventory](docs/projects-and-storage.md#global-defaults-and-project-overrides).
 
 Login is required by default. Use `relay up --no-login` to open the local app

@@ -40,13 +40,17 @@ def _launch(
     stdout: IO[bytes],
     stderr: IO[bytes],
 ) -> subprocess.Popen[bytes]:
+    arguments = node.run
+    if not isinstance(arguments, list):
+        message = "The shared command was not resolved in the captured workflow."
+        raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
     environment = os.environ.copy()
     if context.resources is not None:
         environment.update(context.resources.environment())
     environment.update(node.env)
     try:
         return subprocess.Popen(  # noqa: S603
-            owned_process_argv(node.run),
+            owned_process_argv(arguments),
             cwd=context.worktree,
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -58,7 +62,7 @@ def _launch(
             creationflags=_creation_flags(),
         )
     except OSError:
-        message = f"Relay could not start command {node.run[0]!r}."
+        message = f"Relay could not start command {arguments[0]!r}."
         raise NodeExecutionError(
             message,
             context={"node": context.attempt.scope_path},

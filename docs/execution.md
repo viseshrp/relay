@@ -257,7 +257,7 @@ can outlast the stale-attempt threshold without being mistaken for worker loss.
 | Type | Runtime behavior |
 | --- | --- |
 | `agent` | Starts one fresh routed agent session, sends the snapshotted prompts and declared context, and validates outputs after the session ends. |
-| `command` | Runs the declared argument vector with `shell=False`, merges `env` over the inherited environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
+| `command` | Runs the captured argument vector with `shell=False`, merges captured command variables over the worker/resource environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
 | `human_wait` | Creates a durable owner question with no subprocess. The current attempt completes after an answer, deadline, cancellation, or recovery decision. |
 | `condition` | Evaluates one restricted expression and records the target for the matching branch label. Unselected branch targets become `skipped`. |
 | `loop` | Executes its child graph in numbered scopes until `until` is true or `max_iterations` selects the `exhausted` target. |

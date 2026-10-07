@@ -14,19 +14,22 @@ from relay.constants import (
     DEFAULT_VERIFY_INSTRUCTION,
     MAX_LOOP_ITERATIONS,
 )
-from relay.errors import ConfigError
+from relay.errors import ConfigError, WorkflowValidationError
 
 from .routing import effective_agent_order
 from .schema import (
     DURATION_PATTERN,
+    NODE_ID_PATTERN,
     AgentNode,
     AgentOptions,
     CommandNode,
     LoopNode,
     NodeDefinition,
     RecoveryPolicy,
+    SharedCommandReference,
     StrictModel,
     WorkflowDefinition,
+    validate_environment,
 )
 from .validation import ValidatedWorkflow
 
@@ -56,6 +59,23 @@ class WorkflowDefaults(StrictModel):
     auto_retry: bool = True
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
     repairs: RepairDefaults = Field(default_factory=RepairDefaults)
+    commands: dict[str, list[str]] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("commands")
+    @classmethod
+    def valid_commands(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        del cls
+        for name, arguments in value.items():
+            if NODE_ID_PATTERN.fullmatch(name) is None:
+                message = "Use a lowercase command name with letters, numbers, and underscores"
+                raise ValueError(message)
+            if not arguments or not arguments[0] or any("\x00" in item for item in arguments):
+                message = "Shared commands need a program and arguments without NUL characters"
+                raise ValueError(message)
+        return value
+
+    validate_env = field_validator("env")(validate_environment)
 
     @field_validator("providers")
     @classmethod
@@ -131,6 +151,21 @@ def _nodes_with_defaults(
             updates["agent_options"] = options
             if "auto_retry" not in node.model_fields_set:
                 updates["auto_retry"] = defaults.auto_retry
+        elif isinstance(node, CommandNode):
+            if isinstance(node.run, SharedCommandReference):
+                arguments = defaults.commands.get(node.run.command)
+                if arguments is None:
+                    message = (
+                        f"Shared command {node.run.command!r} is not configured for this project."
+                    )
+                    raise WorkflowValidationError(message)
+                updates["run"] = list(arguments)
+            inherited_env = defaults.env if definition.inherit_env else {}
+            updates["env"] = (
+                {**inherited_env, **definition.env, **node.env}
+                if node.inherit_env
+                else dict(node.env)
+            )
         elif isinstance(node, LoopNode):
             updates["body"] = _nodes_with_defaults(
                 node.body, definition, defaults, owner_agents, launch_model

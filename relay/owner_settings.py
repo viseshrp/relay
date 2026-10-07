@@ -63,8 +63,11 @@ def _merge(base: Mapping[str, object], overrides: Mapping[str, object]) -> dict[
         result.pop("permission_mode", None)
     for key, value in overrides.items():
         old = result.get(key)
+        # Complete maps let a project remove inherited commands or variables.
         result[key] = (
-            _merge(old, value) if isinstance(old, dict) and isinstance(value, dict) else value
+            _merge(old, value)
+            if key not in {"commands", "env"} and isinstance(old, dict) and isinstance(value, dict)
+            else value
         )
     return result
 

@@ -18,6 +18,8 @@ explain the format; Relay does not install them as templates.
 | `model` | no | Exact, case-sensitive default model value. |
 | `agents` | no | Ordered default agent IDs. |
 | `nodes` | yes | Node ID to node-definition map; an empty map is valid. |
+| `env` | no | String variable map for this workflow's command jobs, overriding project/global variables; defaults to `{}`. |
+| `inherit_env` | no | Whether command jobs inherit project/global variables; defaults to `true`. Child workflows have their own environment settings. |
 | `entrypoints` | no | Declared midstream scopes and their required evidence. |
 | `recovery` | no | `{enabled: false, max_retries: 2}` by default. `max_retries` accepts `1` or `2`. |
 | `repairs` | no | Stage ID to a fix-and-verify policy. See [Stage repair rules](#stage-repair-rules). |
@@ -277,12 +279,29 @@ nodes:
 
 ## Command nodes
 
-A `command` node requires a non-empty argument vector. Relay invokes it with
-`shell=False` in the node worktree. For example, `[git, status, --short]`
+A `command` node requires `run`: a non-empty argument vector or a named shared
+command reference, `{command: test}`. Shared names follow the node ID pattern.
+The name must exist in the project's effective **Settings › Shared commands**
+at launch. Relay freezes its argument vector in the run snapshot. An existing
+argument vector continues to run exactly as declared.
+
+Relay invokes the resolved command with `shell=False` in the node worktree.
+For example, `[git, status, --short]`
 becomes three process arguments exactly as written; Relay performs no shell
-splitting or platform-specific quoting. `env` entries override inherited
-environment values. `writes` and `outputs` have the same meaning as on an
-agent node, including the explicit `allow_no_commit` exception.
+splitting, variable expansion, or platform-specific quoting.
+
+Job `env` entries override workflow variables, which override project/global
+variables. `inherit_env` defaults to `true` on both workflows and command jobs.
+Setting it to `false` on a workflow skips project/global variables. Setting it
+to `false` on a job skips all declared inherited variables while keeping that
+job's own map and the worker environment. Variable names must be nonempty,
+without `=` or NUL characters; values must be strings without NUL characters.
+These settings affect command jobs, including loop bodies and repair roles.
+Child workflows retain their own environment layers. See
+[Global defaults and project overrides](projects-and-storage.md#global-defaults-and-project-overrides).
+
+`writes` and `outputs` have the same meaning as on an agent node, including the
+explicit `allow_no_commit` exception.
 
 <!-- relay-example: valid command -->
 ```yaml
@@ -295,6 +314,25 @@ nodes:
     env:
       RELAY_CHECK: enabled
 ```
+
+Select a shared command without copying its arguments into every workflow:
+
+<!-- relay-example: valid shared-command -->
+```yaml
+version: 1
+name: Shared tests
+env:
+  TEST_MODE: workflow
+nodes:
+  test:
+    type: command
+    run: {command: test}
+    env:
+      TEST_MODE: job
+```
+
+Save `test` in Settings before launching this example. Saving or validating a
+portable workflow checks the reference's shape; launch resolves its name.
 
 A scalar command is invalid because its argument boundaries are unknown.
 
@@ -703,9 +741,10 @@ value; there is no automatic model fallback.
 ## Installation defaults
 
 [Settings](projects-and-storage.md#global-defaults-and-project-overrides) can
-supply models, agent order, provider options, job timeouts, retry participation,
-and recovery fields omitted from a workflow. Job models still win over run
-model overrides, which win over workflow models. Defaults come afterwards.
+supply models, agent order, provider options, shared commands, command variables,
+job timeouts, retry participation, and recovery fields omitted from a workflow.
+Job models still win over run model overrides, which win over workflow models.
+Defaults come afterwards.
 Explicit job effort/permission values remain exact; `null` keeps that option
 at the agent's default and skips project/global inheritance.
 
@@ -713,7 +752,8 @@ at the agent's default and skips project/global inheritance.
 only their declared deadlines. Recovery fields inherit individually, so an
 explicit `enabled: false` keeps automatic recovery off.
 Saved repair rounds and instructions are unchanged; global repair defaults
-initialize new rules in the editor only. Workflow schema version 1 is unchanged.
+initialize new rules in the editor only. These additive fields retain workflow
+schema version 1; existing argument-list workflows remain valid.
 
 Launch retains original YAML and prompt bytes while freezing resolved node
 definitions, recovery, and provider routes. Snapshots additionally record

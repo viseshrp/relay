@@ -250,6 +250,8 @@ The complete settings inventory is:
 | Thinking effort | Each agent's Thinking effort | Project agent defaults; job `agent_options.<id>.effort` | Matching exact model |
 | Agent permissions | Each agent's What the agent may do | Project agent defaults; job `permission_profile` or `agent_options.<id>.permission_mode` | Matching exact model |
 | Job timeout | Job timeout, such as `15m` | Project timeout; agent or command `timeout` | New launches |
+| Shared commands | Named program and argument lists | Project command map; job `run: {command: name}` selects one, or declares its own argument list | New command jobs |
+| Environment variables | Variable names and string values | Project variable map; workflow `env`; command job `env`; workflow/job `inherit_env` opt-out | New command jobs |
 | Automatic retry participation | Allow automatic retries for jobs | Project default; job `auto_retry` | New launches |
 | Automatic recovery | Enabled and maximum retries, 1 or 2 | Project policy; explicit workflow `recovery` fields | New launches |
 | Working-copy cleanup | After a successful run | Project policy; run launch `cleanup_policy` | New launches |
@@ -286,6 +288,34 @@ the saved timeout; `timeout: null` explicitly opts out. Human waits and
 structural deadlines remain workflow decisions. Native agent ceilings still
 apply when the inherited timeout is absent.
 
+Shared commands are named argument lists, such as `test: [python, -m, pytest]`.
+A command job selects one explicitly with `run: {command: test}`. Existing
+argument lists remain explicit and do not inherit a different command.
+Missing names stop launch before a run is created. Programs and arguments
+remain separate; Relay does not expand shell syntax or environment variables
+inside an argument.
+
+A project's `commands` and `env` overrides each replace the entire global map.
+Enabling an override in the browser copies the current effective map so you
+can edit or remove entries. An empty map removes all entries for that project.
+Turning the override off restores the current global map.
+
+Command variables resolve in this order, with later values winning: global
+or replacement project `env`, workflow `env`, then job `env`. They are merged
+over the existing worker and resource environment when the process starts.
+Workflow `inherit_env: false` skips global/project variables. Job
+`inherit_env: false` skips both those variables and workflow variables; its
+own `env` still applies over the worker environment. Loop jobs and command
+repair roles use their containing workflow's variables. Child workflows use
+their own workflow variables, plus project/global defaults, rather than the
+parent workflow's variables. These defaults do not configure agent processes.
+
+Launch snapshots capture resolved arguments and variables, including child
+jobs and repair roles. Later settings edits affect future runs. Variable
+values are stored in local settings and captured run data; Relay does not mask
+them in command output. Names must be nonempty and contain neither `=` nor a
+NUL character. Values must be strings without NUL characters.
+
 For example, this global file sets Codex first, keeps successful working
 copies, and supplies a model and timeout for workflows that omit them:
 
@@ -310,7 +340,7 @@ newer bytes. Project saves use the same conflict behavior in a database
 transaction. Login and server saves change only the next startup; current
 access, accounts, and run data remain intact.
 
-Dependency order, conditions, commands, environment variables, input defaults,
+Dependency order, conditions, input defaults,
 output contracts, instructions, write access, no-op permission, approval
 questions/deadlines, loop bounds, subworkflow mappings, repair verdicts, and
 entry-point evidence remain explicit workflow choices. They define the task or

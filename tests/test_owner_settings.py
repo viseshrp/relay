@@ -75,7 +75,7 @@ def test_global_save_is_atomic_private_and_rejects_stale_edits(
         {"recovery": {"max_retries": 3}},
         {"repairs": {"max_rounds": 101}},
         {"repairs": {"fix_instruction": ""}},
-        {"env": {"PASSWORD": "secret"}},
+        {"env": {"BAD=NAME": "value"}},
     ],
 )
 def test_invalid_defaults_never_replace_settings(values: dict[str, object]) -> None:

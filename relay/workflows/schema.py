@@ -23,6 +23,15 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 Scalar = str | int | float | bool | None
 
 
+def validate_environment(value: dict[str, str]) -> dict[str, str]:
+    """Reject values the process environment cannot represent on supported systems."""
+    for name, content in value.items():
+        if not name or "=" in name or "\x00" in name or "\x00" in content:
+            message = "Use nonempty variable names without '='; NUL characters are not allowed"
+            raise ValueError(message)
+    return value
+
+
 class StrictModel(BaseModel):
     """Base for versioned records that must reject unknown keys."""
 
@@ -234,6 +243,12 @@ class AgentNode(NodeBase):
     auto_retry: bool = True
 
 
+class SharedCommandReference(StrictModel):
+    """Select a named owner command whose arguments are frozen at launch."""
+
+    command: str = Field(pattern=NODE_ID_PATTERN.pattern)
+
+
 class CommandNode(NodeBase):
     """A shell-free argument-vector process."""
 
@@ -241,8 +256,11 @@ class CommandNode(NodeBase):
     writes: bool = False
     allow_no_commit: bool = False
     outputs: dict[str, OutputSelector] = Field(default_factory=dict)
-    run: list[str] = Field(min_length=1)
+    run: Annotated[list[str], Field(min_length=1)] | SharedCommandReference
     env: dict[str, str] = Field(default_factory=dict)
+    inherit_env: bool = True
+
+    validate_env = field_validator("env")(validate_environment)
 
 
 class HumanWaitNode(NodeBase):
@@ -363,9 +381,13 @@ class WorkflowDefinition(StrictModel):
     model: str | None = None
     agents: list[str] = Field(default_factory=list)
     nodes: dict[str, NodeDefinition]
+    env: dict[str, str] = Field(default_factory=dict)
+    inherit_env: bool = True
     entrypoints: list[EntryPoint] = Field(default_factory=list)
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
     repairs: dict[str, RepairRule] = Field(default_factory=dict)
+
+    validate_env = field_validator("env")(validate_environment)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> WorkflowDefinition:

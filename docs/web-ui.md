@@ -728,6 +728,14 @@ the workflow and run views. The setup checklist stays hidden here.
 Global defaults cover ordered agents, exact shared and per-agent models,
 thinking effort, agent permissions, job timeouts, retry participation,
 recovery budgets, working-copy cleanup, and defaults for new repair rules.
+They also include **Shared commands** with a name, program, and one argument
+per line, and **Environment variables** with name/value rows. Add and remove
+controls edit the maps. **Advanced command arguments** accepts JSON for empty
+arguments or newlines inside one argument. Variable values can span lines.
+Duplicate names cannot overwrite another row. Server validation checks command
+names, programs, and process environment values.
+Project switches enable independent command and variable maps; removing every
+row keeps an empty project override. Turning a switch off inherits global rows.
 Model and option refreshes use the existing discovery endpoints. Changing an
 agent model clears its options; provider choices preserve their descriptions
 and exact values. Saved workflow choices take precedence as described in the
@@ -757,3 +765,14 @@ project/global defaults to apply. Job effort and permission menus offer
 **Agent's default** to save an explicit null and skip inheritance for that
 option. Existing YAML editing, leases, prompts, and launch validation remain
 the source of workflow edits.
+
+Command job forms, including fixer and verifier roles, offer **Command source**:
+**Program and arguments** or **Shared command from Settings**. Shared commands
+show their saved arguments. A missing name remains visible as **not configured**
+and blocks launch. **Use inherited environment variables** and variable rows
+edit the job's `inherit_env` and `env` in the same YAML document.
+**Advanced workflow settings and YAML** has workflow variable rows and
+**Use project and global environment variables**. YAML edits populate these
+controls, and form edits update YAML. Arguments keep their literal boundaries;
+no shell syntax is expanded. Settings changes affect future launches; existing
+runs retain their resolved arguments and variables.

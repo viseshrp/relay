@@ -31,7 +31,7 @@ import { ActionIcon } from "./ActionIcon";
 import { api, errorMessage, RelayApiError } from "../api";
 import { editorHolder } from "../editor-session";
 import { projectPath, stageLabel } from "../navigation";
-import type { AgentOptions, AgentsResponse, HandoffWarning, ProjectRecord, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
+import type { AgentOptions, AgentsResponse, HandoffWarning, ProjectRecord, ProjectSettingsResponse, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
   canonicalYaml,
   flowElements,
@@ -47,6 +47,8 @@ import { AgentConfiguration } from "./AgentConfiguration";
 import { PromptEditor } from "./PromptEditor";
 import { ModelPicker } from "./ModelPicker";
 import { RepairSettings } from "./RepairSettings";
+import { CommandFields } from "./CommandFields";
+import { EnvironmentEditor } from "./EnvironmentEditor";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import { LaunchPanel } from "./LaunchPanel";
 
@@ -108,6 +110,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   const [busy, setBusy] = useState(false);
   const [formattingYaml, setFormattingYaml] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
+  const [commands, setCommands] = useState<Record<string, string[]>>({});
   const [launchOpen, setLaunchOpen] = useState(initialLaunch);
   const launchButton = useRef<HTMLButtonElement>(null);
 
@@ -193,8 +196,10 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   );
 
   useEffect(() => {
-    void api<AgentsResponse>("/api/agents").then(setAgents).catch(() => setAgents(null));
     let active = true;
+    setCommands({});
+    void api<ProjectSettingsResponse>(projectPath("/api/projects/defaults", requestProject)).then((response) => { if (active) setCommands(response.effective.workflow_defaults.commands); }).catch((caught: unknown) => { if (active) setError(errorMessage(caught)); });
+    void api<AgentsResponse>(projectPath("/api/agents", requestProject)).then((response) => { if (active) setAgents(response); }).catch(() => { if (active) setAgents(null); });
     void api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", requestProject)).then((response) => {
       if (!active) return;
       setInventory(response.workflows);
@@ -495,6 +500,12 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
             <TextField size="small" label="Workflow key" value={workflowKey} onChange={(event) => setWorkflowKey(event.target.value)} />
             <Button onClick={() => void loadWorkflow(workflowKey)}>Load</Button>
           </Stack>
+          <Stack component="section" aria-label="Workflow environment" spacing={1} sx={{ mb: 2 }}>
+            <Typography variant="h6">Workflow environment variables</Typography>
+            <FormControlLabel label="Use project and global environment variables" control={<Switch checked={parsed.value?.inherit_env !== false} disabled={!leaseReady || parsed.value === null} onChange={(_event, checked) => mutate((document) => document.setIn(["inherit_env"], checked))} />} />
+            <Typography variant="body2" color="text.secondary">These variables apply to this workflow's command jobs. Child workflows keep their own workflow variables.</Typography>
+            <EnvironmentEditor value={parsed.value?.env ?? {}} disabled={!leaseReady || parsed.value === null} onChange={(env) => mutate((document) => document.setIn(["env"], env))} />
+          </Stack>
           <FormControlLabel control={<Switch checked={parsed.value?.recovery?.enabled === true}
             disabled={!leaseReady || parsed.value === null}
             onChange={(event) => mutate((document) => document.setIn(["recovery", "enabled"], event.target.checked))} />}
@@ -585,34 +596,16 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                   </FormControl>
                 </>
               )}
-              {definition.type === "command" && (
-                <Stack spacing={1}>
-                  <TextField size="small" label="Program" value={Array.isArray(definition.run) ? String(definition.run[0] ?? "") : ""} onChange={(event) => setNodeField("run", [event.target.value, ...(Array.isArray(definition.run) ? definition.run.slice(1) : [])])} />
-                  <TextField size="small" label="Arguments (one per line)" multiline minRows={2} value={Array.isArray(definition.run) ? definition.run.slice(1).join("\n") : ""} onChange={(event) => {
-                    // "a b\n--fast" becomes ["a b", "--fast"]; no shell quoting or expansion occurs.
-                    setNodeField("run", [Array.isArray(definition.run) ? definition.run[0] : "", ...(event.target.value === "" ? [] : event.target.value.split("\n"))]);
-                  }} helperText="Each line is passed as one argument. For Git status, use status and --short on separate lines." />
-                <Accordion><AccordionSummary>Advanced command arguments</AccordionSummary><AccordionDetails>
-                <TextField
-                  key={`${selectedNode}-${JSON.stringify(definition.run)}`}
-                  size="small"
-                  label="Argument vector as JSON"
-                  defaultValue={JSON.stringify(definition.run ?? [])}
-                  onBlur={(event) => {
-                    try {
-                      const value: unknown = JSON.parse(event.target.value);
-                      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-                        throw new Error("Command arguments must be a JSON string array.");
-                      }
-                      setNodeField("run", value);
-                    } catch (caught) {
-                      setError(errorMessage(caught));
-                    }
-                  }}
-                />
-                </AccordionDetails></Accordion>
-                </Stack>
-              )}
+              {definition.type === "command" && <CommandFields key={selectedNode} node={definition} commands={commands} disabled={!leaseReady || busy} onChange={(next) => {
+                const key = selectedNode;
+                if (key === null) return;
+                mutate((document) => {
+                  for (const field of ["run", "env", "inherit_env"] as const) {
+                    if (next[field] === undefined) document.deleteIn(["nodes", key, field]);
+                    else document.setIn(["nodes", key, field], next[field]);
+                  }
+                });
+              }} />}
               {definition.type === "human_wait" && (
                 <TextField
                   size="small"
@@ -687,7 +680,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         stage={selectedNode} rule={parsed.value.repairs[selectedNode]} defaults={repairDefaults}
         sourceOutputs={definition?.outputs && typeof definition.outputs === "object" ? definition.outputs : {}}
         onSourceOutput={(output, selector) => mutate((document) => document.setIn(["nodes", selectedNode, "outputs", output], selector))}
-        agents={agents} model={typeof parsed.value.model === "string" ? parsed.value.model : ""}
+        agents={agents} commands={commands} model={typeof parsed.value.model === "string" ? parsed.value.model : ""}
         preferences={parsed.value.agents?.length ? parsed.value.agents : agents?.preferences ?? []}
         workflowPath={workflowPath(loadedKey)} workflowKey={loadedKey} project={requestProject}
         holder={holder.current} disabled={!leaseReady} onDirty={setPromptDirty}

@@ -652,6 +652,8 @@ services. They never mutate an existing run's snapshot or provider session.
   "providers": {},
   "timeout": null,
   "auto_retry": true,
+  "commands": {},
+  "env": {},
   "recovery": {"enabled": false, "max_retries": 2},
   "repairs": {
     "max_rounds": 4,
@@ -667,8 +669,17 @@ and permission defaults require a model. Reads include resolved built-in
 values; sparse settings files remain valid. A save replaces the submitted
 settings object, so clients should send the complete loaded object.
 
+`commands` maps lowercase node-ID-style names to nonempty string argument
+lists. The first argument must be a nonempty program; no argument may contain
+a NUL character. `env` maps nonempty variable names to string values. Names
+cannot contain `=` or NUL; values cannot contain NUL. Both default to empty
+maps. Existing settings, project defaults, and agent inventory endpoints expose
+these additive fields through `workflow_defaults` or `defaults`.
+
 Project overrides accept only `agent_preferences`, `cleanup_policy`, and
 `workflow_defaults`. Omitted fields inherit; nested objects merge by field.
+The `commands` and `env` maps each replace the entire inherited map when
+present, including when empty. Other nested objects keep merging by field.
 An explicit `null` model, timeout, effort, or permission removes that inherited
 choice. Sending an empty overrides object restores all global defaults.
 Changing a provider's model clears inherited effort and permissions unless
@@ -685,6 +696,12 @@ Workflow reads keep their existing `repair_defaults` shape, using saved
 project/global values when the editor creates a new repair rule.
 An omitted launch `cleanup_policy` uses the project's resolved setting.
 Existing explicit launch fields and all control/event payloads are unchanged.
+Workflow schema version 1 additionally accepts workflow `env` and `inherit_env`,
+command-job `inherit_env`, and `run: {command: name}`. Launch resolves shared
+commands and environment layers through Python services and freezes them in
+node definitions and child snapshots. An unresolved name returns
+`422 workflow_validation_error` without creating a run. Original YAML bytes
+remain unchanged, and existing `run` arrays and old snapshots remain valid.
 
 Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 `attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,

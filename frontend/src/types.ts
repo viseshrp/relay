@@ -351,6 +351,8 @@ export interface ProviderDefaults {
   permission_mode?: string | null;
 }
 export interface WorkflowDefaults {
+  commands: Record<string, string[]>;
+  env: Record<string, string>;
   model: string | null;
   providers: Record<string, ProviderDefaults>;
   timeout: string | null;

@@ -3,6 +3,8 @@ import { useId } from "react";
 import type { AgentOptions, AgentRecord, OwnerSettings, ProjectDefaultOverrides, ProviderDefaults, WorkflowDefaults } from "../types";
 import { AgentConfiguration } from "./AgentConfiguration";
 import { ModelPicker } from "./ModelPicker";
+import { EnvironmentEditor } from "./EnvironmentEditor";
+import { SharedCommandsEditor } from "./SharedCommandsEditor";
 
 interface Props {
   settings: OwnerSettings;
@@ -18,6 +20,7 @@ const overrideLabels: Record<keyof WorkflowDefaults | "agent_preferences" | "cle
   agent_preferences: "agent order", cleanup_policy: "working-copy cleanup", model: "shared model",
   providers: "agent models and thinking", timeout: "job timeout", auto_retry: "automatic job retries",
   recovery: "automatic recovery", repairs: "new repair rules",
+  commands: "shared commands", env: "environment variables",
 };
 
 export function DefaultSettingsForm({ settings, agents, onChange, project, disabled, overrides, onOverrides }: Props) {
@@ -85,6 +88,16 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
             {value.permission_mode && <Alert severity="info">New jobs using this exact model inherit this permission choice unless the workflow sets its own. Review the agent's description before saving.</Alert>}
           </Stack></AccordionDetails></Accordion>;
       })}
+    </Box>
+    <Box><Typography variant="h6">Shared commands</Typography>
+      <Typography variant="body2" color="text.secondary">Save named programs and arguments for command jobs to select. Each run captures the selected command. Existing program and argument lists stay explicit.</Typography>
+      {inherit("commands")}
+      <SharedCommandsEditor value={defaults.commands} disabled={locked("commands")} onChange={(commands) => update("commands", commands)} />
+    </Box>
+    <Box><Typography variant="h6">Environment variables</Typography>
+      <Typography variant="body2" color="text.secondary">Defaults for command jobs. Workflow and job variables take precedence. Values are stored locally and captured in runs; output is not masked.</Typography>
+      {inherit("env")}
+      <EnvironmentEditor value={defaults.env} disabled={locked("env")} onChange={(env) => update("env", env)} />
     </Box>
     <Box><Typography variant="h6">Job defaults</Typography><Stack spacing={2} sx={{ mt: 2 }}>
       <Box>{inherit("timeout")}<TextField fullWidth label="Job timeout" value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></Box>

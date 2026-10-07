@@ -7,6 +7,9 @@ import { stageLabel } from "./navigation";
 
 export interface WorkflowNodeValue {
   type: string;
+  run?: string[] | { command: string };
+  env?: Record<string, string>;
+  inherit_env?: boolean;
   needs?: string[];
   writes?: boolean;
   agents?: string[];
@@ -30,6 +33,8 @@ export interface WorkflowValue {
   name: string;
   model?: string;
   agents?: string[];
+  env?: Record<string, string>;
+  inherit_env?: boolean;
   inputs?: Record<string, InputDefinition>;
   nodes: Record<string, WorkflowNodeValue>;
   entrypoints?: Array<{ scope_path: string }>;
