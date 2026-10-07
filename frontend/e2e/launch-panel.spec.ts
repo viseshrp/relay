@@ -176,3 +176,56 @@ test("launch errors stay in the panel and failed requests can be retried", async
   await expect(panel).toBeHidden();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
 });
+
+test("file blockers and exemptions appear before launch and copied fixes leave Git unchanged", async ({ page, context }) => {
+  await create(page, "file-launch");
+  const before = await (await post(page, "/__test__/launch-files", { mode: "blockers" })).json();
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const panel = await open(page);
+  const files = panel.getByRole("region", { name: "Launch file check" });
+  await expect(files).toContainText("2 files block this run.");
+  await expect(files).toContainText("README.md");
+  await expect(files).toContainText("staged, modified");
+  await expect(files).toContainText("untracked code.py");
+  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
+  await files.locator("summary").click();
+  await expect(files).toContainText("REVIEW.md");
+  await expect(files).toContainText("Root workflow report");
+  await expect(files).toContainText(".relay/workflows/file-launch.yaml");
+  await expect(files).toContainText("Captured workflow source");
+  for (const command of ["git commit", "git stash -u"]) {
+    await files.getByRole("button", { name: `Copy ${command}`, exact: true }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
+    await expect(files.getByRole("status")).toHaveText(`Copied ${command}.`);
+  }
+  const after = await (await post(page, "/__test__/launch-files", { mode: "inspect" })).json();
+  expect(after).toEqual(before);
+  expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  await files.getByRole("button", { name: "Check files again" }).click();
+  await expect(files).toContainText("Project files are ready to run.");
+  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
+});
+
+test("file check failures can be refreshed and later changes still block the launch", async ({ page }) => {
+  await create(page, "racing-launch");
+  await page.route("**/api/workflows/racing-launch.yaml/preflight", (route) => route.fulfill({
+    status: 503, json: { code: "git_error", message: "Git file check failed.", context: {} },
+  }));
+  const panel = await open(page);
+  const files = panel.getByRole("region", { name: "Launch file check" });
+  await expect(files.getByRole("alert")).toHaveText("Git file check failed.");
+  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
+  await page.unroute("**/api/workflows/racing-launch.yaml/preflight");
+  await files.getByRole("button", { name: "Check files again" }).click();
+  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
+  expect((await post(page, "/__test__/launch-files", { mode: "race" })).ok()).toBeTruthy();
+  const launched = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
+  await panel.getByRole("button", { name: "Run workflow", exact: true }).click();
+  const response = await launched;
+  expect(response.status()).toBe(409);
+  expect((await response.json()).context.changes).toBe("?? racing code.py");
+  await expect(panel.getByRole("alert").filter({ hasText: "The Git worktree has code or staged changes before starting this run." })).toBeVisible();
+  await files.getByRole("button", { name: "Check files again" }).click();
+  await expect(files).toContainText("racing code.py");
+  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
+});

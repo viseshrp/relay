@@ -19,17 +19,17 @@ from relay.errors import (
     WorkflowValidationError,
 )
 from relay.paths import safe_resolve
-from relay.projects.discovery import git_root
 from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import create_primary_worktree
-from relay.workflows.loader import load_workflow, resolve_workflow_path
+from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
 from relay.workflows.scope import parse_scope_path
 from relay.workflows.snapshot import SnapshotBundle, build_snapshot
-from relay.workflows.validation import ValidatedWorkflow, resolve_inputs, validate_loaded_workflow
+from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
+from .preflight import launch_source_files, load_launch_workflow
 from .scheduler import SchedulingStore, dispatch_ready_nodes
 
 _HASH_CHUNK_BYTES = 1024 * 1024
@@ -197,17 +197,10 @@ def launch_workflow(
     enqueue: Callable[[str], object],
 ) -> LaunchResult:
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
-    workflows_root = relay_root / "workflows"
-    workflow_path = resolve_workflow_path(workflows_root, request.workflow_key)
-    root = load_workflow(workflow_path)
-    workflow = validate_loaded_workflow(root, relay_root)
+    workflow = load_launch_workflow(relay_root, request.workflow_key)
     typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     repository = relay_root.parent.resolve()
-    captured = [workflow.root.path, *(item.path for item in workflow.subworkflows.values())]
-    captured.extend(Path(prompt.path) for prompt in workflow.prompts if prompt.source == "local")
-    # /repo/.relay/prompts/check.md becomes .relay/prompts/check.md in Git's root-relative status.
-    source_root = git_root(repository)
-    snapshot_files = frozenset(path.relative_to(source_root).as_posix() for path in captured)
+    snapshot_files = launch_source_files(workflow, repository)
     require_launch_clean(repository, snapshot_files)
     entry_point = _validate_entry_point(
         workflow,

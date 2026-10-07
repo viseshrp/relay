@@ -54,6 +54,7 @@ request header is `X-CSRFToken: abc`.
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
+| `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
@@ -63,6 +64,21 @@ request header is `X-CSRFToken: abc`.
 commit. Reading it does not modify the repository. These fields are additive;
 `project` keeps its existing payload. Launch performs its own source capture
 and preflight rather than relying on this preview.
+
+Workflow preflight validates the saved workflow, its subworkflows, and local
+instructions, then applies the same Git cleanliness rule as launch. It neither
+probes agents nor creates a run. Invalid sources return their existing Relay
+error envelopes. Each `files` entry has porcelain `status`, root-relative
+`path`, optional rename/copy `original_path`, `allowed`, and `reasons`.
+Blocking files appear first, with reasons such as `staged`, `modified`, or
+`untracked`. Allowed entries explain the exact report, captured source, or
+unchanged setup-file exemption. No file contents are returned.
+
+Counts cover every changed file. The preview returns at most 200 entries and
+512 KiB of serialized file metadata; `truncated` indicates omitted entries.
+The owner can inspect the complete list with `git status`. Reading preflight
+does not change files, Git history, the index, or editor leases. Launch repeats
+validation and cleanliness checks even after a successful preview.
 
 Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
 resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.

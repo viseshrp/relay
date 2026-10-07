@@ -22,6 +22,7 @@ from relay.constants import (
     REVIEW_PREVIEW_MAX_BYTES,
 )
 from relay.errors import ConfigError, RelayError
+from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import RunStatus
 from relay.projects.service import list_registered_projects, project_launch_source
@@ -133,6 +134,14 @@ def project_context(request: HttpRequest) -> HttpResponse:
 def workflow_templates(request: HttpRequest) -> HttpResponse:
     del request
     return JsonResponse({"templates": starter_inventory()})
+
+
+@api_errors
+@owner_required
+@require_GET
+def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
+    relay_root, _project = current_project(request)
+    return JsonResponse(asdict(inspect_launch_cleanliness(relay_root, key)))
 
 
 @api_errors

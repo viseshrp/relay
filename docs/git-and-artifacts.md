@@ -22,6 +22,12 @@ files, and other `.relay` files stop launch. Root workflow documents such as `RE
 does not add Git exclusions, stage these files, or commit them. Existing owner
 documents stay in place. Symlinks and staged report changes still stop launch.
 
+The browser's **Run workflow** panel previews this same rule and explains
+blocking and permitted changes. It reads Git status and validates saved
+workflow sources without staging, stashing, or committing anything. Launch
+checks again before creating a snapshot or working copy, so a preview never
+authorizes changes made later.
+
 These report exemptions apply to writing-node cleanliness too, so a report
 can be preserved and passed to the next stage without a documentation commit.
 Autonomous workflows can also leave `E2E_VERIFICATION.md`,

@@ -58,6 +58,14 @@ export interface PreviousRunInputs {
   inputs: Record<string, JsonScalar>;
 }
 
+export interface LaunchCleanliness {
+  clean: boolean;
+  blocking_count: number;
+  allowed_count: number;
+  files: Array<{ status: string; path: string; original_path: string | null; allowed: boolean; reasons: string[] }>;
+  truncated: boolean;
+}
+
 export interface HandoffWarning {
   workflow_key?: string;
   scope_path: string;

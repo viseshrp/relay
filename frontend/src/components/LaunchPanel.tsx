@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath, stageLabel } from "../navigation";
-import type { PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
+import type { LaunchCleanliness, PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
 import type { WorkflowValue } from "../workflow";
 import { LaunchInputs, type LaunchValues } from "./LaunchInputs";
+import { LaunchPreflight } from "./LaunchPreflight";
 
 interface LaunchPanelProps {
   open: boolean;
@@ -33,6 +34,8 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
   const [sourceRevision, setSourceRevision] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [preflight, setPreflight] = useState<LaunchCleanliness | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
 
   useEffect(() => { setInputs(previousRun?.inputs ?? {}); }, [previousRun]);
 
@@ -48,10 +51,24 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
     return () => controller.abort();
   }, [open, requestProject, sourceRevision]);
 
+  useEffect(() => {
+    setPreflight(null); setPreflightError(null);
+    if (!open || workflowKey === null || blockedReason) return;
+    const controller = new AbortController();
+    const path = `/api/workflows/${workflowKey.split("/").map(encodeURIComponent).join("/")}/preflight`;
+    void api<LaunchCleanliness>(projectPath(path, requestProject), { signal: controller.signal })
+      .then((result) => { if (!controller.signal.aborted) setPreflight(result); })
+      .catch((caught: unknown) => { if (!controller.signal.aborted) setPreflightError(errorMessage(caught)); });
+    return () => controller.abort();
+  }, [open, workflowKey, requestProject, blockedReason, sourceRevision]);
+
   const reason = launching ? "Starting this workflow…" : blockedReason || (sourceError
     ? "Relay could not check the current branch. Check again before running."
     : source === null ? "Checking the current branch…"
-    : source.commit === null ? "Create the first Git commit in this project before running a workflow." : null);
+    : source.commit === null ? "Create the first Git commit in this project before running a workflow."
+    : preflightError ? "Fix the project file check, then check again before running."
+    : preflight === null ? "Checking project files…"
+    : !preflight.clean ? `${preflight.blocking_count} ${preflight.blocking_count === 1 ? "file blocks" : "files block"} this run. Commit or set aside the listed changes first.` : null);
 
   async function launch(): Promise<void> {
     if (reason || workflowKey === null) return;
@@ -82,6 +99,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
           : sourceError ? <Button onClick={() => setSourceRevision((value) => value + 1)}>Check again</Button> : undefined}>{reason}</Alert>}
         {saveError && <Alert severity="error">{saveError}</Alert>}
         {launchError && <Alert severity="error">{launchError}</Alert>}
+        {!blockedReason && <LaunchPreflight result={preflight} error={preflightError} onCheck={() => setSourceRevision((value) => value + 1)} />}
         <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} onChange={(name, value) => setInputs((current) => ({ ...current, [name]: value }))} />
         <Accordion><AccordionSummary>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
           <TextField label="Override model for this run" value={model} onChange={(event) => setModel(event.target.value)}

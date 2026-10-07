@@ -39,6 +39,72 @@ from tests.support import (
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
 
 
+def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    text = "version: 1\nname: Check\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    served.write_workflow("nested/check", text)
+    served.write("REVIEW.md", "Owner review\n")
+    served.write("loose code.py", "Owner code\n")
+    before = git(served.repository, "status", "--porcelain=v1")
+    head = git(served.repository, "rev-parse", "HEAD")
+    response = owner.get("/api/workflows/nested/check.yaml/preflight")
+    assert response.status_code == 200
+    assert response.json() == {
+        "clean": False,
+        "blocking_count": 1,
+        "allowed_count": 1,
+        "truncated": False,
+        "files": [
+            {
+                "status": "??",
+                "path": "loose code.py",
+                "original_path": None,
+                "allowed": False,
+                "reasons": ["untracked"],
+            },
+            {
+                "status": "??",
+                "path": "REVIEW.md",
+                "original_path": None,
+                "allowed": True,
+                "reasons": ["Root workflow report"],
+            },
+        ],
+    }
+    assert git(served.repository, "status", "--porcelain=v1") == before
+    assert git(served.repository, "rev-parse", "HEAD") == head
+    assert not Run.objects.exists()
+    assert "Owner code" not in response.content.decode()
+    other = create_project(tmp_path / "another")
+    other.write_workflow("nested/check", text)
+    selected = owner.get(f"/api/workflows/nested/check/preflight?project={other.project_id}")
+    assert selected.status_code == 200
+    assert selected.json() == {
+        "clean": True,
+        "blocking_count": 0,
+        "allowed_count": 0,
+        "files": [],
+        "truncated": False,
+    }
+    assert owner.post("/api/workflows/nested/check/preflight").status_code == 405
+
+
+def test_workflow_preflight_requires_login_and_returns_workflow_errors(
+    client: Client, owner: Client, served: RelayProject
+) -> None:
+    client.logout()
+    assert client.get("/api/workflows/workflow/preflight").status_code == 401
+    client.force_login(User.objects.get(username="owner"))
+    served.write(".relay/workflows/invalid.yaml", "nodes: [\n")
+    response = owner.get("/api/workflows/invalid/preflight")
+    assert response.status_code == 422
+    assert response.json()["code"] == "workflow_validation_error"
+    missing = owner.get("/api/workflows/missing/preflight")
+    assert missing.status_code == 422
+    assert missing.json()["code"] == "workflow_validation_error"
+
+
 def test_historical_provider_failure_is_visible_without_replaying_activity(
     owner: Client, served: RelayProject, engine: InlineEngine
 ) -> None:

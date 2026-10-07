@@ -231,6 +231,19 @@ commit. Unsaved workflow changes offer **Save** when this browser can save;
 lease conflicts and unsaved instructions explain what to fix in the editor.
 Launch failures appear in the panel, and the owner can retry after fixing them.
 
+When the saved workflow is ready, **Project files** checks launch cleanliness
+before enabling **Run workflow**. It lists blocking files with their Git
+reasons and puts permitted changes under **Allowed files**, explaining each
+exemption. A bounded preview shows full counts when the file list is truncated.
+**Check files again** refreshes the file check and current branch.
+
+Blocked previews offer **Copy** for `git commit` and `git stash -u`. Relay
+copies these commands; the owner chooses what to stage or set aside and runs
+them in the project folder. Stashing with `-u` also removes untracked workflow
+files and reports until restored. The preview uses saved sources. After
+**Save**, the panel checks them again. A later file change can still block the
+server's launch check and appears as an error in the panel.
+
 **Advanced options** explains **Override model for this run**, **After a
 successful run**, and **Start from job**. Cached models are suggestions; Relay
 sends the exact entered value. Working copies can be deleted on success or

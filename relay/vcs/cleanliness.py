@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 
@@ -33,12 +34,23 @@ def require_clean(repository: Path, *, stage: str) -> None:
         )
 
 
-def execution_changes(
+@dataclass(frozen=True, slots=True)
+class RepositoryChange:
+    """One Git status record and the shared launch exemption decision."""
+
+    status: str
+    path: str
+    original_path: str | None
+    allowed: bool
+    reasons: tuple[str, ...]
+
+
+def execution_status(
     repository: Path,
     *,
     snapshot_files: frozenset[str] = frozenset(),
     allow_initial_surface: bool = False,
-) -> tuple[str, ...]:
+) -> tuple[RepositoryChange, ...]:
     """Ignore unstaged workflow documents and exact snapshotted source files.
 
     ``?? REVIEW.md`` is allowed; ``?? src/review.py`` and staged ``A  REVIEW.md``
@@ -66,7 +78,7 @@ def execution_changes(
         else {}
     )
     records = raw.stdout.split(b"\0")
-    changes = []
+    changes: list[RepositoryChange] = []
     index = 0
     while index < len(records):
         record = records[index]
@@ -75,28 +87,77 @@ def execution_changes(
             continue
         state = record[:2].decode("ascii")
         name = os.fsdecode(record[3:])
+        original_path = None
         # Rename/copy records carry another NUL field; neither is an allowed edit.
         if "R" in state or "C" in state:
+            original_path = os.fsdecode(records[index]) if index < len(records) else None
             index += 1
         path = git_root / name
         allowed = name in documents or name in snapshot_files
         allowed_change = allowed and state in {"??", " M"}
         initial_change = state == "??" and name in initial_files
+        allowed_reason = None
         if (allowed_change or initial_change) and path.is_file() and not path.is_symlink():
             if allowed_change:
-                continue
-            if initial_change and path.resolve().is_relative_to(git_root):
+                allowed_reason = (
+                    "Root workflow report" if name in documents else "Captured workflow source"
+                )
+            if (
+                allowed_reason is None
+                and initial_change
+                and path.resolve().is_relative_to(git_root)
+            ):
                 # Untracked, untouched init placeholders are safe to leave in place.
                 # Read only enough to detect any owner edit, including appended bytes.
                 try:
                     with path.open("rb") as stream:
                         expected = initial_files[name]
                         if stream.read(max(map(len, expected)) + 1) in expected:
-                            continue
+                            allowed_reason = "Unchanged setup file"
                 except OSError:
                     pass
-        changes.append(f"{state} {name}")
+        reasons = []
+        if allowed_reason is not None:
+            reasons.append(allowed_reason)
+        else:
+            if state == "??":
+                reasons.append("untracked")
+            elif state[0] != " ":
+                reasons.append("staged")
+            if "M" in state:
+                reasons.append("modified")
+            if "D" in state:
+                reasons.append("deleted")
+            if "R" in state:
+                reasons.append("renamed")
+            if "C" in state:
+                reasons.append("copied")
+            if "U" in state:
+                reasons.append("Git conflict")
+            if path.is_symlink():
+                reasons.append("symlink")
+            if not reasons:
+                reasons.append("changed")
+        changes.append(
+            RepositoryChange(state, name, original_path, allowed_reason is not None, tuple(reasons))
+        )
     return tuple(changes)
+
+
+def execution_changes(
+    repository: Path,
+    *,
+    snapshot_files: frozenset[str] = frozenset(),
+    allow_initial_surface: bool = False,
+) -> tuple[str, ...]:
+    """Return blocking records without changing the existing error format."""
+    return tuple(
+        f"{change.status} {change.path}"
+        for change in execution_status(
+            repository, snapshot_files=snapshot_files, allow_initial_surface=allow_initial_surface
+        )
+        if not change.allowed
+    )
 
 
 def require_launch_clean(repository: Path, snapshot_files: frozenset[str]) -> None:
@@ -115,4 +176,11 @@ def require_launch_clean(repository: Path, snapshot_files: frozenset[str]) -> No
         )
 
 
-__all__ = ["execution_changes", "require_clean", "require_launch_clean", "status_porcelain"]
+__all__ = [
+    "RepositoryChange",
+    "execution_changes",
+    "execution_status",
+    "require_clean",
+    "require_launch_clean",
+    "status_porcelain",
+]

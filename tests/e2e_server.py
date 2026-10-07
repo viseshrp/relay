@@ -75,6 +75,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         RegistryNetwork,
         create_project,
         fake_executable,
+        git,
     )
 
     apply_migrations()
@@ -165,6 +166,29 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Save browser-test workflow")
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def launch_files(request: HttpRequest) -> JsonResponse:
+        mode = json_body(request).get("mode")
+        if mode == "blockers":
+            project.write("README.md", "Browser-test staged change\n")
+            git(project.repository, "add", "README.md")
+            project.write("untracked code.py", "Browser-test code\n")
+            project.write("REVIEW.md", "Browser-test owner review\n")
+        elif mode == "race":
+            project.write("racing code.py", "Browser-test later change\n")
+        elif mode != "inspect":
+            message = "The browser-test launch file mode is invalid."
+            raise ConfigError(message)
+        return JsonResponse(
+            {
+                "head": git(project.repository, "rev-parse", "HEAD"),
+                "status": git(project.repository, "status", "--porcelain=v1"),
+                "index": git(project.repository, "diff", "--cached"),
+            }
+        )
+
     @owner_required
     @require_POST
     def report(request: HttpRequest) -> JsonResponse:
@@ -228,6 +252,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
+    urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))

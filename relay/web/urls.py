@@ -16,6 +16,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/projects/relink", actions.relink_registered_project, name="project-relink"),
     path("api/workflows", actions.workflows_collection, name="workflows"),
     path("api/workflow-templates", pages.workflow_templates, name="workflow-templates"),
+    path("api/workflows/<path:key>/preflight", pages.workflow_preflight, name="workflow-preflight"),
     path("api/workflows/<path:key>/draft", actions.autosave_draft, name="workflow-draft"),
     path("api/workflows/<path:key>/save", actions.save_workflow, name="workflow-save"),
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
