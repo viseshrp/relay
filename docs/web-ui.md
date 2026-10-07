@@ -78,11 +78,19 @@ Actions started without a login are attributed to `local`.
 
 ## Get started
 
-After sign-in, or immediately with login disabled, a **Get started** checklist
-shows the selected project, all five supported agents, workflow choices, and
-the first-run controls. It appears in the editor and history until a run
-succeeds in that project. Opening a run gives its summary and logs the full
-page. Use **Help › Get started** to open the checklist again.
+Every project uses the same workflow and run workspace, including projects
+with no previous runs. After sign-in, or immediately with login disabled, a
+small welcome prompt offers **Get started**. Opening the checklist or choosing
+**Dismiss welcome** hides this prompt across all projects in that browser,
+including after a reload. This choice does not change project settings.
+
+The checklist opens in a dialog from the welcome prompt or **Help › Get
+started**, including on the settings page. It shows the selected project,
+all five supported agents, workflow choices, and first-run controls. Close it
+at any time with **Close checklist**, Escape, or a click outside the dialog;
+focus returns to **Help**. Opening the checklist starts a bounded agent
+connection check; switching projects with it closed does not probe agents.
+Launching a workflow closes it and opens the run page.
 
 Agent cards show **Ready to connect**, **Sign in required**, **Check failed**,
 or **Not installed**, with text and a status symbol. **Check again** uses the
@@ -97,7 +105,7 @@ You can edit those inputs or change the model before pressing **Run workflow**.
 Launch uses the existing validation and preflight services. With no working
 agent, the checklist explains the fix and disables the run button.
 **Blank workflow** opens the same gallery with the blank option available;
-add its jobs in the editor before running it.
+close the checklist and add its jobs in the editor before running it.
 
 ## Choose a project and workflow
 

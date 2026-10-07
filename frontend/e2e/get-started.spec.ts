@@ -58,6 +58,7 @@ for (const readyCount of [0, 5]) {
       })) } });
     });
     await page.goto("/");
+    await page.getByRole("button", { name: "Get started", exact: true }).click();
     const setup = page.getByRole("region", { name: "Get started", exact: true });
     await expect(setup.getByRole("article")).toHaveCount(5);
     // Installed status comes from the inventory; model checks never install an agent.

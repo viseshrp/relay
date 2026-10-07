@@ -15,6 +15,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
     await page.getByLabel(/^Password/).fill("Relay-Test-Passphrase-2026!");
     await page.getByRole("button", { name: "Create password", exact: true }).click();
   }
+  await page.getByRole("button", { name: "Get started", exact: true }).click();
   const setup = page.getByRole("region", { name: "Get started", exact: true });
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   await expect(setup.getByRole("article", { name: "Claude Code", exact: true })).toContainText("Not installed");

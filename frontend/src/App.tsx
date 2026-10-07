@@ -43,6 +43,13 @@ const RunWorkspace = lazy(() =>
   })),
 );
 
+const SETUP_DISMISSED = "relay.setup-dismissed";
+
+function readSetupDismissed(): boolean {
+  try { return localStorage.getItem(SETUP_DISMISSED) === "true"; }
+  catch { return false; }
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [location, setLocation] = useState(readLocation);
@@ -63,6 +70,9 @@ export function App() {
   const [signingOut, setSigningOut] = useState(false);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const [setupForced, setSetupForced] = useState(false);
+  const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
+  const helpButton = useRef<HTMLButtonElement>(null);
+  const setupWasOpen = useRef(false);
   const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
   const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
   const [workflowCreate, setWorkflowCreate] = useState(false);
@@ -125,6 +135,22 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === location.project);
   const requestProject = location.project === servedProject ? null : location.project;
   useEffect(() => { setSetupRunSucceeded(false); setSetupForced(false); }, [location.project]);
+  useEffect(() => {
+    if (setupWasOpen.current && !setupForced) helpButton.current?.focus();
+    setupWasOpen.current = setupForced;
+  }, [setupForced]);
+
+  function dismissSetup(): void {
+    setSetupDismissed(true);
+    try { localStorage.setItem(SETUP_DISMISSED, "true"); }
+    catch { /* The current session can dismiss setup when browser storage is unavailable. */ }
+  }
+
+  function openSetup(): void {
+    dismissSetup();
+    setSetupForced(true);
+    setHelpAnchor(null);
+  }
 
   useEffect(() => {
     let active = true;
@@ -214,9 +240,9 @@ export function App() {
           {loginRequired && (
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Sign out</Button>
           )}
-          <Button aria-haspopup="menu" aria-expanded={helpAnchor !== null} onClick={(event) => setHelpAnchor(event.currentTarget)}>Help</Button>
+          <Button ref={helpButton} aria-haspopup="menu" aria-expanded={helpAnchor !== null} onClick={(event) => setHelpAnchor(event.currentTarget)}>Help</Button>
           <Menu anchorEl={helpAnchor} open={helpAnchor !== null} onClose={() => setHelpAnchor(null)}>
-            <MenuItem onClick={() => { setSetupForced(true); setHelpAnchor(null); }}>Get started</MenuItem>
+            <MenuItem onClick={openSetup}>Get started</MenuItem>
             <MenuItem onClick={() => { void attention.toggleNotifications(); setHelpAnchor(null); }}>{attention.notifications ? "Disable desktop notifications" : "Enable desktop notifications"}</MenuItem>
           </Menu>
         </Toolbar>
@@ -225,13 +251,19 @@ export function App() {
 
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
         {projectError && !openingProject && <Alert severity="error" sx={{ mb: 2 }}>{projectError}</Alert>}
-        {location.view !== "settings" && projectReady && selectedProject && (location.run === null || setupForced) && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
-          forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
+        {!setupDismissed && <Alert severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={
+          <Stack direction="row" spacing={1}>
+            <Button onClick={openSetup} disabled={!projectReady || !selectedProject}>Get started</Button>
+            <Button onClick={dismissSetup}>Dismiss welcome</Button>
+          </Stack>
+        }>New to Relay? Check agents and choose your first workflow.</Alert>}
+        {setupForced && projectReady && selectedProject && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
+          runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => { setSetupForced(false); setOpeningProject(true); }}
           onWorkflowCreated={async (key) => {
             await beforeLeave.current?.();
             navigate({ workflow: key, view: "workflows", run: null, interaction: null, job: null });
             setWorkflowRevision((value) => value + 1);
-          }} onRunLaunched={(id) => navigate({ run: id, interaction: null, job: null, view: "runs" })} />}
+          }} onRunLaunched={(id) => { setSetupForced(false); navigate({ run: id, interaction: null, job: null, view: "runs" }); }} />}
         {logoutError && (
           <Alert severity="error" sx={{ mb: 2 }} action={
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Retry</Button>
