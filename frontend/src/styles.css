@@ -347,7 +347,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .log-footer { padding: 8px 0 0; align-items: center; justify-content: space-between; }
 .log-footer .MuiTypography-root { color: #67738b; }
 .conversation-log-row { display: flex; align-items: flex-start; border-bottom: 1px solid #edf0f7; }
-.conversation-log-row .activity-message { flex: 1; min-width: 0; border: 0; border-radius: 0; padding: 12px 8px; background: transparent; }
+.conversation-log-row .activity-message { flex: 1; min-width: 0; border: 0; border-radius: 0; padding: 12px 8px; }
+.conversation-log-row.active-match .activity-message { background: transparent; }
 .conversation-log-row .log-line-number { margin-top: 12px; }
 .fullscreen-log .job-log-viewport { height: calc(100vh - 190px); }
 .workflow-author-layout { display: grid; grid-template-columns: 245px minmax(0, 1fr); gap: 28px; }

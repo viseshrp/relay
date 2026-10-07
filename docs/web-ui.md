@@ -415,6 +415,9 @@ expandable row, matched by job, attempt, turn, and tool ID. Each row has a short
 title, a status symbol and text, and expandable input and output. Recorded run
 and reader-folder prefixes become relative paths in the display; other paths
 and original event bytes remain unchanged. Thoughts are collapsed by default.
+Agent messages, thoughts, and tool results use purple text on a light lavender
+background in Summary and job logs. Job and agent labels identify the source
+without relying on color; command logs keep their terminal and ANSI colors.
 
 **Filter by job** and **Search activity** search the loaded Summary messages.
 Job logs use **Search logs** across the selected attempt and scroll within

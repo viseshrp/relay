@@ -1,4 +1,5 @@
 import { Alert, Box, Button, FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Select, Stack, Switch, TextField, Typography } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { activityRows, relativeActivityText, type ActivityMessage } from "../activity";
 import { ansiSpans, commandLines, type AnsiStyle } from "../job";
@@ -20,7 +21,8 @@ export function ActivityMessageView({ message, workingFolder, timestamps = true,
   const attribution = `${stageLabel(message.scope)} · ${message.agent ? stageLabel(message.agent) : message.kind.startsWith("command.") ? "Command" : "Agent"}${message.attempt !== null ? ` · Attempt ${message.attempt}` : ""}`;
   const tool = message.tool;
   const status = tool ? toolStatus(tool.status) : null;
-  return <Paper variant="outlined" component="article" className="activity-message">
+  return <Paper variant="outlined" component="article" className="activity-message"
+    sx={message.kind.startsWith("agent.") ? { color: "secondary.dark", bgcolor: (theme) => alpha(theme.palette.secondary.main, 0.055) } : undefined}>
     <Typography variant="caption" color="text.secondary">{attribution}{timestamps ? ` · ${new Date(message.timestamp).toLocaleTimeString()}` : ""}</Typography>
     {tool && status ? <Box component="details" className="activity-tool" open={expanded || undefined}>
       <Box component="summary"><Box component="span" aria-hidden sx={{ mr: 1 }}>{status.icon}</Box>
