@@ -23,6 +23,7 @@ from relay.execution.scheduler import (
 from relay.execution.state import EventSource, NodeStatus
 from relay.workflows.graph import compile_graph
 from relay.workflows.outputs import extract_outputs
+from relay.workflows.repairs import effective_dependency_outputs
 from relay.workflows.schema import (
     JsonPathSelector,
     LabelSelector,
@@ -182,7 +183,12 @@ class SynchronousScopeRunner:
                                 needed: records[needed].status
                                 for needed in graph.dependencies[node_id]
                             },
-                            _expression_values(context, inputs, dependencies, loop_index),
+                            _expression_values(
+                                context,
+                                inputs,
+                                effective_dependency_outputs(nodes, dependencies),
+                                loop_index,
+                            ),
                         )
                         action = eligibility.action
                 if action is not None:

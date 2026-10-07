@@ -11,6 +11,7 @@ from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.graph import CompiledGraph
+from relay.workflows.repairs import effective_dependency_outputs
 from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import node_scope, parse_scope_path
 
@@ -262,8 +263,11 @@ def advance_run_schedule(
                     {
                         "inputs": dict(schedule.inputs),
                         "needs": {
-                            needed: {"outputs": dict(item.outputs)}
-                            for needed, item in dependencies.items()
+                            needed: {"outputs": dict(outputs)}
+                            for needed, outputs in effective_dependency_outputs(
+                                graph.nodes,
+                                {needed: item.outputs for needed, item in dependencies.items()},
+                            ).items()
                         },
                         "run": dict(schedule.run_metadata),
                         "loop": {},

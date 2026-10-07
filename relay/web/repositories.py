@@ -867,8 +867,22 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     }
 
 
+def _repair_groups(run: Run) -> dict[str, str]:
+    groups = {}
+    for scope, source in _mapping(run, "repair_groups").items():
+        if not isinstance(source, str):
+            message = "The stored repair presentation is invalid."
+            raise PersistenceError(message, context={"run": _identifier(run)})
+        groups[scope] = source
+    return groups
+
+
 def _node_record(
-    node: NodeRun, snapshot: RunSnapshot, *, dispatch_paused: bool = False
+    node: NodeRun,
+    snapshot: RunSnapshot,
+    *,
+    dispatch_paused: bool = False,
+    repair_groups: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
@@ -877,6 +891,35 @@ def _node_record(
     parent = scope.rsplit(".", 1)[0]
     needs = frozen.get("needs", [])
     branches = frozen.get("branches", {})
+    repair = frozen.get("repair_rule")
+    repair_for = (repair_groups or {}).get(scope)
+    if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+        repair_for = sibling_scope(scope, repair["source"])
+    repair_settings = None
+    if (
+        repair_for is not None
+        and _string(node, "node_type") == NodeType.LOOP.value
+        and parse_scope_path(scope)[-1].iteration is None
+    ):
+        body = frozen.get("body", {})
+        repair_settings = {
+            "legacy": not isinstance(repair, dict),
+            "max_rounds": frozen.get("max_iterations"),
+            "accepted_output": repair.get("accepted_output") if isinstance(repair, dict) else None,
+            "accepted_value": repair.get("accepted_value") if isinstance(repair, dict) else None,
+            "fix_instruction": repair.get("fix_instruction") if isinstance(repair, dict) else None,
+            "verify_instruction": repair.get("verify_instruction")
+            if isinstance(repair, dict)
+            else None,
+            "roles": {
+                role: {
+                    field: definition.get(field)
+                    for field in ("type", "model", "agents", "agent_options", "writes")
+                }
+                for role, definition in (body.items() if isinstance(body, dict) else ())
+                if isinstance(role, str) and isinstance(definition, dict)
+            },
+        }
     controls = [
         {"target": f"{parent}.{target}", "label": label}
         for label, target in (branches.items() if isinstance(branches, dict) else ())
@@ -884,7 +927,7 @@ def _node_record(
     ]
     for field, label in (("on_timeout", "Time limit"), ("exhausted", "Iteration limit")):
         target = frozen.get(field)
-        if isinstance(target, str):
+        if isinstance(target, str) and target:
             controls.append({"target": f"{parent}.{target}", "label": label})
     return {
         "id": _identifier(node),
@@ -900,6 +943,8 @@ def _node_record(
         if isinstance(needs, list)
         else [],
         "controls": controls,
+        "repair_for": repair_for,
+        "repair_settings": repair_settings,
         "retry_settings": (
             _retry_configuration(node, snapshot)
             if _string(node, "node_type") == NodeType.AGENT.value
@@ -1102,6 +1147,15 @@ class DjangoReadStore:
             # Reserve half the response ceiling for run and snapshot metadata.
             byte_budget = API_MAX_PAGE_BYTES // 2
             if collection == "nodes":
+                repair_groups = _repair_groups(run)
+                # Legacy exhaustion sentinels belong to the explicitly grouped
+                # repair loop. Their execution and frozen definitions stay intact.
+                for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
+                    target = _mapping(coordinator, "frozen_def").get("exhausted")
+                    if isinstance(target, str) and target:
+                        repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
+                            repair_groups[_string(coordinator, "scope_path")]
+                        )
                 nodes = list(
                     NodeRun.objects.filter(run=run, pk__gt=since)
                     .annotate(
@@ -1115,7 +1169,10 @@ class DjangoReadStore:
                     nodes,
                     bounded,
                     lambda node: _node_record(
-                        node, snapshot, dispatch_paused=_boolean(run, "dispatch_paused")
+                        node,
+                        snapshot,
+                        dispatch_paused=_boolean(run, "dispatch_paused"),
+                        repair_groups=repair_groups,
                     ),
                     byte_budget=byte_budget,
                 )
@@ -2194,6 +2251,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         )
         needs = _string_list(frozen.get("needs", []), field="needs")
         upstream = {}
+        repaired_outputs = {}
         scope_path = _string(node, "scope_path")
         for needed in needs:
             dependency = NodeRun.objects.filter(
@@ -2204,6 +2262,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 message = f"The durable dependency {needed!r} is missing."
                 raise PersistenceError(message, context={"node": scope_path})
             upstream[needed] = _mapping(dependency, "outputs")
+            repair = _mapping(dependency, "frozen_def").get("repair_rule")
+            if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+                repaired_outputs[repair["source"]] = _mapping(dependency, "outputs")
+        # Keep rejected source rows intact; dependents see the accepted verifier's
+        # outputs as needs.review.outputs instead of the original rejection.
+        upstream.update(repaired_outputs)
         metadata = {
             "run_id": _identifier(run),
             "workflow_key": _string(run, "workflow_key"),
@@ -2224,6 +2288,37 @@ class DjangoExecutionStore(DjangoAgentStore):
             metadata["loop_index"] = loop_index
         route = _effective_route(node, snapshot)
         prompts = _resolved_prompt_contents(snapshot, frozen)
+        if parent_scope is not None and _string(node, "node_id") in {"fix", "verify"}:
+            # root.relay_repair_review#2 -> root.relay_repair_review. Only an
+            # explicitly marked coordinator can add repair instructions.
+            coordinator_scope = parent_scope.rsplit("#", maxsplit=1)[0]
+            coordinator = NodeRun.objects.filter(run=run, scope_path=coordinator_scope).first()
+            repair = (
+                _mapping(coordinator, "frozen_def").get("repair_rule")
+                if coordinator is not None
+                else None
+            )
+            if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+                source_scope = sibling_scope(coordinator_scope, repair["source"])
+                report_scope = source_scope
+                if isinstance(loop_index, int) and loop_index > 1:
+                    report_scope = f"{coordinator_scope}#{loop_index - 1}.verify"
+                report = NodeRun.objects.filter(run=run, scope_path=report_scope).first()
+                repair_context = {
+                    "source_scope": source_scope,
+                    "round": loop_index,
+                    "max_rounds": _mapping(coordinator, "frozen_def").get("max_iterations"),
+                    "rejected_report_scope": report_scope,
+                    "rejected_outputs": _mapping(report, "outputs") if report is not None else {},
+                    "retained_evidence": str(artifacts_dir() / _identifier(run)),
+                }
+                metadata["repair"] = repair_context
+                instruction = repair.get(f"{_string(node, 'node_id')}_instruction")
+                if isinstance(instruction, str):
+                    prompts = (
+                        *prompts,
+                        instruction + "\nRepair context:\n" + json.dumps(repair_context),
+                    )
         handoff = route.get("handoff_prompt")
         if isinstance(handoff, str):
             # ("Review the code",) becomes ("Review the code", "Continue...").
@@ -4396,6 +4491,59 @@ class DjangoExecutionStore(DjangoAgentStore):
         except (DatabaseError, ObjectDoesNotExist):
             message = "Relay could not find the requested failed-node rerun target."
             raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
+
+    def configure_repair_groups(
+        self, run_id: str, groups: Mapping[str, str], idempotency_key: str
+    ) -> ControlResult:
+        """Fold explicitly selected legacy loops into a paused run's repair panel."""
+        from relay.execution.control import valid_idempotency_key
+
+        if not valid_idempotency_key(idempotency_key):
+            return ControlResult.INVALID
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="run.repairs_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                if not _boolean(run, "dispatch_paused"):
+                    return ControlResult.STALE
+                if len(set(groups.values())) != len(groups):
+                    return ControlResult.INVALID
+                paths = set(groups) | set(groups.values())
+                nodes = {
+                    _string(node, "scope_path"): node
+                    for node in NodeRun.objects.filter(run=run, scope_path__in=paths)
+                }
+                if set(nodes) != paths:
+                    return ControlResult.INVALID
+                for coordinator, source in groups.items():
+                    loop = nodes[coordinator]
+                    if (
+                        _string(loop, "node_type") != NodeType.LOOP.value
+                        or parse_scope_path(coordinator)[-1].iteration is not None
+                        or coordinator == source
+                        or scope_is_ancestor(coordinator, source)
+                        or source in groups
+                        or nodes[source].parent_scope_path != loop.parent_scope_path
+                        or _mapping(loop, "frozen_def").get("repair_rule") is not None
+                    ):
+                        return ControlResult.INVALID
+                _set_model_field(run, "repair_groups", dict(groups))
+                run.save(update_fields=("repair_groups",))
+                _append_event(
+                    run,
+                    "run.repairs_changed",
+                    EventSource.RUN,
+                    {"groups": dict(groups), "idempotency_key": idempotency_key},
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the repair presentation."
+            raise PersistenceError(message, context={"run": run_id}) from None
 
     def configure_dispatch_pause(
         self, run_id: str, paused: bool, idempotency_key: str

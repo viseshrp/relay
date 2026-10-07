@@ -123,6 +123,28 @@ attempt. A confirmed provider usage reset can authorize a fresh failed-node
 recovery as described below. An explicitly enabled recovery policy also
 authorizes bounded retries for eligible agent failures.
 
+### Stage repair rules
+
+A stage's frozen repair policy adds a durable coordinator behind the source
+stage. An accepted initial verdict completes that coordinator without running
+its fixer or verifier. A rejection creates scoped fix and verify attempts for
+each configured round. Only an exactly matching typed verdict releases the
+source's dependent stages. The last rejected round fails with
+`repair_exhausted`; reports and successful writer commits remain retained.
+
+These attempts use the same dispatch claims, admission locks, process controls,
+and evidence preservation as other nodes. A waiting or paused coordinator
+resumes its existing round. Provider recovery targets the failed role and
+reopens its enclosing coordinator without repeating completed fixers or
+increasing the verdict budget. An exhausted verdict budget does not schedule
+automatic error recovery.
+
+Expressions and child exports expose the accepted verifier's outputs under
+the source stage's name. The original source row and each rejected report
+remain unchanged. Fix and verify agent prompts include the frozen role
+instruction, round number, previous rejected outputs, and retained evidence.
+See [Stage repair rules](workflows.md#stage-repair-rules) for configuration.
+
 ### Automatic step recovery
 
 Automatic recovery is disabled by default. The workflow's `recovery` policy

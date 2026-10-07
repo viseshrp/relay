@@ -48,7 +48,7 @@ def control_targets(node: NodeDefinition) -> tuple[str, ...]:
         targets.append(node.on_timeout)
     if isinstance(node, ConditionNode):
         targets.extend(node.branches.values())
-    if isinstance(node, LoopNode):
+    if isinstance(node, LoopNode) and node.repair_rule is None:
         targets.append(node.exhausted)
     return tuple(targets)
 

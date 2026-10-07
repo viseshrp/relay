@@ -11,7 +11,15 @@ from django.views.decorators.http import require_GET
 from relay.agents.discovery import discover_agents
 from relay.agents.registry import load_registry
 from relay.config import load_config
-from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX, REVIEW_PREVIEW_MAX_BYTES
+from relay.constants import (
+    API_MAX_PAGE,
+    DATABASE_INTEGER_MAX,
+    DEFAULT_FIX_INSTRUCTION,
+    DEFAULT_REPAIR_ROUNDS,
+    DEFAULT_VERIFY_INSTRUCTION,
+    MAX_LOOP_ITERATIONS,
+    REVIEW_PREVIEW_MAX_BYTES,
+)
 from relay.errors import ConfigError, RelayError
 from relay.execution.state import RunStatus
 from relay.projects.service import list_registered_projects
@@ -122,6 +130,12 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
             "base_hash": document.base_hash,
             "project": asdict(project),
             "warnings": warnings,
+            "repair_defaults": {
+                "max_rounds": DEFAULT_REPAIR_ROUNDS,
+                "max_allowed_rounds": MAX_LOOP_ITERATIONS,
+                "fix_instruction": DEFAULT_FIX_INSTRUCTION,
+                "verify_instruction": DEFAULT_VERIFY_INSTRUCTION,
+            },
         }
     )
 

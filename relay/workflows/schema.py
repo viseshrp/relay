@@ -7,7 +7,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from relay.constants import MAX_AUTOMATIC_RETRIES, MAX_LOOP_ITERATIONS
+from relay.constants import (
+    DEFAULT_FIX_INSTRUCTION,
+    DEFAULT_REPAIR_ROUNDS,
+    DEFAULT_VERIFY_INSTRUCTION,
+    MAX_AUTOMATIC_RETRIES,
+    MAX_LOOP_ITERATIONS,
+    REPAIR_NODE_PREFIX,
+)
 
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DURATION_PATTERN = re.compile(r"^[0-9]+(?:ms|s|m|h)$")
@@ -256,6 +263,16 @@ class ConditionNode(NodeBase):
     branches: dict[str, str] = Field(min_length=1)
 
 
+class RepairAcceptance(StrictModel):
+    """Frozen acceptance and instructions for an implicit repair coordinator."""
+
+    source: str
+    accepted_output: str
+    accepted_value: Scalar
+    fix_instruction: str
+    verify_instruction: str
+
+
 class LoopNode(NodeBase):
     """A bounded, scoped subgraph repeated until its condition holds."""
 
@@ -264,6 +281,7 @@ class LoopNode(NodeBase):
     max_iterations: int = Field(ge=1, le=MAX_LOOP_ITERATIONS)
     until: str | None = None
     exhausted: str
+    repair_rule: RepairAcceptance | None = None
 
 
 class SubworkflowNode(NodeBase):
@@ -312,6 +330,30 @@ class RecoveryPolicy(StrictModel):
     max_retries: int = Field(default=MAX_AUTOMATIC_RETRIES, ge=1, le=MAX_AUTOMATIC_RETRIES)
 
 
+class RepairRule(StrictModel):
+    """A stage's bounded fix-and-verify policy, separate from its main graph."""
+
+    enabled: bool = True
+    max_rounds: int = Field(default=DEFAULT_REPAIR_ROUNDS, ge=1, le=MAX_LOOP_ITERATIONS)
+    accepted_output: str = Field(min_length=1)
+    accepted_value: Scalar = "Yes"
+    fix: AgentNode | CommandNode
+    verify: AgentNode | CommandNode
+    fix_instruction: str = Field(default=DEFAULT_FIX_INSTRUCTION, min_length=1)
+    verify_instruction: str = Field(default=DEFAULT_VERIFY_INSTRUCTION, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_roles(self) -> RepairRule:
+        for role in (self.fix, self.verify):
+            if role.needs or role.condition is not None or role.on_timeout is not None:
+                message = "repair roles cannot declare needs, if, or on_timeout"
+                raise ValueError(message)
+        if self.accepted_output not in self.verify.outputs:
+            message = "the verifier must declare the accepted_output"
+            raise ValueError(message)
+        return self
+
+
 class WorkflowDefinition(StrictModel):
     """One complete Relay workflow document."""
 
@@ -323,10 +365,25 @@ class WorkflowDefinition(StrictModel):
     nodes: dict[str, NodeDefinition]
     entrypoints: list[EntryPoint] = Field(default_factory=list)
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
+    repairs: dict[str, RepairRule] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> WorkflowDefinition:
         _validate_node_map(self.nodes, "nodes")
+        for source, rule in self.repairs.items():
+            node = self.nodes.get(source)
+            if node is None or node.type not in {"agent", "command"}:
+                message = f"repair source {source!r} must be an agent or command stage"
+                raise ValueError(message)
+            if (
+                isinstance(node, (AgentNode, CommandNode))
+                and rule.accepted_output not in node.outputs
+            ):
+                message = f"repair source {source!r} must declare {rule.accepted_output!r}"
+                raise ValueError(message)
+            if f"{REPAIR_NODE_PREFIX}{source}" in self.nodes:
+                message = f"repair coordinator id conflicts with a stage for {source!r}"
+                raise ValueError(message)
         for name in self.inputs:
             if NODE_ID_PATTERN.fullmatch(name) is None:
                 message = f"input id {name!r} must match {NODE_ID_PATTERN.pattern}"
@@ -344,6 +401,9 @@ def _validate_node_map(nodes: dict[str, NodeDefinition], location: str) -> None:
             message = f"{location} id {node_id!r} must match {NODE_ID_PATTERN.pattern}"
             raise ValueError(message)
         if isinstance(node, LoopNode):
+            if node.repair_rule is not None:
+                message = "repair_rule is internal; configure repairs on the workflow instead"
+                raise ValueError(message)
             _validate_node_map(node.body, f"{location}.{node_id}.body")
 
 

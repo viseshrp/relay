@@ -13,6 +13,7 @@ from relay.constants import SCHEMA_VERSION
 from relay.errors import PathSafetyError, SchemaVersionError, WorkflowValidationError
 from relay.paths import safe_resolve
 
+from .repairs import compile_repairs
 from .schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
 
 
@@ -80,7 +81,7 @@ def load_workflow_text(text: str, *, source: Path | None = None) -> LoadedWorkfl
         raise WorkflowValidationError(
             _validation_message(error), context={"workflow": str(display)}
         ) from None
-    return LoadedWorkflow(display, text, document, definition)
+    return LoadedWorkflow(display, text, document, compile_repairs(definition))
 
 
 def subworkflow_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[SubworkflowNode]:

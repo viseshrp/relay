@@ -20,6 +20,7 @@ explain the format; Relay does not install them as templates.
 | `nodes` | yes | Node ID to node-definition map; an empty map is valid. |
 | `entrypoints` | no | Declared midstream scopes and their required evidence. |
 | `recovery` | no | `{enabled: false, max_retries: 2}` by default. `max_retries` accepts `1` or `2`. |
+| `repairs` | no | Stage ID to a fix-and-verify policy. See [Stage repair rules](#stage-repair-rules). |
 
 Node and input IDs match `^[a-z][a-z0-9_]*$`. A node accepts `needs`, `if`,
 `timeout`, and `on_timeout` in addition to its type-specific fields. `needs` is
@@ -54,6 +55,87 @@ handoffs remain available. A failed command needs its existing workflow repair
 route; Relay does not choose a repair agent for a standalone command. Declared
 human waits still require the owner. See
 [Automatic step recovery](execution.md#automatic-step-recovery).
+
+## Stage repair rules
+
+Configure `repairs` on an agent or command stage that produces a verdict. Relay
+runs the stage first. If its declared output equals `accepted_value`, work
+continues. Otherwise Relay runs the configured fixer, then the verifier. A
+rejected verification starts another round; an accepted verification releases
+dependent stages. Exhausting the budget fails with `repair_exhausted`.
+
+Each rule requires `accepted_output`, `fix`, and `verify`. The source and
+verifier must declare that output. `accepted_value` defaults to the string
+`"Yes"`; comparison preserves JSON kinds and case. For example, the string
+`"Yes"` accepts `"Yes"` but rejects `"yes"`, and the boolean `true` rejects the
+number `1`. Numeric values `1` and `1.0` match. `enabled` defaults to `true`.
+`max_rounds` defaults to four and
+accepts integers from one through 100. A disabled rule adds no execution gate.
+
+Fixers and verifiers are ordinary `agent` or `command` definitions with their
+own prompts, outputs, write permissions, model, effort, and permission mode.
+They cannot set `needs`, `if`, or `on_timeout`; Relay owns their ordering.
+`fix_instruction` and `verify_instruction` have defaults that preserve scope
+and require fresh evidence. Custom instructions replace those defaults. Agent
+roles receive their instruction and rejection context after their original
+prompts. Commands execute their configured argument vector.
+
+Use a required retained selector such as `label`, `json_path`, or `yaml_path`
+for a report. `exists` tests only presence and retains no report. Relay keeps
+the original rejection and every round's reports. Dependent expressions see
+the accepted verifier's outputs under the original stage name; recorded
+source outputs remain unchanged. In the example, `needs.review.outputs.ready`
+can become `"Yes"` for delivery while the first review still records `"No"`.
+
+<!-- relay-example: valid stage-repairs -->
+```yaml
+version: 1
+name: Review with automatic repairs
+model: exact-model-value
+agents: [codex]
+nodes:
+  review:
+    type: agent
+    prompts: [{local: prompts/review.md}]
+    writes: true
+    allow_no_commit: true
+    outputs:
+      ready: {label: {artifact: REVIEW.md, label: Ready}}
+  deliver:
+    type: command
+    needs: [review]
+    if: '${{ needs.review.outputs.ready == "Yes" }}'
+    run: [git, status, --short]
+repairs:
+  review:
+    accepted_output: ready
+    accepted_value: "Yes"
+    max_rounds: 4
+    fix:
+      type: agent
+      writes: true
+      allow_no_commit: true
+    verify:
+      type: agent
+      writes: true
+      allow_no_commit: true
+      outputs:
+        ready:
+          label:
+            artifact: REVIEW_FIX_VERIFICATION.md
+            label: Ready
+```
+
+Rules apply to root workflows and loaded subworkflows. Embedded loop bodies
+keep their explicit graphs. Relay reserves the generated node ID
+`relay_repair_<stage>`; a conflicting source ID fails validation. The portable
+YAML keeps the rule, while the captured graph contains durable coordinators.
+The browser shows the original stages and a separate Repairs panel.
+
+Pausing, restarting, or recovering a failed role preserves completed rounds
+and the frozen policy. Action failures use the existing failure and recovery
+rules; they do not count as accepted verdicts or replenish the repair budget.
+See [Execution](execution.md#stage-repair-rules).
 
 ## Typed inputs
 

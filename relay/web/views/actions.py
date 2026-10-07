@@ -40,6 +40,7 @@ from relay.workflows.editor import (
     save_workflow_document,
 )
 from relay.workflows.loader import workflow_key_parts
+from relay.workflows.scope import parse_scope_path
 
 from ..auth import (
     auth_state,
@@ -184,6 +185,26 @@ def _validate_agent_choices(
         require_choice(configuration, "effort", effort)
     if permission_mode is not None:
         require_choice(configuration, "permission_mode", permission_mode)
+
+
+@api_errors
+@owner_required
+@require_POST
+def configure_repair_groups(request: HttpRequest, run_id: str) -> HttpResponse:
+    run_id = canonical_uuid(run_id, resource="run")
+    body = json_body(request)
+    groups = {}
+    for coordinator, source in required_object(body, "groups").items():
+        if not isinstance(source, str):
+            message = "groups must map repair-loop scopes to stage scopes."
+            raise ConfigError(message)
+        parse_scope_path(coordinator)
+        parse_scope_path(source)
+        groups[coordinator] = source
+    result = DjangoExecutionStore().configure_repair_groups(
+        run_id, groups, required_text(body, "idempotency_key")
+    )
+    return _control_response(result)
 
 
 @api_errors

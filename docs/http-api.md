@@ -78,6 +78,11 @@ rewrite the workflow or grant permission to pass a human gate.
 Warnings from transitive child workflows include their source `workflow_key`.
 Repeated references to the same child do not duplicate its warnings.
 
+Workflow reads also include `repair_defaults`, containing `max_rounds`,
+`max_allowed_rounds`, `fix_instruction`, and `verify_instruction`. The editor
+uses these defaults when adding a stage policy; saved custom values remain
+part of the workflow. See [Stage repair rules](workflows.md#stage-repair-rules).
+
 `base_hash` is the SHA-256 of the exact saved UTF-8 bytes. For example, loading
 bytes `version: 1\nname: A\nnodes: {}\n` returns their hash; Save with that hash
 succeeds only while those bytes remain on disk. A stale hash returns `409` and
@@ -159,6 +164,12 @@ Run metadata includes the registered `project`. Each node includes captured
 `dependencies` (scope paths), `controls` (`target` and `label`), and
 `parent_scope`. These fields come from that run's frozen node definitions,
 including concrete loop and child scopes, rather than today's editable YAML.
+Each node also includes `repair_for`, either its source stage's scope or null.
+A repair coordinator includes `repair_settings` with its captured round
+budget, acceptance output and value, role configuration, and instructions.
+Other nodes return null. Native policies set `legacy:false`; explicitly grouped
+older loops set `legacy:true`. Node pages retain all repair coordinators and
+child attempts so clients can inspect the full execution history.
 Failed agent nodes also include `retry_settings`, containing their own
 `scope_path`, effective `agent_id`, `model_value`, `effort`, `permission_mode`,
 `default_handoff_prompt`, and `handoff_prompt_max_bytes`. Other nodes return
@@ -277,6 +288,25 @@ idempotency key. Recovery preparation errors include their scope and public
 message. A failed run's stream stays open while error recovery is pending,
 as it does for a pending quota reset. Run cancellation and manual retry
 supersede queued error recovery through the existing recovery lock.
+
+### Repair presentation
+
+`POST /api/runs/{id}/repairs` records display groups for an existing captured
+loop. The body contains `groups`, a mapping from concrete loop scopes to their
+sibling source stages, and an `idempotency_key`. For example,
+`{"groups":{"root.repairs":"root.review"},"idempotency_key":"display-1"}`
+groups that loop and its scoped children under review. An empty mapping clears
+legacy groups. Native policies already carry their own source association.
+
+The run must have `dispatch_paused:true`; otherwise it returns `409 stale`.
+Invalid associations return `422 invalid`. Each source has at most one grouped
+loop. Replaying a successful key returns `already_applied`.
+Success returns `accepted` and emits `run.repairs_changed`. The action saves
+only presentation metadata. It does not rewrite snapshots, routes, prompts,
+node statuses, attempts, or outputs. Owner and CSRF checks apply in both login
+modes.
+
+### Pause and unstarted-step settings
 
 `pause` saves `dispatch_paused` without interrupting active attempts. The flag
 appears in run summaries and detail and survives restart. `paused` must be a

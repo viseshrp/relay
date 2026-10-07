@@ -12,6 +12,7 @@ from relay.errors import NodeExecutionError, WorkflowValidationError
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason
 from relay.workflows.expressions import evaluate_expression
+from relay.workflows.repairs import compile_repairs, effective_dependency_outputs
 from relay.workflows.schema import SubworkflowNode, WorkflowDefinition
 from relay.workflows.validation import resolve_inputs
 
@@ -31,7 +32,7 @@ def _child_definition(context: AttemptContext, reference: str) -> WorkflowDefini
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
     try:
         raw = YAML(typ="safe").load(record["yaml"])
-        return WorkflowDefinition.model_validate(raw)
+        return compile_repairs(WorkflowDefinition.model_validate(raw))
     except (TypeError, ValidationError, YAMLError):
         message = f"Snapshotted subworkflow {reference!r} is invalid."
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path}) from None
@@ -85,9 +86,10 @@ class SubworkflowExecutor:
                 error_code=result.error_code,
             )
         outputs = {}
+        child_results = effective_dependency_outputs(definition.nodes, result.node_outputs)
         for name, child_reference in node.outputs.items():
             child_id, separator, output_name = child_reference.partition(".")
-            child_outputs = result.node_outputs.get(child_id)
+            child_outputs = child_results.get(child_id)
             if not separator or child_outputs is None or output_name not in child_outputs:
                 message = f"Child output {child_reference!r} was not produced."
                 raise NodeExecutionError(message, context={"node": context.attempt.scope_path})

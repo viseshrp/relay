@@ -163,6 +163,7 @@ class Run(RelayModel):
     recorded_head: models.CharField = models.CharField(max_length=40)
     recovery_policy: models.JSONField = models.JSONField(default=dict)
     dispatch_paused: models.BooleanField = models.BooleanField(default=False)
+    repair_groups: models.JSONField = models.JSONField(default=dict)
 
     class Meta:
         indexes: ClassVar[list[models.Index]] = [

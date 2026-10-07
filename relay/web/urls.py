@@ -41,6 +41,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/runs/<str:run_id>/cancel", actions.cancel_run, name="run-cancel"),
     path("api/runs/<str:run_id>/recovery", actions.configure_run_recovery, name="run-recovery"),
     path("api/runs/<str:run_id>/pause", actions.configure_dispatch_pause, name="run-pause"),
+    path("api/runs/<str:run_id>/repairs", actions.configure_repair_groups, name="run-repairs"),
     path(
         "api/runs/<str:run_id>/step-settings",
         actions.configure_pending_step,
