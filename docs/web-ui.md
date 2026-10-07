@@ -800,3 +800,8 @@ edit the job's `inherit_env` and `env` in the same YAML document.
 controls, and form edits update YAML. Arguments keep their literal boundaries;
 no shell syntax is expanded. Settings changes affect future launches; existing
 runs retain their resolved arguments and variables.
+
+An editable checkout can rebuild its frontend while the server is running.
+Static serving refreshes its file catalog when a new asset hash is requested
+and rechecks path containment. Reload the browser after the build finishes.
+A Python service change still requires an orderly server restart.
