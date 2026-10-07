@@ -208,14 +208,14 @@ test("file blockers and exemptions appear before launch and copied fixes leave G
 
 test("file check failures can be refreshed and later changes still block the launch", async ({ page }) => {
   await create(page, "racing-launch");
-  await page.route("**/api/workflows/racing-launch.yaml/preflight", (route) => route.fulfill({
+  await page.route("**/api/workflows/racing-launch.yaml/preflight*", (route) => route.fulfill({
     status: 503, json: { code: "git_error", message: "Git file check failed.", context: {} },
   }));
   const panel = await open(page);
   const files = panel.getByRole("region", { name: "Launch file check" });
   await expect(files.getByRole("alert")).toHaveText("Git file check failed.");
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await page.unroute("**/api/workflows/racing-launch.yaml/preflight");
+  await page.unroute("**/api/workflows/racing-launch.yaml/preflight*");
   await files.getByRole("button", { name: "Check files again" }).click();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
   expect((await post(page, "/__test__/launch-files", { mode: "race" })).ok()).toBeTruthy();

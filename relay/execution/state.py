@@ -25,6 +25,7 @@ class ChoiceEnum(str, Enum):
 class RunStatus(ChoiceEnum):
     PENDING = "pending", "Pending"
     RUNNING = "running", "Running"
+    COMPLETING = "completing", "Merging and cleaning up"
     PAUSED_WAIT = "paused_wait", "Paused for input"
     CANCELING = "canceling", "Canceling"
     SUCCEEDED = "succeeded", "Succeeded"
@@ -43,6 +44,7 @@ class WorktreeState(ChoiceEnum):
 class CleanupPolicy(ChoiceEnum):
     CLEAN_ON_SUCCESS = "clean_on_success", "Clean on success"
     RETAIN = "retain", "Retain"
+    MERGE_ON_SUCCESS = "merge_on_success", "Merge and clean on success"
 
 
 class NodeStatus(ChoiceEnum):
@@ -201,6 +203,27 @@ RUN_TRANSITIONS: tuple[Transition, ...] = (
         "all_nodes_terminal_success",
         RunStatus.SUCCEEDED,
         "run.succeeded",
+    ),
+    Transition(
+        RunStatus.RUNNING,
+        "completion_started",
+        "all_nodes_terminal_success_and_merge_requested",
+        RunStatus.COMPLETING,
+        "run.completing",
+    ),
+    Transition(
+        RunStatus.COMPLETING,
+        "completion_succeeded",
+        "merge_and_worktree_removal_durable",
+        RunStatus.SUCCEEDED,
+        "run.succeeded",
+    ),
+    Transition(
+        RunStatus.COMPLETING,
+        "completion_failed",
+        "merge_or_worktree_removal_failed",
+        RunStatus.FAILED,
+        "run.failed",
     ),
     Transition(
         RunStatus.RUNNING,

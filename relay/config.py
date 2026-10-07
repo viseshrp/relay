@@ -67,7 +67,7 @@ def validate_config(raw: object) -> RelayConfig:
         raise ConfigError(message)
     cleanup_policy = raw.get("cleanup_policy", "clean_on_success")
     if cleanup_policy not in {policy.value for policy in CleanupPolicy}:
-        message = "cleanup_policy must be clean_on_success or retain."
+        message = "cleanup_policy must be clean_on_success, retain, or merge_on_success."
         raise ConfigError(message)
     host = raw.get("host", DEFAULT_HOST)
     if host not in LOOPBACK_HOSTS:

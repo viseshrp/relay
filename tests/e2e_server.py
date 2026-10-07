@@ -206,7 +206,9 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
             project.write("untracked code.py", "Browser-test code\n")
             project.write("REVIEW.md", "Browser-test owner review\n")
         elif mode == "race":
-            project.write("racing code.py", "Browser-test later change\n")
+            target = project.repository / "racing code.py"
+            previous = target.read_text() if target.exists() else ""
+            project.write("racing code.py", previous + "Browser-test later change\n")
         elif mode != "inspect":
             message = "The browser-test launch file mode is invalid."
             raise ConfigError(message)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 
@@ -36,7 +36,9 @@ class LaunchCleanliness:
     truncated: bool
 
 
-def inspect_launch_cleanliness(relay_root: Path, workflow_key: str) -> LaunchCleanliness:
+def inspect_launch_cleanliness(
+    relay_root: Path, workflow_key: str, *, merge_on_success: bool = False
+) -> LaunchCleanliness:
     workflow = load_launch_workflow(relay_root, workflow_key)
     repository = relay_root.parent.resolve()
     changes = execution_status(
@@ -44,6 +46,15 @@ def inspect_launch_cleanliness(relay_root: Path, workflow_key: str) -> LaunchCle
         snapshot_files=launch_source_files(workflow, repository),
         allow_initial_surface=True,
     )
+    if merge_on_success:
+        changes = tuple(
+            replace(
+                change,
+                allowed=False,
+                reasons=("A merge requires every changed file to be committed or set aside.",),
+            )
+            for change in changes
+        )
     blocked = [change for change in changes if not change.allowed]
     allowed = [change for change in changes if change.allowed]
     files: list[RepositoryChange] = []

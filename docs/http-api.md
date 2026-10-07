@@ -183,6 +183,27 @@ returned together. A successful preflight atomically records the run and
 snapshot, creates `relay/run/{run-id}` in an isolated worktree, and durably
 dispatches eligible nodes.
 
+`cleanup_policy` additionally accepts `merge_on_success`, inherited from
+project/global settings when omitted. It requires a strictly clean checkout
+and an attached branch at launch. After all jobs succeed, the run enters
+`completing` and fast-forwards the branch captured at launch before removing
+the run worktree. Dirty, switched, or diverged targets fail the run and retain
+its worktree; no automatic stashing or conflict resolution occurs. Existing
+`clean_on_success` and `retain` behavior stays unchanged.
+Run records add `merged_commit`, initially `null`. The new `run.completing`
+event includes `status` and `branch`; `run.merged` includes `branch` and
+`merged_commit`. Success follows durable integration and cleanup. Completion
+failures use the existing `run.failed` and Relay error envelopes, including
+`failure_summary`; `run_merge_failed` identifies branch or integration errors,
+and `dirty_repository_error` identifies target changes. Existing run status
+values and event payloads remain valid. Migration `0012_run_merge_completion`
+adds the nullable commit field and choices without modifying existing runs.
+
+The workflow preflight endpoint accepts optional `cleanup_policy`, defaulting
+to the selected project's effective policy. For `merge_on_success`, every
+changed file blocks launch, including usual workflow/report exemptions.
+`GET /api/projects/current` adds the resolved `cleanup_policy` for the panel.
+
 Run history accepts `project`, `status`, `since`, and `limit`, plus optional
 `workflow`, `branch`, and `query` filters. Workflow and source branch filters
 match exactly, with the existing `review` / `review.yaml` workflow alias.

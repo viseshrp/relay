@@ -119,10 +119,12 @@ applicable; do not silently change adjacent behavior.
 
 ### Git isolation and retained evidence
 
-- Never check out, reset, or merge the launch branch as part of a run. Writers
-  use the primary run worktree exclusively; readers use detached worktrees at
-  the recorded committed head. Remove reader worktrees before releasing their
-  admission locks.
+- Never check out or reset the launch branch as part of a run. Only the explicit
+  `merge_on_success` policy may fast-forward the captured launch branch after
+  every job succeeds. Require a strictly clean checkout on that same branch;
+  retain the run workspace on integration failure. Writers use the primary run
+  worktree exclusively; readers use detached worktrees at the recorded committed
+  head. Remove reader worktrees before releasing their admission locks.
 - Runtime writing nodes commit their own changes, leave the index and code
   clean, and advance from the attempt's starting head. Only an explicit
   `allow_no_commit: true` permits a valid no-op. These runtime rules do not

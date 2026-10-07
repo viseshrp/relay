@@ -22,6 +22,7 @@ from relay.paths import safe_resolve
 from relay.projects.service import project_launch_source
 from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
+from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
 from relay.workflows.defaults import WorkflowDefaults, apply_workflow_defaults
 from relay.workflows.loader import resolve_workflow_path
@@ -33,6 +34,7 @@ from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
 from .preflight import launch_source_files, load_launch_workflow
 from .scheduler import SchedulingStore, dispatch_ready_nodes
+from .state import CleanupPolicy
 
 _HASH_CHUNK_BYTES = 1024 * 1024
 LOGGER = logging.getLogger(__name__)
@@ -209,6 +211,8 @@ def launch_workflow(
     repository = relay_root.parent.resolve()
     snapshot_files = launch_source_files(workflow, repository)
     require_launch_clean(repository, snapshot_files)
+    if request.cleanup_policy == CleanupPolicy.MERGE_ON_SUCCESS.value:
+        require_merge_target(repository, project_launch_source(repository).branch)
     entry_point = _validate_entry_point(
         workflow,
         request.entry_point,
@@ -253,6 +257,8 @@ def launch_workflow(
     )
     source_commit = current_head(repository)
     source = project_launch_source(repository)
+    if request.cleanup_policy == CleanupPolicy.MERGE_ON_SUCCESS.value:
+        require_merge_target(repository, source.branch)
     run_id = store.create_pending_run(
         project_id,
         replace(normalized_request, source_branch=source.branch),

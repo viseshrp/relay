@@ -55,6 +55,7 @@ from relay.execution.automatic import (
     RECOVERABLE_ERRORS,
     recovery_instruction,
 )
+from relay.execution.completion import MergeTarget, complete_run_merge
 from relay.execution.control import (
     ClaimedControl,
     ControlRecovery,
@@ -126,7 +127,12 @@ from relay.paths import (
 )
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
-from relay.vcs.artifacts import PreservationResult, RecoveryReport, preserve_recovery_reports
+from relay.vcs.artifacts import (
+    PreservationResult,
+    RecoveryReport,
+    preserve_recovery_reports,
+    validate_attempt_evidence,
+)
 from relay.vcs.git import git_stdout, run_git, run_git_to_file
 from relay.vcs.worktree import (
     reader_worktree_path,
@@ -723,6 +729,7 @@ def _run_record(run: Run) -> dict[str, object]:
         "run_branch": _string(run, "run_branch"),
         "worktree_state": _string(run, "worktree_state"),
         "cleanup_policy": _string(run, "cleanup_policy"),
+        "merged_commit": run.merged_commit,
         "launcher": _string(run, "launcher"),
         "started_at": _datetime_text(_datetime_field(run, "started_at")),
         "ended_at": _datetime_text(_datetime_field(run, "ended_at")),
@@ -2501,6 +2508,120 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             self._record_cleanup_failure(run_id, error)
 
+    def run_merge_target(self, run_id: str) -> MergeTarget | None:
+        run = (
+            Run.objects.select_related("project")
+            .filter(pk=run_id, status=RunStatus.COMPLETING.value)
+            .first()
+        )
+        if run is None:
+            return None
+        project = _related(run, "project", Project)
+        return MergeTarget(
+            Path(_string(project, "git_root")),
+            safe_resolve(worktrees_dir(), _string(run, "worktree_path")),
+            run.source_branch if isinstance(run.source_branch, str) else None,
+            _string(run, "run_branch"),
+            _string(run, "recorded_head"),
+            run.merged_commit if isinstance(run.merged_commit, str) else None,
+        )
+
+    def require_completion_evidence(self, run_id: str) -> None:
+        if (
+            Artifact.objects.filter(attempt__node_run__run_id=run_id)
+            .exclude(preservation_state=PreservationState.PRESERVED.value)
+            .exists()
+        ):
+            message = "Relay kept the run working copy because evidence preservation is incomplete."
+            raise PersistenceError(message, context={"run": run_id})
+        run = Run.objects.select_related("project").get(pk=run_id)
+        project = _related(run, "project", Project)
+        repository = Path(_string(project, "git_root"))
+        for attempt in NodeAttempt.objects.filter(
+            node_run__run=run,
+            node_run__node_type__in=(NodeType.AGENT.value, NodeType.COMMAND.value),
+        ):
+            validate_attempt_evidence(
+                repository, run_id, _identifier(attempt), _string(attempt, "starting_head")
+            )
+
+    def record_run_merge(self, run_id: str, commit: str) -> None:
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=run_id)
+            if _string(run, "status") != RunStatus.COMPLETING.value or run.merged_commit:
+                return
+            _set_model_field(run, "merged_commit", commit)
+            run.save(update_fields=("merged_commit",))
+            _append_event(
+                run,
+                "run.merged",
+                EventSource.RUN,
+                {"branch": run.source_branch, "merged_commit": commit},
+            )
+
+    def finish_run_completion(self, run_id: str, error: RelayError | None) -> None:
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=run_id)
+            if _string(run, "status") != RunStatus.COMPLETING.value:
+                return
+            transition = transition_run(
+                _string(run, "status"),
+                "completion_failed" if error else "completion_succeeded",
+            )
+            _set_model_field(run, "status", transition.status)
+            _set_model_field(run, "ended_at", timezone.now())
+            if error:
+                _set_model_field(run, "failure_code", error.error_code)
+                _set_model_field(run, "failure_summary", error.message)
+                _append_event(run, "error", EventSource.SYSTEM, error.to_envelope())
+            else:
+                _set_model_field(run, "worktree_state", WorktreeState.REMOVED.value)
+                _append_event(
+                    run,
+                    "run.cleanup_succeeded",
+                    EventSource.SYSTEM,
+                    {"worktree_state": WorktreeState.REMOVED.value},
+                )
+            run.save(
+                update_fields=(
+                    "status",
+                    "ended_at",
+                    "failure_code",
+                    "failure_summary",
+                    "worktree_state",
+                )
+            )
+            _append_event(
+                run,
+                transition.event,
+                EventSource.RUN,
+                {
+                    "status": transition.status,
+                    "failure_code": run.failure_code,
+                    "failure_summary": run.failure_summary,
+                },
+            )
+            transaction.on_commit(lambda: self._cleanup_terminal_resources(run_id))
+
+    def _complete_merged_run(self, run_id: str) -> None:
+        try:
+            complete_run_merge(self, run_id)
+        except RelayError as error:
+            self.finish_run_completion(run_id, error)
+        except (DatabaseError, ObjectDoesNotExist):
+            LOGGER.exception(
+                "Could not persist run integration; reconciliation will resume it",
+                extra={"run": run_id},
+            )
+
+    def resume_run_completions(self) -> None:
+        for run_id in (
+            Run.objects.filter(status=RunStatus.COMPLETING.value)
+            .order_by("created_at")
+            .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+        ):
+            self._complete_merged_run(str(run_id))
+
     def append_attempt_event(
         self,
         attempt_id: str,
@@ -3799,6 +3920,25 @@ class DjangoExecutionStore(DjangoAgentStore):
                 action = "failure_drain_complete"
         else:
             return
+        if (
+            action == "all_succeeded"
+            and _string(run, "cleanup_policy") == CleanupPolicy.MERGE_ON_SUCCESS.value
+        ):
+            transition = transition_run(status, "completion_started")
+            _set_model_field(run, "status", transition.status)
+            run.save(update_fields=("status",))
+            _append_event(
+                run,
+                transition.event,
+                EventSource.RUN,
+                {
+                    "status": transition.status,
+                    "branch": run.source_branch,
+                },
+            )
+            run_id = _identifier(run)
+            transaction.on_commit(lambda: self._complete_merged_run(run_id))
+            return
         transition = transition_run(status, action)
         if not transition.changed:
             return
@@ -4649,7 +4789,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                         return ControlResult.ACCEPTED
                 if canceled_recovery and status == RunStatus.FAILED.value:
                     return ControlResult.ACCEPTED
-                if status in {RunStatus.PENDING.value, RunStatus.INTERRUPTED.value}:
+                if status in {
+                    RunStatus.PENDING.value,
+                    RunStatus.INTERRUPTED.value,
+                    RunStatus.COMPLETING.value,
+                }:
                     return ControlResult.STALE
                 if status in {
                     RunStatus.SUCCEEDED.value,

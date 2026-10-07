@@ -76,6 +76,8 @@ const EVENT_TYPES = [
   "run.canceled",
   "run.interrupted",
   "run.succeeded",
+  "run.completing",
+  "run.merged",
   "run.rerun",
   "run.retry_scheduled",
   "run.retry_blocked",
@@ -223,6 +225,9 @@ function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail 
         )),
       };
     }
+  }
+  if (event.type === "run.merged" && typeof event.payload.merged_commit === "string") {
+    return { ...current, merged_commit: event.payload.merged_commit };
   }
   if (event.type === "run.cleanup_succeeded" || event.type === "run.cleanup_failed") {
     const worktreeState = event.payload.worktree_state;
@@ -791,7 +796,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
     : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop."
       : recovering ? `Retrying step · ${recovery?.retry_number} of ${detail?.recovery.max_retries}.`
         : detail?.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically."
-          : detail?.status === "failed" ? "Select a failed job to inspect its logs and retry settings."
+          : detail?.status === "failed" ? detail.nodes.some((node) => node.status === "failed") ? "Select a failed job to inspect its logs and retry settings." : "The run could not merge or remove its working copy. See the error below."
             : detail?.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below."
               : detail?.status === "canceled" ? "Work stopped. Finished jobs and their changes remain available for review."
                 : detail?.status === "canceling" ? "Relay is stopping active tools and preserving their results."
@@ -862,6 +867,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
                   <Box><Typography variant="body2" color="text.secondary">Artifacts</Typography><Button size="small" href="#run-artifacts">{artifacts.length || "None"}</Button></Box>
                 </Box>
                 {!dispatchPaused && <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>{summaryMessage}</Typography>}
+                {detail.status === "completing" && <Alert severity="info" sx={{ mt: 2 }}>Every job finished. Relay is merging into {detail.source_branch} and deleting the run working copies.</Alert>}
+                {detail.merged_commit && <Alert severity="success" sx={{ mt: 2 }}>Merged into {detail.source_branch} at <code>{detail.merged_commit.slice(0, 7)}</code>. {detail.worktree_state === "removed" ? "Run working copies deleted." : "The run working copy still needs cleanup."}</Alert>}
                 <Button size="small" component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>

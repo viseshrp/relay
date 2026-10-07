@@ -26,6 +26,9 @@ target state already holds is a no-op.
 | `running` | `node_waiting` | `one_or_more_nodes_waiting` | `paused_wait` | `run.paused` |
 | `paused_wait` | `wait_answered` | `no_waiting_nodes_and_none_failed` | `running` | `run.resumed` |
 | `running` | `all_succeeded` | `all_nodes_terminal_success` | `succeeded` | `run.succeeded` |
+| `running` | `completion_started` | `all_nodes_terminal_success_and_merge_requested` | `completing` | `run.completing` |
+| `completing` | `completion_succeeded` | `merge_and_worktree_removal_durable` | `succeeded` | `run.succeeded` |
+| `completing` | `completion_failed` | `merge_or_worktree_removal_failed` | `failed` | `run.failed` |
 | `running` | `node_failed` | `fail_fast` | `canceling` | `run.failing` |
 | `paused_wait` | `node_failed` | `fail_fast` | `canceling` | `run.failing` |
 | `running` | `owner_cancel` | `owner_requested` | `canceling` | `run.canceling` |
@@ -40,6 +43,12 @@ target state already holds is a no-op.
 
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
 `canceled` node cannot satisfy the `all_succeeded` guard.
+With `cleanup_policy: "merge_on_success"`, all successful jobs instead enter
+`completing`. The run succeeds only after the captured launch branch has been
+fast-forwarded and its working copy removed. Integration failures fail the run
+without changing completed job results. The merge commit is durable before
+cleanup; reconciliation resumes this state after a restart without reopening
+jobs. See [Run integration](git-and-artifacts.md#opt-in-run-integration).
 Canceling runs keep their owner-cancel or fail-fast intent during shutdown.
 Successful attempts keep their outputs and protected commits, and failed
 attempts keep their failure details. An interrupted attempt in a canceling run

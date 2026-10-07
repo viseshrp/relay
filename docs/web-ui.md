@@ -257,6 +257,19 @@ artifact evidence. **Automatic recovery** is a workflow setting in
 The server repeats validation, clean-Git, artifact, and exact-model preflight
 before it creates a run.
 
+The **After a successful run** choice in global defaults, project defaults,
+and Run workflow includes **Merge into the active branch, then delete working
+copies**. The launch panel shows when this choice is inherited and checks all
+changed files. Commit workflow and report edits before launching. Relay
+captures the branch selected at launch, fast-forwards it after every job
+succeeds, and removes the run working copies. The checkout must remain clean
+and on that branch. A diverged branch fails and requires a manual merge.
+The run shows **Merging and cleaning up**, then the merged branch and commit.
+Failure keeps the working copy and shows the error under Annotations. If
+cleanup fails after the merge, the summary distinguishes the completed merge
+from the retained working copy. History, reports, and run branches remain.
+See [Run integration](git-and-artifacts.md#opt-in-run-integration).
+
 ## Monitor and control runs
 
 The run header keeps its controls visible in both **Summary** and a job log.

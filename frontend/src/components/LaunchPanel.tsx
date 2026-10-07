@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath, stageLabel } from "../navigation";
-import type { LaunchCleanliness, PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
+import type { LaunchCleanliness, OwnerSettings, PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
 import type { WorkflowValue } from "../workflow";
 import { LaunchInputs, type LaunchValues } from "./LaunchInputs";
 import { LaunchPreflight } from "./LaunchPreflight";
@@ -28,6 +28,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
   const [inputs, setInputs] = useState<LaunchValues>(previousRun?.inputs ?? {});
   const [model, setModel] = useState("");
   const [cleanup, setCleanup] = useState("");
+  const [defaultCleanup, setDefaultCleanup] = useState<OwnerSettings["cleanup_policy"] | null>(null);
   const [entryPoint, setEntryPoint] = useState("");
   const [source, setSource] = useState<ProjectLaunchSource | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -43,24 +44,26 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
     if (!open) return;
     const controller = new AbortController();
     setSource(null);
+    setDefaultCleanup(null);
     setSourceError(null);
     setLaunchError(null);
-    void api<{ launch_source: ProjectLaunchSource }>(projectPath("/api/projects/current", requestProject), { signal: controller.signal })
-      .then((response) => { if (!controller.signal.aborted) setSource(response.launch_source); })
+    void api<{ launch_source: ProjectLaunchSource; cleanup_policy: OwnerSettings["cleanup_policy"] }>(projectPath("/api/projects/current", requestProject), { signal: controller.signal })
+      .then((response) => { if (!controller.signal.aborted) { setSource(response.launch_source); setDefaultCleanup(response.cleanup_policy); } })
       .catch((caught: unknown) => { if (!controller.signal.aborted) setSourceError(errorMessage(caught)); });
     return () => controller.abort();
   }, [open, requestProject, sourceRevision]);
 
   useEffect(() => {
     setPreflight(null); setPreflightError(null);
-    if (!open || workflowKey === null || blockedReason) return;
+    if (!open || workflowKey === null || blockedReason || defaultCleanup === null) return;
     const controller = new AbortController();
     const path = `/api/workflows/${workflowKey.split("/").map(encodeURIComponent).join("/")}/preflight`;
-    void api<LaunchCleanliness>(projectPath(path, requestProject), { signal: controller.signal })
+    const query = `cleanup_policy=${encodeURIComponent(cleanup || defaultCleanup)}`;
+    void api<LaunchCleanliness>(`${projectPath(path, requestProject)}${requestProject ? "&" : "?"}${query}`, { signal: controller.signal })
       .then((result) => { if (!controller.signal.aborted) setPreflight(result); })
       .catch((caught: unknown) => { if (!controller.signal.aborted) setPreflightError(errorMessage(caught)); });
     return () => controller.abort();
-  }, [open, workflowKey, requestProject, blockedReason, sourceRevision]);
+  }, [open, workflowKey, requestProject, blockedReason, sourceRevision, cleanup, defaultCleanup]);
 
   const reason = launching ? "Starting this workflow…" : blockedReason || (sourceError
     ? "Relay could not check the current branch. Check again before running."
@@ -94,6 +97,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
         <Typography variant="h6">{workflow?.name ?? "Choose a workflow"}</Typography>
         {previousRun && <Alert severity="info">Previous inputs are prefilled. This creates a new run using the saved workflow, current branch, and fresh agent checks. Changed input definitions are validated again.</Alert>}
         {source?.commit && <Typography>Runs on a new branch from <strong>{source.branch ?? `commit ${source.commit.slice(0, 12)}`}</strong>.</Typography>}
+        {(cleanup || defaultCleanup) === "merge_on_success" && <Alert severity="info">After every job succeeds, Relay will fast-forward {source?.branch ?? "the branch selected at launch"} and delete the run working copies. The checkout must stay completely clean and on that branch.</Alert>}
         {sourceError && <Alert severity="error">{sourceError}</Alert>}
         {reason && <Alert severity="info" action={onSave ? <Button onClick={onSave}>Save</Button>
           : sourceError ? <Button onClick={() => setSourceRevision((value) => value + 1)}>Check again</Button> : undefined}>{reason}</Alert>}
@@ -108,8 +112,8 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
           <datalist id="launch-model-options">{modelOptions.map((value) => <option key={value} value={value} />)}</datalist>
           <FormControl fullWidth><InputLabel id="launch-cleanup">After a successful run</InputLabel>
             <Select labelId="launch-cleanup" label="After a successful run" value={cleanup} onChange={(event) => setCleanup(event.target.value)}>
-              <MenuItem value="">Use project and global defaults</MenuItem><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem>
-            </Select><FormHelperText>Saved reports and committed changes remain available after the working copy is deleted.</FormHelperText>
+              <MenuItem value="">Use project and global defaults</MenuItem><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem>
+            </Select><FormHelperText>{cleanup === "merge_on_success" ? "Fast-forwards the branch shown above after every job succeeds. Commit all workflow, report, and code changes first. Dirty, switched, or diverged branches fail and keep the run working copy." : "Saved reports and committed changes remain available after the working copy is deleted."}</FormHelperText>
           </FormControl>
           <FormControl fullWidth><InputLabel id="launch-entry">Start from job</InputLabel>
             <Select labelId="launch-entry" label="Start from job" value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)}>

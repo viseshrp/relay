@@ -21,7 +21,7 @@ from relay.constants import (
 from relay.errors import ConfigError, GitError, ProjectDiscoveryError, RelayError
 from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
-from relay.execution.state import RunStatus
+from relay.execution.state import CleanupPolicy, RunStatus
 from relay.owner_settings import effective_config
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
@@ -123,6 +123,7 @@ def project_context(request: HttpRequest) -> HttpResponse:
         {
             "project": asdict(project),
             "launch_source": asdict(project_launch_source(Path(project.git_root))),
+            "cleanup_policy": effective_config(DjangoSettingsStore(), project.id).cleanup_policy,
         }
     )
 
@@ -139,8 +140,19 @@ def workflow_templates(request: HttpRequest) -> HttpResponse:
 @owner_required
 @require_GET
 def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
-    relay_root, _project = current_project(request)
-    return JsonResponse(asdict(inspect_launch_cleanliness(relay_root, key)))
+    from relay.config import validate_config
+
+    relay_root, project = current_project(request)
+    policy = validate_config(
+        {
+            "cleanup_policy": request.GET.get(
+                "cleanup_policy", effective_config(DjangoSettingsStore(), project.id).cleanup_policy
+            )
+        }
+    ).cleanup_policy
+    strict = policy == CleanupPolicy.MERGE_ON_SUCCESS.value
+    preview = inspect_launch_cleanliness(relay_root, key, merge_on_success=strict)
+    return JsonResponse(asdict(preview))
 
 
 @api_errors

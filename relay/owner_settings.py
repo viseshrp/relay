@@ -24,7 +24,7 @@ class ProjectDefaults(StrictModel):
     """Omitted project fields inherit the corresponding installation setting."""
 
     agent_preferences: list[str] = Field(default_factory=list)
-    cleanup_policy: Literal["clean_on_success", "retain"] = "clean_on_success"
+    cleanup_policy: Literal["clean_on_success", "retain", "merge_on_success"] = "clean_on_success"
     workflow_defaults: WorkflowDefaults = Field(default_factory=WorkflowDefaults)
 
 

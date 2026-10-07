@@ -255,6 +255,7 @@ The complete settings inventory is:
 | Automatic retry participation | Allow automatic retries for jobs | Project default; job `auto_retry` | New launches |
 | Automatic recovery | Enabled and maximum retries, 1 or 2 | Project policy; explicit workflow `recovery` fields | New launches |
 | Working-copy cleanup | After a successful run | Project policy; run launch `cleanup_policy` | New launches |
+| Merge successful run commits | Off | Project policy; run launch `cleanup_policy: merge_on_success` | New launches |
 | Repair rounds | Defaults for new repair rules, 1 through 100 | Project default; saved rule `max_rounds` | New editor rules |
 | Repair instructions | Fixer and verifier instructions | Project default; saved rule instructions | New editor rules |
 | Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |

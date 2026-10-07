@@ -1,8 +1,9 @@
 # Git worktrees and retained evidence
 
 Relay runs each workflow on a new branch and keeps failed work attributable to
-one attempt. It never checks out, rewinds, or merges the branch from which the
-run was launched.
+one attempt. It never checks out or rewinds the branch from which the run was
+launched. Merging into that branch requires the explicit completion option
+described below.
 
 ## Clean launch
 
@@ -59,8 +60,8 @@ before the agent or command runs, and normal fail-fast scheduling stops its
 downstream work. Agent context identifies the project and assigned checkout.
 
 The run branch remains after success, failure, cancellation, and worktree
-cleanup. Relay has no automatic merge. The owner decides whether and how to
-inspect, merge, or delete it.
+cleanup. By default, the owner decides whether and how to inspect, merge, or
+delete it. The opt-in integration policy can merge successful run commits.
 
 ## Reader and writer admission
 
@@ -211,6 +212,43 @@ unchanged. This selection requires preserved artifact records and holds the
 same workspace lock as recovery, so a retry cannot reopen the checkout during
 removal. The project must have no active runs. Deleting a selected run with
 `scope: "all"` leaves shared process logs in place.
+
+## Opt-in run integration
+
+Select **Merge into the active branch, then delete working copies** in global
+defaults, project defaults, or Run workflow. The API and settings value is
+`cleanup_policy: "merge_on_success"`. Existing defaults stay unchanged.
+
+All writing jobs already commit onto one run branch. Read-only jobs have no
+changes to merge; their detached working copies are removed after each attempt.
+After every job succeeds or is skipped, Relay performs these steps:
+
+1. Record the run as `completing`, keeping the live event stream open.
+2. Verify retained evidence and the run's recorded commit. Acquire the run's
+   workspace lock and a repository-wide integration lock.
+3. Require the original checkout to be on the branch captured at launch and
+   completely clean. Staged changes, unstaged changes, and untracked files all
+   block integration, including workflow sources and root reports. Ignored
+   files follow Git's normal status rules. An unfinished merge, rebase,
+   cherry-pick, or revert also blocks it.
+4. Fast-forward that branch to the validated run commit, with automatic
+   stashing and Git hooks disabled. A diverged branch fails without creating
+   conflicts or changing the owner's checkout. Relay never switches branches.
+5. Record `merged_commit`, remove the primary run worktree, and record success.
+   Run history, artifacts, the run branch, and attempt refs remain available.
+
+Merge-enabled launches also require the strictly clean checkout and an attached
+branch. Commit workflow and report edits before launching with this option.
+The launch file preview uses the same strict policy.
+
+A dirty, switched, or diverged branch fails the run and retains its worktree.
+Completed jobs remain successful and retain their outputs. If deletion fails
+after merging, the run fails and shows the recorded merged commit and retained
+working copy. Relay does not undo an already completed merge.
+Startup reconciliation resumes runs left `completing`, including a crash after
+Git updated the branch but before the database recorded it, or after removing
+the worktree. It recognizes the integrated commit instead of merging twice.
+Pause and cancellation cannot interrupt this final integration step.
 
 ## Privacy and storage
 

@@ -490,7 +490,7 @@ def launch_run(request: HttpRequest) -> HttpResponse:
         message = "cleanup_policy must be a string."
         raise ConfigError(message)
     if cleanup_value not in {item.value for item in CleanupPolicy}:
-        message = "cleanup_policy must be clean_on_success or retain."
+        message = "cleanup_policy must be clean_on_success, retain, or merge_on_success."
         raise ConfigError(message)
     launcher = owner_username(request)
     result = launch_workflow(

@@ -206,8 +206,11 @@ data.
 
 Relay rejects staged changes and unrelated edits before launch. Validated
 workflow sources and supported generated documents follow the
-[launch rules](docs/git-and-artifacts.md#clean-launch). Relay never merges a
-run branch into the launch branch.
+[launch rules](docs/git-and-artifacts.md#clean-launch). By default, run branches
+remain separate. Choose **Merge into the active branch, then delete working
+copies** in Settings or Run workflow to integrate successful runs. This requires
+a completely clean checkout on the branch selected at launch and a fast-forward
+merge. See [Run integration](docs/git-and-artifacts.md#opt-in-run-integration).
 
 ## Development
 

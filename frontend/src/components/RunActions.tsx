@@ -23,7 +23,7 @@ export function RunActions({ run, busy, onPause, onCancel, onRerunAll, onRerunFa
     {actions.rerunAll && <Button ref={rerunAllRef} variant="outlined" disabled={busy} aria-haspopup="menu" aria-expanded={Boolean(anchor)} startIcon={<ActionIcon name="refresh" />} endIcon={<ActionIcon name="down" />} onClick={(event) => setAnchor(event.currentTarget)}>Re-run jobs</Button>}
     <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
       <MenuItem onClick={() => { setAnchor(null); onRerunAll(); }}>Re-run all jobs</MenuItem>
-      {actions.rerunFailed && onRerunFailed && <MenuItem onClick={() => { setAnchor(null); onRerunFailed(); }}>Re-run failed jobs…</MenuItem>}
+      {actions.rerunFailed && (run.problem || run.nodes.some((node) => node.status === "failed")) && onRerunFailed && <MenuItem onClick={() => { setAnchor(null); onRerunFailed(); }}>Re-run failed jobs…</MenuItem>}
     </Menu>
   </Stack>;
 }

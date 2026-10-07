@@ -53,6 +53,8 @@ class ReconcileStore(Protocol):
 
     def resume_automatic_retries(self) -> int: ...
 
+    def resume_run_completions(self) -> None: ...
+
 
 def reconcile_once(
     store: ReconcileStore,
@@ -78,6 +80,8 @@ def reconcile_once(
     attempts = store.reap_stale_attempts(orderly_shutdown=orderly_shutdown)
     usage_retries = 0 if orderly_shutdown else store.resume_usage_retries()
     automatic_retries = 0 if orderly_shutdown else store.resume_automatic_retries()
+    if not orderly_shutdown:
+        store.resume_run_completions()
     return ReconcileResult(
         enqueued,
         failures,

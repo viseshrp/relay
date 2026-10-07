@@ -176,6 +176,7 @@ export interface RunSummary {
   run_branch: string;
   worktree_state: string;
   cleanup_policy: string;
+  merged_commit: string | null;
   launcher: string;
   started_at: string | null;
   ended_at: string | null;
@@ -362,7 +363,7 @@ export interface WorkflowDefaults {
 }
 export interface OwnerSettings {
   agent_preferences: string[];
-  cleanup_policy: "clean_on_success" | "retain";
+  cleanup_policy: "clean_on_success" | "retain" | "merge_on_success";
   host: string;
   port: number;
   workers: number;
