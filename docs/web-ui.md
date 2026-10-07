@@ -447,6 +447,9 @@ stopped** identify a source stage whose repair work is active or failed. Open
 the **Repairs** panel to inspect its round, budget, roles, instructions, and
 child attempt statuses. Reports and activity remain available. Run settings
 are captured; **Edit repairs for future runs** opens the editable workflow.
+The panel shows saved settings for an unstarted or failed role, including
+owner-selected model, effort, and permission overrides. Other role settings
+are labeled as workflow defaults. A held repair shows **Repairs paused**.
 
 An existing captured loop can be grouped through the
 [repair presentation API](http-api.md#repair-presentation) while dispatch is

@@ -168,3 +168,52 @@ test("exhausted repairs stop visibly at their source and keep every rejected rep
   expect(reports).toHaveLength(2);
   for (const artifact of reports) await expect((await page.request.get(`/api/artifacts/${artifact.id}`)).text()).resolves.toMatch(/^Ready: No\r?\n$/);
 });
+
+test("paused repair roles show saved model overrides instead of workflow defaults", async ({ page }) => {
+  await page.request.get("/api/auth");
+  expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
+  expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
+  const created = await post(page, "/api/workflows", { key: "repair-settings", holder, yaml: stringify({
+    version: 1, name: "Paused repair settings", model: "m1", agents: ["codex"], nodes: {
+      review: { type: "command", run: ["git", "status"] },
+      repairs: { type: "loop", needs: ["review"], max_iterations: 2, until: "${{ loop.index >= 1 }}", exhausted: "stopped", body: {
+        wait: { type: "human_wait", prompt: "Hold this isolated repair" },
+        verify: { type: "agent", needs: ["wait"], model: "m1", agents: ["codex"], agent_options: { codex: { effort: "low", permission_mode: "auto" } } },
+      } },
+      stopped: { type: "command", run: ["git", "status"] },
+    },
+  }) });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const launch = await post(page, "/api/runs", { workflow_key: "repair-settings", inputs: {}, cleanup_policy: "retain" });
+  expect(launch.ok(), await launch.text()).toBeTruthy();
+  const runId = (await launch.json()).run_id;
+  await expect.poll(async () => {
+    const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+    return run.nodes.find((item: { scope_path: string }) => item.scope_path === "root.repairs")?.status;
+  }).toBe("waiting");
+  const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  expect((await post(page, `/api/runs/${runId}/pause`, { paused: true, idempotency_key: "hold-repairs" })).ok()).toBeTruthy();
+  expect((await post(page, `/api/runs/${runId}/repairs`, { groups: { "root.repairs": "root.review" }, idempotency_key: "group-repairs" })).ok()).toBeTruthy();
+  const changed = await post(page, `/api/runs/${runId}/step-settings`, {
+    scope_path: "root.repairs#1.verify", agent_id: "claude", model: "m1", effort: "high", permission_mode: "auto", idempotency_key: "change-verifier",
+  });
+  expect(changed.ok(), await changed.text()).toBeTruthy();
+  await page.goto(`/?view=runs&run=${runId}`);
+  await page.getByText("Repairs · 1 configured", { exact: true }).click();
+  const panel = page.getByRole("region", { name: "Repairs for Review", exact: true });
+  await expect(panel.getByRole("heading", { name: "Review · Repairs paused", exact: true })).toBeVisible();
+  const verifier = panel.getByRole("region", { name: "Repair settings for Verify", exact: true });
+  await expect(verifier).toContainText("Verify · m1");
+  await expect(verifier).toContainText("Claude · Effort override: high · Permission override: auto");
+  await expect(verifier).not.toContainText("Codex");
+  await expect(page.getByRole("button", { name: "Resume new steps", exact: true })).toBeVisible();
+  const after = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  expect(after.snapshot).toEqual(before.snapshot);
+  expect(after.dispatch_paused).toBe(true);
+  const canceled = await post(page, `/api/runs/${runId}/cancel`, { idempotency_key: "clean-test-hold" });
+  expect(canceled.ok(), await canceled.text()).toBeTruthy();
+});

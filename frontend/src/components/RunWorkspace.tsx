@@ -910,10 +910,30 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
                   const settings = group.repair_settings!;
                   const children = repairChildren.get(group.repair_for!) ?? [];
                   const round = Math.max(0, ...children.map((node) => node.loop_index ?? 0));
+                  const roleNodes = new Map<string, RunNode>();
+                  for (const child of children) {
+                    // root.hidden#2.verify is the direct verifier for round 2;
+                    // a nested child must not replace its parent's role settings.
+                    if (child.parent_scope !== `${group.scope_path}#${child.loop_index}`) continue;
+                    const previous = roleNodes.get(child.node_id);
+                    if (!previous || (child.loop_index ?? 0) >= (previous.loop_index ?? 0)) roleNodes.set(child.node_id, child);
+                  }
+                  const held = dispatchPaused && !["succeeded", "skipped", "failed", "canceled"].includes(group.status);
                   return <Paper key={group.id} variant="outlined" className="section-card" role="region" aria-label={`Repairs for ${stageLabel(group.repair_for!)}`}>
-                    <Typography variant="h6">{stageLabel(group.repair_for!)} · {statusLabel(group.status)}</Typography>
+                    <Typography variant="h6">{stageLabel(group.repair_for!)} · {held ? "Repairs paused" : statusLabel(group.status)}</Typography>
                     <Typography variant="body2">{round ? `Round ${round} of ${settings.max_rounds}` : `Up to ${settings.max_rounds} rounds`}{settings.legacy ? " · Existing workflow loop" : ` · ${settings.accepted_output} must equal ${JSON.stringify(settings.accepted_value)}`}</Typography>
-                    {Object.entries(settings.roles).map(([role, value]) => <Typography key={role} variant="body2">{stageLabel(role)}: {value.model ?? (value.type === "agent" ? "Captured workflow model" : "Command")}{value.agents?.length ? ` · ${value.agents.join(", ")}` : ""}{value.agent_options ? ` · ${JSON.stringify(value.agent_options)}` : ""}</Typography>)}
+                    {Object.entries(settings.roles).map(([role, value]) => {
+                      const child = roleNodes.get(role);
+                      const current = child?.pending_settings ?? child?.retry_settings;
+                      const tools = value.agents?.length ? value.agents : Object.keys(value.agent_options ?? {});
+                      return <Box key={role} component="section" aria-label={`Repair settings for ${stageLabel(role)}`} sx={{ mt: 1 }}>
+                        <Typography variant="subtitle2">{stageLabel(role)} · {current?.model_value ?? value.model ?? (value.type === "agent" ? "Captured workflow model" : "Command")}</Typography>
+                        {value.type === "agent" && (current
+                          ? <Typography variant="body2">{stageLabel(current.agent_id)} · Effort override: {current.effort ?? "Provider default"} · Permission override: {current.permission_mode ?? "Provider default"}</Typography>
+                          : tools.length ? tools.map((tool) => <Typography key={tool} variant="body2">{stageLabel(tool)} · Effort override: {value.agent_options?.[tool]?.effort ?? "Provider default"} · Permission override: {value.agent_options?.[tool]?.permission_mode ?? "Provider default"} · Workflow defaults</Typography>)
+                            : <Typography variant="body2">Tool and settings follow the captured workflow.</Typography>)}
+                      </Box>;
+                    })}
                     {settings.fix_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Fixer instructions: {settings.fix_instruction}</Typography>}
                     {settings.verify_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Verifier instructions: {settings.verify_instruction}</Typography>}
                     <Stack spacing={1} sx={{ mt: 1 }}>{children.map((node) => <Button key={node.id} onClick={() => showStep(node.scope_path)}>{stageLabel(node.scope_path)} · {statusLabel(node.status)}</Button>)}</Stack>
