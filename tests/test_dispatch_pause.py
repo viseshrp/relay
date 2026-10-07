@@ -93,9 +93,7 @@ class PausingWriter:
         )
         assert NodeAttempt.objects.get(pk=context.attempt.attempt_id).status == "running"
         if self.writes:
-            (context.worktree / "implementation.txt").write_text(
-                "State: Finished\n", encoding="utf-8"
-            )
+            (context.worktree / "implementation.txt").write_bytes(b"State: Finished\n")
             git(context.worktree, "add", "implementation.txt")
             git(context.worktree, "commit", "-q", "-m", "Finish implementation")
         return ExecutionOutcome(OutcomeKind.SUCCEEDED)
