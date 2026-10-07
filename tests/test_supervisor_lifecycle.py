@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
+import shutil
 import signal
 import socket
 import subprocess
@@ -17,6 +19,8 @@ from relay.constants import INSTANCE_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import ConfigError, PersistenceError
 from relay.execution.process_identity import ProcessIdentity
 from relay.paths import shutdown_marker_path
+from relay.projects.service import INITIAL_PROJECT_FILES
+from relay.vcs.git import run_git
 from relay.web import process_ownership, supervisor
 from relay.web.models import Instance, NodeAttempt, Run
 from relay.web.repositories import DjangoExecutionStore
@@ -299,6 +303,53 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
         for options in boundary.launches
     )
     assert not boundary.browser_urls
+
+
+def test_supervisor_initializes_a_new_repository_without_changing_git(
+    supervisor_boundary: SupervisorBoundary, project: RelayProject
+) -> None:
+    shutil.rmtree(project.relay_root)
+    head = run_git(project.repository, ["rev-parse", "HEAD"]).stdout
+    supervisor.run_supervisor(
+        RelayConfig(), open_browser=True, on_ready=supervisor_boundary.stop_when_ready
+    )
+    assert {
+        str(path.relative_to(project.relay_root)): path.read_text(encoding="utf-8")
+        for path in project.relay_root.rglob("*")
+        if path.is_file()
+    } == dict(INITIAL_PROJECT_FILES)
+    assert run_git(project.repository, ["rev-parse", "HEAD"]).stdout == head
+    assert run_git(project.repository, ["diff", "--cached"]).stdout == ""
+    assert supervisor_boundary.browser_urls == ["http://127.0.0.1:7845/"]
+
+
+def test_supervisor_preserves_an_existing_nested_project(
+    supervisor_boundary: SupervisorBoundary, project: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nested = project.repository / "nested"
+    nested_relay = nested / ".relay"
+    nested_relay.mkdir(parents=True)
+    prompt = nested_relay / "owner.md"
+    prompt.write_bytes(b"Owner instructions\r\n")
+    original = (project.relay_root / "workflows" / "workflow.yaml").read_bytes()
+    monkeypatch.chdir(nested)
+    supervisor.run_supervisor(
+        RelayConfig(), open_browser=False, on_ready=supervisor_boundary.stop_when_ready
+    )
+    assert os.environ["RELAY_PROJECT_ROOT"] == str(nested)
+    assert prompt.read_bytes() == b"Owner instructions\r\n"
+    assert (project.relay_root / "workflows" / "workflow.yaml").read_bytes() == original
+    assert list(nested_relay.iterdir()) == [prompt]
+
+
+def test_supervisor_rejects_non_git_startup_without_creating_a_project(
+    supervisor_boundary: SupervisorBoundary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ConfigError, match="not inside a Git worktree"):
+        supervisor.run_supervisor(RelayConfig(), open_browser=False)
+    assert not (tmp_path / ".relay").exists()
+    assert not supervisor_boundary.children
 
 
 def test_console_break_uses_orderly_shutdown_and_restores_its_handler(

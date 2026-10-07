@@ -9,44 +9,23 @@
 [![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 [![Typing: ty](https://img.shields.io/badge/typing-checked-blue.svg)](https://docs.astral.sh/ty/)
 
-Relay turns coding-agent runbooks into local, durable workflows. It keeps the
-workflow definition in Git, runs each attempt in an isolated worktree, and
-puts authoring, launch, live output, human decisions, and recovery in one
-loopback-only web application.
+Relay lets you draw, edit, and run coding-agent workflows in your browser.
 
-## Status
+![A completed Ask an agent run in Relay](docs/images/run-page.png)
 
-Relay Phase 1 is implemented but unreleased. All five supported agents passed
-authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
-Live provider execution on Linux and Windows remains unverified. Exact
-versions, model selectors, artifact hashes, cleanup results, and remaining
-verification limits are recorded in [`certification/`](certification/README.md).
-The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
-contracts at the first release.
+## Quick start
 
-Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, model fallback, or automatic merge. Six
-[starter workflows](docs/workflows.md#starter-workflows) copy into the project
-when the owner chooses one; runs use the saved project files.
-Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
-eligible agent failures up to twice with the same model and settings, retained
-reports, and a separate repair instruction. It stops on unsafe failures or an
-exhausted budget.
-Configure [stage repair rules](docs/workflows.md#stage-repair-rules) to run a
-selected fixer and verifier after a rejected verdict. The map keeps the main
-stages; the Repairs panel shows each round, its settings, and retained reports.
-Confirmed provider usage resets can resume a failed stage automatically while
-preserving its captured model, effort, and prompts. Unsupported or missing reset
-information remains visible for the owner. See
-[Provider usage resets](docs/execution.md#provider-usage-resets).
-An owner can retry a stopped agent step with another installed tool and exact
-model. Relay validates the selection and keeps completed steps, prompts, and
-the original snapshot. See
-[Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
-Use **Pause new steps** to let current work finish while holding the next
-stage. Change an unstarted agent's settings, then resume explicitly; completed
-work and captured instructions stay saved. See
-[Pause new steps](docs/execution.md#pause-new-steps-and-change-an-unstarted-agent).
+1. Install Relay: `pip install relay-app`.
+2. Open a terminal in your Git repository and run `relay up`.
+3. Create your local password, check the agent connections, and select
+   **Start from a template › Ask an agent**.
+4. Press **Run workflow** with the sample question. Follow the job and its
+   conversation on the run page.
+
+You need Python 3.10 or newer, Git, and one supported coding agent installed
+and signed in. The setup screen gives install links and sign-in commands.
+Relay opens your browser and creates the blank project files on first start.
+To open the local app without a password, use `relay up --no-login`.
 
 ## Requirements
 
@@ -67,21 +46,7 @@ pip install relay-app
 `pipx install relay-app` and `uv tool install relay-app` provide isolated CLI
 installations.
 
-## Quick start
-
-Run these commands from a clean Git repository:
-
-```bash
-relay init
-relay doctor
-relay up
-```
-
-`relay init` creates only `.relay/workflows/workflow.yaml` and
-`.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser.
-In **Get started**, check agent connections and choose **Start from a template**.
-Select **Ask an agent**, create the workflow, and press **Run workflow** with its
-sample question. **Runs** shows progress, output, and requests for your input.
+## Administration
 
 Login is required by default. Use `relay up --no-login` to open the local app
 without credentials. The saved `login_required` setting keeps this choice for
@@ -178,6 +143,40 @@ Options:
 The CLI handles setup and administration. Workflow launch, permissions,
 elicitations, waits, cancellation, resume, rerun, history, artifacts, and
 cleanup are browser actions.
+
+## Status
+
+Relay Phase 1 is implemented but unreleased. All five supported agents passed
+authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
+Live provider execution on Linux and Windows remains unverified. Exact
+versions, model selectors, artifact hashes, cleanup results, and remaining
+verification limits are recorded in [`certification/`](certification/README.md).
+The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
+contracts at the first release.
+
+Phase 1 is local and single-owner. It contains no remote workers, containers,
+Redis, Postgres, model fallback, or automatic merge. Six
+[starter workflows](docs/workflows.md#starter-workflows) copy into the project
+when the owner chooses one; runs use the saved project files.
+Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
+eligible agent failures up to twice with the same model and settings, retained
+reports, and a separate repair instruction. It stops on unsafe failures or an
+exhausted budget.
+Configure [stage repair rules](docs/workflows.md#stage-repair-rules) to run a
+selected fixer and verifier after a rejected verdict. The map keeps the main
+stages; the Repairs panel shows each round, its settings, and retained reports.
+Confirmed provider usage resets can resume a failed stage automatically while
+preserving its captured model, effort, and prompts. Unsupported or missing reset
+information remains visible for the owner. See
+[Provider usage resets](docs/execution.md#provider-usage-resets).
+An owner can retry a stopped agent step with another installed tool and exact
+model. Relay validates the selection and keeps completed steps, prompts, and
+the original snapshot. See
+[Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
+Use **Pause new steps** to let current work finish while holding the next
+stage. Change an unstarted agent's settings, then resume explicitly; completed
+work and captured instructions stay saved. See
+[Pause new steps](docs/execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 ## Architecture
 

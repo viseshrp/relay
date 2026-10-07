@@ -26,7 +26,7 @@ from relay.constants import (
     PROCESS_EXIT_POLL_SECONDS,
     SHUTDOWN_TIMEOUT_SECONDS,
 )
-from relay.errors import ConfigError, PersistenceError, RelayError
+from relay.errors import ConfigError, PersistenceError, ProjectDiscoveryError, RelayError
 from relay.execution.cancellation import signal_process_tree
 from relay.execution.huey_app import enqueue_claim
 from relay.execution.process_identity import ProcessIdentity, process_identity
@@ -37,7 +37,7 @@ from relay.execution.scheduler import SchedulingStore, dispatch_ready_nodes
 from relay.manage import MigrationLock, apply_migrations
 from relay.paths import data_dir, shutdown_marker_path
 from relay.projects.discovery import discover_relay_root
-from relay.projects.service import register_current_project
+from relay.projects.service import initialize_project, register_current_project
 
 from .process_ownership import SupervisorOwnership, abandoned_ownership, stop_owned_children
 
@@ -374,7 +374,11 @@ def _run_supervisor(
 ) -> None:
     """Run until a signal or child failure, then preserve resumable state."""
     try:
-        relay_root = discover_relay_root(Path.cwd())
+        try:
+            relay_root = discover_relay_root(Path.cwd())
+        except ProjectDiscoveryError:
+            initialize_project(Path.cwd())
+            relay_root = discover_relay_root(Path.cwd())
     except RelayError as error:
         raise ConfigError(
             error.message,

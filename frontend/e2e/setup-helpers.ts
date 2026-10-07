@@ -43,7 +43,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
   }
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.", { exact: true })).toBeVisible();
   await expect(setup).toHaveCount(0);
-  if (id === "ask-agent") await page.screenshot({ path: testInfo.outputPath("run-page.png"), fullPage: true });
+  if (id === "ask-agent") await page.screenshot({ path: testInfo.outputPath("run-page.png") });
   await page.getByRole("button", { name: "Help", exact: true }).click();
   const checked = page.waitForResponse((response) => response.url().includes("/api/agents/check"));
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();

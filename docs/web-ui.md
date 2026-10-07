@@ -5,11 +5,15 @@ It runs on loopback and has no remote deployment mode in Phase 1.
 
 ## Start Relay
 
-Run this inside an initialized repository:
+Run this inside a Git repository:
 
 ```bash
 relay up
 ```
+
+If the repository has no `.relay` directory, Relay creates the same blank
+project files as `relay init`. Existing project files stay unchanged, including
+a project discovered in a repository subdirectory. Startup never commits them.
 
 Relay applies database migrations, reconciles durable work, starts Uvicorn and
 one Huey consumer, waits for the HTTP API to become ready, and then opens the
