@@ -75,8 +75,9 @@ test("configure repairs, save and reload, then run fix and verification behind t
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Review · Complete", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Deliver · Complete", exact: true })).toBeVisible();
+  const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  await expect(jobs.locator('[data-job-scope="root.review"]')).toContainText("Complete");
+  await expect(jobs.locator('[data-job-scope="root.deliver"]')).toContainText("Complete");
   await page.getByText("Repairs · 1 configured", { exact: true }).click();
   const panel = page.getByRole("region", { name: "Repairs for Review", exact: true });
   await expect(panel).toContainText("Round 1 of 3");
@@ -158,9 +159,13 @@ test("exhausted repairs stop visibly at their source and keep every rejected rep
   await page.goto(`/?view=runs&run=${runId}`);
   await expect(page.getByRole("heading", { name: "Review stopped", exact: true })).toBeVisible();
   await expect(page.getByText("The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review · Repairs stopped", exact: true })).toBeVisible();
+  const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  await expect(jobs.locator('[data-job-scope="root.review"]')).toHaveCount(1);
+  await expect(jobs).toContainText("Repair for Review");
   await expect(page.locator(".react-flow__node")).toHaveCount(2);
   const detail = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  expect(await jobs.locator("[data-job-scope]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-job-scope")).sort()))
+    .toEqual(detail.nodes.map((node: { scope_path: string }) => node.scope_path).sort());
   expect(detail.problem.error_code).toBe("repair_exhausted");
   expect(detail.nodes.find((item: { scope_path: string }) => item.scope_path === "root.deliver").status).toBe("canceled");
   const artifacts = (await (await page.request.get(`/api/runs/${runId}/artifacts`)).json()).artifacts;

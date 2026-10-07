@@ -58,7 +58,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.goto(href!);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Owner review · Waiting", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Jobs", exact: true }).getByRole("button", { name: /^Owner review Waiting/ })).toBeVisible();
   const detail = (await (await page.request.get(`/api/runs/${runId}?collection=interactions&pending=true`)).json()).run;
   expect(detail.status).toBe("paused_wait");
   expect(detail.interactions).toHaveLength(1);
@@ -73,7 +73,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.route(stream, (route) => route.fulfill({ contentType: "text/event-stream", body: frames.map((item) => `id: ${item.id}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join("") }));
   await page.reload();
   await expect(page.getByText("New output after an old failed attempt.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Owner review · Waiting", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Jobs", exact: true }).getByRole("button", { name: /^Owner review Waiting/ })).toBeVisible();
   await page.unroute(stream);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
@@ -185,6 +185,6 @@ test("a review completed during initial loading updates progress before the stre
   });
   await page.goto(`/?view=runs&run=${runId}`);
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review · Complete", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Jobs", exact: true }).locator('[data-job-scope="root.review"]')).toContainText("Complete");
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeHidden();
 });

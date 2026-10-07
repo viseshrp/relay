@@ -2,6 +2,7 @@ import { Box, Button, Divider, List, ListItemButton, ListItemText, Typography } 
 import type { RunNode } from "../types";
 import { stageLabel, statusLabel } from "../navigation";
 import { jobDuration } from "../job";
+import { jobListRows } from "../job-list";
 
 function statusIcon(status: string): string {
   if (status === "succeeded") return "✓";
@@ -15,27 +16,22 @@ export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMo
   nodes: RunNode[]; selected: string | null; repairOwners: Map<string, string>;
   hasMore: boolean; onSelect: (scope: string | null) => void; onMore: () => void;
 }) {
-  const groups = new Map<string, RunNode[]>();
-  for (const node of nodes) {
-    if (node.node_type === "loop" && /#\d+$/.test(node.scope_path)) continue;
-    const parent = node.parent_scope ?? "root";
-    const group = groups.get(parent) ?? [];
-    group.push(node); groups.set(parent, group);
-  }
+  const rows = jobListRows(nodes, repairOwners);
+  const attention = rows.filter((row) => row.attention);
+  const other = rows.filter((row) => !row.attention);
   return <Box component="nav" aria-label="Jobs">
     <Divider />
     <Typography variant="h6" sx={{ p: 2 }}>Jobs</Typography>
     <ListItemButton selected={!selected} onClick={() => onSelect(null)}><ListItemText primary="Summary" /></ListItemButton>
-    {Array.from(groups, ([parent, rows]) => <Box key={parent}>
-      {parent !== "root" && <Typography variant="subtitle2" sx={{ px: 2, pt: 1 }}>
-        {repairOwners.get(parent) ? `Repair for ${stageLabel(repairOwners.get(parent) ?? parent)} · ` : ""}{stageLabel(parent)}
-      </Typography>}
-      <List disablePadding>{rows.map((node) => <ListItemButton key={node.id} selected={node.scope_path === selected}
-        onClick={() => onSelect(node.scope_path)} sx={{ pl: parent === "root" ? 2 : 3 }}>
+    {[attention, other].filter((group) => group.length > 0).map((group) => <Box key={group === attention ? "attention" : "jobs"}>
+      {attention.length > 0 && <Typography variant="subtitle2" sx={{ px: 2, pt: 1 }}>{group === attention ? "Waiting and failed jobs" : "Other jobs"}</Typography>}
+      <List disablePadding>{group.map(({ node, depth, context }) => <ListItemButton key={node.scope_path} selected={node.scope_path === selected}
+        data-job-scope={node.scope_path} onClick={() => onSelect(node.scope_path)} sx={{ pl: 2 + depth * 1.5 }}>
         <Box aria-hidden sx={{ mr: 1 }}>{statusIcon(node.status)}</Box>
-        <ListItemText primary={stageLabel(node.scope_path)} secondary={`${statusLabel(node.status)} · ${jobDuration(node.started_at, node.ended_at)}`} />
+        <ListItemText primary={stageLabel(node.scope_path)} secondary={`${statusLabel(node.status)} · ${jobDuration(node.started_at, node.ended_at)}${context ? ` · ${context}` : ""}`} />
       </ListItemButton>)}</List>
     </Box>)}
+    {rows.length === 0 && <Typography color="text.secondary" sx={{ p: 2 }}>Jobs will appear here when the run is prepared.</Typography>}
     {hasMore && <Button onClick={onMore}>Load more jobs</Button>}
   </Box>;
 }

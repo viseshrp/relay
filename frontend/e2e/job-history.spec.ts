@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import { post } from "./setup-helpers";
 import { ansiSpans, commandLines, jobDuration } from "../src/job";
-import type { RunEvent } from "../src/types";
+import { jobListRows } from "../src/job-list";
+import type { RunEvent, RunNode } from "../src/types";
 import type { AnsiStyle } from "../src/job";
 
 async function create(page: Page, key: string, nodes: object, extra: object = {}) {
@@ -36,6 +37,10 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   await settled(page, id, "failed");
   await page.goto(`/?view=runs&run=${id}`);
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  await expect(page.getByRole("heading", { name: "Steps and progress", exact: true })).toHaveCount(0);
+  await expect(jobs.locator("[data-job-scope]").first()).toHaveAttribute("data-job-scope", "root.check");
+  await expect(jobs.locator('[data-job-scope="root.check"]')).toHaveCount(1);
+  await expect(jobs.getByText("Waiting and failed jobs", { exact: true })).toBeVisible();
   await jobs.getByRole("button", { name: /^Check / }).click();
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(log.getByRole("alert")).toContainText("Final command error");
@@ -98,6 +103,16 @@ test("loop iterations and nested workflow jobs have individual logs and stable l
   const log = page.getByRole("region", { name: "Job log" });
   await expect(log.getByRole("heading", { name: "Check (iteration 2)", exact: true })).toBeVisible();
   const jobs = page.getByRole("navigation", { name: "Jobs" });
+  const detail: { run: { nodes: RunNode[] } } = await (await page.request.get(`/api/runs/${id}`)).json();
+  const expectedScopes = detail.run.nodes.map((node) => node.scope_path).sort();
+  const listedScopes = await jobs.locator("[data-job-scope]").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-job-scope")).sort());
+  expect(listedScopes).toEqual(expectedScopes);
+  const loop = jobs.locator('[data-job-scope="root.repeats"]');
+  const iteration = jobs.locator('[data-job-scope="root.repeats#2"]');
+  const child = jobs.locator('[data-job-scope="root.repeats#2.check"]');
+  const padding = async (selector: typeof loop) => Number.parseFloat(await selector.evaluate((element) => getComputedStyle(element).paddingLeft));
+  expect(await padding(iteration)).toBeGreaterThan(await padding(loop));
+  expect(await padding(child)).toBeGreaterThan(await padding(iteration));
   await expect(jobs).toContainText("Repeats (iteration 1)");
   await expect(jobs).toContainText("Repeats (iteration 2)");
   await jobs.getByRole("button", { name: /^Check Complete/ }).click();
@@ -105,6 +120,47 @@ test("loop iterations and nested workflow jobs have individual logs and stable l
   await expect(log.getByRole("heading", { name: "Check", exact: true })).toBeVisible();
   await page.reload();
   await expect(log.getByRole("heading", { name: "Check", exact: true })).toBeVisible();
+});
+
+function job(scope: string, fields: Partial<RunNode> = {}): RunNode {
+  return { id: scope, scope_path: scope, node_id: scope.split(".").at(-1) ?? scope,
+    node_type: "command", status: "succeeded", writes: false, selected_branch: null,
+    loop_index: null, parent_scope: null, dependencies: [], controls: [], ...fields };
+}
+
+test("a waiting job is pinned above completed work and opens from the keyboard", async ({ page }) => {
+  await create(page, "waiting-list", { before: { type: "command", run: ["git", "status"] },
+    approval: { type: "human_wait", needs: ["before"], prompt: "Approve the saved work." } });
+  const id = await launch(page, "waiting-list");
+  await settled(page, id, "paused_wait");
+  await page.goto(`/?view=runs&run=${id}`);
+  const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  const first = jobs.locator("[data-job-scope]").first();
+  await expect(first).toHaveAttribute("data-job-scope", "root.approval");
+  await expect(first).toContainText("Waiting");
+  await expect(jobs.locator('[data-job-scope="root.before"]')).toContainText("Complete");
+  await first.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/job=root.approval/);
+  await expect(page.getByRole("region", { name: "Job log", exact: true })).toBeVisible();
+});
+
+test("job ordering keeps nested groups, pins attention once, and handles partial pages", () => {
+  const records = [job("root.repeat", { node_type: "loop" }), job("root.child", { node_type: "subworkflow" }),
+    job("root.repeat#2.check", { parent_scope: "root.repeat#2", status: "failed" }),
+    job("root.child.test", { parent_scope: "root.child" }),
+    job("root.repeat#2", { node_type: "loop", parent_scope: "root" }),
+    job("root.hidden", { node_type: "loop", repair_for: "root.child" }),
+    job("root.hidden#1.fix", { parent_scope: "root.hidden#1", status: "waiting" })];
+  const rows = jobListRows([...records, records[0]], new Map([["root.hidden", "root.child"], ["root.hidden#1.fix", "root.child"]]));
+  expect(rows.map((row) => row.node.scope_path)).toEqual(["root.repeat#2.check", "root.hidden#1.fix", "root.repeat", "root.repeat#2", "root.child", "root.child.test", "root.hidden"]);
+  expect(rows[0]).toMatchObject({ depth: 2, context: "Repeat › Repeat (iteration 2)", attention: true });
+  expect(rows[1]).toMatchObject({ depth: 1, context: "Repair for Child › Hidden", attention: true });
+  expect(rows.find((row) => row.node.scope_path === "root.child.test")).toMatchObject({ depth: 1, context: "Child" });
+  expect(jobListRows([records[2]], new Map())[0]).toMatchObject({ depth: 1, context: "Repeat (iteration 2)" });
+  expect(jobListRows([], new Map())).toEqual([]);
+  const cycle = jobListRows([job("root.a", { parent_scope: "root.b" }), job("root.b", { parent_scope: "root.a" })], new Map());
+  expect(cycle.map((row) => row.node.scope_path)).toEqual(["root.a", "root.b"]);
 });
 
 test("terminal text keeps stream boundaries, ANSI colors, and inert escape sequences", () => {

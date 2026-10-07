@@ -62,7 +62,6 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .diff-file-list { display: block; max-height: 620px; }
   .diff-file-button { margin-bottom: 6px; }
 }
-.stage-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; }
 .react-flow__node { white-space: pre-line; }
 .react-flow__edge-path { stroke-width: 2; }
 

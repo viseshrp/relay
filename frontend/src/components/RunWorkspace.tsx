@@ -933,14 +933,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                 onClose={() => setPendingSettings(null)} onRetry={savePendingSettings}
               />}
 
-              <Paper variant="outlined" className="section-card">
-                <Typography variant="h6" sx={{ mb: 1 }}>Steps and progress</Typography>
-                <Box className="stage-list">{visibleStages.map((node) => <Button key={node.id} variant={(repairOwners.get(focusStage ?? "") ?? focusStage) === node.scope_path ? "outlined" : "text"} color={["failed", "repair_stopped"].includes(node.status) ? "error" : node.status === "waiting" ? "warning" : "inherit"} onClick={() => showStep(node.scope_path)}>
-                  {stageLabel(node.scope_path)} · {statusLabel(node.status)}
-                </Button>)}</Box>
-                {nodeCursor !== null && <Button onClick={() => void loadMoreNodes()}>Load more steps</Button>}
-              </Paper>
-
               <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
                 <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) showStep(id); }} followSelection focusRequest={stepFocusRequest} />
               </Paper>

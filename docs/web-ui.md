@@ -300,9 +300,13 @@ Relay adds the chosen instructions after the original step prompts and retains
 them for future retries.
 The left column lists jobs with a status symbol, text, and the latest attempt's
 duration. Loop iterations, child workflows, and repair rounds retain their
-own groups and scope paths. Select **Summary** for the run graph, approvals,
-and overall status. Selecting a job in the list, graph, progress buttons, or
-failure notice opens its log in the right column. The URL records
+own groups and scope paths, with children indented beneath their parent.
+Waiting and failed jobs move to the top with their parent and repair context;
+each loaded job appears once, including iteration markers. **Load more jobs**
+extends the same list. The Summary has one graph without a duplicate chip
+block. Select **Summary** for the run graph, approvals, and overall status.
+Selecting a job in the list, graph, or failure notice opens its log in the
+right column. The URL records
 `job=<scope path>` so a reload or shared link opens the same job.
 
 The job header shows its name, agent and exact model, duration, attempt picker,
