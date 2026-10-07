@@ -714,6 +714,10 @@ def _run_record(run: Run) -> dict[str, object]:
         "id": _identifier(run),
         "project_id": _foreign_key_text(run, "project"),
         "workflow_key": _string(run, "workflow_key"),
+        "number": _integer(run, "number"),
+        "title": _string(run, "title"),
+        "source_branch": run.source_branch,
+        "created_at": _datetime_text(_datetime_field(run, "created_at")),
         "status": _string(run, "status"),
         "source_commit": _string(run, "source_commit"),
         "run_branch": _string(run, "run_branch"),
@@ -1233,6 +1237,9 @@ class DjangoReadStore:
         status: str | None,
         since: str | None,
         limit: int,
+        workflow: str | None = None,
+        branch: str | None = None,
+        query_text: str | None = None,
     ) -> tuple[list[dict[str, object]], str | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
@@ -1249,6 +1256,16 @@ class DjangoReadStore:
                 query = query.filter(project_id=project_id)
             if status is not None:
                 query = query.filter(status=status)
+            if workflow is not None:
+                query = query.filter(workflow_key=workflow)
+            if branch is not None:
+                query = query.filter(source_branch=branch)
+            if query_text:
+                query = query.filter(
+                    models.Q(title__icontains=query_text)
+                    | models.Q(workflow_key__icontains=query_text)
+                    | models.Q(source_commit__startswith=query_text)
+                )
             if since is not None:
                 cursor = _require_run(Run.objects.filter(pk=since).first(), since)
                 cursor_started = _datetime_field(cursor, "started_at")
@@ -1952,11 +1969,16 @@ class DjangoExecutionStore(DjangoAgentStore):
                         next_action="Start Relay again, then relaunch the workflow.",
                     )
                 project = _project_by_id(project_id)
+                number = _integer(project, "next_run_number")
+                Project.objects.filter(pk=project.pk).update(next_run_number=number + 1)
                 run_transition = transition_run(None, "launch")
                 run = Run.objects.create(
                     id=run_id,
                     project=project,
                     workflow_key=request.workflow_key,
+                    number=number,
+                    title=policy.definition.name,
+                    source_branch=request.source_branch,
                     status=run_transition.status,
                     source_commit=source_commit,
                     run_branch=branch,

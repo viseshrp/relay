@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -19,6 +19,7 @@ from relay.errors import (
     WorkflowValidationError,
 )
 from relay.paths import safe_resolve
+from relay.projects.service import project_launch_source
 from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import create_primary_worktree
@@ -47,6 +48,7 @@ class LaunchRequest:
     entry_point: str | None
     owner_agents: Sequence[str]
     launcher: str
+    source_branch: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,9 +239,10 @@ def launch_workflow(
         )
     snapshot = build_snapshot(workflow, typed_inputs=typed_inputs, routes=routes)
     source_commit = current_head(repository)
+    source = project_launch_source(repository)
     run_id = store.create_pending_run(
         project_id,
-        normalized_request,
+        replace(normalized_request, source_branch=source.branch),
         source_commit,
         snapshot,
         workflow.root.definition.nodes,

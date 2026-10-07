@@ -73,6 +73,7 @@ class Project(RelayModel):
     display_name: models.TextField = models.TextField()
     git_root: models.TextField = models.TextField()
     last_opened_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
+    next_run_number: models.PositiveIntegerField = models.PositiveIntegerField(default=1)
 
 
 class ProjectRelink(RelayModel):
@@ -140,6 +141,10 @@ class Run(RelayModel):
         Project, on_delete=models.PROTECT, related_name="runs"
     )
     workflow_key: models.TextField = models.TextField()
+    number: models.PositiveIntegerField = models.PositiveIntegerField(default=0)
+    title: models.TextField = models.TextField(blank=True, default="")
+    source_branch: models.TextField = models.TextField(null=True, blank=True)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
     status: models.CharField = models.CharField(
         max_length=16, choices=RunStatus.choices(), default=RunStatus.PENDING
     )
@@ -166,6 +171,13 @@ class Run(RelayModel):
     repair_groups: models.JSONField = models.JSONField(default=dict)
 
     class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("project", "number"),
+                condition=models.Q(number__gt=0),
+                name="relay_unique_project_run_number",
+            )
+        ]
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=("project", "status"), name="relay_run_project_status_idx")
         ]

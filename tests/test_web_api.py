@@ -1807,3 +1807,28 @@ def test_attention_database_errors_keep_the_public_envelope(
     assert response.status_code == 503
     assert response.json()["code"] == "persistence_error"
     assert "Private database trace" not in response.content.decode()
+
+
+def test_history_filters_are_additive_and_titles_stay_captured(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    workflow = (
+        "version: 1\nname: Build and review\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    served.write_workflow("identity", workflow)
+    run_id = engine.launch(served, "identity")
+    engine.drain(run_id)
+    served.write_workflow("identity", workflow.replace("Build and review", "New workflow name"))
+    for query in ("workflow=identity", "branch=main", "query=review", "query=Build"):
+        response = owner.get(f"/api/runs?project={served.project_id}&{query}")
+        assert response.status_code == 200
+        rows = response.json()["runs"]
+        assert [row["id"] for row in rows] == [run_id]
+        assert rows[0]["title"] == "Build and review"
+        assert rows[0]["number"] == 1
+        assert rows[0]["source_branch"] == "main"
+        assert rows[0]["created_at"]
+    assert owner.get("/api/runs?branch=missing").json()["runs"] == []
+    assert owner.get("/api/runs?query=missing").json()["runs"] == []
+    assert owner.get("/api/runs?workflow=missing").json()["runs"] == []
+    assert owner.get("/api/runs?query=" + "x" * 1025).status_code == 400

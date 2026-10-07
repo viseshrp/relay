@@ -272,11 +272,18 @@ def runs(request: HttpRequest) -> HttpResponse:
     since = request.GET.get("since")
     if since is not None:
         since = canonical_uuid(since, resource="run")
+    filters = {key: request.GET.get(key) for key in ("workflow", "branch", "query")}
+    if any(value is not None and len(value) > 1024 for value in filters.values()):
+        message = "Run filters must be 1024 characters or fewer."
+        raise ConfigError(message)
     records, next_value = DjangoReadStore().list_runs(
         project_id=project_id,
         status=status,
         since=since,
         limit=limit,
+        workflow=filters["workflow"],
+        branch=filters["branch"],
+        query_text=filters["query"],
     )
     return JsonResponse({"runs": records, "next": next_value})
 

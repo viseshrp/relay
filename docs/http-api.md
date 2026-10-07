@@ -183,7 +183,10 @@ returned together. A successful preflight atomically records the run and
 snapshot, creates `relay/run/{run-id}` in an isolated worktree, and durably
 dispatches eligible nodes.
 
-Run history accepts `project`, `status`, `since`, and `limit`. `since` is the
+Run history accepts `project`, `status`, `since`, and `limit`, plus optional
+`workflow`, `branch`, and `query` filters. Workflow and source branch filters
+match exactly. The query matches the captured title, workflow key, or source
+commit prefix. Filters accept at most 1024 characters. `since` is the
 opaque run cursor returned as `next`; `limit` is clamped to 200. Event `since`
 is the last numeric event ID already consumed. Event pages are ordered by ID,
 contain at most 200 events and 1 MiB, and can be replayed without gaps by using
@@ -193,6 +196,13 @@ each event ID as its replay cursor. The initial connection may use
 `GET /api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
 `Last-Event-ID` takes precedence over `since`; omitting both starts at zero.
 Both cursors must fit the same nonnegative database integer range.
+
+Run history and detail add `number`, `title`, `source_branch`, and `created_at`.
+Numbers increase within each project and remain reserved after deletion. The
+title captures the workflow name at launch; the branch records its Git source
+when available. Older runs retain their UUID and snapshot bytes. Migration
+assigns their numbers in snapshot creation order and leaves their unknown
+source branch null. Existing response fields and run cursors stay unchanged.
 
 Run history and detail include `waiting_count`, the number of pending owner
 requests attached to waiting attempts. Interaction records add `respondable`

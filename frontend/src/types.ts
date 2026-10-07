@@ -164,6 +164,10 @@ export interface RetryOptions {
 
 export interface RunSummary {
   id: string;
+  number: number;
+  title: string;
+  source_branch: string | null;
+  created_at: string;
   project_id: string;
   workflow_key: string;
   status: string;

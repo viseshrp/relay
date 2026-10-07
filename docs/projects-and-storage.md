@@ -203,7 +203,10 @@ tables, independent of operating-system registries and MIME files.
 
 ## Retention and deletion
 
-Run history remains until the owner confirms deletion. Project rows are
+Run history remains until the owner confirms deletion. Each project keeps a
+monotonic run counter. Deleting history never reuses a run number. Existing
+runs receive numbers in snapshot creation order during migration; subsequent
+runs keep their assigned number. Project rows are
 protected while runs reference them. Deleting a run may cascade only through
 that run's owned snapshot, nodes, attempts, events, interactions, controls,
 and artifact metadata.
