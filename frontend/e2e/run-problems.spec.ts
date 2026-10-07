@@ -58,20 +58,14 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   await expect(notice).toBeVisible();
   if (!automatic) {
     await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
-    const progress = page.getByRole("region", { name: "Step progress", exact: true });
-    await expect(progress).toBeInViewport({ ratio: 0.5 });
-    await expect(progress).toBeFocused();
-    const review = progress.locator('[data-id="root.review"]');
-    await expect(review).toBeInViewport();
-    const width = await review.evaluate((element) => element.getBoundingClientRect().width);
-    await progress.getByRole("button", { name: "Zoom Out", exact: true }).click();
-    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(width);
-    await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
-    await expect(progress).toBeInViewport({ ratio: 0.5 });
-    await expect(progress).toBeFocused();
-    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(width);
+    const log = page.getByRole("region", { name: "Job log", exact: true });
+    await expect(log.getByRole("heading", { name: "Review", exact: true })).toBeFocused();
+    await expect(log.getByRole("alert")).toContainText("unknown-command");
+    await expect(page).toHaveURL(/job=root.review/);
+    await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
     await page.getByRole("button", { name: "Show step", exact: true }).click();
-    await expect(progress).toBeFocused();
+    await expect(log.getByRole("alert")).toBeInViewport();
+    await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
   }
   if (automatic) {
     await expect(page.getByText("Relay is waiting for the provider's reset. It will retry automatically.", { exact: true })).toBeVisible();

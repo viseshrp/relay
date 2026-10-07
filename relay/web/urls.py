@@ -33,6 +33,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/runs/<str:run_id>", pages.run_detail, name="run-detail"),
     path("api/runs/<str:run_id>/stream", stream.run_stream, name="run-stream"),
     path("api/runs/<str:run_id>/events", pages.run_events, name="run-events"),
+    path("api/runs/<str:run_id>/job", pages.run_job, name="run-job"),
     path("api/runs/<str:run_id>/artifacts", pages.run_artifacts, name="run-artifacts"),
     path("api/runs/<str:run_id>/changes", pages.run_changes, name="run-changes"),
     path(

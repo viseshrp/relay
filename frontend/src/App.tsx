@@ -71,7 +71,7 @@ export function App() {
     catch (caught) { setProjectError(errorMessage(caught)); }
   }, [navigate]);
   const selectRun = useCallback((run: string | null) => {
-    setLocation((current) => ({ ...current, run, interaction: run === current.run ? current.interaction : null }));
+    setLocation((current) => ({ ...current, run, interaction: run === current.run ? current.interaction : null, job: run === current.run ? current.job : null }));
   }, []);
 
   useEffect(() => saveLocation(location, true), [location]);
@@ -162,7 +162,7 @@ export function App() {
         method: "POST", body: JSON.stringify({ path: projectPath, initialize: true }),
       });
       setProjects((current) => [...current.filter((project) => project.id !== response.project.id), response.project]);
-      navigate({ project: response.project.id, workflow: null, run: null, interaction: null, view: "author" });
+      navigate({ project: response.project.id, workflow: null, run: null, interaction: null, job: null, view: "author" });
       setOpeningProject(false);
     } catch (caught) {
       setProjectError(errorMessage(caught));
@@ -202,9 +202,9 @@ export function App() {
           forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
           onWorkflowCreated={async (key) => {
             await beforeLeave.current?.();
-            navigate({ workflow: key, view: "author", run: null, interaction: null });
+            navigate({ workflow: key, view: "author", run: null, interaction: null, job: null });
             setWorkflowRevision((value) => value + 1);
-          }} onRunLaunched={(id) => navigate({ run: id, interaction: null, view: "runs" })} />}
+          }} onRunLaunched={(id) => navigate({ run: id, interaction: null, job: null, view: "runs" })} />}
         {logoutError && (
           <Alert severity="error" sx={{ mb: 2 }} action={
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Retry</Button>
@@ -222,7 +222,7 @@ export function App() {
               onWorkflowLoaded={workflowLoaded}
               onNavigationReady={registerNavigation}
               onRunLaunched={(runId) => {
-                navigate({ run: runId, interaction: null, view: "runs" });
+                navigate({ run: runId, interaction: null, job: null, view: "runs" });
               }}
             />
           ) : (
@@ -230,6 +230,8 @@ export function App() {
               selectedRun={location.run}
               project={selectedProject}
               selectedInteraction={location.interaction}
+              selectedJob={location.job}
+              onSelectJob={(job) => navigate({ job })}
               onRunSucceeded={runSucceeded}
               onSelectRun={selectRun}
             />
@@ -252,7 +254,7 @@ export function App() {
     return <Stack className="project-context" direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3, alignItems: { md: "center" } }}>
       <FormControl size="small" sx={{ minWidth: 200 }}>
         <InputLabel id="current-project">Project</InputLabel>
-        <Select labelId="current-project" label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, workflow: null, run: null, interaction: null })}>
+        <Select labelId="current-project" label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, workflow: null, run: null, interaction: null, job: null })}>
           {projects.map((project) => <MenuItem key={project.id} value={project.id}>{project.display_name}</MenuItem>)}
         </Select>
       </FormControl>

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from django.contrib.auth.models import User
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.http import HttpResponse
 from django.test import Client, override_settings
 import pytest
@@ -23,8 +23,9 @@ from relay.constants import (
 from relay.execution.resume import recovery_workspace_lock
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, EventSensitivity, EventSource
-from relay.web.models import Artifact, HumanInteraction, Run, RunEvent
+from relay.web.models import Artifact, HumanInteraction, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
+from relay.web.views import actions
 from tests.support import (
     FakeAgents,
     InlineEngine,
@@ -1228,3 +1229,243 @@ def test_invalid_template_requests_write_no_sources(
     assert created.status_code in {400, 422}
     assert not (served.relay_root / "workflows" / "starter.yaml").exists()
     assert not (served.relay_root / "prompts" / "ask-agent.md").exists()
+
+
+def test_job_history_filters_tail_events_and_keeps_attempts_separate(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
+    served.write_workflow(
+        "jobs", "version: 1\nname: Jobs\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "jobs")
+    first = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert first is not None
+    for index in range(205):
+        engine.store.append_attempt_event(
+            first.attempt_id, "command.stdout", EventSource.COMMAND, {"chunk": f"line {index}\n"}
+        )
+    engine.store.append_attempt_event(
+        first.attempt_id, "command.stderr", EventSource.COMMAND, {"chunk": "Last error\n"}
+    )
+    engine.store.finish_attempt(
+        first.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="First failure", exit_code=3),
+        first.starting_head,
+    )
+    retry = post(
+        owner,
+        f"/api/runs/{run_id}/rerun-node",
+        {"scope_path": "root.check", "idempotency_key": "second-job-attempt"},
+    )
+    assert retry.status_code == 202
+    second = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert second is not None
+    engine.store.append_attempt_event(
+        second.attempt_id, "command.stderr", EventSource.COMMAND, {"chunk": "Second error\n"}
+    )
+    engine.store.finish_attempt(
+        second.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="Second failure", exit_code=4),
+        second.starting_head,
+    )
+    path = f"/api/runs/{run_id}"
+    first_page = owner.get(f"{path}/job?job=root.check&limit=1").json()
+    assert first_page["job"]["attempts"][0]["number"] == 1
+    assert first_page["job"]["latest_attempt"]["number"] == 2
+    assert first_page["job"]["latest_attempt"]["error_message"] == "Second failure"
+    assert first_page["job"]["latest_attempt"]["exit_code"] == 4
+    assert "worker_id" not in first_page["job"]["latest_attempt"]
+    next_page = owner.get(f"{path}/job?job=root.check&limit=1&since={first_page['next']}").json()
+    assert next_page["job"]["attempts"][0]["number"] == 2
+    assert next_page["next"] is None
+    tail = owner.get(f"{path}/events?job=root.check&attempt=1&latest=true&limit=3").json()
+    assert any(event["payload"].get("chunk") == "Last error\n" for event in tail["events"])
+    ids = [event["id"] for event in tail["events"]]
+    assert ids == sorted(ids)
+    older = owner.get(
+        f"{path}/events?job=root.check&attempt=1&latest=true&limit=3&before={tail['next']}"
+    ).json()
+    assert all(event["id"] < ids[0] for event in older["events"])
+    assert all(event["payload"]["attempt_number"] == 1 for event in older["events"])
+    current = owner.get(f"{path}/events?job=root.check&attempt=2").json()
+    assert all(event["payload"].get("attempt_number", 2) == 2 for event in current["events"])
+    assert any(event["payload"].get("chunk") == "Second error\n" for event in current["events"])
+    assert "Last error" not in json.dumps(current)
+    summary = owner.get(path).json()["run"]["nodes"][0]
+    assert summary["started_at"] and summary["ended_at"]
+
+
+def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    served.write(".relay/prompts/owner.md", "Frozen owner instructions\n")
+    served.write_workflow(
+        "instructions",
+        "version: 1\nname: Instructions\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work: {type: agent, prompts: [{local: prompts/owner.md}]}\n",
+    )
+    run_id = engine.launch(served, "instructions")
+    served.write(".relay/prompts/owner.md", "Edited after launch\n")
+    response = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    assert response["instructions"] == [
+        {
+            "reference": {"local": "prompts/owner.md"},
+            "text": "Frozen owner instructions\n",
+            "truncated": False,
+        }
+    ]
+    assert response["latest_attempt"] is None
+    assert response["command"] is None
+    assert response["outputs"] == {}
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("", 400),
+        ("?job=../outside", 422),
+        ("?job=root.missing", 404),
+        ("?job=root.check&limit=0", 400),
+        ("?job=root.check&since=-1", 400),
+    ],
+)
+def test_job_reads_reject_missing_or_invalid_targets(
+    owner: Client, served: RelayProject, engine: InlineEngine, query: str, expected: int
+) -> None:
+    served.write_workflow(
+        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "job")
+    assert owner.get(f"/api/runs/{run_id}/job{query}").status_code == expected
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "job?job=root.check",
+        "events?attempt=0",
+        "events?attempt=-1",
+        "events?before=bad",
+        "changes?attempt=0",
+        "changes?attempt=bad",
+    ],
+)
+def test_job_routes_preserve_auth_and_validate_parameters(
+    owner: Client, served: RelayProject, engine: InlineEngine, path: str
+) -> None:
+    served.write_workflow(
+        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "job")
+    url = f"/api/runs/{run_id}/{path}"
+    assert Client().get(url).status_code == 401
+    assert owner.post(url).status_code == 405
+    if not path.startswith("job?"):
+        assert owner.get(url).status_code == 400
+
+
+def test_job_changes_are_limited_to_the_selected_attempt(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "changes",
+        "version: 1\nname: Changes\nnodes:\n"
+        "  work: {type: command, writes: true, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "changes")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    from relay.vcs.git import run_git
+
+    head = run_git(served.repository, ["rev-parse", "HEAD"]).stdout.strip()
+    run_git(served.repository, ["commit", "--allow-empty", "-m", "Job's own commit"])
+    ending = run_git(served.repository, ["rev-parse", "HEAD"]).stdout.strip()
+    engine.store.finish_attempt(attempt.attempt_id, ExecutionOutcome(OutcomeKind.SUCCEEDED), ending)
+    response = owner.get(f"/api/runs/{run_id}/changes?job=root.work&attempt=1").json()
+    assert response["source_commit"] == head
+    assert response["recorded_head"] == ending
+    assert response["commits"] == [{"sha": ending, "title": "Job's own commit"}]
+    missing = owner.get(f"/api/runs/{run_id}/changes?job=root.work&attempt=2").json()
+    assert missing["commits"] == []
+    assert missing["text"] == ""
+
+
+def test_job_reads_omit_redacted_output_and_failure_text(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "private",
+        "version: 1\nname: Private\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "private")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    engine.store.append_attempt_event(
+        attempt.attempt_id, "agent.message", EventSource.AGENT, {"text": "Public failure"}
+    )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.message",
+        EventSource.AGENT,
+        {"text": "Private provider content"},
+        sensitivity=EventSensitivity.REDACTED,
+    )
+    engine.store.finish_attempt(
+        attempt.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="Private failure"),
+        attempt.starting_head,
+    )
+    RunEvent.objects.filter(attempt_id=attempt.attempt_id, type="attempt.ended").update(
+        sensitivity=EventSensitivity.REDACTED.value
+    )
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.check").json()["job"]
+    assert job["latest_attempt"]["error_message"] is None
+    assert job["latest_attempt"]["provider_message"] == "Public failure"
+    for query in ("job=root.check", "attempt=1", "job=root.check&attempt=1&latest=true"):
+        response = owner.get(f"/api/runs/{run_id}/events?{query}").json()
+        assert "Private provider content" not in json.dumps(response)
+        assert "Private failure" not in json.dumps(response)
+
+
+def test_job_instruction_preview_shares_a_utf8_byte_budget(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    first = "界" * 100000
+    served.write(".relay/prompts/large.md", first)
+    served.write(".relay/prompts/last.md", "Last instruction")
+    served.write_workflow(
+        "large",
+        "version: 1\nname: Large\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work: {type: agent, prompts: [{local: prompts/large.md}, {local: prompts/last.md}]}\n",
+    )
+    run_id = engine.launch(served, "large")
+    instructions = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]["instructions"]
+    assert instructions[0]["text"] == first[: 262144 // 3]
+    assert instructions[0]["truncated"] is True
+    assert instructions[1]["text"] == "L"
+    assert instructions[1]["truncated"] is True
+    assert sum(len(row["text"].encode("utf-8")) for row in instructions) == 262144
+
+
+def test_job_database_failure_keeps_the_public_error_envelope(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served.write_workflow(
+        "failure",
+        "version: 1\nname: Failure\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "failure")
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        message = "Private database trace"
+        raise DatabaseError(message)
+
+    monkeypatch.setattr(NodeRun.objects, "filter", unavailable)
+    response = owner.get(f"/api/runs/{run_id}/job?job=root.check")
+    assert response.status_code == 503
+    assert response.json()["code"] == "persistence_error"
+    assert "Private database trace" not in response.content.decode()

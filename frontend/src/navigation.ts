@@ -4,6 +4,7 @@ export interface LocationState {
   workflow: string | null;
   run: string | null;
   interaction: string | null;
+  job: string | null;
 }
 
 const LOCATION_KEY = "relay.location";
@@ -18,12 +19,13 @@ export function readLocation(): LocationState {
     workflow: parameters.get("workflow"),
     run: parameters.get("run"),
     interaction: parameters.get("interaction"),
+    job: parameters.get("job"),
   };
 }
 
 export function saveLocation(location: LocationState, replace = false): void {
   const query = new URLSearchParams({ view: location.view });
-  for (const key of ["project", "workflow", "run", "interaction"] as const) {
+  for (const key of ["project", "workflow", "run", "interaction", "job"] as const) {
     const value = location[key];
     if (value) query.set(key, value);
   }

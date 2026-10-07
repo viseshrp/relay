@@ -166,6 +166,8 @@ export interface RunNode {
   node_id: string;
   node_type: string;
   status: string;
+  started_at?: string | null;
+  ended_at?: string | null;
   writes: boolean;
   selected_branch: string | null;
   loop_index: number | null;
@@ -187,6 +189,45 @@ export interface RunNode {
   } | null;
   retry_settings?: RetryConfiguration | null;
   pending_settings?: RetryConfiguration | null;
+}
+
+export interface JobAttempt {
+  id: string;
+  number: number;
+  status: string;
+  agent_id: string;
+  model_value: string;
+  started_at: string | null;
+  ended_at: string | null;
+  stop_reason: string | null;
+  exit_code: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  provider_message: string | null;
+  provider_message_truncated: boolean;
+  starting_head: string;
+  ending_head: string | null;
+}
+
+export interface RunJob {
+  scope_path: string;
+  node_type: string;
+  status: string;
+  writes: boolean;
+  command: string[] | null;
+  prompt: string | null;
+  instructions: Array<{ reference: { local?: string; global?: string }; text: string; truncated: boolean }>;
+  outputs: Record<string, JsonValue>;
+  attempts: JobAttempt[];
+  latest_attempt: JobAttempt | null;
+}
+
+export interface JobChanges {
+  text: string;
+  truncated: boolean;
+  source_commit: string;
+  recorded_head: string;
+  commits: Array<{ sha: string; title: string }>;
 }
 
 export interface RunInteraction {

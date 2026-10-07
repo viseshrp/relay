@@ -268,10 +268,27 @@ choose **Use default handoff** to restore it. Returning to the original
 selection hides the editor; effort and permission changes alone keep it hidden.
 Relay adds the chosen instructions after the original step prompts and retains
 them for future retries.
-Stage buttons and **Show step** scroll to the graph, move keyboard focus to
-the progress view, and center that step at a readable scale. Repeated clicks
-restore the view after you pan or zoom away, even when the step is already
-selected.
+The left column lists jobs with a status symbol, text, and the latest attempt's
+duration. Loop iterations, child workflows, and repair rounds retain their
+own groups and scope paths. Select **Summary** for the run graph, approvals,
+and overall status. Selecting a job in the list, graph, progress buttons, or
+failure notice opens its log in the right column. The URL records
+`job=<scope path>` so a reload or shared link opens the same job.
+
+The job header shows its name, agent and exact model, duration, attempt picker,
+and **Re-run job** when the existing retry service allows it. Sections show
+**Set up**, captured read-only **Instructions**, **Agent conversation** or
+**Command output**, declared **Outputs**, this attempt's committed **Changes**,
+and **Complete**. A failed attempt opens its output and places its public
+error and recent stderr at the top, independently of whole-run event pages.
+Older output and attempts have separate load controls. Command lines show
+line numbers, stdout/stderr labels, and safe ANSI colors; escape sequences
+never become HTML or links. **Copy output** and **Download output** read the
+complete selected attempt's command streams, including earlier pages.
+Captured instruction previews are bounded and show when text is omitted.
+Outputs describe the latest attempt; older attempts keep their own events
+and committed changes. Re-running a job uses the existing control service
+and preserves completed upstream work and the launch snapshot.
 The selected run's history entry uses its live status, so it agrees with the
 detail view when work waits, finishes, stops, or restarts. Refresh reloads the
 history list and selected run's state, requests, saved files, and recent events.

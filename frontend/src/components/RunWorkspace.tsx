@@ -51,6 +51,8 @@ import { FlowCanvas } from "./FlowCanvas";
 import { ReviewRequest, ReviewEvidence } from "./RunReview";
 import { RunProblemNotice } from "./RunProblemNotice";
 import { RetrySettings } from "./RetrySettings";
+import { JobList } from "./JobList";
+import { JobWorkspace } from "./JobWorkspace";
 
 const EVENT_TYPES = [
   "run.created",
@@ -129,6 +131,8 @@ interface RunWorkspaceProps {
   onSelectRun: (runId: string | null) => void;
   project: ProjectRecord;
   selectedInteraction: string | null;
+  selectedJob: string | null;
+  onSelectJob: (scope: string | null) => void;
   onRunSucceeded?: () => void;
 }
 
@@ -296,7 +300,7 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, onRunSucceeded }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, selectedJob, onSelectJob, onRunSucceeded }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -328,6 +332,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
   const eventAfter = useRef(0);
   const previousRunStatus = useRef<string | null>(null);
   const stepProgress = useRef<HTMLDivElement>(null);
+  const jobContent = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedJob) jobContent.current?.scrollIntoView({ block: "start" });
+  }, [selectedJob]);
 
   const loadHistory = useCallback(async (cursor?: string) => {
     const query = new URLSearchParams({ limit: "50" });
@@ -664,10 +672,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
 
   function showStep(scopePath: string): void {
     setSelectedStage(scopePath);
-    // Explicit navigation also recenters an already selected step after panning.
-    setStepFocusRequest((value) => value + 1);
-    stepProgress.current?.scrollIntoView({ block: "start" });
-    stepProgress.current?.focus({ preventScroll: true });
+    onSelectJob(scopePath);
+    if (scopePath === selectedJob) jobContent.current?.scrollIntoView({ block: "start" });
   }
 
   async function loadMoreNodes() {
@@ -748,6 +754,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       <Box className="run-layout">
         <Paper variant="outlined" className="history-panel">
+          {detail && <JobList nodes={detail.nodes} selected={selectedJob} repairOwners={repairOwners}
+            hasMore={nodeCursor !== null} onSelect={(scope) => scope ? showStep(scope) : onSelectJob(null)}
+            onMore={() => void loadMoreNodes()} />}
           <Stack direction="row" sx={{ alignItems: "center", p: 2 }}>
             <Typography variant="h6" sx={{ flex: 1 }}>Run history</Typography>
             <Button size="small" disabled={refreshing} onClick={() => void refreshRuns()}>Refresh</Button>
@@ -773,11 +782,14 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
           )}
         </Paper>
 
-        <Stack spacing={2} sx={{ minWidth: 0 }}>
+        <Stack ref={jobContent} spacing={2} sx={{ minWidth: 0, scrollMarginTop: 80 }}>
           {detail === null ? (
             <Paper variant="outlined" className="empty-panel">
               <Typography color="text.secondary">Select a run to inspect it.</Typography>
             </Paper>
+          ) : selectedJob ? (
+            <JobWorkspace key={`${detail.id}:${selectedJob}`} runId={detail.id} scope={selectedJob}
+              liveEvents={events} canRetry={detail.status === "failed"} onRetry={rerunNode} />
           ) : (
             <>
               <Paper variant="outlined" className="section-card">
@@ -903,7 +915,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
               </Paper>
 
               <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
-                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) setSelectedStage(id); }} followSelection focusRequest={stepFocusRequest} />
+                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) showStep(id); }} followSelection focusRequest={stepFocusRequest} />
               </Paper>
 
               {repairGroups.length > 0 && <Accordion><AccordionSummary><Typography>Repairs · {repairGroups.length} configured</Typography></AccordionSummary><AccordionDetails><Stack spacing={2}>

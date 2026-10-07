@@ -456,6 +456,13 @@ def _require_run(run: Run | None, run_id: str) -> Run:
     return run
 
 
+def _require_job(node: NodeRun | None, run_id: str, scope_path: str) -> NodeRun:
+    if node is None:
+        message = "The requested job does not exist in this run."
+        raise ProjectDiscoveryError(message, context={"run": run_id, "job": scope_path})
+    return node
+
+
 def _require_artifact(artifact: Artifact | None) -> Artifact:
     if artifact is None:
         message = "The requested artifact does not exist."
@@ -935,6 +942,8 @@ def _node_record(
         "node_id": _string(node, "node_id"),
         "node_type": _string(node, "node_type"),
         "status": _string(node, "status"),
+        "started_at": _datetime_text(_datetime_field(node, "latest_started_at")),
+        "ended_at": _datetime_text(_datetime_field(node, "latest_ended_at")),
         "writes": _boolean(node, "writes"),
         "selected_branch": node.selected_branch,
         "loop_index": node.loop_index,
@@ -1031,16 +1040,90 @@ def _bounded_page(
     return records, more
 
 
+def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
+    """Expose attempt facts without worker, process, session, or provider-private fields."""
+    ended = (
+        RunEvent.objects.filter(
+            attempt=attempt, type="attempt.ended", sensitivity=EventSensitivity.NORMAL.value
+        )
+        .order_by("-id")
+        .first()
+    )
+    error = _mapping(ended, "payload").get("error_message") if ended else None
+    provider_message, truncated = _provider_failure_message(attempt)
+    return {
+        "id": _identifier(attempt),
+        "number": _integer(attempt, "attempt_number"),
+        "status": _string(attempt, "status"),
+        "agent_id": _string(attempt, "agent_id"),
+        "model_value": _string(attempt, "model_value"),
+        "started_at": _datetime_text(_datetime_field(attempt, "started_at")),
+        "ended_at": _datetime_text(_datetime_field(attempt, "ended_at")),
+        "stop_reason": attempt.stop_reason,
+        "exit_code": attempt.exit_code,
+        "error_code": attempt.error_code,
+        "error_message": _truncate_utf8(error, RUN_PROBLEM_TEXT_MAX_CHARS)
+        if isinstance(error, str)
+        else None,
+        "provider_message": provider_message,
+        "provider_message_truncated": truncated,
+        "starting_head": _string(attempt, "starting_head"),
+        "ending_head": attempt.ending_head,
+    }
+
+
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
-    def run_changes(self, run_id: str) -> dict[str, object]:
+    def run_changes(
+        self, run_id: str, *, scope_path: str | None = None, attempt_number: int | None = None
+    ) -> dict[str, object]:
         """Preview committed changes from the source commit to the protected run head."""
         try:
             run = _require_run(
                 Run.objects.select_related("project").filter(pk=run_id).first(), run_id
             )
             project = _related(run, "project", Project)
+            source_commit = _string(run, "source_commit")
+            recorded_head = _string(run, "recorded_head")
+            commits: list[dict[str, str]] = []
+            if scope_path is not None:
+                parse_scope_path(scope_path)
+                node = _require_job(
+                    NodeRun.objects.filter(run=run, scope_path=scope_path).first(),
+                    run_id,
+                    scope_path,
+                )
+                query = NodeAttempt.objects.filter(node_run=node)
+                if attempt_number is not None:
+                    query = query.filter(attempt_number=attempt_number)
+                attempt = query.order_by("-attempt_number").first()
+                if attempt is not None:
+                    source_commit = _string(attempt, "starting_head")
+                    recorded_head = str(attempt.ending_head or source_commit)
+                else:
+                    recorded_head = source_commit
+                with tempfile.TemporaryFile(mode="w+b") as log:
+                    run_git_to_file(
+                        Path(_string(project, "git_root")),
+                        [
+                            "log",
+                            "--format=%H%x00%s",
+                            "-100",
+                            f"{source_commit}..{recorded_head}",
+                            "--",
+                        ],
+                        log,
+                    )
+                    log.seek(0)
+                    for line in (
+                        log.read(REVIEW_PREVIEW_MAX_BYTES)
+                        .decode("utf-8", errors="replace")
+                        .splitlines()
+                    ):
+                        sha, separator, title = line.partition("\0")
+                        if separator:
+                            commits.append({"sha": sha, "title": title})
             with tempfile.TemporaryFile(mode="w+b") as output:
                 run_git_to_file(
                     Path(_string(project, "git_root")),
@@ -1048,23 +1131,27 @@ class DjangoReadStore:
                         "diff",
                         "--no-ext-diff",
                         "--no-textconv",
-                        _string(run, "source_commit"),
-                        _string(run, "recorded_head"),
+                        source_commit,
+                        recorded_head,
                         "--",
                     ],
                     output,
                 )
                 output.seek(0)
                 content = output.read(REVIEW_PREVIEW_MAX_BYTES + 1)
-            return {
+            result: dict[str, object] = {
                 "text": content[:REVIEW_PREVIEW_MAX_BYTES].decode("utf-8", errors="replace"),
                 "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
-                "source_commit": _string(run, "source_commit"),
-                "recorded_head": _string(run, "recorded_head"),
+                "source_commit": source_commit,
+                "recorded_head": recorded_head,
             }
+            if scope_path is not None:
+                result["commits"] = commits
         except DatabaseError:
             message = "Relay could not read the run's committed changes."
             raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return result
 
     def list_runs(
         self,
@@ -1161,7 +1248,17 @@ class DjangoReadStore:
                     .annotate(
                         has_attempt=models.Exists(
                             NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                        )
+                        ),
+                        latest_started_at=models.Subquery(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                            .order_by("-attempt_number")
+                            .values("started_at")[:1]
+                        ),
+                        latest_ended_at=models.Subquery(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                            .order_by("-attempt_number")
+                            .values("ended_at")[:1]
+                        ),
                     )
                     .order_by("pk")[: bounded + 1]
                 )
@@ -1203,14 +1300,32 @@ class DjangoReadStore:
         run_id: str,
         since: int,
         limit: int,
+        *,
+        scope_path: str | None = None,
+        attempt_number: int | None = None,
+        latest: bool = False,
+        before: int | None = None,
     ) -> tuple[list[dict[str, object]], int | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
             query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
+            if scope_path is not None:
+                parse_scope_path(scope_path)
+                query = query.filter(node_run__scope_path=scope_path)
+            if attempt_number is not None:
+                query = query.filter(attempt__attempt_number=attempt_number)
+            if scope_path is not None or attempt_number is not None:
+                query = query.filter(sensitivity=EventSensitivity.NORMAL.value)
+            if before is not None:
+                query = query.filter(id__lt=before)
+            if latest:
+                query = query.order_by("-id")
             rows = list(query[: bounded + 1])
             events, more = _bounded_page(rows, bounded, _event_record)
             next_value = int(str(events[-1]["id"])) if more and events else None
+            if latest:
+                events.reverse()
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except DatabaseError:
@@ -1218,6 +1333,69 @@ class DjangoReadStore:
             raise PersistenceError(message, context={"run": run_id}) from None
         else:
             return events, next_value
+
+    def run_job(
+        self, run_id: str, scope_path: str, *, since: int, limit: int
+    ) -> tuple[dict[str, object], int | None]:
+        """Read captured instructions and a bounded page of this job's attempts."""
+        parse_scope_path(scope_path)
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+                )
+                node = _require_job(
+                    NodeRun.objects.filter(run=run, scope_path=scope_path).first(),
+                    run_id,
+                    scope_path,
+                )
+                frozen = _mapping(node, "frozen_def")
+                snapshot = _related(run, "snapshot", RunSnapshot)
+                references = frozen.get("prompts", [])
+                contents = _resolved_prompt_contents(snapshot, frozen)
+                instructions: list[dict[str, object]] = []
+                remaining = API_MAX_PAGE_BYTES // 4
+                for index, content in enumerate(contents):
+                    reference = references[index] if isinstance(references, list) else {}
+                    text = _truncate_utf8(content, max(remaining, 0))
+                    remaining -= len(text.encode("utf-8"))
+                    instructions.append(
+                        {"reference": reference, "text": text, "truncated": text != content}
+                    )
+                attempts = list(
+                    NodeAttempt.objects.filter(node_run=node, pk__gt=since).order_by("pk")[
+                        : bounded + 1
+                    ]
+                )
+                records, more = _bounded_page(attempts, bounded, _job_attempt_record)
+                result = {
+                    "scope_path": scope_path,
+                    "node_type": _string(node, "node_type"),
+                    "status": _string(node, "status"),
+                    "writes": _boolean(node, "writes"),
+                    "command": frozen.get("run"),
+                    "prompt": frozen.get("prompt"),
+                    "instructions": instructions,
+                    "outputs": _mapping(node, "outputs"),
+                    "attempts": records,
+                    "latest_attempt": _job_attempt_record(latest)
+                    if (
+                        latest := NodeAttempt.objects.filter(node_run=node)
+                        .order_by("-attempt_number")
+                        .first()
+                    )
+                    is not None
+                    else None,
+                }
+                next_value = int(str(records[-1]["id"])) if more and records else None
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read this job's attempts."
+            raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
+        else:
+            return result, next_value
 
     def page_artifacts(
         self,

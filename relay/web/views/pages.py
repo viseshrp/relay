@@ -79,6 +79,17 @@ def _page_parameters(request: HttpRequest) -> tuple[int, int]:
     return since, _page_limit(request)
 
 
+def _attempt_parameter(request: HttpRequest) -> int | None:
+    value = request.GET.get("attempt")
+    if value is None:
+        return None
+    number = _nonnegative_int(value, field="attempt", default=0, maximum=DATABASE_INTEGER_MAX)
+    if number == 0:
+        message = "attempt must be at least 1."
+        raise ConfigError(message)
+    return number
+
+
 @api_errors
 @owner_required
 @require_GET
@@ -270,8 +281,35 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
     since, limit = _page_parameters(request)
-    events, next_value = DjangoReadStore().page_events(run_id, since, limit)
+    events, next_value = DjangoReadStore().page_events(
+        run_id,
+        since,
+        limit,
+        scope_path=request.GET.get("job"),
+        attempt_number=_attempt_parameter(request),
+        latest=request.GET.get("latest") == "true",
+        before=_nonnegative_int(
+            request.GET.get("before"), field="before", default=0, maximum=DATABASE_INTEGER_MAX
+        )
+        if request.GET.get("before") is not None
+        else None,
+    )
     return JsonResponse({"events": events, "next": next_value})
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_job(request: HttpRequest, run_id: str) -> HttpResponse:
+    since, limit = _page_parameters(request)
+    scope = request.GET.get("job")
+    if not scope:
+        message = "job must identify a job in this run."
+        raise ConfigError(message)
+    job, next_value = DjangoReadStore().run_job(
+        canonical_uuid(run_id, resource="run"), scope, since=since, limit=limit
+    )
+    return JsonResponse({"job": job, "next": next_value})
 
 
 @api_errors
@@ -333,8 +371,13 @@ def artifact_preview(request: HttpRequest, artifact_id: str) -> HttpResponse:
 @owner_required
 @require_GET
 def run_changes(request: HttpRequest, run_id: str) -> HttpResponse:
-    del request
-    return JsonResponse(DjangoReadStore().run_changes(canonical_uuid(run_id, resource="run")))
+    return JsonResponse(
+        DjangoReadStore().run_changes(
+            canonical_uuid(run_id, resource="run"),
+            scope_path=request.GET.get("job"),
+            attempt_number=_attempt_parameter(request),
+        )
+    )
 
 
 @api_errors

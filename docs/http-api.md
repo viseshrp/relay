@@ -112,6 +112,7 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/runs` | optional query below | `200 {"runs":[...],"next":...}` |
 | `GET /api/runs/{id}` | `?collection=nodes\|interactions&since=0&limit=200` | `200 {"run":...,"next":...}` |
 | `GET /api/runs/{id}/events` | `?since=0&limit=100` | `200 {"events":[...],"next":...}` |
+| `GET /api/runs/{id}/job` | `?job=root.check&since=0&limit=100` | `200 {"job":...,"next":...}` |
 | `GET /api/runs/{id}/artifacts` | `?since=0&limit=200` | `200 {"artifacts":[...],"next":...}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
@@ -175,6 +176,48 @@ Run detail pages one collection at a time. `collection=nodes` is the default;
 Both use the last numeric record ID as `since`. Stable run and snapshot
 metadata accompanies every page. Node pages are monitor summaries; complete
 provider and command output remains available through the event history.
+Node summaries also include the latest attempt's `started_at` and `ended_at`
+as UTC timestamps, or null before that attempt starts or finishes.
+
+### Job history
+
+`GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job
+contains its `scope_path`, `node_type`, `status`, `writes`, captured `command`
+or human-wait `prompt`, `instructions`, current declared `outputs`, and a
+bounded `attempts` page. Each instruction contains its local or global
+`reference`, captured `text`, and `truncated` flag. The combined instruction
+preview is limited to 256 KiB. It reads the launch snapshot, never current
+prompt files.
+
+Attempts contain `id`, `number`, `status`, `agent_id`, exact `model_value`,
+`started_at`, `ended_at`, `stop_reason`, `exit_code`, `error_code`,
+`error_message`, public `provider_message`, `provider_message_truncated`,
+`starting_head`, and `ending_head`. Worker IDs, process IDs, live session
+identifiers, and private provider content are omitted. `latest_attempt` is
+returned separately even when it falls outside the requested attempt page.
+Use `since=next` for further attempts; the existing numeric record bounds and
+200-row page limit apply. Declared outputs describe the latest job result;
+earlier attempt events and retained files remain available independently.
+
+Event reads accept optional `job` and positive `attempt` filters before
+pagination. Filtered job reads omit redacted events. For example,
+`events?job=root.check&attempt=2&latest=true` returns
+the last page of that exact attempt in ascending event order. In this mode,
+`next` is an older-page cursor: send it as `before=next` with the same filters
+and `latest=true`. Without `latest=true`, `since` and `next` keep their existing
+forward behavior. Event payloads are unchanged.
+
+`GET /api/runs/{id}/changes?job=root.check&attempt=2` previews that attempt's
+committed changes, using its recorded starting and ending heads. It adds
+`commits`, up to 100 records with `sha` and `title`, to the existing diff
+response. No started attempt or no ending head yields no committed changes.
+Omitting `attempt` selects the latest attempt; omitting `job` keeps the
+existing whole-run response. Diff preview limits and disabled Git external
+diff and text-conversion hooks still apply. Job reads require owner access;
+unknown runs or jobs return the existing not-found error envelope.
+
+### Live run detail
+
 Run detail also includes `event_cursor`, the highest event ID read in the same
 database statement as its run status, before the node or interaction page.
 The browser retains older replayed output but applies state changes only after
