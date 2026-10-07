@@ -143,6 +143,12 @@ reset and cleanup.
 
 ## Rerun and resume reset
 
+Interrupted loops and subworkflows check the primary checkout against the
+latest protected head without resetting it. Unstaged root report handoffs keep
+the same exact exemptions as completed writers. Code changes, staged reports,
+nested report files, and an unrecorded head still stop recovery. Restart keeps
+an owner's dispatch pause, so recovery does not start held child steps.
+
 Manual rerun, automatic recovery, and interrupted resume use this order:
 
 1. Stop the attempt process.

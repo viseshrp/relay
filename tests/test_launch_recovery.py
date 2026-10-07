@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import partial
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -18,11 +19,12 @@ from relay.errors import (
     WorktreeError,
 )
 from relay.execution.recovery import prepare_recovery_workspace
-from relay.execution.resume import RecoveryTarget
+from relay.execution.resume import RecoveryTarget, resume_interrupted
+from relay.execution.scheduler import dispatch_ready_nodes
 from relay.projects.service import initialize_project, register_current_project
 from relay.vcs.cleanliness import status_porcelain
 from relay.vcs.commits import current_head
-from relay.web.models import Artifact, NodeRun, Run
+from relay.web.models import Artifact, NodeAttempt, NodeRun, Run, RunSnapshot
 from relay.web.repositories import DjangoExecutionStore, DjangoProjectStore, DjangoReadStore
 from tests.support import InlineEngine, RelayProject, git, init_repository, run_status
 
@@ -308,3 +310,82 @@ def test_a_missing_ephemeral_reader_needs_no_workspace_repair(
         DjangoExecutionStore(), replace(interrupted_writer, ephemeral_reader=True)
     )
     assert not Artifact.objects.exists()
+
+
+@pytest.fixture
+def interrupted_paused_loop(project: RelayProject, engine: InlineEngine) -> RecoveryTarget:
+    project.write_workflow(
+        "loop",
+        "version: 1\nname: Paused loop\nnodes:\n"
+        "  repeat:\n    type: loop\n    max_iterations: 1\n    exhausted: stop\n"
+        '    until: "${{ loop.index >= 1 }}"\n'
+        "    body:\n      wait: {type: human_wait, prompt: Continue}\n"
+        "      check: {type: command, needs: [wait], run: [git, status]}\n"
+        "  stop: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(project, "loop")
+    engine.run_token(engine.tokens.popleft())
+    store = engine.store
+    store.configure_dispatch_pause(run_id, True, "pause-loop")
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.repeat").status == "waiting"
+    instance = store.acquire_instance(os.getpid(), "test-host")
+    store.request_orderly_shutdown(instance)
+    store.interrupt_active_attempts()
+    store.release_instance(instance)
+    target = next(
+        target for target in store.interrupted_targets() if target.scope_path == "root.repeat"
+    )
+    (Path(target.worktree_path) / "REVIEW.md").write_bytes(b"Ready: No\n")
+    return target
+
+
+def test_paused_loop_restart_keeps_reports_snapshots_and_unstarted_children(
+    interrupted_paused_loop: RecoveryTarget, engine: InlineEngine
+) -> None:
+    target = interrupted_paused_loop
+    report = Path(target.worktree_path) / "REVIEW.md"
+    snapshot = RunSnapshot.objects.get(run_id=target.run_id)
+    frozen = (snapshot.workflow_yaml, snapshot.resolved_prompts, snapshot.hashes)
+    attempt_ids = list(NodeAttempt.objects.values_list("id", flat=True))
+
+    resumed = resume_interrupted(engine.store, partial(prepare_recovery_workspace, engine.store))
+    dispatch_ready_nodes(engine.store, target.run_id, engine.tokens.append)
+    engine.drain(target.run_id)
+
+    assert resumed == (target.run_id,)
+    run = Run.objects.get(pk=target.run_id)
+    assert run.status == "running" and run.dispatch_paused is True
+    assert run.recorded_head == target.protected_head
+    assert report.read_bytes() == b"Ready: No\n"
+    snapshot.refresh_from_db()
+    assert (snapshot.workflow_yaml, snapshot.resolved_prompts, snapshot.hashes) == frozen
+    assert list(NodeAttempt.objects.values_list("id", flat=True)) == attempt_ids
+    assert not NodeAttempt.objects.filter(node_run__scope_path="root.repeat#1.check").exists()
+
+
+@pytest.mark.parametrize(
+    "change", ["untracked_code", "modified_code", "staged_report", "nested_report", "moved_head"]
+)
+def test_loop_restart_still_rejects_code_staged_reports_and_head_movement(
+    interrupted_paused_loop: RecoveryTarget, change: str
+) -> None:
+    target = interrupted_paused_loop
+    worktree = Path(target.worktree_path)
+    if change == "untracked_code":
+        (worktree / "unfinished.py").write_bytes(b"unfinished\n")
+    elif change == "modified_code":
+        (worktree / "README.md").write_bytes(b"unfinished\n")
+    elif change == "staged_report":
+        git(worktree, "add", "REVIEW.md")
+    elif change == "nested_report":
+        (worktree / "nested").mkdir()
+        (worktree / "nested/REVIEW.md").write_bytes(b"Ready: No\n")
+    else:
+        git(worktree, "commit", "--allow-empty", "-q", "-m", "Unrecorded head")
+
+    expected = WorktreeError if change == "moved_head" else DirtyRepositoryError
+    with pytest.raises(expected):
+        prepare_recovery_workspace(DjangoExecutionStore(), target)
+
+    assert run_status(target.run_id) == "interrupted"
+    assert (worktree / "REVIEW.md").read_bytes() == b"Ready: No\n"
