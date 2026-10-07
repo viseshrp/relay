@@ -30,6 +30,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, errorMessage, RelayApiError } from "../api";
+import { editorHolder } from "../editor-session";
 import { projectPath, stageLabel } from "../navigation";
 import type { AgentOptions, AgentsResponse, HandoffWarning, JsonScalar, ProjectRecord, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
@@ -47,6 +48,7 @@ import { AgentConfiguration } from "./AgentConfiguration";
 import { PromptEditor } from "./PromptEditor";
 import { ModelPicker } from "./ModelPicker";
 import { RepairSettings } from "./RepairSettings";
+import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 
 const YamlEditor = lazy(() =>
   import("./YamlEditor").then((module) => ({ default: module.YamlEditor })),
@@ -82,20 +84,11 @@ function scalarDefault(value: unknown): LaunchInputValue {
   return undefined;
 }
 
-function createHolder(): string {
-  const existing = sessionStorage.getItem("relay.editor-holder");
-  if (existing) return existing;
-  const holder = crypto.randomUUID();
-  sessionStorage.setItem("relay.editor-holder", holder);
-  return holder;
-}
-
 export function WorkflowWorkspace({ onRunLaunched, project, requestProject, initialWorkflow, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
-  const holder = useRef(createHolder());
+  const holder = useRef(editorHolder());
   const initialKey = useRef(initialWorkflow);
   const [inventory, setInventory] = useState<Array<{ key: string; name: string }>>([]);
   const [newWorkflow, setNewWorkflow] = useState(false);
-  const [newKey, setNewKey] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [addingStage, setAddingStage] = useState(false);
   const [stageName, setStageName] = useState("Check project");
@@ -457,26 +450,6 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
   ]));
   const effectiveModel = (typeof definition?.model === "string" ? definition.model : "")
     || launchModel || parsed.value?.model || "";
-
-  async function createWorkflow() {
-    setBusy(true);
-    setError(null);
-    try {
-      // "Release review" becomes "release-review"; the display name keeps the owner's wording.
-      const slug = newKey.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "workflow";
-      const key = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug) ? `workflow-${slug}` : slug;
-      const created = await api<{ key: string }>(projectPath("/api/workflows", requestProject), {
-        method: "POST", body: JSON.stringify({ key, name: newKey.trim(), holder: holder.current }),
-      });
-      const refreshed = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", requestProject));
-      setInventory(refreshed.workflows);
-      await loadWorkflow(created.key);
-      setNewWorkflow(false);
-      setNewKey("");
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally { setBusy(false); }
-  }
 
   return (
     <Stack spacing={2}>
@@ -914,11 +887,12 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
         </Stack></DialogContent>
         <DialogActions><Button onClick={() => { setHandoffHelp(false); setAdvanced(true); }}>Open workflow configuration</Button><Button onClick={() => setHandoffHelp(false)}>Close</Button></DialogActions>
       </Dialog>
-      <Dialog open={newWorkflow} onClose={() => !busy && setNewWorkflow(false)} fullWidth>
-        <DialogTitle>Create a workflow</DialogTitle>
-        <DialogContent><Typography sx={{ mb: 2 }}>Name the workflow, then add the stages you want Relay to run in {project.display_name}.</Typography><TextField autoFocus fullWidth label="Workflow name" value={newKey} onChange={(event) => setNewKey(event.target.value)} />{error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}</DialogContent>
-        <DialogActions><Button onClick={() => setNewWorkflow(false)} disabled={busy}>Cancel</Button><Button variant="contained" onClick={() => void createWorkflow()} disabled={busy || !newKey.trim()}>Create workflow</Button></DialogActions>
-      </Dialog>
+      <CreateWorkflowDialog open={newWorkflow} requestProject={requestProject} holder={holder.current}
+        onClose={() => setNewWorkflow(false)} onCreated={async (key) => {
+          const refreshed = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", requestProject));
+          setInventory(refreshed.workflows);
+          await loadWorkflow(key);
+        }} />
       <Dialog open={addingStage} onClose={() => setAddingStage(false)} fullWidth>
         <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem></Select></FormControl><Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim()}>Add stage</Button></DialogActions>
       </Dialog>

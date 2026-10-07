@@ -1,0 +1,17 @@
+version: 1
+name: Review my branch
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: What should the review focus on?
+    default: Review this branch for bugs and missing tests.
+    required: true
+nodes:
+  review:
+    type: agent
+    prompts: [{local: prompts/review-branch.md}]
+    writes: true
+    allow_no_commit: true
+    outputs:
+      ready: {label: {artifact: REVIEW.md, label: Ready}}

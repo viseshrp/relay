@@ -22,6 +22,10 @@ route requires an authenticated owner session while login is enabled. An
 unauthenticated request gets `401 authentication_required` instead of a redirect.
 
 `GET /api/auth` also returns `login_required`, which is `true` by default.
+It includes `password_rules`, an ordered list of plain text rules from the
+configured password validators before an account exists, or an empty list
+afterwards. The browser displays them before account creation; enforcement
+still happens on the server. Existing authentication fields are unchanged.
 With `relay up --no-login` or the saved `"login_required": false` setting,
 `authenticated` reports effective access as `true`, `username` is `local`, and
 `owner_created` still reports the actual onboarding state. Relay creates no
@@ -45,7 +49,8 @@ request header is `X-CSRFToken: abc`.
 | `POST /api/projects/open` | `{"path":"/repo"}` | `200 {"project":...}` |
 | `POST /api/projects/relink` | `{"old":"/old","new":"/new"}` | `200 {"project":...}` |
 | `GET /api/workflows` | optional `?project={id}` | `200 {"workflows":[{"key":"review.yaml","name":"Review"}],"project":...}` |
-| `POST /api/workflows` | `{"key":"review","holder":"tab-id"}`; optional `yaml`, `name` | `201`; creates a validated workflow without overwriting an existing file |
+| `POST /api/workflows` | `{"key":"review","holder":"tab-id"}`; optional `yaml`, `name`, `template_id` | `201`; creates a validated workflow without overwriting an existing file |
+| `GET /api/workflow-templates` | none | `200 {"templates":[...]}`; the six starter bundles and their typed inputs |
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
@@ -68,6 +73,12 @@ changes another browser's project. `POST /api/projects/open` also accepts
 `"initialize":true` to create the blank `.relay` surface in a Git repository.
 Creation without `yaml` writes a blank version 1 workflow. Its bytes remain
 uncommitted until the owner commits them.
+With `template_id`, creation copies the named starter's workflow and prompts
+byte-for-byte. It rejects a supplied `yaml`, an unknown template, an existing
+workflow, or an existing prompt with different bytes. Identical shared starter
+prompts can be reused. All sources validate before copying; a failed copy
+removes only its newly created, unchanged files. Gallery records contain `id`,
+`name`, `description`, `jobs`, `required_agents`, and schema-defined `inputs`.
 New workflow and instruction paths reject Windows device names, reserved
 characters, and trailing spaces or dots on every operating system. For example,
 `NUL.yaml` and `draft:notes.md` are rejected; `nested/review.yaml` is accepted.
@@ -94,6 +105,7 @@ renews it; another holder gets `409` until expiry.
 | Method and path | Request | Success |
 | --- | --- | --- |
 | `GET /api/agents` | none | `200 {"agents":[...],"preferences":[...],"registry":...}` |
+| `POST /api/agents/check` | `{}`; optional selected project query | `200 {"agents":[...]}` from the same bounded probe as `relay doctor` |
 | `POST /api/agents/{agent-id}/models` | `{}`; optional selected project query | `200 {"models":[{"value":"exact-value","name":"Display name"}]}` from a fresh probe of one tool |
 | `POST /api/agents/{agent-id}/configuration` | `{"model":"exact-value"}` | `200` configuration object below |
 | `POST /api/runs` | launch object below | `201 {"run_id":"..."}` |
@@ -104,6 +116,15 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
 | `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
+
+Readiness checks require owner access and CSRF protection. Each row contains
+`id`, `display_name`, `install_url`, `installed`, `ready`, `error_code`,
+`reason`, `cleanup_warning`, exact `models`, `login_command`, and
+`login_guidance`. `ready` means the tool returned a usable model inventory;
+it does not prove authentication. A structured `agent_auth_error` identifies
+a sign-in failure. Other failures keep their distinct codes. Checks do not
+send prompts or authenticate. Cached observations remain advisory; launch
+and execution still require fresh proof for the selected model and settings.
 
 Configuration discovery requires owner access and CSRF protection. Owner
 access is a session when login is enabled, or direct local access when disabled.

@@ -489,8 +489,32 @@ def test_auth_state_before_onboarding_issues_a_csrf_cookie(client: Client) -> No
         "authenticated": False,
         "username": None,
         "login_required": True,
+        "password_rules": [
+            "Your password can\u2019t be too similar to your other personal information.",
+            "Your password must contain at least 8 characters.",
+            "Your password can\u2019t be a commonly used password.",
+            "Your password can\u2019t be entirely numeric.",
+        ],
     }
     assert "relay_csrftoken" in client.cookies
+
+
+@override_settings(
+    AUTH_PASSWORD_VALIDATORS=[
+        {
+            "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+            "OPTIONS": {"min_length": 12},
+        }
+    ]
+)
+def test_onboarding_rules_follow_the_configured_password_policy(client: Client) -> None:
+    assert client.get("/api/auth").json()["password_rules"] == [
+        "Your password must contain at least 12 characters."
+    ]
+
+
+def test_created_accounts_do_not_show_onboarding_password_rules(owner: Client) -> None:
+    assert owner.get("/api/auth").json()["password_rules"] == []
 
 
 def test_onboarding_authenticates_the_new_owner(client: Client) -> None:
@@ -565,6 +589,12 @@ def test_disabled_login_opens_projects_without_creating_an_owner(client: Client)
         "authenticated": True,
         "username": "local",
         "login_required": False,
+        "password_rules": [
+            "Your password can\u2019t be too similar to your other personal information.",
+            "Your password must contain at least 8 characters.",
+            "Your password can\u2019t be a commonly used password.",
+            "Your password can\u2019t be entirely numeric.",
+        ],
     }
     assert "relay_csrftoken" in client.cookies
     assert "relay_sessionid" not in client.cookies
@@ -1071,3 +1101,130 @@ def test_agents_report_detection_registry_and_model_observations(
     assert rows["codex"]["registry"]["distributions"][0]["manager"] == "npx"
     assert rows["antigravity"]["installed"] is False
     assert body["registry"]["stale"] is False
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+@pytest.mark.parametrize(
+    "mode,ready,code",
+    [
+        ("success", True, None),
+        ("auth", False, "agent_auth_error"),
+        ("no-selector", False, "model_selector_error"),
+    ],
+)
+def test_readiness_preserves_structured_probe_results(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+    mode: str,
+    ready: bool,
+    code: str | None,
+) -> None:
+    del served
+    fake_agents.install("codex", mode=mode)
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()["agents"]}
+    assert rows["codex"]["installed"] is True
+    assert rows["codex"]["ready"] is ready
+    assert rows["codex"]["error_code"] == code
+    assert rows["codex"]["login_command"] == "codex login"
+    assert rows["cursor"]["installed"] is False
+    assert rows["cursor"]["ready"] is False
+    assert not any(message.get("method") == "session/prompt" for message in fake_agents.messages())
+    assert not any(message.get("method") == "authenticate" for message in fake_agents.messages())
+
+
+@pytest.mark.usefixtures("registry_network")
+def test_readiness_with_no_agents_is_an_actionable_inventory(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+) -> None:
+    del served, fake_agents
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    rows = response.json()["agents"]
+    assert len(rows) == 5
+    assert all(not row["ready"] and not row["installed"] for row in rows)
+    assert all(row["install_url"].startswith("https://") for row in rows)
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+def test_readiness_checks_all_five_supported_transports(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+) -> None:
+    del served
+    for agent_id in ("codex", "claude", "copilot", "cursor", "antigravity"):
+        fake_agents.install(agent_id, mode="configuration")
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    assert all(row["ready"] for row in response.json()["agents"])
+    assert not any(message.get("method") == "session/prompt" for message in fake_agents.messages())
+
+
+def test_readiness_is_owner_only_and_post_only(owner: Client, served: RelayProject) -> None:
+    del served
+    assert Client().post("/api/agents/check", content_type="application/json").status_code == 401
+    assert owner.get("/api/agents/check").status_code == 405
+
+
+def test_readiness_keeps_csrf_in_no_login_mode(served: RelayProject) -> None:
+    from django.test import override_settings
+
+    del served
+    with override_settings(RELAY_LOGIN_REQUIRED=False):
+        response = Client(enforce_csrf_checks=True).post(
+            "/api/agents/check", data="{}", content_type="application/json"
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "csrf_failed"
+
+
+def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
+    owner: Client,
+    served: RelayProject,
+) -> None:
+    from relay.workflows.starters import STARTER_ROOT
+
+    assert Client().get("/api/workflow-templates").status_code == 401
+    gallery = owner.get("/api/workflow-templates")
+    assert gallery.status_code == 200
+    assert len(gallery.json()["templates"]) == 6
+    created = post(
+        owner,
+        "/api/workflows",
+        {
+            "key": "starter",
+            "holder": "template-tab",
+            "template_id": "ask-agent",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["yaml"].encode("utf-8") == (STARTER_ROOT / "ask-agent.yaml").read_bytes()
+    assert (served.relay_root / "prompts" / "ask-agent.md").read_bytes() == (
+        STARTER_ROOT / "ask-agent.md"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("extra", [{"yaml": "nodes: {}"}, {"template_id": "unknown"}])
+def test_invalid_template_requests_write_no_sources(
+    owner: Client,
+    served: RelayProject,
+    extra: dict[str, object],
+) -> None:
+    created = post(
+        owner,
+        "/api/workflows",
+        {
+            "key": "starter",
+            "holder": "template-tab",
+            "template_id": "ask-agent",
+            **extra,
+        },
+    )
+    assert created.status_code in {400, 422}
+    assert not (served.relay_root / "workflows" / "starter.yaml").exists()
+    assert not (served.relay_root / "prompts" / "ask-agent.md").exists()

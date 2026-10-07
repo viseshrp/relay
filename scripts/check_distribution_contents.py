@@ -8,6 +8,24 @@ from pathlib import Path, PurePosixPath
 import tarfile
 import zipfile
 
+_STARTER_FILES = frozenset(
+    f"relay/workflows/starters/{name}"
+    for name in (
+        "ask-agent.yaml",
+        "ask-agent.md",
+        "plan-approve-implement.yaml",
+        "plan.md",
+        "implement.md",
+        "implement-and-test.yaml",
+        "review-branch.yaml",
+        "review-branch.md",
+        "fix-tests.yaml",
+        "fix-tests.md",
+        "write-docs.yaml",
+        "write-docs.md",
+    )
+)
+
 
 def _relative_sdist_names(names: Iterable[str]) -> tuple[str, ...]:
     relative: list[str] = []
@@ -34,7 +52,7 @@ def _looks_like_template(name: str) -> bool:
     if path.suffix in {".yaml", ".yml"}:
         return True
     if any(
-        part in {".relay", "templates", "workflow_templates", "prompt_templates"}
+        part in {".relay", "templates", "workflow_templates", "prompt_templates", "starters"}
         for part in path.parts
     ):
         return True
@@ -64,7 +82,9 @@ def _check_sdist(path: Path, names: tuple[str, ...]) -> None:
 def check_distribution(path: Path) -> None:
     """Validate one wheel or source distribution."""
     names = _archive_names(path)
-    templates = sorted(name for name in names if _looks_like_template(name))
+    templates = sorted(
+        name for name in names if _looks_like_template(name) and name not in _STARTER_FILES
+    )
     if templates:
         message = f"{path.name} contains forbidden workflow or prompt templates: {templates}"
         raise RuntimeError(message)

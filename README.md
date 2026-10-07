@@ -25,8 +25,9 @@ The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, model fallback, automatic merge, or
-bundled workflow templates.
+Redis, Postgres, model fallback, or automatic merge. Six
+[starter workflows](docs/workflows.md#starter-workflows) copy into the project
+when the owner chooses one; runs use the saved project files.
 Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
 eligible agent failures up to twice with the same model and settings, retained
 reports, and a separate repair instruction. It stops on unsafe failures or an
@@ -78,9 +79,9 @@ relay up
 
 `relay init` creates only `.relay/workflows/workflow.yaml` and
 `.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser.
-In **Workflows**, choose **New workflow**, add stages and instructions, save,
-and start work. **Runs** shows progress, readable output, and requests for your
-input.
+In **Get started**, check agent connections and choose **Start from a template**.
+Select **Ask an agent**, create the workflow, and press **Run workflow** with its
+sample question. **Runs** shows progress, output, and requests for your input.
 
 Login is required by default. Use `relay up --no-login` to open the local app
 without credentials. The saved `login_required` setting keeps this choice for

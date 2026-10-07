@@ -1,0 +1,55 @@
+version: 1
+name: Fix until tests pass
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: Which failing tests or change should the agent fix?
+    default: Run the tests and fix the failures without changing their intent.
+    required: true
+nodes:
+  implement:
+    type: agent
+    prompts: [{local: prompts/implement.md}]
+    writes: true
+    allow_no_commit: true
+  test:
+    type: command
+    needs: [implement]
+    writes: true
+    allow_no_commit: true
+    run: &pytest_check
+      - python
+      - -c
+      - |
+        import json
+        import subprocess
+        import sys
+        from pathlib import Path
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest"], check=False, shell=False
+        )
+        verdict = {"ready": result.returncode == 0, "exit_code": result.returncode}
+        Path("AUDIT_CHECKPOINT.json").write_text(
+            json.dumps(verdict), encoding="utf-8"
+        )
+        print(f"pytest exited with code {result.returncode}.")
+    outputs:
+      ready: {json_path: {artifact: AUDIT_CHECKPOINT.json, path: ready}}
+repairs:
+  test:
+    max_rounds: 2
+    accepted_output: ready
+    accepted_value: true
+    fix:
+      type: agent
+      prompts: [{local: prompts/fix-tests.md}]
+      writes: true
+      allow_no_commit: true
+    verify:
+      type: command
+      run: *pytest_check
+      writes: true
+      allow_no_commit: true
+      outputs:
+        ready: {json_path: {artifact: AUDIT_CHECKPOINT.json, path: ready}}

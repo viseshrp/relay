@@ -29,6 +29,7 @@ from relay.workflows.editor import (
     workflow_handoff_warnings,
 )
 from relay.workflows.loader import load_workflow_text, load_workflow_tree
+from relay.workflows.starters import starter_inventory
 
 from ..auth import owner_required
 from ..repositories import (
@@ -93,6 +94,14 @@ def projects(request: HttpRequest) -> HttpResponse:
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
     return JsonResponse({"project": asdict(project)})
+
+
+@api_errors
+@owner_required
+@require_GET
+def workflow_templates(request: HttpRequest) -> HttpResponse:
+    del request
+    return JsonResponse({"templates": starter_inventory()})
 
 
 @api_errors

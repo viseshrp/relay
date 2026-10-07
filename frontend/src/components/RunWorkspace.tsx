@@ -129,6 +129,7 @@ interface RunWorkspaceProps {
   onSelectRun: (runId: string | null) => void;
   project: ProjectRecord;
   selectedInteraction: string | null;
+  onRunSucceeded?: () => void;
 }
 
 type DetailCollection = "nodes" | "interactions";
@@ -295,10 +296,11 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, onRunSucceeded }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  useEffect(() => { if (detail?.status === "succeeded") onRunSucceeded?.(); }, [detail?.status, onRunSucceeded]);
   const [nodeCursor, setNodeCursor] = useState<number | null>(null);
   const [interactionCursor, setInteractionCursor] = useState<number | null>(null);
   const [linkedRequest, setLinkedRequest] = useState<RunInteraction | null>(null);

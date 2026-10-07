@@ -1,0 +1,15 @@
+version: 1
+name: Write docs for a change
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: What behavior or change should the docs explain?
+    default: Explain how to run this repository's tests in the README.
+    required: true
+nodes:
+  docs:
+    type: agent
+    prompts: [{local: prompts/write-docs.md}]
+    writes: true
+    allow_no_commit: true

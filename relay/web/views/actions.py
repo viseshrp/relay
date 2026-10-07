@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from relay.agents.configuration import require_choice
 from relay.agents.driver import probe_agent_configuration, probe_agent_models
+from relay.agents.readiness import check_agent_readiness
 from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
 from relay.execution.cancellation import request_cancellation
@@ -41,6 +42,7 @@ from relay.workflows.editor import (
 )
 from relay.workflows.loader import workflow_key_parts
 from relay.workflows.scope import parse_scope_path
+from relay.workflows.starters import create_starter_workflow
 
 from ..auth import (
     auth_state,
@@ -68,6 +70,15 @@ from . import (
 )
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+@api_errors
+@owner_required
+@require_POST
+def agent_readiness(request: HttpRequest) -> HttpResponse:
+    root, _project = current_project(request)
+    rows = check_agent_readiness(root.parent, observation_store=DjangoAgentStore())
+    return JsonResponse({"agents": [asdict(row) for row in rows]})
 
 
 @api_errors
@@ -393,14 +404,21 @@ def create_workflow(request: HttpRequest) -> HttpResponse:
     key = "/".join(workflow_key_parts(required_text(body, "key")))
     store = DjangoWorkflowStore()
     store.acquire_lease(project.id, key, _lease_holder(body))
-    document = create_workflow_document(
-        store,
-        relay_root,
-        project.id,
-        key,
-        _yaml_text(body) if "yaml" in body else None,
-        optional_text(body, "name") or "New workflow",
-    )
+    template_id = optional_text(body, "template_id")
+    if template_id is not None:
+        if "yaml" in body:
+            message = "Choose a template or supply YAML, rather than both."
+            raise ConfigError(message)
+        document = create_starter_workflow(store, relay_root, project.id, key, template_id)
+    else:
+        document = create_workflow_document(
+            store,
+            relay_root,
+            project.id,
+            key,
+            _yaml_text(body) if "yaml" in body else None,
+            optional_text(body, "name") or "New workflow",
+        )
     return JsonResponse(
         {"key": key, "yaml": document.yaml, "base_hash": document.base_hash}, status=201
     )

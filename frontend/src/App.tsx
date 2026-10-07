@@ -12,6 +12,7 @@ import {
   FormControl,
   InputLabel,
   MenuItem,
+  Menu,
   Select,
   Stack,
   Tab,
@@ -24,6 +25,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 
 import { api, errorMessage } from "./api";
 import { AuthView } from "./components/AuthView";
+import { GetStarted } from "./components/GetStarted";
 import { readLocation, saveLocation, type LocationState } from "./navigation";
 import type { AuthState, ProjectRecord } from "./types";
 
@@ -52,6 +54,11 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
+  const [setupForced, setSetupForced] = useState(false);
+  const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
+  const [workflowRevision, setWorkflowRevision] = useState(0);
+  const runSucceeded = useCallback(() => setSetupRunSucceeded(true), []);
   const beforeLeave = useRef<(() => Promise<void>) | null>(null);
   const registerNavigation = useCallback((callback: (() => Promise<void>) | null) => { beforeLeave.current = callback; }, []);
 
@@ -101,6 +108,7 @@ export function App() {
 
   const selectedProject = projects.find((project) => project.id === location.project);
   const requestProject = location.project === servedProject ? null : location.project;
+  useEffect(() => { setSetupRunSucceeded(false); setSetupForced(false); }, [location.project]);
 
   useEffect(() => {
     let active = true;
@@ -182,10 +190,21 @@ export function App() {
           {loginRequired && (
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Sign out</Button>
           )}
+          <Button aria-haspopup="menu" aria-expanded={helpAnchor !== null} onClick={(event) => setHelpAnchor(event.currentTarget)}>Help</Button>
+          <Menu anchorEl={helpAnchor} open={helpAnchor !== null} onClose={() => setHelpAnchor(null)}>
+            <MenuItem onClick={() => { setSetupForced(true); setHelpAnchor(null); }}>Get started</MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
       <Container maxWidth={false} className="app-content">
         {renderProjectContext()}
+        {projectReady && selectedProject && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
+          forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
+          onWorkflowCreated={async (key) => {
+            await beforeLeave.current?.();
+            navigate({ workflow: key, view: "author", run: null, interaction: null });
+            setWorkflowRevision((value) => value + 1);
+          }} onRunLaunched={(id) => navigate({ run: id, interaction: null, view: "runs" })} />}
         {logoutError && (
           <Alert severity="error" sx={{ mb: 2 }} action={
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Retry</Button>
@@ -196,7 +215,7 @@ export function App() {
           : !selectedProject ? <Alert severity="info">Choose a project above, or open a Git repository to begin.</Alert>
           : location.view === "author" ? (
             <WorkflowWorkspace
-              key={selectedProject.id}
+              key={`${selectedProject.id}-${workflowRevision}`}
               project={selectedProject}
               requestProject={requestProject}
               initialWorkflow={location.workflow}
@@ -211,6 +230,7 @@ export function App() {
               selectedRun={location.run}
               project={selectedProject}
               selectedInteraction={location.interaction}
+              onRunSucceeded={runSucceeded}
               onSelectRun={selectRun}
             />
           )}

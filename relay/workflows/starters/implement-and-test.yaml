@@ -1,0 +1,33 @@
+version: 1
+name: Implement and test
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: What change should the agent implement?
+    default: Improve the README's explanation of the main code folder.
+    required: true
+  test_runner:
+    type: enum
+    description: Which test command does this repository use?
+    default: pytest
+    constraints: {values: [pytest, npm]}
+nodes:
+  implement:
+    type: agent
+    prompts: [{local: prompts/implement.md}]
+    writes: true
+    allow_no_commit: true
+  choose_tests:
+    type: condition
+    needs: [implement]
+    expr: '${{ inputs.test_runner }}'
+    branches: {pytest: pytest, npm: npm}
+  pytest:
+    type: command
+    needs: [choose_tests]
+    run: [python, -m, pytest]
+  npm:
+    type: command
+    needs: [choose_tests]
+    run: [npm, test]

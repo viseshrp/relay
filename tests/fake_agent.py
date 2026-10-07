@@ -199,6 +199,19 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "configuration-starters":
+                blocks = params.get("prompt", [])
+                text = (
+                    "\n".join(
+                        str(block.get("text", "")) for block in blocks if isinstance(block, dict)
+                    )
+                    if isinstance(blocks, list)
+                    else ""
+                )
+                if "Edit only REVIEW.md." in text:
+                    (Path(self.cwd) / "REVIEW.md").write_text(
+                        "Ready: Yes\nNo blocking findings in the fake review.\n", encoding="utf-8"
+                    )
             if self.mode == "configuration-recovery":
                 blocks = params.get("prompt", [])
                 text = (

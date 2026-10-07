@@ -1,0 +1,13 @@
+version: 1
+name: Ask an agent
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: What would you like to learn about this repository?
+    default: Explain what this repository does and where its main code lives.
+    required: true
+nodes:
+  ask:
+    type: agent
+    prompts: [{local: prompts/ask-agent.md}]

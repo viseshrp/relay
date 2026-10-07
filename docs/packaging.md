@@ -65,9 +65,11 @@ make check-dist
 Twine metadata checks and `scripts/check_distribution_contents.py`. The
 content check requires compiled static files in the wheel, requires the
 frontend lockfile and hook in the source distribution, rejects certification
-evidence, and rejects bundled workflow or prompt templates. Relay ships only
-the blank files created by `relay init`; no example workflow or prompt enters
-a distribution.
+evidence, and rejects workflow or prompt templates outside the exact allow-list
+for the six [starter workflows](workflows.md#starter-workflows). Their twelve
+source files live under `relay/workflows/starters/` and ship in both archives.
+The content gate still rejects every other YAML or template path. The blank
+files created by `relay init` remain separate from these opt-in starters.
 
 The distribution jobs install Python dependencies in editable mode, then
 install the pinned Node version before building the source distribution and wheel.

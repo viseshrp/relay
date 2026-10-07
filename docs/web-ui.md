@@ -43,8 +43,9 @@ rejected. IPv6 `::1` is rendered in the browser URL as
 ## First login
 
 Login is required by default. The first browser session shows owner onboarding.
-Choose the only local owner username and a password that passes Django's
-configured password validators.
+Choose a username and a password for this computer's Relay. The form shows
+the configured password rules before you submit it. The server enforces them
+when creating the account.
 Relay ships no username or password. Onboarding creates one Django superuser in
 a transaction, signs that browser session in, and rejects later attempts to
 create another owner.
@@ -71,6 +72,28 @@ restores the existing owner login, or onboarding if no owner was created.
 Disabling login leaves stored passwords, sessions, projects, and runs intact.
 Actions started without a login are attributed to `local`.
 
+## Get started
+
+After sign-in, or immediately with login disabled, a **Get started** checklist
+shows the selected project, all five supported agents, workflow choices, and
+the first-run controls. It stays visible until a run succeeds in that project.
+Use **Help › Get started** to open it again.
+
+Agent cards show **Ready to connect**, **Sign in required**, **Check failed**,
+or **Not installed**, with text and a status symbol. **Check again** uses the
+same bounded probe as `relay doctor`. A successful connection check reads
+models; it does not prove the account is signed in. Only a structured
+authentication error gets the sign-in label. Cards provide install links and
+commands to copy; Relay never installs an agent or signs it in.
+
+Choose **Start from a template**, select a starter, and create the workflow.
+The checklist shows its sample inputs and an exact model from a fresh probe.
+You can edit those inputs or change the model before pressing **Run workflow**.
+Launch uses the existing validation and preflight services. With no working
+agent, the checklist explains the fix and disables the run button.
+**Blank workflow** opens the same gallery with the blank option available;
+add its jobs in the editor before running it.
+
 ## Choose a project and workflow
 
 The project bar stays visible above both views. Choose a registered project,
@@ -82,6 +105,12 @@ selection; changing projects does not change another browser's selection.
 already started. The run header names its captured workflow and project,
 shows completed steps, and states what happens next. Internal IDs, branch
 names, provider JSON, and cleanup controls are under advanced views.
+
+**New workflow** opens the same six-starter gallery as the checklist. Each
+card shows its purpose, job graph preview, required agent, and input types.
+Selection copies sources into `.relay/workflows/` and `.relay/prompts/` without
+overwriting owner files. The editor and launch use those copies. A blank
+workflow still accepts a name and opens with an empty canvas.
 
 ## Author workflows
 

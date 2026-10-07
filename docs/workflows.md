@@ -137,6 +137,41 @@ and the frozen policy. Action failures use the existing failure and recovery
 rules; they do not count as accepted verdicts or replenish the repair budget.
 See [Execution](execution.md#stage-repair-rules).
 
+## Starter workflows
+
+**Get started** and **New workflow** offer six starters. Each needs one
+compatible coding agent. Choose an exact available model before launch; no
+template pins a provider model or changes permission defaults. The gallery
+copies the chosen YAML and prompts byte-for-byte into the project's `.relay`
+folders. Runs use these saved files, which remain editable and uncommitted.
+Existing owner files are never replaced.
+
+| Starter | Jobs | Sample input |
+| --- | --- | --- |
+| Ask an agent | One read-only agent | Explain the repository and its main code |
+| Plan, approve, implement | Read-only plan, owner approval, implementation | Explain the main code folder in the README |
+| Implement and test | Implementation, test-command choice, pytest or npm test | Improve the README's code-folder explanation |
+| Review my branch | Agent report with a `Ready` output | Review for bugs and missing tests |
+| Fix until tests pass | Implementation, pytest, bounded fix and verification | Fix test failures without changing their intent |
+| Write docs for a change | Documentation agent | Document how to run tests |
+
+All starters define a typed `task` input with a sample default.
+**Implement and test** also has a `test_runner` enum, `pytest` or `npm`.
+Its command jobs run `python -m pytest` or `npm test` as argument vectors.
+The project must already provide the selected test command and dependencies.
+
+**Review my branch** has `writes: true` and `allow_no_commit: true`, because
+a read-only job cannot create its required report. Its instructions permit
+only `REVIEW.md` and forbid code edits and commits. The `Ready` label supplies
+a retained verdict. This instruction does not add a new runtime permission.
+
+**Fix until tests pass** records pytest's exit code and boolean verdict in
+`AUDIT_CHECKPOINT.json`. The test job returns that verdict to the existing
+repair policy, allowing a test failure to start the configured fixer rather
+than fail the run immediately. The verifier repeats the same command. At most
+two repair rounds run; passing tests accept `ready: true`. Each command uses
+an argument vector with `shell=False`. Neither starter installs dependencies.
+
 ## Typed inputs
 
 Each input has `type`, optional `description`, optional `required`, optional

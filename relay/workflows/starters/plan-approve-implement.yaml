@@ -1,0 +1,23 @@
+version: 1
+name: Plan, approve, implement
+agents: [codex, claude, copilot, cursor, antigravity]
+inputs:
+  task:
+    type: string
+    description: What change should the agent plan and implement?
+    default: Add a short explanation of the main code folder to the README.
+    required: true
+nodes:
+  plan:
+    type: agent
+    prompts: [{local: prompts/plan.md}]
+  approve:
+    type: human_wait
+    needs: [plan]
+    prompt: Read the plan in the Plan job's conversation. Approve implementation?
+  implement:
+    type: agent
+    needs: [approve]
+    prompts: [{local: prompts/implement.md}]
+    writes: true
+    allow_no_commit: true

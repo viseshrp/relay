@@ -193,6 +193,7 @@ def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
     from .agents.discovery import discover_agents
     from .agents.driver import probe_installed_agents
+    from .agents.readiness import probe_is_ready
     from .agents.registry import load_registry
     from .manage import apply_migrations
     from .projects.discovery import discover_relay_root, git_root
@@ -296,12 +297,7 @@ def doctor_command(context: click.Context) -> None:
     agents = []
     for discovered, result in rows:
         models = [] if result is None else [item.model_value for item in result.models]
-        ready = (
-            discovered.installed
-            and result is not None
-            and result.general_error is None
-            and bool(models)
-        )
+        ready = probe_is_ready(discovered, result)
         registry_metadata = (
             registry.agents.get(discovered.profile.registry_id)
             if registry is not None and discovered.profile.registry_id is not None

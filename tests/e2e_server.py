@@ -11,6 +11,7 @@ import asyncio
 from collections.abc import Callable
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from threading import Event, Thread
@@ -52,17 +53,26 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     import uvicorn
 
     django.setup()
+    from django.contrib.auth.models import User
+
     from relay.agents import discovery, registry
     from relay.agents.driver import RoutedAgentNodeDriver
     from relay.execution.nodes import node_executors
     from relay.execution.scheduler import dispatch_ready_nodes
     from relay.manage import apply_migrations
     from relay.paths import artifacts_dir
+    from relay.projects.service import initialize_project
     from relay.web.auth import owner_required
-    from relay.web.models import EditorLease, Run, WorkflowDraft
+    from relay.web.models import EditorLease, Installation, Run, WorkflowDraft
     from relay.web.urls import urlpatterns
-    from relay.web.views import actions
-    from tests.support import FakeAgents, InlineEngine, RegistryNetwork, create_project
+    from relay.web.views import actions, json_body
+    from tests.support import (
+        FakeAgents,
+        InlineEngine,
+        RegistryNetwork,
+        create_project,
+        fake_executable,
+    )
 
     apply_migrations()
     patch = pytest.MonkeyPatch()
@@ -106,11 +116,44 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         del request
         # The feedback scenario replaces Codex and the shared ACP mode.
         # Restore its configuration so later tests get the normal capabilities.
-        providers.install("codex", mode="configuration")
+        shutil.rmtree(providers.directory)
+        providers.directory.mkdir()
+        for agent_id in ("codex", "claude", "antigravity"):
+            providers.install(agent_id, mode="configuration")
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
         project.write_workflow("workflow", WORKFLOW)
         return JsonResponse({"ok": True, "python": sys.executable})
+
+    @owner_required
+    @require_POST
+    def starter_project(request: HttpRequest) -> JsonResponse:
+        fresh_owner = json_body(request).get("fresh_owner") is True
+        WorkflowDraft.objects.all().delete()
+        EditorLease.objects.all().delete()
+        # Only this server owns the scratch repository and fake-provider directory.
+        shutil.rmtree(project.relay_root)
+        initialize_project(project.repository)
+        project.commit("Restore untouched initialization files")
+        shutil.rmtree(providers.directory)
+        providers.directory.mkdir()
+        providers.install("codex", mode="configuration-starters")
+        fake_executable(
+            providers.directory,
+            "python",
+            (
+                "from pathlib import Path\n"
+                "import sys\n"
+                "if len(sys.argv) > 2 and sys.argv[1] == '-c':\n"
+                "    Path('AUDIT_CHECKPOINT.json').write_text('{\"ready\":true,\"exit_code\":0}')\n"
+                "print('Fake pytest: all tests passed')\n"
+            ),
+        )
+        fake_executable(providers.directory, "npm", "print('Fake npm test: all tests passed')\n")
+        if fresh_owner:
+            User.objects.all().delete()
+            Installation.objects.all().delete()
+        return JsonResponse({"ok": True})
 
     @owner_required
     @require_POST
@@ -142,6 +185,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         return JsonResponse({"ok": True})
 
     urlpatterns.insert(0, path("__test__/reset", reset))
+    urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))

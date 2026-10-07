@@ -13,6 +13,7 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   login_required: boolean;
+  password_rules?: string[];
 }
 
 export interface WorkflowDraft {
@@ -82,6 +83,35 @@ export interface AgentsResponse {
     stale: boolean;
     warning: string | null;
   };
+}
+
+export interface AgentReadiness {
+  id: string;
+  display_name: string;
+  install_url: string;
+  installed: boolean;
+  ready: boolean;
+  error_code: string | null;
+  reason: string | null;
+  cleanup_warning: string | null;
+  models: string[];
+  login_command: string;
+  login_guidance: string;
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  jobs: string[];
+  required_agents: string;
+  inputs: Record<string, {
+    type: string;
+    description?: string | null;
+    default?: JsonScalar;
+    required: boolean;
+    constraints?: { values?: string[] };
+  }>;
 }
 
 export interface AgentOptions {

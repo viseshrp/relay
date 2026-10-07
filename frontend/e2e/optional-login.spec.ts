@@ -1,4 +1,16 @@
 import { expect, test } from "@playwright/test";
+import { post, runStarter } from "./setup-helpers";
+
+test.beforeEach(async ({ page }) => {
+  await page.request.get("/api/auth");
+  expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
+});
+
+test("setup completes a starter run without login", async ({ page }, testInfo) => {
+  await page.request.get("/api/auth");
+  await runStarter(page, "ask-agent", "Ask an agent", testInfo);
+  await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
+});
 
 test("a fresh local app opens and runs a workflow without an owner login", async ({ page }) => {
   await page.goto("/");
@@ -6,7 +18,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Password", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
-  expect(await (await page.request.get("/api/auth")).json()).toEqual({
+  expect(await (await page.request.get("/api/auth")).json()).toMatchObject({
     owner_created: false, authenticated: true, username: "local", login_required: false,
   });
   expect((await page.context().cookies()).some((cookie) => cookie.name === "relay_sessionid")).toBeFalsy();
