@@ -1,6 +1,6 @@
 import { statusPresentation } from "./status";
 export interface LocationState {
-  view: "workflows" | "runs";
+  view: "workflows" | "runs" | "settings";
   project: string | null;
   workflow: string | null;
   run: string | null;
@@ -15,7 +15,7 @@ export function readLocation(): LocationState {
   const query = window.location.search || localStorage.getItem(LOCATION_KEY) || "";
   const parameters = new URLSearchParams(query);
   return {
-    view: parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
+    view: parameters.get("view") === "settings" ? "settings" : parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
     project: parameters.get("project"),
     workflow: parameters.get("workflow"),
     run: parameters.get("run"),

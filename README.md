@@ -48,6 +48,11 @@ installations.
 
 ## Administration
 
+Open **Settings** in the browser to choose default agents, models, thinking
+effort, recovery, and cleanup for every project. Projects and workflows can
+override these choices. Server and login changes show when a restart is needed.
+See the [settings inventory](docs/projects-and-storage.md#global-defaults-and-project-overrides).
+
 Login is required by default. Use `relay up --no-login` to open the local app
 without credentials. The saved `login_required` setting keeps this choice for
 later starts. See [Open without a login](docs/web-ui.md#open-without-a-login).

@@ -15,16 +15,14 @@ from relay.config import load_config
 from relay.constants import (
     API_MAX_PAGE,
     DATABASE_INTEGER_MAX,
-    DEFAULT_FIX_INSTRUCTION,
-    DEFAULT_REPAIR_ROUNDS,
-    DEFAULT_VERIFY_INSTRUCTION,
     MAX_LOOP_ITERATIONS,
     REVIEW_PREVIEW_MAX_BYTES,
 )
-from relay.errors import ConfigError, RelayError
+from relay.errors import ConfigError, GitError, ProjectDiscoveryError, RelayError
 from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import RunStatus
+from relay.owner_settings import effective_config
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
@@ -41,6 +39,7 @@ from ..repositories import (
     DjangoReadStore,
     DjangoWorkflowStore,
 )
+from ..settings_repository import DjangoSettingsStore
 from . import api_errors, canonical_record_id, canonical_uuid, current_project
 
 
@@ -172,6 +171,7 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
                 )
     except RelayError:
         warnings = []
+    repair_defaults = effective_config(DjangoSettingsStore(), project.id).workflow_defaults.repairs
     return JsonResponse(
         {
             "yaml": document.yaml,
@@ -180,10 +180,10 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
             "project": asdict(project),
             "warnings": warnings,
             "repair_defaults": {
-                "max_rounds": DEFAULT_REPAIR_ROUNDS,
+                "max_rounds": repair_defaults.max_rounds,
                 "max_allowed_rounds": MAX_LOOP_ITERATIONS,
-                "fix_instruction": DEFAULT_FIX_INSTRUCTION,
-                "verify_instruction": DEFAULT_VERIFY_INSTRUCTION,
+                "fix_instruction": repair_defaults.fix_instruction,
+                "verify_instruction": repair_defaults.verify_instruction,
             },
         }
     )
@@ -193,7 +193,14 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
 @owner_required
 @require_GET
 def agents(request: HttpRequest) -> HttpResponse:
-    del request
+    owner_config = load_config()
+    try:
+        _root, project = current_project(request)
+    except (ProjectDiscoveryError, GitError):
+        if "project" in request.GET:
+            raise
+    else:
+        owner_config = effective_config(DjangoSettingsStore(), project.id)
     registry = load_registry()
     observations = DjangoAgentStore().list_model_observations()
     grouped = {}
@@ -245,7 +252,8 @@ def agents(request: HttpRequest) -> HttpResponse:
     return JsonResponse(
         {
             "agents": rows,
-            "preferences": list(load_config().agent_preferences),
+            "preferences": list(owner_config.agent_preferences),
+            "defaults": owner_config.workflow_defaults.model_dump(mode="json"),
             "registry": {
                 "source_url": registry.source_url,
                 "fetched_at": registry.fetched_at.isoformat(),

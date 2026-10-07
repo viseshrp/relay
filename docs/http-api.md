@@ -627,3 +627,68 @@ HTML error page.
 Run path identifiers are UUIDs; attempt and artifact identifiers are positive
 integers. A malformed or unknown identifier returns the same Relay-owned `404`
 response and does not reach a state-changing service.
+
+## Owner and project settings
+
+These additive routes use the same owner access, loopback, host, and CSRF
+protections as other APIs. Settings validation and inheritance are Python
+services. They never mutate an existing run's snapshot or provider session.
+
+| Method and path | Request | Success |
+| --- | --- | --- |
+| `GET /api/settings` | none | `200`; `settings`, exact-file `revision`, `active_login_required`, `username`, and storage `paths` |
+| `POST /api/settings` | `settings` object and loaded `revision` | `200`; the same payload after an atomic save |
+| `GET /api/projects/defaults` | optional `?project={id}` | `200`; explicit `overrides`, their `revision`, and resolved `effective` settings |
+| `POST /api/projects/defaults` | `overrides` object and loaded `revision` | `200`; the same payload after a transactional save |
+| `POST /api/projects/defaults` | `overrides` object and `preview: true` | `200 {"effective":...}`; validates and resolves without saving |
+| `GET /api/data/usage` | optional `?project={id}` | `200`; project storage metadata and cleanup availability |
+
+`settings` contains the existing `agent_preferences`, `cleanup_policy`, `host`,
+`port`, `workers`, and `login_required`, plus `workflow_defaults`:
+
+```json
+{
+  "model": null,
+  "providers": {},
+  "timeout": null,
+  "auto_retry": true,
+  "recovery": {"enabled": false, "max_retries": 2},
+  "repairs": {
+    "max_rounds": 4,
+    "fix_instruction": "Instructions for a newly added fixer role.",
+    "verify_instruction": "Instructions for a newly added verifier role."
+  }
+}
+```
+
+Each `providers` key is a supported Relay agent ID. Its object accepts `model`,
+`effort`, and `permission_mode`, preserving exact provider values. Thinking
+and permission defaults require a model. Reads include resolved built-in
+values; sparse settings files remain valid. A save replaces the submitted
+settings object, so clients should send the complete loaded object.
+
+Project overrides accept only `agent_preferences`, `cleanup_policy`, and
+`workflow_defaults`. Omitted fields inherit; nested objects merge by field.
+An explicit `null` model, timeout, effort, or permission removes that inherited
+choice. Sending an empty overrides object restores all global defaults.
+Changing a provider's model clears inherited effort and permissions unless
+the project explicitly supplies replacements for that model.
+Login and server options cannot be overridden per project.
+A stale revision returns `409 settings_conflict`; validation errors retain
+`400 config_error`. Filesystem and database failures use Relay envelopes and
+retain private traces only in diagnostic logs. The active login policy stays
+unchanged until restart, including when the saved setting differs.
+
+`GET /api/agents` additively includes `defaults`, the selected project's
+resolved `workflow_defaults`; `preferences` now reflects project overrides.
+Workflow reads keep their existing `repair_defaults` shape, using saved
+project/global values when the editor creates a new repair rule.
+An omitted launch `cleanup_policy` uses the project's resolved setting.
+Existing explicit launch fields and all control/event payloads are unchanged.
+
+Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
+`attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,
+`directories`, and `truncated`. Working-copy measurement visits at most
+50,000 entries and 1,000 run roots; incomplete counts are lower bounds.
+It reads metadata only, follows no inner symlinks, and never returns file
+contents. The existing confirmed `POST /api/data/clean` remains unchanged.

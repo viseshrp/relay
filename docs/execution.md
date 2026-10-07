@@ -3,6 +3,12 @@
 Relay runs each workflow from durable state in `relay.db`. Huey carries only an
 opaque claim token. A queue item is never the record of whether work ran.
 
+Launch resolves omitted workflow choices from project and global settings,
+then captures the resulting definitions, routes, and recovery policy in the
+snapshot. Settings changes affect future launches. Retries and later child
+jobs continue to use the captured choices; original YAML and prompts retain
+their exact bytes. See [Installation defaults](workflows.md#installation-defaults).
+
 ## State transitions
 
 `relay/execution/state.py` is the source for these tables. Each accepted

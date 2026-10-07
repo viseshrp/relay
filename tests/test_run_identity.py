@@ -58,6 +58,7 @@ def test_migration_numbers_by_snapshot_creation_without_changing_snapshots(
     )
     executor = MigrationExecutor(connection)
     executor.migrate([("relay_web", "0010_run_identity")])
+    executor.migrate(executor.loader.graph.leaf_nodes())
     assert Run.objects.get(pk=second).number == 1
     assert Run.objects.get(pk=first).number == 2
     assert Run.objects.get(pk=first).created_at == datetime(2026, 1, 2, tzinfo=timezone.utc)

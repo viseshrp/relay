@@ -39,7 +39,8 @@ Set `recovery: {enabled: true}` to retry eligible failed agent steps without an
 owner action. Each step gets at most two additional attempts over the run's
 lifetime. Set `max_retries: 1` for one additional attempt. Agent nodes can opt
 out with `auto_retry: false`; they allow retries by default when the workflow
-policy is enabled. An omitted policy keeps existing workflows unchanged.
+policy is enabled. An omitted policy uses the saved project or global default;
+recovery remains off when no such default has been configured.
 The root workflow's policy applies to agent steps in loops and subworkflows;
 use the child agent's `auto_retry` field for an individual opt-out.
 
@@ -244,17 +245,20 @@ nodes:
 
 `agent_options` is keyed by agent ID. Each tool accepts optional `effort` and
 `permission_mode` strings, using the exact values advertised for the selected
-model. Omit either key to use that provider's default; `Provider default` is a
-browser label, never a serialized value. Empty strings and unknown option
-fields are invalid. The editor removes a key when the owner returns its
-dropdown to Provider default and removes empty option mappings.
+model. Omit either key to inherit saved project or global choices for that
+exact model, or the provider's default when none is configured. Use an explicit
+null to keep the provider's default even when a saved override exists. Browser
+labels are never serialized as option values. Empty strings and unknown option
+fields are invalid. The editor removes a key when the owner chooses to inherit
+and removes empty option mappings.
 
 Launch preflight checks each candidate's own overrides after selecting the
 exact model. A candidate must confirm every requested value before its route
 is frozen. Two nodes can use the same model with different effort or mode
 values. The worker applies the frozen values in a fresh session before sending
 the prompt and rejects unsupported or changed values. Existing workflows that
-omit `agent_options` continue to use provider defaults.
+omit `agent_options` use provider defaults until the owner configures defaults
+in Settings.
 
 This invalid workflow attempts to leave the project prompt root.
 
@@ -695,3 +699,25 @@ For example, node `[codex, cursor]`, workflow `[cursor, claude]`, and owner
 `[codex, copilot]` becomes `[codex, cursor, claude, copilot]`. A later model
 preflight records the first candidate that proves it can select the exact
 value; there is no automatic model fallback.
+
+## Installation defaults
+
+[Settings](projects-and-storage.md#global-defaults-and-project-overrides) can
+supply models, agent order, provider options, job timeouts, retry participation,
+and recovery fields omitted from a workflow. Job models still win over run
+model overrides, which win over workflow models. Defaults come afterwards.
+Explicit job effort/permission values remain exact; `null` keeps that option
+at the agent's default and skips project/global inheritance.
+
+`timeout: null` skips an inherited agent/command timeout. Human waits retain
+only their declared deadlines. Recovery fields inherit individually, so an
+explicit `enabled: false` keeps automatic recovery off.
+Saved repair rounds and instructions are unchanged; global repair defaults
+initialize new rules in the editor only. Workflow schema version 1 is unchanged.
+
+Launch retains original YAML and prompt bytes while freezing resolved node
+definitions, recovery, and provider routes. Snapshots additionally record
+`launch_defaults`; captured child records include their resolved `definition`
+alongside original YAML and hash. Older snapshots keep an empty defaults record
+and continue reading their original child YAML. Updating settings never
+rewrites an existing snapshot, source workflow, or completed job.

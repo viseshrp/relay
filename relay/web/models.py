@@ -74,6 +74,7 @@ class Project(RelayModel):
     git_root: models.TextField = models.TextField()
     last_opened_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
     next_run_number: models.PositiveIntegerField = models.PositiveIntegerField(default=1)
+    defaults: models.JSONField = models.JSONField(default=dict)
 
 
 class ProjectRelink(RelayModel):
@@ -199,6 +200,7 @@ class RunSnapshot(RelayModel):
     relay_version: models.TextField = models.TextField()
     runtime_versions: models.JSONField = models.JSONField(default=dict)
     hashes: models.JSONField = models.JSONField(default=dict)
+    launch_defaults: models.JSONField = models.JSONField(default=dict)
     created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 
 

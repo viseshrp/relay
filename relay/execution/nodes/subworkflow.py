@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
@@ -13,10 +13,18 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.repairs import compile_repairs, effective_dependency_outputs
-from relay.workflows.schema import SubworkflowNode, WorkflowDefinition
+from relay.workflows.schema import (
+    NodeDefinition,
+    RecoveryPolicy,
+    SubworkflowNode,
+    WorkflowDefinition,
+)
 from relay.workflows.validation import resolve_inputs
 
 from .base import NestedScopeRunner, expression_context, parse_node
+
+_CAPTURED_NODES: TypeAdapter[dict[str, NodeDefinition]] = TypeAdapter(dict[str, NodeDefinition])
+_CAPTURED_RECORD: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
 
 
 def _snapshot_key(reference: str) -> str:
@@ -31,8 +39,19 @@ def _child_definition(context: AttemptContext, reference: str) -> WorkflowDefini
         message = f"Subworkflow {reference!r} is missing from the run snapshot."
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
     try:
-        raw = YAML(typ="safe").load(record["yaml"])
-        return compile_repairs(WorkflowDefinition.model_validate(raw))
+        definition = WorkflowDefinition.model_validate(YAML(typ="safe").load(record["yaml"]))
+        if "definition" not in record:
+            return compile_repairs(definition)
+        frozen = _CAPTURED_RECORD.validate_python(record["definition"])
+        # Captured nodes include compiled repair coordinators, which portable
+        # workflow validation intentionally rejects. Validate their node types
+        # as the runtime does, preserving the original source's other fields.
+        return definition.model_copy(
+            update={
+                "nodes": _CAPTURED_NODES.validate_python(frozen.get("nodes")),
+                "recovery": RecoveryPolicy.model_validate(frozen.get("recovery")),
+            }
+        )
     except (TypeError, ValidationError, YAMLError):
         message = f"Snapshotted subworkflow {reference!r} is invalid."
         raise NodeExecutionError(message, context={"node": context.attempt.scope_path}) from None

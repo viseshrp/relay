@@ -96,6 +96,7 @@ export interface AgentRecord {
 export interface AgentsResponse {
   agents: AgentRecord[];
   preferences: string[];
+  defaults?: WorkflowDefaults;
   registry: {
     source_url: string;
     fetched_at: string;
@@ -135,8 +136,8 @@ export interface WorkflowTemplate {
 }
 
 export interface AgentOptions {
-  effort?: string;
-  permission_mode?: string;
+  effort?: string | null;
+  permission_mode?: string | null;
 }
 
 export interface ConfigurationSelector {
@@ -342,4 +343,56 @@ export interface ArtifactRecord {
   bytes: number;
   media_type: string;
   preservation_state: string;
+}
+
+export interface ProviderDefaults {
+  model: string | null;
+  effort?: string | null;
+  permission_mode?: string | null;
+}
+export interface WorkflowDefaults {
+  model: string | null;
+  providers: Record<string, ProviderDefaults>;
+  timeout: string | null;
+  auto_retry: boolean;
+  recovery: { enabled: boolean; max_retries: number };
+  repairs: { max_rounds: number; fix_instruction: string; verify_instruction: string };
+}
+export interface OwnerSettings {
+  agent_preferences: string[];
+  cleanup_policy: "clean_on_success" | "retain";
+  host: string;
+  port: number;
+  workers: number;
+  login_required: boolean;
+  workflow_defaults: WorkflowDefaults;
+}
+export interface SettingsResponse {
+  settings: OwnerSettings;
+  revision: string;
+  active_login_required: boolean;
+  username: string;
+  paths: Record<"config" | "data" | "logs" | "prompts", string>;
+}
+export interface ProjectDefaultOverrides {
+  agent_preferences?: string[];
+  cleanup_policy?: OwnerSettings["cleanup_policy"];
+  workflow_defaults?: Partial<Omit<WorkflowDefaults, "recovery" | "repairs">> & {
+    recovery?: Partial<WorkflowDefaults["recovery"]>;
+    repairs?: Partial<WorkflowDefaults["repairs"]>;
+  };
+}
+export interface ProjectSettingsResponse {
+  overrides: ProjectDefaultOverrides;
+  revision: string;
+  effective: OwnerSettings;
+}
+export interface StorageUsage {
+  runs: number;
+  artifacts: number;
+  artifact_bytes: number;
+  working_copies: { bytes: number; files: number; directories: number; truncated: boolean };
+  branches: number;
+  attempt_refs: number;
+  cleanup_blocked: boolean;
 }

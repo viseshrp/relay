@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 
@@ -10,6 +10,7 @@ from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS, LOOPBACK_HOS
 from .errors import ConfigError
 from .execution.state import CleanupPolicy
 from .paths import settings_path
+from .workflows.defaults import WorkflowDefaults, validate_defaults
 
 _ALLOWED_KEYS: set[str] = {
     "agent_preferences",
@@ -18,6 +19,7 @@ _ALLOWED_KEYS: set[str] = {
     "login_required",
     "port",
     "workers",
+    "workflow_defaults",
 }
 
 
@@ -31,15 +33,21 @@ class RelayConfig:
     port: int = DEFAULT_PORT
     workers: int = DEFAULT_WORKERS
     login_required: bool = True
+    workflow_defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults)
 
     def to_dict(self) -> dict[str, object]:
         """Return JSON-compatible settings for diagnostics and UI reads."""
         values = asdict(self)
+        values.pop("workflow_defaults")
+        if self.workflow_defaults.model_fields_set:
+            values["workflow_defaults"] = self.workflow_defaults.model_dump(
+                mode="json", exclude_unset=True
+            )
         values["agent_preferences"] = list(self.agent_preferences)
         return values
 
 
-def _validate_config(raw: object) -> RelayConfig:
+def validate_config(raw: object) -> RelayConfig:
     if not isinstance(raw, dict):
         message = "Relay settings must be a JSON object."
         raise ConfigError(message)
@@ -77,7 +85,15 @@ def _validate_config(raw: object) -> RelayConfig:
     if not isinstance(login_required, bool):
         message = "login_required must be true or false."
         raise ConfigError(message)
-    return RelayConfig(tuple(preferences), cleanup_policy, host, port, workers, login_required)
+    return RelayConfig(
+        tuple(preferences),
+        cleanup_policy,
+        host,
+        port,
+        workers,
+        login_required,
+        validate_defaults(raw.get("workflow_defaults", {})),
+    )
 
 
 def load_config(path: Path | None = None) -> RelayConfig:
@@ -93,4 +109,4 @@ def load_config(path: Path | None = None) -> RelayConfig:
             message,
             next_action="Fix or remove the settings file and run the command again.",
         ) from None
-    return _validate_config(raw)
+    return validate_config(raw)

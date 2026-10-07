@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 import platform
@@ -28,6 +28,7 @@ class SnapshotBundle:
     relay_version: str
     runtime_versions: dict[str, str]
     hashes: dict[str, str]
+    launch_defaults: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -49,6 +50,7 @@ def build_snapshot(
     *,
     typed_inputs: Mapping[str, object],
     routes: Iterable[RouteRequirement],
+    launch_defaults: Mapping[str, object] | None = None,
 ) -> SnapshotBundle:
     """Capture exact workflow and prompt bytes plus all launch decisions."""
     subworkflows = {}
@@ -61,7 +63,10 @@ def build_snapshot(
     ]
     for key, loaded in workflow.subworkflows.items():
         digest = _digest(loaded.text)
-        subworkflows[key] = {"yaml": loaded.text, "sha256": digest}
+        child_record: dict[str, object] = {"yaml": loaded.text, "sha256": digest}
+        if launch_defaults is not None:
+            child_record["definition"] = loaded.definition.model_dump(mode="json", by_alias=True)
+        subworkflows[key] = child_record
         hashes[f"subworkflow:{key}"] = digest
         agent_prefs.append({"workflow": key, "agents": list(loaded.definition.agents)})
 
@@ -85,6 +90,7 @@ def build_snapshot(
         relay_version=__version__,
         runtime_versions=runtime_versions,
         hashes=hashes,
+        launch_defaults=dict(launch_defaults or {}),
     )
 
 

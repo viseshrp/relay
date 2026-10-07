@@ -30,6 +30,8 @@ import { GetStarted } from "./components/GetStarted";
 import { readLocation, saveLocation, type LocationState } from "./navigation";
 import type { AuthState, ProjectRecord } from "./types";
 
+const SettingsPage = lazy(() => import("./components/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+
 const WorkflowWorkspace = lazy(() =>
   import("./components/WorkflowWorkspace").then((module) => ({
     default: module.WorkflowWorkspace,
@@ -200,8 +202,9 @@ export function App() {
               if (value === "runs" && waiting && location.view !== "runs") void openWaitingRun(waiting);
               else void navigateSafely({ view: value, run: null, job: null, interaction: null });
             }}
-            sx={{ flex: 1 }}
+            sx={{ flex: 1, minWidth: 270 }}
           >
+            <Tab value="settings" label="Settings" sx={{ order: 3 }} />
             <Tab value="workflows" label="Workflows" />
             <Tab value="runs" label={attention.attention.waiting_count ? `Runs (${attention.attention.waiting_count})` : "Runs"} />
           </Tabs>
@@ -221,7 +224,8 @@ export function App() {
       <Container maxWidth={false} className="app-content">
 
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
-        {projectReady && selectedProject && (location.run === null || setupForced) && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
+        {projectError && !openingProject && <Alert severity="error" sx={{ mb: 2 }}>{projectError}</Alert>}
+        {location.view !== "settings" && projectReady && selectedProject && (location.run === null || setupForced) && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
           forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
           onWorkflowCreated={async (key) => {
             await beforeLeave.current?.();
@@ -235,6 +239,7 @@ export function App() {
         )}
         <Suspense fallback={<Box className="loading-panel"><CircularProgress /></Box>}>
           {!projectReady ? <Box className="loading-panel"><CircularProgress aria-label="Loading projects" /></Box>
+          : location.view === "settings" ? <SettingsPage project={selectedProject} requestProject={requestProject} notifications={attention.notifications} onToggleNotifications={attention.toggleNotifications} onNavigationReady={registerNavigation} />
           : !selectedProject ? <Alert severity="info">Choose a project above, or open a Git repository to begin.</Alert>
           : location.view === "workflows" ? (
             <WorkflowWorkspace
@@ -292,7 +297,6 @@ export function App() {
         </Select>
       </FormControl>
       <Button onClick={() => setOpeningProject(true)}>Open another project</Button>
-      {projectError && !openingProject && <Alert severity="error">{projectError}</Alert>}
     </Stack>;
   }
 }

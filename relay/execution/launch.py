@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -23,6 +23,7 @@ from relay.projects.service import project_launch_source
 from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import create_primary_worktree
+from relay.workflows.defaults import WorkflowDefaults, apply_workflow_defaults
 from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
@@ -49,6 +50,7 @@ class LaunchRequest:
     owner_agents: Sequence[str]
     launcher: str
     source_branch: str | None = None
+    defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +202,9 @@ def launch_workflow(
 ) -> LaunchResult:
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
     workflow = load_launch_workflow(relay_root, request.workflow_key)
+    workflow = apply_workflow_defaults(
+        workflow, request.defaults, tuple(request.owner_agents), request.model
+    )
     typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     repository = relay_root.parent.resolve()
     snapshot_files = launch_source_files(workflow, repository)
@@ -237,7 +242,15 @@ def launch_workflow(
             registry=registry,
             observation_store=store,
         )
-    snapshot = build_snapshot(workflow, typed_inputs=typed_inputs, routes=routes)
+    snapshot = build_snapshot(
+        workflow,
+        typed_inputs=typed_inputs,
+        routes=routes,
+        launch_defaults={
+            "workflow_defaults": request.defaults.model_dump(mode="json"),
+            "recovery": workflow.root.definition.recovery.model_dump(mode="json"),
+        },
+    )
     source_commit = current_head(repository)
     source = project_launch_source(repository)
     run_id = store.create_pending_run(

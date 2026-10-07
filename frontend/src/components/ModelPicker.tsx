@@ -4,9 +4,9 @@ import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type { AgentRecord } from "../types";
 
-export function ModelPicker({ agents, value, project, disabled = false, onChange }: {
+export function ModelPicker({ agents, value, project, disabled = false, onChange, defaultLabel = "Use workflow model" }: {
   agents: AgentRecord[]; value: string; project: string | null; onChange: (value: string) => void;
-  disabled?: boolean;
+  disabled?: boolean; defaultLabel?: string;
 }) {
   const labelId = useId();
   const [observed, setObserved] = useState<Array<{ value: string; name: string }>>([]);
@@ -25,7 +25,7 @@ export function ModelPicker({ agents, value, project, disabled = false, onChange
   }
   return <Stack spacing={1}>
     <FormControl size="small"><InputLabel id={labelId}>Model</InputLabel><Select labelId={labelId} label="Model" value={value} disabled={disabled || busy} onChange={(event) => onChange(event.target.value)}>
-      <MenuItem value="">Use workflow model</MenuItem>
+      <MenuItem value="">{defaultLabel}</MenuItem>
       {value && !models.has(value) && <MenuItem value={value}>{value}</MenuItem>}
       {Array.from(models, ([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
     </Select></FormControl>

@@ -229,3 +229,100 @@ contain sensitive prompts, responses, command output, and tool results.
 
 See the [README](../README.md) for installation and the local-only product
 boundary.
+
+## Global defaults and project overrides
+
+Open **Settings** in the browser to set defaults for every registered project.
+**Global defaults** saves to the installation's `settings.json`.
+**Project defaults** saves only explicit overrides in the project database row.
+Turn a project override off to inherit the current saved global value.
+Changes apply to future launches. Existing runs retain their settings through
+pause, restart, retries, loops, and child workflows.
+
+The complete settings inventory is:
+
+| Setting | Global control | Project or workflow override | Applies |
+| --- | --- | --- | --- |
+| Ordered agents | Default agent order | Project order; workflow and job `agents` come first | New launches |
+| Exact model | Shared default model and one model per agent | Project model; workflow `model`; run override; job `model` | New launches |
+| Thinking effort | Each agent's Thinking effort | Project agent defaults; job `agent_options.<id>.effort` | Matching exact model |
+| Agent permissions | Each agent's What the agent may do | Project agent defaults; job `permission_profile` or `agent_options.<id>.permission_mode` | Matching exact model |
+| Job timeout | Job timeout, such as `15m` | Project timeout; agent or command `timeout` | New launches |
+| Automatic retry participation | Allow automatic retries for jobs | Project default; job `auto_retry` | New launches |
+| Automatic recovery | Enabled and maximum retries, 1 or 2 | Project policy; explicit workflow `recovery` fields | New launches |
+| Working-copy cleanup | After a successful run | Project policy; run launch `cleanup_policy` | New launches |
+| Repair rounds | Defaults for new repair rules, 1 through 100 | Project default; saved rule `max_rounds` | New editor rules |
+| Repair instructions | Fixer and verifier instructions | Project default; saved rule instructions | New editor rules |
+| Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |
+| Loopback address | Server and account | Explicit `relay up --host` | Restart required |
+| Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
+| Worker count | Server and account, positive integer | Explicit `relay up --workers` | Restart required |
+| Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
+| Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |
+| Local account | Server and account shows the current account and active login policy | Existing onboarding and sign-in | Read-only in the page |
+| Retained data deletion | Storage shows project counts, sizes, and deletion categories | Explicit confirmed project cleanup | On confirmation |
+
+Models resolve in this order: job, explicit run override, workflow, shared
+project/global model. If none supplies a model, Relay uses the configured model
+of the first agent in the effective agent order. It then requires fresh proof
+of that same exact value through the existing routing service. It never tries
+another agent's different default model to make a failed launch succeed.
+
+Per-agent effort and permissions inherit only when that agent's configured
+model equals the resolved exact model. An explicit job option takes precedence;
+an explicit `null` leaves that provider option unset even when a global value
+exists. An explicit `permission_profile` also prevents a global permission mode
+from replacing it. Changing an agent's model in Settings clears its saved
+options. Unsupported saved choices remain errors at launch.
+
+A project model change also clears inherited effort and permissions from the
+global model. Explicit project options for the new model still take precedence.
+
+Recovery fields inherit individually; `recovery: {enabled: false}` disables
+an inherited policy. Agent and command jobs without a declared timeout inherit
+the saved timeout; `timeout: null` explicitly opts out. Human waits and
+structural deadlines remain workflow decisions. Native agent ceilings still
+apply when the inherited timeout is absent.
+
+For example, this global file sets Codex first, keeps successful working
+copies, and supplies a model and timeout for workflows that omit them:
+
+```json
+{
+  "agent_preferences": ["codex"],
+  "cleanup_policy": "retain",
+  "workflow_defaults": {
+    "providers": {"codex": {"model": "gpt-6-luna"}},
+    "timeout": "15m",
+    "recovery": {"enabled": false, "max_retries": 2}
+  }
+}
+```
+
+The model is an example exact value; the installed agent must advertise and
+confirm it. Settings reads and model menus never authorize a launch.
+
+Global saves validate the whole file and replace it atomically under a bounded
+kernel lock. A stale file hash returns `settings_conflict` and preserves the
+newer bytes. Project saves use the same conflict behavior in a database
+transaction. Login and server saves change only the next startup; current
+access, accounts, and run data remain intact.
+
+Dependency order, conditions, commands, environment variables, input defaults,
+output contracts, instructions, write access, no-op permission, approval
+questions/deadlines, loop bounds, subworkflow mappings, repair verdicts, and
+entry-point evidence remain explicit workflow choices. They define the task or
+its safety boundary and are not injected into every project. Provider login,
+credentials, installation, resource bounds, and process ownership stay with
+their existing adapters. `--no-browser` remains a startup-only CLI choice.
+
+**Settings › Storage** replaces project-wide cleanup on run pages. It counts
+retained reports from database metadata and measures working-copy files without
+following inner symlinks. A bounded or unreadable scan shows a lower bound.
+Run history shares database pages, and Git references share repository objects,
+so the page does not invent per-project disk sizes for those categories.
+No deletion category is selected initially. Confirmation describes the category
+and current counts; **Everything** also requires typing the project name.
+Cleanup still goes through the existing service and rejects active project
+runs. Everything also clears Relay's marked process logs across the
+installation, as the existing `all` cleanup contract specifies.

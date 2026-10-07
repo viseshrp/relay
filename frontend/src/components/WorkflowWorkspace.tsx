@@ -321,7 +321,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     setRepairOpen(true);
   }
 
-  function setAgentOption(agentId: string, field: keyof AgentOptions, value: string) {
+  function setAgentOption(agentId: string, field: keyof AgentOptions, value: string | null) {
     if (selectedNode === null) return;
     mutate((document, workflow) => {
       const current = { ...workflow.nodes[selectedNode].agent_options };
@@ -404,7 +404,8 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     ...(agents?.preferences ?? []),
   ]));
   const effectiveModel = (typeof definition?.model === "string" ? definition.model : "")
-    || parsed.value?.model || "";
+    || parsed.value?.model || agents?.defaults?.model
+    || agents?.defaults?.providers[candidateIds[0] ?? ""]?.model || "";
 
   return (
     <Box className="workflow-author-layout">
@@ -669,6 +670,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                   agent={agent}
                   model={effectiveModel}
                   project={requestProject}
+                  inheritDefaults={Boolean(effectiveModel && agents?.defaults?.providers[agentId]?.model === effectiveModel)}
                   options={definition.agent_options?.[agentId] ?? {}}
                   onChange={(field, value) => setAgentOption(agentId, field, value)}
                 />

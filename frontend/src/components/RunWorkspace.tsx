@@ -332,8 +332,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
   const [artifactCursor, setArtifactCursor] = useState<number | null>(null);
   const [streamState, setStreamState] = useState("disconnected");
   const [error, setError] = useState<string | null>(null);
-  const [cleanupScope, setCleanupScope] = useState("all");
-  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [runAgain, setRunAgain] = useState<{ source: PreviousRunInputs; workflow: WorkflowValue; models: string[]; open: boolean } | null>(null);
   const relaunchButton = useRef<HTMLButtonElement>(null);
@@ -758,22 +756,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
     }
   }
 
-  async function cleanData() {
-    try {
-      await api<{ deleted: Record<string, number> }>(projectPath("/api/data/clean", project.id), {
-        method: "POST",
-        body: JSON.stringify({ scope: cleanupScope, confirm: true }),
-      });
-      setCleanupOpen(false);
-      onSelectRun(null);
-      setDetail(null);
-      await loadHistory();
-    } catch (caught) {
-      setError(errorMessage(caught));
-      setCleanupOpen(false);
-    }
-  }
-
   const now = useClock(Boolean(detail && !TERMINAL_RUNS.has(detail.status)));
   const graph = useMemo(() => runSummaryGraph(detail?.nodes ?? [], now), [detail?.nodes, now]);
   const visibleStages = useMemo(() => visibleRunStages(detail?.nodes ?? []), [detail]);
@@ -1035,51 +1017,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
             </>
           )}
 
-          <Accordion><AccordionSummary>Advanced data cleanup</AccordionSummary><AccordionDetails><Paper variant="outlined" className="section-card">
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={2}
-              sx={{ alignItems: { sm: "center" } }}
-            >
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="h6">Retained data cleanup</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Cleanup is rejected while any project run is active and always requires confirmation.
-                </Typography>
-              </Box>
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel>Scope</InputLabel>
-                <Select value={cleanupScope} label="Scope" onChange={(event) => setCleanupScope(event.target.value)}>
-                  <MenuItem value="worktrees">Worktrees</MenuItem>
-                  <MenuItem value="branches">Branches</MenuItem>
-                  <MenuItem value="runs">Run history</MenuItem>
-                  <MenuItem value="all">Everything</MenuItem>
-                </Select>
-              </FormControl>
-              <Button color="error" variant="outlined" onClick={() => setCleanupOpen(true)}>
-                Clean data
-              </Button>
-            </Stack>
-          </Paper></AccordionDetails></Accordion>
         </Stack>
       </Box>}
       <Dialog open={graphJobs !== null} onClose={() => setGraphJobs(null)} fullWidth><DialogTitle>{graphJobs?.every((scope) => detail?.nodes.find((node) => node.scope_path === scope)?.status === "failed") ? "Choose a failed job" : "Parallel jobs"}</DialogTitle><DialogContent><List>{graphJobs?.map((scope) => <ListItemButton key={scope} onClick={() => { setGraphJobs(null); showStep(scope); }}><StatusIcon status={detail?.nodes.find((node) => node.scope_path === scope)?.status ?? "pending"} /><ListItemText primary={stageLabel(scope)} /></ListItemButton>)}</List></DialogContent><DialogActions><Button onClick={() => setGraphJobs(null)}>Close</Button></DialogActions></Dialog>
 
-      <Dialog open={cleanupOpen} onClose={() => setCleanupOpen(false)}>
-        <DialogTitle>Delete retained Relay data?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            This permanently deletes the selected <strong>{cleanupScope}</strong> scope for the current
-            project. Relay will not change the launch branch.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCleanupOpen(false)}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => void cleanData()}>
-            Confirm deletion
-          </Button>
-        </DialogActions>
-      </Dialog>
       <Dialog open={stopOpen} onClose={() => setStopOpen(false)}>
         <DialogTitle>Cancel this run?</DialogTitle>
         <DialogContent><DialogContentText>Relay stops active tools and skips remaining work. Finished jobs keep their results and committed changes. You can still review the saved evidence.</DialogContentText></DialogContent>

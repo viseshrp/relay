@@ -15,7 +15,6 @@ from django.views.decorators.http import require_GET, require_POST
 from relay.agents.configuration import require_choice
 from relay.agents.driver import probe_agent_configuration, probe_agent_models
 from relay.agents.readiness import check_agent_readiness
-from relay.config import load_config
 from relay.errors import ConfigError, PermissionFlowError
 from relay.execution.cancellation import request_cancellation
 from relay.execution.control import ControlResult, submit_control
@@ -31,6 +30,7 @@ from relay.execution.resume import (
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import CleanupPolicy, ControlKind
 from relay.execution.step_settings import UnstartedAgentTarget, change_unstarted_agent_settings
+from relay.owner_settings import effective_config
 from relay.projects.service import initialize_project, register_current_project, relink_project
 from relay.workflows.editor import (
     autosave_workflow_draft,
@@ -58,6 +58,7 @@ from ..repositories import (
     DjangoProjectStore,
     DjangoWorkflowStore,
 )
+from ..settings_repository import DjangoSettingsStore
 from . import (
     api_errors,
     canonical_record_id,
@@ -483,7 +484,7 @@ def launch_run(request: HttpRequest) -> HttpResponse:
         raise ConfigError(
             message, next_action="Reload the workflow in the selected project before starting."
         )
-    config = load_config()
+    config = effective_config(DjangoSettingsStore(), project.id)
     cleanup_value = body.get("cleanup_policy", config.cleanup_policy)
     if not isinstance(cleanup_value, str):
         message = "cleanup_policy must be a string."
@@ -504,6 +505,7 @@ def launch_run(request: HttpRequest) -> HttpResponse:
             entry_point=optional_text(body, "entry_point"),
             owner_agents=config.agent_preferences,
             launcher=launcher,
+            defaults=config.workflow_defaults,
         ),
         _enqueue_claim,
     )

@@ -1992,7 +1992,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                     launcher=request.launcher,
                     entry_point=request.entry_point,
                     recorded_head=source_commit,
-                    recovery_policy=policy.definition.recovery.model_dump(mode="json"),
+                    recovery_policy=snapshot.launch_defaults.get(
+                        "recovery", policy.definition.recovery.model_dump(mode="json")
+                    ),
                 )
                 RunSnapshot.objects.create(run=run, **snapshot.to_dict())
                 _append_event(

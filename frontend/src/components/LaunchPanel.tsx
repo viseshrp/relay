@@ -27,7 +27,7 @@ interface LaunchPanelProps {
 export function LaunchPanel({ open, workflowKey, workflow, project, requestProject, modelOptions, blockedReason, saveError, onSave, onClose, onExited, onRunLaunched, previousRun }: LaunchPanelProps) {
   const [inputs, setInputs] = useState<LaunchValues>(previousRun?.inputs ?? {});
   const [model, setModel] = useState("");
-  const [cleanup, setCleanup] = useState("clean_on_success");
+  const [cleanup, setCleanup] = useState("");
   const [entryPoint, setEntryPoint] = useState("");
   const [source, setSource] = useState<ProjectLaunchSource | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
       const supplied = Object.fromEntries(Object.entries(inputs).filter(([name, value]) => value !== undefined && Object.hasOwn(workflow?.inputs ?? {}, name)));
       const response = await api<{ run_id: string }>(projectPath("/api/runs", requestProject), {
         method: "POST", body: JSON.stringify({ workflow_key: workflowKey, project_id: project.id, inputs: supplied,
-          ...(model ? { model } : {}), cleanup_policy: cleanup, ...(entryPoint ? { entry_point: entryPoint } : {}) }),
+          ...(model ? { model } : {}), ...(cleanup ? { cleanup_policy: cleanup } : {}), ...(entryPoint ? { entry_point: entryPoint } : {}) }),
       });
       onRunLaunched(response.run_id);
     } catch (caught) { setLaunchError(errorMessage(caught)); }
@@ -103,12 +103,12 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
         <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} onChange={(name, value) => setInputs((current) => ({ ...current, [name]: value }))} />
         <Accordion><AccordionSummary>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
           <TextField label="Override model for this run" value={model} onChange={(event) => setModel(event.target.value)}
-            helperText="Leave blank to use the workflow's model. Values must match the provider exactly, including case."
+            helperText="Leave blank to use the workflow, project, or global model. Values must match the provider exactly, including case."
             slotProps={{ htmlInput: { list: "launch-model-options" } }} />
           <datalist id="launch-model-options">{modelOptions.map((value) => <option key={value} value={value} />)}</datalist>
           <FormControl fullWidth><InputLabel id="launch-cleanup">After a successful run</InputLabel>
             <Select labelId="launch-cleanup" label="After a successful run" value={cleanup} onChange={(event) => setCleanup(event.target.value)}>
-              <MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem>
+              <MenuItem value="">Use project and global defaults</MenuItem><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem>
             </Select><FormHelperText>Saved reports and committed changes remain available after the working copy is deleted.</FormHelperText>
           </FormControl>
           <FormControl fullWidth><InputLabel id="launch-entry">Start from job</InputLabel>

@@ -163,6 +163,7 @@ def up_command(
                 if context.get_parameter_source("login_required") is ParameterSource.DEFAULT
                 else login_required
             ),
+            stored.workflow_defaults,
         )
         run_supervisor(
             effective,

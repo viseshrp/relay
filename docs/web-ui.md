@@ -518,8 +518,10 @@ evidence, credentials, and personal browser profiles. See
 [Run-owned resources](projects-and-storage.md#run-owned-resources).
 
 History, snapshots, output, interactions, and artifacts remain until explicit
-cleanup. Advanced data cleanup selects `worktrees`, `branches`, `runs`, or `all`
-and requires a confirmation dialog. Relay rejects cleanup while any run for
+cleanup. **Settings > Storage** selects working copies, run references, run
+history, or everything for the project. Nothing is selected initially;
+deletion requires a confirmation dialog. Everything also requires typing the
+project name. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
 never changes the launch branch. A disposable reader left by an interruption
 is removed before its primary run worktree. Run-record cleanup is rejected
@@ -570,7 +572,8 @@ Paginated history remains available at
 
 ## Automatic step recovery
 
-**Automatic recovery** in Start work is off for existing workflows. Turn it
+**Automatic recovery** in Start work is off unless a workflow or saved owner
+default enables it. Turn it
 on, save, and launch to retry eligible agent failures up to twice. Select an
 agent stage and turn off **Allow automatic retries for this step** to opt out.
 
@@ -709,3 +712,40 @@ bottom, or **Stop following** pauses automatic scrolling. **Jump to latest**
 returns to the newest output and resumes following. Logs scroll within their
 panel. Active run and job durations update each second and freeze at the
 recorded end time; durations over an hour display hours, minutes, and seconds.
+
+## Settings
+
+The header's **Settings** tab opens `view=settings`. Its sidebar contains
+**Global defaults**, **Project defaults**, **Server and account**,
+**Notifications**, and **Storage**, using the same colors and typography as
+the workflow and run views. The setup checklist stays hidden here.
+
+Global defaults cover ordered agents, exact shared and per-agent models,
+thinking effort, agent permissions, job timeouts, retry participation,
+recovery budgets, working-copy cleanup, and defaults for new repair rules.
+Model and option refreshes use the existing discovery endpoints. Changing an
+agent model clears its options; provider choices preserve their descriptions
+and exact values. Saved workflow choices take precedence as described in the
+[inventory](projects-and-storage.md#global-defaults-and-project-overrides).
+
+Project controls start disabled while inheriting their saved global value.
+Turn on an override to edit it. Turning it off previews the inherited value
+through the server before saving. Global and project saves have distinct
+buttons, error states, and conflict recovery. Unsaved settings block tab and
+project navigation and warn before closing the browser. **Discard changes**
+restores the loaded values. **Reload settings** resolves stale edits.
+
+Server and account displays the current account and active login policy.
+Changes to login, loopback address, port, and workers show a restart notice;
+startup flags still override saved choices. Notifications retain the existing
+browser-specific permission and preference. Storage shows installation paths
+and the selected project's sizes, counts, and confirmed cleanup controls.
+Project-wide cleanup no longer appears on run pages; attempt temporary-resource
+cleanup remains with its run diagnostics.
+
+Run workflow leaves cleanup unspecified until you select an override, allowing
+project/global defaults to apply. Job effort and permission menus offer
+**Use project and global defaults** when saved agent defaults exist, plus
+**Agent's default** to save an explicit null and skip inheritance for that
+option. Existing YAML editing, leases, prompts, and launch validation remain
+the source of workflow edits.

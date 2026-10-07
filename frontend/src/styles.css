@@ -370,3 +370,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .log-toolbar { justify-content: flex-start; }
 }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.settings-layout { align-items: start; }
+.settings-content { padding: 28px; width: 100%; max-width: 1000px; min-width: 0; }
+.settings-save { position: sticky; bottom: 12px; padding: 12px; background: #fff; border: 1px solid #dce1ec; border-radius: 6px; }
+@media (max-width: 900px) { .settings-content { padding: 18px; } }

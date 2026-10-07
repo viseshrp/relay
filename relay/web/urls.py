@@ -3,13 +3,15 @@
 from django.urls import URLPattern, URLResolver, path
 
 from .static_view import serve_spa
-from .views import actions, pages, stream
+from .views import actions, pages, settings, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/auth", actions.authentication_state, name="auth-state"),
     path("api/auth/onboard", actions.onboard, name="auth-onboard"),
     path("api/auth/login", actions.sign_in, name="auth-login"),
     path("api/auth/logout", actions.sign_out, name="auth-logout"),
+    path("api/settings", settings.owner_settings, name="owner-settings"),
+    path("api/projects/defaults", settings.project_defaults, name="project-defaults"),
     path("api/projects", pages.projects, name="projects"),
     path("api/projects/current", pages.project_context, name="project-context"),
     path("api/projects/open", actions.open_project, name="project-open"),
@@ -69,6 +71,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path(
         "api/artifacts/<str:artifact_id>/preview", pages.artifact_preview, name="artifact-preview"
     ),
+    path("api/data/usage", settings.storage_usage, name="data-usage"),
     path("api/data/clean", actions.clean_data, name="data-clean"),
     path("api", pages.api_not_found, name="api-root-not-found"),
     path("api/", pages.api_not_found, name="api-slash-not-found"),

@@ -14,12 +14,15 @@ interface AgentConfigurationProps {
   agent: AgentRecord;
   model: string;
   options: AgentOptions;
-  onChange: (field: keyof AgentOptions, value: string) => void;
+  onChange: (field: keyof AgentOptions, value: string | null) => void;
   project: string | null;
   disabled?: boolean;
+  defaultLabel?: string;
+  inheritDefaults?: boolean;
+  labels?: Record<keyof AgentOptions, string>;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;
@@ -55,10 +58,11 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
   }, [agent.id, key, model, ready, project]);
 
   function selector(field: keyof AgentOptions, label: string, supported: ConfigurationSelector | null) {
-    const value = options[field] ?? "";
+    const raw = options[field];
+    const value = raw === null ? "agent-default" : raw === undefined ? "inherit" : `choice:${raw}`;
     const choices = supported?.choices ?? [];
-    const available = value === "" || choices.some((choice) => choice.value === value);
-    const selected = choices.find((choice) => choice.value === value);
+    const available = raw === undefined || raw === null || choices.some((choice) => choice.value === raw);
+    const selected = choices.find((choice) => choice.value === raw);
     const message = !agent.installed ? "Install this tool to load its supported choices."
       : !model ? "Select an exact model to load its supported choices."
       : loading ? "Loading supported choices…"
@@ -67,8 +71,8 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
       : !supported ? `This tool does not expose a separate ${label.toLowerCase()} selector.`
       : supported.transport === "native" && field === "effort"
         ? "Effort is included in this exact model. Choose another model to change it."
-      : selected?.description ?? (value ? `Use ${selected?.name ?? value} for this tool.`
-        : "Provider default leaves this override unset.");
+      : selected?.description ?? (raw ? `Use ${selected?.name ?? raw} for this tool.`
+        : inheritDefaults && raw === undefined ? "Use the saved defaults for this exact model." : `${defaultLabel} leaves this override unset.`);
     const labelId = `${agent.id}-${field}-label`;
     return (
       <FormControl size="small" error={!available && !loading && !error}>
@@ -78,15 +82,17 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
           label={label}
           displayEmpty
           notched
-          renderValue={(selectedValue) => selectedValue === "" ? "Provider default"
-            : choices.find((choice) => choice.value === selectedValue)?.name ?? selectedValue}
+          renderValue={(selectedValue) => selectedValue === "inherit" ? (inheritDefaults ? "Use project and global defaults" : defaultLabel)
+            : selectedValue === "agent-default" ? "Agent’s default"
+            : choices.find((choice) => choice.value === selectedValue.slice(7))?.name ?? selectedValue.slice(7)}
           value={value}
-          disabled={disabled || loading || (!supported && value === "")}
-          onChange={(event) => onChange(field, event.target.value)}
+          disabled={disabled || loading || (!supported && raw === undefined)}
+          onChange={(event) => onChange(field, event.target.value === "agent-default" ? null : event.target.value === "inherit" ? "" : event.target.value.slice(7))}
         >
-          <MenuItem value="">Provider default</MenuItem>
-          {!available && <MenuItem value={value} disabled>{value} (unavailable)</MenuItem>}
-          {choices.map((choice) => <MenuItem key={choice.value} value={choice.value}>{choice.name}</MenuItem>)}
+          <MenuItem value="inherit">{inheritDefaults ? "Use project and global defaults" : defaultLabel}</MenuItem>
+          {(inheritDefaults || options[field] === null) && <MenuItem value="agent-default">Agent’s default</MenuItem>}
+          {!available && <MenuItem value={value} disabled>{raw} (unavailable)</MenuItem>}
+          {choices.map((choice) => <MenuItem key={choice.value} value={`choice:${choice.value}`}>{choice.name}</MenuItem>)}
         </Select>
         <FormHelperText>{message}</FormHelperText>
       </FormControl>
@@ -98,8 +104,8 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
       <Typography variant="subtitle2">{agent.display_name}</Typography>
       {error && <Alert severity="error" action={<Button disabled={disabled} onClick={() => setRefresh((current) => current + 1)}>Retry</Button>}>{error}</Alert>}
       <Box className="field-grid">
-        {selector("effort", "Effort", configuration?.effort ?? null)}
-        {selector("permission_mode", "Permission mode", configuration?.permission_mode ?? null)}
+        {selector("effort", labels?.effort ?? "Effort", configuration?.effort ?? null)}
+        {selector("permission_mode", labels?.permission_mode ?? "Permission mode", configuration?.permission_mode ?? null)}
       </Box>
     </Stack>
   );

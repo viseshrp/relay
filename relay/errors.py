@@ -239,3 +239,9 @@ __all__ = [
     "WorkflowValidationError",
     "WorktreeError",
 ]
+
+
+class SettingsConflictError(RelayError):
+    error_code: ClassVar[str] = "settings_conflict"
+    cli_exit_code: ClassVar[int] = constants.EXIT_CONFIG_ERROR
+    http_status: ClassVar[int] = constants.HTTP_CONFLICT

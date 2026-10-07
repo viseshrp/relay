@@ -28,15 +28,16 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, m
   const settingsDisabled = disabled || promptDirty;
   const candidates = node.agents?.length ? node.agents : preferences;
   const selectedModel = typeof node.model === "string" ? node.model : "";
-  const effectiveModel = selectedModel || model;
+  const effectiveModel = selectedModel || model || agents?.defaults?.model
+    || agents?.defaults?.providers[candidates[0] ?? ""]?.model || "";
   const resultType = rule.accepted_value === null ? "null" : typeof (rule.accepted_value ?? "Yes");
   // "checks.yaml", stage review, role fix -> "prompts/ui/checks/review-fix.md".
   const promptReference = `prompts/ui/${workflowKey.replace(/\.(yaml|yml)$/, "")}/${stage}-${role}.md`;
   function setNode(value: WorkflowNodeValue) { onChange({ ...rule, [role]: value }); }
-  function setOption(agentId: string, field: keyof AgentOptions, value: string) {
+  function setOption(agentId: string, field: keyof AgentOptions, value: string | null) {
     const options = { ...node.agent_options };
     const selected = { ...options[agentId] };
-    if (value) selected[field] = value; else delete selected[field];
+    if (value !== "") selected[field] = value; else delete selected[field];
     if (Object.keys(selected).length) options[agentId] = selected; else delete options[agentId];
     setNode({ ...node, agent_options: options });
   }
@@ -80,7 +81,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, m
             {agents?.agents.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.display_name}</MenuItem>)}
           </Select></FormControl>
           <ModelPicker key={`${role}-${candidates.join(",")}`} agents={agents?.agents.filter((agent) => candidates.includes(agent.id)) ?? []} value={selectedModel} project={project} disabled={settingsDisabled} onChange={(value) => setNode({ ...node, model: value || undefined, agent_options: {} })} />
-          {candidates.map((id) => { const agent = agents?.agents.find((item) => item.id === id); return agent ? <AgentConfiguration key={id} agent={agent} model={effectiveModel} options={node.agent_options?.[id] ?? {}} project={project} disabled={settingsDisabled} onChange={(field, value) => setOption(id, field, value)} /> : null; })}
+          {candidates.map((id) => { const agent = agents?.agents.find((item) => item.id === id); return agent ? <AgentConfiguration key={id} agent={agent} model={effectiveModel} inheritDefaults={Boolean(effectiveModel && agents?.defaults?.providers[id]?.model === effectiveModel)} options={node.agent_options?.[id] ?? {}} project={project} disabled={settingsDisabled} onChange={(field, value) => setOption(id, field, value)} /> : null; })}
           <PromptEditor workflowPath={workflowPath} project={project} holder={holder} disabled={disabled}
             reference={node.prompts?.find((prompt) => prompt.local)?.local ?? null}
             newReference={promptReference}

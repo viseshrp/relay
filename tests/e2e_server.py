@@ -17,6 +17,7 @@ import tempfile
 from threading import Event, Thread
 from types import SimpleNamespace
 from typing import TypeVar
+from uuid import uuid4
 
 import pytest
 
@@ -62,10 +63,10 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     from relay.execution.scheduler import dispatch_ready_nodes
     from relay.execution.state import EventSource
     from relay.manage import apply_migrations
-    from relay.paths import artifacts_dir
+    from relay.paths import artifacts_dir, settings_path
     from relay.projects.service import initialize_project
     from relay.web.auth import owner_required
-    from relay.web.models import EditorLease, Installation, NodeAttempt, Run, WorkflowDraft
+    from relay.web.models import EditorLease, Installation, NodeAttempt, Project, Run, WorkflowDraft
     from relay.web.repositories import DjangoExecutionStore
     from relay.web.urls import urlpatterns
     from relay.web.views import actions, api_errors, json_body
@@ -126,6 +127,8 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
             providers.install(agent_id, mode="configuration")
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
+        settings_path().unlink(missing_ok=True)
+        Project.objects.filter(pk=project.project_id).update(defaults={})
         project.write_workflow("workflow", WORKFLOW)
         return JsonResponse({"ok": True, "python": sys.executable})
 
@@ -165,6 +168,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         del request
         project.commit("Save browser-test workflow")
         return JsonResponse({"ok": True})
+
+    @owner_required
+    @require_POST
+    def storage_project(request: HttpRequest) -> JsonResponse:
+        del request
+        isolated = create_project(root / f"storage-{uuid4().hex}")
+        return JsonResponse({"project_id": isolated.project_id})
 
     @api_errors
     @owner_required
@@ -252,6 +262,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
+    urlpatterns.insert(0, path("__test__/storage-project", storage_project))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
