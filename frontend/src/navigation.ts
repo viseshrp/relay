@@ -1,5 +1,6 @@
+import { statusPresentation } from "./status";
 export interface LocationState {
-  view: "author" | "runs";
+  view: "workflows" | "runs";
   project: string | null;
   workflow: string | null;
   run: string | null;
@@ -14,7 +15,7 @@ export function readLocation(): LocationState {
   const query = window.location.search || localStorage.getItem(LOCATION_KEY) || "";
   const parameters = new URLSearchParams(query);
   return {
-    view: parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "author",
+    view: parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
     project: parameters.get("project"),
     workflow: parameters.get("workflow"),
     run: parameters.get("run"),
@@ -53,11 +54,5 @@ export function stageLabel(scope: string): string {
 }
 
 export function statusLabel(status: string): string {
-  return ({
-    pending: "Not started", ready: "Ready", dispatched: "Starting", running: "In progress",
-    waiting: "Waiting", paused_wait: "Waiting", succeeded: "Complete",
-    failed: "Needs attention", skipped: "Skipped", canceled: "Stopped", canceling: "Stopping",
-    failing: "Finishing after an error", interrupted: "Resuming after restart",
-    repairing: "Repairing", repair_stopped: "Repairs stopped",
-  } as Record<string, string>)[status] ?? status;
+  return statusPresentation(status).label;
 }

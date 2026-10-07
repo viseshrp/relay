@@ -40,9 +40,9 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: runId } = await launched.json();
   await page.goto(`/?view=runs&run=${runId}`);
-  await expect(page.locator(".run-layout").getByRole("heading", { name: "Local run", exact: true })).toBeVisible();
+  await expect(page.locator(".run-header").getByRole("heading", { name: /Local run #/ })).toBeVisible();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
-  await expect(page.locator(".run-layout").getByRole("heading", { name: "Local run", exact: true })).toBeVisible();
+  await expect(page.locator(".run-header").getByRole("heading", { name: /Local run #/ })).toBeVisible();
 });

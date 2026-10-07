@@ -47,10 +47,10 @@ export function GetStarted({ project, requestProject, forced, runSucceeded, onWo
   useEffect(() => {
     let active = true;
     void api<{ runs: Array<{ id: string }> }>(`/api/runs?project=${encodeURIComponent(project.id)}&status=succeeded&limit=1`)
-      .then((value) => { if (active) setComplete(value.runs.length > 0); })
+      .then((value) => { if (active) setComplete(runSucceeded || value.runs.length > 0); })
       .catch((caught: unknown) => { if (active) { setError(errorMessage(caught)); setComplete(false); } });
     return () => { active = false; };
-  }, [project.id]);
+  }, [project.id, runSucceeded]);
   useEffect(() => { if (runSucceeded) setComplete(true); }, [runSucceeded]);
 
   useEffect(() => {

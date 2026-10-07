@@ -69,7 +69,12 @@ for (const kind of ["wait", "permission", "elicitation"] as const) for (const pl
     const count = (await waiting(page)).waiting_count;
     await expect(page.getByRole("tab", { name: `Runs (${count})`, exact: true })).toBeVisible();
     await expect(page).toHaveTitle(`(${count}) Relay`);
-    await expect(page.getByRole("button", { name: new RegExp(`^Waiting ${kind} ${placement} ! Waiting for you`) })).toBeVisible();
+    await expect(page.getByRole("heading", { name: new RegExp(`${key} #`) })).toBeVisible();
+    await expect(page.getByText("Waiting for you", { exact: true }).last()).toBeVisible();
+    await page.getByRole("button", { name: "Run history", exact: true }).click();
+    const historyRun = page.getByRole("button", { name: new RegExp(`^${key} #`) });
+    await expect(historyRun).toContainText("Waiting for you");
+    await historyRun.click();
     await expect(page.getByText(/needs (your )?input/i)).toHaveCount(0);
     await page.getByRole("tab", { name: "Workflows", exact: true }).click();
     await expect(page.getByRole("tab", { name: `Runs (${count})`, exact: true })).toBeVisible();
@@ -93,6 +98,27 @@ for (const kind of ["wait", "permission", "elicitation"] as const) for (const pl
     await expect(page.getByText(/before sending your response/)).toHaveCount(0);
   });
 }
+
+test("returning from Workflows keeps the selected run when several runs are waiting", async ({ page }) => {
+  await create(page, "other-waiting", { approval: { type: "human_wait", prompt: "Another pending request." } });
+  await create(page, "selected-waiting", { approval: { type: "human_wait", prompt: "Answer this selected run." } });
+  expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const other = await launch(page, "other-waiting");
+  try {
+    const selected = await launch(page, "selected-waiting");
+    await expect.poll(async () => (await detail(page, other)).interactions.length).toBe(1);
+    await expect.poll(async () => (await detail(page, selected)).interactions.length).toBe(1);
+    await page.goto(`/?view=runs&run=${selected}`);
+    await expect(page.getByRole("region", { name: "Waiting for you", exact: true })).toContainText("Answer this selected run.");
+    await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+    await page.getByRole("tab", { name: /^Runs \(/ }).click();
+    await expect(page).toHaveURL(new RegExp(`run=${selected}`));
+    await expect(page.getByRole("region", { name: "Waiting for you", exact: true })).toContainText("Answer this selected run.");
+  } finally {
+    expect((await post(page, `/api/runs/${other}/cancel`, { idempotency_key: "other-wait-cleanup" })).ok()).toBeTruthy();
+    await expect.poll(async () => (await detail(page, other)).waiting_count).toBe(0);
+  }
+});
 
 test("a job log keeps its pending response available above the output", async ({ page }) => {
   await create(page, "waiting-job-log", { approval: { type: "human_wait", prompt: "Read the job output and approve." } });

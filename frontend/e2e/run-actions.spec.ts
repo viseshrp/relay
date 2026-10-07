@@ -37,7 +37,7 @@ test("Pause, Resume, and Cancel run work from the job log and finished controls 
   await settled(page, id, "paused_wait");
   await page.goto(`/?view=runs&run=${id}&job=root.approval`);
   await expect(page.getByRole("region", { name: "Job log" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Re-run all jobs", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Re-run jobs", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Resume", exact: true }).click();
@@ -52,7 +52,7 @@ test("Pause, Resume, and Cancel run work from the job log and finished controls 
   await settled(page, id, "canceled");
   await expect(page.getByRole("button", { name: "Cancel run", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Re-run all jobs", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Re-run jobs", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Re-run job", exact: true })).toHaveCount(0);
 });
 
@@ -69,7 +69,8 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   await page.goto(`/?view=runs&run=${id}`);
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Cancel run", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Re-run all jobs", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run jobs", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Re-run all jobs", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await expect(panel.getByRole("heading", { name: "Updated source", exact: true })).toBeVisible();
   await expect(panel.getByRole("textbox", { name: "Task" })).toHaveValue("Previous task");
@@ -77,8 +78,9 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   await expect(panel.getByRole("spinbutton", { name: "Count" })).toHaveValue("0");
   await panel.press("Escape");
   await expect(panel).toBeHidden();
-  await expect(page.getByRole("button", { name: "Re-run all jobs", exact: true })).toBeFocused();
-  await page.getByRole("button", { name: "Re-run all jobs", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Re-run jobs", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Re-run jobs", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Re-run all jobs", exact: true }).click();
   await expect(panel.getByRole("textbox", { name: "Task" })).toHaveValue("Previous task");
   const created = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/runs" && r.request().method() === "POST");
   await panel.getByRole("button", { name: "Run workflow", exact: true }).click();
@@ -98,7 +100,7 @@ test("failed runs hide pause and cancel, and per-job retry appears only in the j
   const id = await launch(page, "failed-actions", { nodes: { check: { type: "command", run: ["git", "relay-no-such-command"] } } });
   await settled(page, id, "failed");
   await page.goto(`/?view=runs&run=${id}`);
-  await expect(page.getByRole("button", { name: "Re-run all jobs", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Re-run jobs", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Cancel run", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Re-run job", exact: true })).toHaveCount(0);
@@ -114,7 +116,8 @@ test("a stale re-run request shows an error and creates no run", async ({ page }
   await page.goto(`/?view=runs&run=${id}`);
   await page.route(`**/api/runs/${id}/launch-inputs`, (route) => route.fulfill({ status: 400, json: { code: "config_error", message: "Wait for this run to finish before running all jobs again.", context: {} } }));
   const before = (await (await page.request.get("/api/runs")).json()).runs.length;
-  await page.getByRole("button", { name: "Re-run all jobs", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run jobs", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Re-run all jobs", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Wait for this run to finish before running all jobs again.");
   await expect(page.getByRole("dialog", { name: "Run workflow", exact: true })).toHaveCount(0);
   expect((await (await page.request.get("/api/runs")).json()).runs.length).toBe(before);
@@ -137,12 +140,14 @@ test("switching runs while repeat options load drops the previous request", asyn
   });
   try {
     const requested = page.waitForRequest(`**/api/runs/${first}/launch-inputs`);
-    await page.getByRole("button", { name: "Re-run all jobs", exact: true }).click();
+    await page.getByRole("button", { name: "Re-run jobs", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Re-run all jobs", exact: true }).click();
     await requested;
-    await page.getByRole("button", { name: /^Other actions Complete/ }).click();
+    await page.getByRole("button", { name: "Run history", exact: true }).click();
+    await page.getByRole("button", { name: /^other-actions #/ }).click();
     await expect(page).toHaveURL(new RegExp(`run=${other}`));
   } finally { release?.(); }
   await page.unrouteAll({ behavior: "wait" });
   await expect(page.getByRole("dialog", { name: "Run workflow", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Re-run all jobs", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Re-run jobs", exact: true })).toBeEnabled();
 });

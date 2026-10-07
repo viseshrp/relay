@@ -27,6 +27,7 @@ import {
 } from "@mui/material";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ActionIcon } from "./ActionIcon";
 import { api, errorMessage, RelayApiError } from "../api";
 import { editorHolder } from "../editor-session";
 import { projectPath, stageLabel } from "../navigation";
@@ -57,6 +58,7 @@ const LEASE_RENEW_MS = 30_000;
 const AUTOSAVE_DELAY_MS = 600;
 
 interface WorkflowWorkspaceProps {
+  initialCreate?: boolean;
   onRunLaunched: (runId: string) => void;
   project: ProjectRecord;
   requestProject: string | null;
@@ -76,11 +78,11 @@ function workflowPath(key: string, suffix = ""): string {
   return `/api/workflows/${encoded}${suffix}`;
 }
 
-export function WorkflowWorkspace({ onRunLaunched, project, requestProject, initialWorkflow, initialLaunch, onLaunchClosed, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
+export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, project, requestProject, initialWorkflow, initialLaunch, onLaunchClosed, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
   const holder = useRef(editorHolder());
   const initialKey = useRef(initialWorkflow);
   const [inventory, setInventory] = useState<Array<{ key: string; name: string }>>([]);
-  const [newWorkflow, setNewWorkflow] = useState(false);
+  const [newWorkflow, setNewWorkflow] = useState(initialCreate);
   const [advanced, setAdvanced] = useState(false);
   const [addingStage, setAddingStage] = useState(false);
   const [stageName, setStageName] = useState("Check project");
@@ -366,6 +368,9 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
       });
       const refreshed = await api<WorkflowDocumentResponse>(projectPath(workflowPath(loadedKey), requestProject));
       applyDocument(refreshed);
+      setInventory((items) => items.map((item) => item.key === loadedKey
+        ? { ...item, name: parseWorkflow(refreshed.yaml).value?.name || item.name }
+        : item));
       setNotice("Workflow saved and validated.");
     } catch (caught) {
       if (caught instanceof RelayApiError && caught.status === 409) {
@@ -402,11 +407,17 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     || parsed.value?.model || "";
 
   return (
-    <Stack spacing={2}>
+    <Box className="workflow-author-layout">
+      <Box component="nav" aria-label="Workflow sidebar" className="actions-sidebar">
+        <Typography variant="h6" sx={{ p: 1 }}>Workflows</Typography>
+        <Button fullWidth variant="outlined" onClick={() => setNewWorkflow(true)}>New workflow</Button>
+        <List>{inventory.map((item) => <ListItemButton key={item.key} selected={item.key === loadedKey} disabled={busy} onClick={() => void loadWorkflow(item.key)}><ActionIcon name="workflow" /><ListItemText primary={item.name} /></ListItemButton>)}</List>
+      </Box>
+      <Stack spacing={2} sx={{ minWidth: 0 }}>
       <Stack component="header" role="region" aria-label="Workflow header" direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
         <Box>
-          <Typography variant="h4">{parsed.value?.name || "Choose a workflow"}</Typography>
-          <Typography color="text.secondary">Choose a workflow, edit its jobs, and save your changes.</Typography>
+          <Typography component="h1" variant="h5">{parsed.value?.name || "Choose a workflow"}</Typography>
+          <Typography variant="body2" color="text.secondary">{loadedKey}</Typography>
         </Box>
         <Button ref={launchButton} variant="contained" onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button>
       </Stack>
@@ -422,7 +433,6 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
               {inventory.map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}
             </Select>
           </FormControl>
-          <Button variant="outlined" onClick={() => setNewWorkflow(true)}>New workflow</Button>
           <Button variant="contained" onClick={requestSave} disabled={!dirty || busy || !leaseReady}>
             Save
           </Button>
@@ -735,5 +745,6 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
         </DialogActions>
       </Dialog>
     </Stack>
+    </Box>
   );
 }

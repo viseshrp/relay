@@ -41,7 +41,8 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   }).toBe("succeeded");
   await expect(page.getByRole("region", { name: "Waiting for you", exact: true })).toHaveCount(0);
   await expect(page.getByText(/needs (your )?input/i)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Pause review New jobs paused/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Pause review #/ })).toBeVisible();
+  await expect(page.getByText("New jobs paused", { exact: true })).toBeVisible();
   const pausedMessage = "Paused. Running jobs will finish; nothing new will start until you resume.";
   await expect(page.getByText(pausedMessage, { exact: true })).toHaveCount(1);
   await expect(page.getByText("Unstarted agent steps", { exact: true })).toHaveCount(0);

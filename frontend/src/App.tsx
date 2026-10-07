@@ -44,6 +44,10 @@ const RunWorkspace = lazy(() =>
 export function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [location, setLocation] = useState(readLocation);
+  const lastSelectedRun = useRef<{ id: string; project: string | null } | null>(null);
+  useEffect(() => {
+    if (location.run) lastSelectedRun.current = { id: location.run, project: location.project };
+  }, [location.run, location.project]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [servedProject, setServedProject] = useState<string | null>(null);
   const [projectReady, setProjectReady] = useState(false);
@@ -59,6 +63,7 @@ export function App() {
   const [setupForced, setSetupForced] = useState(false);
   const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
   const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
+  const [workflowCreate, setWorkflowCreate] = useState(false);
   const [workflowRevision, setWorkflowRevision] = useState(0);
   const runSucceeded = useCallback(() => setSetupRunSucceeded(true), []);
   const beforeLeave = useRef<(() => Promise<void>) | null>(null);
@@ -67,7 +72,7 @@ export function App() {
   const navigate = useCallback((patch: Partial<LocationState>) => {
     setLocation((current) => ({ ...current, ...patch }));
   }, []);
-  const workflowLoaded = useCallback((workflow: string) => navigate({ workflow }), [navigate]);
+  const workflowLoaded = useCallback((workflow: string) => { setWorkflowCreate(false); navigate({ workflow }); }, [navigate]);
   const navigateSafely = useCallback(async (patch: Partial<LocationState>) => {
     try { await beforeLeave.current?.(); navigate(patch); }
     catch (caught) { setProjectError(errorMessage(caught)); }
@@ -171,7 +176,7 @@ export function App() {
         method: "POST", body: JSON.stringify({ path: projectPath, initialize: true }),
       });
       setProjects((current) => [...current.filter((project) => project.id !== response.project.id), response.project]);
-      navigate({ project: response.project.id, workflow: null, run: null, interaction: null, job: null, view: "author" });
+      navigate({ project: response.project.id, workflow: null, run: null, interaction: null, job: null, view: "workflows" });
       setOpeningProject(false);
     } catch (caught) {
       setProjectError(errorMessage(caught));
@@ -184,17 +189,20 @@ export function App() {
     <Box sx={{ minHeight: "100vh" }}>
       <AppBar position="sticky" color="inherit" elevation={0} className="app-header">
         <Toolbar>
-          <Typography variant="h5" color="primary" sx={{ mr: 3 }}>Relay</Typography>
+          <Typography variant="h5" color="primary" sx={{ mr: 2 }}>Relay</Typography>
+          {renderProjectContext()}
           <Tabs
             value={location.view}
             onChange={(_event, value: LocationState["view"]) => {
-              const waiting = location.run && attention.attention.waiting_runs.includes(location.run) ? location.run : attention.attention.waiting_runs[0];
+              const previousRun = lastSelectedRun.current?.project === location.project ? lastSelectedRun.current.id : null;
+              const selected = location.run ?? previousRun;
+              const waiting = selected && attention.attention.waiting_runs.includes(selected) ? selected : attention.attention.waiting_runs[0];
               if (value === "runs" && waiting && location.view !== "runs") void openWaitingRun(waiting);
-              else void navigateSafely({ view: value });
+              else void navigateSafely({ view: value, run: null, job: null, interaction: null });
             }}
             sx={{ flex: 1 }}
           >
-            <Tab value="author" label="Workflows" />
+            <Tab value="workflows" label="Workflows" />
             <Tab value="runs" label={attention.attention.waiting_count ? `Runs (${attention.attention.waiting_count})` : "Runs"} />
           </Tabs>
           <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
@@ -211,13 +219,13 @@ export function App() {
         </Toolbar>
       </AppBar>
       <Container maxWidth={false} className="app-content">
-        {renderProjectContext()}
+
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
-        {projectReady && selectedProject && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
+        {projectReady && selectedProject && (location.run === null || setupForced) && <GetStarted key={selectedProject.id} project={selectedProject} requestProject={requestProject}
           forced={setupForced} runSucceeded={setupRunSucceeded} onClose={() => setSetupForced(false)} onOpenProject={() => setOpeningProject(true)}
           onWorkflowCreated={async (key) => {
             await beforeLeave.current?.();
-            navigate({ workflow: key, view: "author", run: null, interaction: null, job: null });
+            navigate({ workflow: key, view: "workflows", run: null, interaction: null, job: null });
             setWorkflowRevision((value) => value + 1);
           }} onRunLaunched={(id) => navigate({ run: id, interaction: null, job: null, view: "runs" })} />}
         {logoutError && (
@@ -228,11 +236,12 @@ export function App() {
         <Suspense fallback={<Box className="loading-panel"><CircularProgress /></Box>}>
           {!projectReady ? <Box className="loading-panel"><CircularProgress aria-label="Loading projects" /></Box>
           : !selectedProject ? <Alert severity="info">Choose a project above, or open a Git repository to begin.</Alert>
-          : location.view === "author" ? (
+          : location.view === "workflows" ? (
             <WorkflowWorkspace
               key={`${selectedProject.id}-${workflowRevision}`}
               project={selectedProject}
               requestProject={requestProject}
+              initialCreate={workflowCreate}
               initialWorkflow={location.workflow}
               initialLaunch={launchWorkflow === location.workflow && launchWorkflow !== null}
               onLaunchClosed={() => setLaunchWorkflow(null)}
@@ -253,9 +262,10 @@ export function App() {
               onSelectJob={(job) => navigate({ job })}
               onRunSucceeded={runSucceeded}
               onSelectRun={selectRun}
+              onEditWorkflow={(workflow) => { setWorkflowCreate(!workflow); setWorkflowRevision((value) => value + 1); navigate({ workflow: workflow || null, view: "workflows", run: null, interaction: null, job: null }); }}
               onRunWorkflow={(workflow) => {
                 setLaunchWorkflow(workflow);
-                navigate({ workflow, view: "author", run: null, interaction: null, job: null });
+                navigate({ workflow, view: "workflows", run: null, interaction: null, job: null });
               }}
             />
           )}
@@ -274,17 +284,13 @@ export function App() {
   );
 
   function renderProjectContext() {
-    return <Stack className="project-context" direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3, alignItems: { md: "center" } }}>
+    return <Stack className="project-context" direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mr: 2, alignItems: "center" }}>
       <FormControl size="small" sx={{ minWidth: 200 }}>
         <InputLabel id="current-project">Project</InputLabel>
         <Select labelId="current-project" label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, workflow: null, run: null, interaction: null, job: null })}>
           {projects.map((project) => <MenuItem key={project.id} value={project.id}>{project.display_name}</MenuItem>)}
         </Select>
       </FormControl>
-      <Box sx={{ flex: 1 }}>
-        <Typography variant="body2" color="text.secondary">{selectedProject?.canonical_path ?? "No project selected"}</Typography>
-        <Typography variant="body2">{location.view === "author" ? "Workflows: choose the steps, save your instructions, and start work." : "Runs: follow progress, review results, and respond when your input is needed."}</Typography>
-      </Box>
       <Button onClick={() => setOpeningProject(true)}>Open another project</Button>
       {projectError && !openingProject && <Alert severity="error">{projectError}</Alert>}
     </Stack>;

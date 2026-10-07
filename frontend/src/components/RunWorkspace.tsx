@@ -1,4 +1,3 @@
-import type { Edge, Node } from "@xyflow/react";
 import {
   Alert,
   Accordion,
@@ -19,7 +18,6 @@ import {
   List,
   ListItemButton,
   ListItemText,
-  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -46,9 +44,9 @@ import type {
   RetryConfiguration,
   RetryOptions,
 } from "../types";
-import { capturedRunGraph, repairOwnership, visibleRunStages } from "../graph";
+import { repairOwnership, visibleRunStages } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
-import { parseWorkflow, type WorkflowNodeData, type WorkflowValue } from "../workflow";
+import { parseWorkflow, type WorkflowValue } from "../workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { ReviewEvidence } from "./RunReview";
 import { WaitingRequests } from "./WaitingRequests";
@@ -61,6 +59,11 @@ import { JobWorkspace } from "./JobWorkspace";
 import { RunActions } from "./RunActions";
 import { LaunchPanel } from "./LaunchPanel";
 import { ActivityFeed } from "./ActivityFeed";
+import { RunHistory } from "./RunHistory";
+import { ActionIcon, StatusIcon } from "./ActionIcon";
+import { runSummaryGraph } from "../run-graph";
+import { useClock } from "../useClock";
+import { jobDuration } from "../job";
 
 const EVENT_TYPES = [
   "run.created",
@@ -138,6 +141,7 @@ interface RunWorkspaceProps {
   selectedRun: string | null;
   onSelectRun: (runId: string | null) => void;
   onRunWorkflow: (key: string) => void;
+  onEditWorkflow: (key: string) => void;
   project: ProjectRecord;
   selectedInteraction: string | null;
   selectedJob: string | null;
@@ -229,11 +233,6 @@ function applyStateEvent(current: RunDetail | null, event: RunEvent): RunDetail 
   return current;
 }
 
-function runGraph(run: RunDetail | null): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
-  if (run === null) return { nodes: [], edges: [] };
-  return capturedRunGraph(run.nodes);
-}
-
 function outputText(event: RunEvent): string | null {
   // {text: "Done."} -> "Done."; {plan: ["build"]} -> indented JSON.
   const keys = ["text", "chunk", "summary", "plan", "content", "event"];
@@ -310,7 +309,16 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWorkflow, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
+  const [filters, setFilters] = useState({ workflow: "", status: "", branch: "", query: "" });
+  const [graphJobs, setGraphJobs] = useState<string[] | null>(null);
+  const [showArtifacts, setShowArtifacts] = useState(false);
+  useEffect(() => {
+    if (showArtifacts && !selectedJob) {
+      document.getElementById("run-artifacts")?.scrollIntoView({ block: "start" });
+      setShowArtifacts(false);
+    }
+  }, [showArtifacts, selectedJob]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -342,7 +350,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const [refreshing, setRefreshing] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
-  const [stepFocusRequest, setStepFocusRequest] = useState(0);
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
@@ -355,17 +362,23 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     if (selectedJob) jobContent.current?.scrollIntoView({ block: "start" });
   }, [selectedJob]);
 
+  const historyRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => historyRequest.current?.abort(), []);
   const loadHistory = useCallback(async (cursor?: string) => {
     const query = new URLSearchParams({ limit: "50" });
     query.set("project", project.id);
+    for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
     if (cursor) query.set("since", cursor);
-    const response = await api<{ runs: RunSummary[]; next: string | null }>(
-      `/api/runs?${query.toString()}`,
-    );
-    setRuns((current) => (cursor ? [...current, ...response.runs] : response.runs));
-    setRunCursor(response.next);
-    if (!cursor && selectedRun === null && response.runs[0]) onSelectRun(response.runs[0].id);
-  }, [onSelectRun, selectedRun, project.id]);
+    historyRequest.current?.abort();
+    const controller = new AbortController();
+    historyRequest.current = controller;
+    try {
+      const response = await api<{ runs: RunSummary[]; next: string | null }>(`/api/runs?${query.toString()}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setRuns((current) => (cursor ? [...current, ...response.runs] : response.runs));
+      setRunCursor(response.next);
+    } catch (caught) { if (!controller.signal.aborted) throw caught; }
+  }, [project.id, filters]);
 
   const loadDetailCollection = useCallback(async (
     collection: DetailCollection,
@@ -443,7 +456,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     // Historical output stays visible; progress starts at the loaded state cursor.
     const live = batch.filter((item) => item.id > stateAfter.current);
     setDetail((current) => live.reduce(applyStateEvent, current));
-    const interactionChanged = live.some((item) => item.type === "attempt.ended"
+    const interactionChanged = live.some((item) => item.type === "attempt.ended" || item.type === "attempt.started"
       || item.type.endsWith(".requested") || item.type.endsWith(".answered"));
     if (interactionChanged || live.some((item) => item.type === "node.created" || item.type === "run.dispatch_changed" || item.type === "run.repairs_changed" || item.type === "node.settings_changed" || item.type.startsWith("run.retry_") || item.type.startsWith("run.recovery_"))) {
       void loadDetailCollection("nodes", 0, "refresh").catch((caught: unknown) =>
@@ -488,7 +501,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     setStreamRun(null);
     setDetail(null);
     setSelectedStage(null);
-    setStepFocusRequest(0);
     setRetrySettings(null);
     setPendingSettings(null);
     setError(null);
@@ -762,7 +774,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
     }
   }
 
-  const graph = useMemo(() => runGraph(detail), [detail]);
+  const now = useClock(Boolean(detail && !TERMINAL_RUNS.has(detail.status)));
+  const graph = useMemo(() => runSummaryGraph(detail?.nodes ?? [], now), [detail?.nodes, now]);
   const visibleStages = useMemo(() => visibleRunStages(detail?.nodes ?? []), [detail]);
   const repairOwners = useMemo(() => repairOwnership(detail?.nodes ?? []), [detail]);
   const repairGroups = detail?.nodes.filter((node) => node.repair_for && node.repair_settings) ?? [];
@@ -780,10 +793,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const pendingInteractions = Array.from(new Map([...(detail?.interactions ?? []), ...(linkedRequest ? [linkedRequest] : [])].filter((item) => item.status === "pending" && item.respondable !== false).map((item) => [item.id, item])).values());
   const interactionRevision = pendingInteractions.map((request) => request.id).join(",");
   useEffect(() => attentionChanged(), [interactionRevision, detail?.status]);
-  const complete = visibleStages.filter((node) => node.status === "succeeded" || node.status === "skipped").length;
   const currentStages = visibleStages.filter((node) => ["waiting", "running", "failed", "repairing", "repair_stopped"].includes(node.status));
   const focusStage = selectedStage ?? pendingInteractions[0]?.scope_path ?? currentStages[0]?.scope_path;
-  const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
   const canPause = detail !== null && PAUSABLE_RUNS.has(detail.status);
   const dispatchPaused = canPause && detail.dispatch_paused;
   const pendingChoices = usePendingChoices(detail?.id ?? null, detail?.project_id ?? project.id, dispatchPaused,
@@ -794,16 +805,30 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const recovering = recovery?.state === "resumed" && detail?.status === "running"
     && detail.nodes.some((node) => node.scope_path === recovery.scope_path
       && ["ready", "dispatched", "running", "waiting"].includes(node.status));
+  const summaryMessage = pendingInteractions.length ? "Choose Respond above to continue this job."
+    : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop."
+      : recovering ? `Retrying step · ${recovery?.retry_number} of ${detail?.recovery.max_retries}.`
+        : detail?.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically."
+          : detail?.status === "failed" ? "Select a failed job to inspect its logs and retry settings."
+            : detail?.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below."
+              : detail?.status === "canceled" ? "Work stopped. Finished jobs and their changes remain available for review."
+                : detail?.status === "canceling" ? "Relay is stopping active tools and preserving their results."
+                  : detail?.status === "interrupted" ? "This run was interrupted. Saved logs remain available."
+                    : "Updates are live. Select a job to follow its output.";
 
   return (
     <Stack spacing={2}>
-      {detail && <Stack component="header" role="region" aria-label="Workflow run history" direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-        <Typography variant="h5">{stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Typography>
-        <Button variant="contained" onClick={() => onRunWorkflow(detail.workflow_key)}>Run workflow</Button>
-      </Stack>}
-      {detail && <RunActions run={detail} busy={pauseBusy || relaunchBusy || refreshing}
-        onPause={() => void configurePause(!detail.dispatch_paused)} onCancel={() => setStopOpen(true)}
-        onRerunAll={() => void rerunAll()} rerunAllRef={relaunchButton} />}
+      {detail && <Box component="header" role="region" aria-label="Workflow run history" className="run-header">
+        <Button size="small" startIcon={<ActionIcon name="back" />} onClick={() => onSelectRun(null)}>{detail.title || stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Button>
+        <Stack direction="row" spacing={2} className="run-heading-row">
+          <Typography component="h1" variant="h5" sx={{ flex: 1 }}><StatusIcon status={detail.status} size={26} /> {detail.title || stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))} <Box component="span" color="text.secondary">#{detail.number}</Box></Typography>
+          <Button variant="outlined" onClick={() => onRunWorkflow(detail.workflow_key)}>Run workflow</Button>
+          <RunActions run={detail} busy={pauseBusy || relaunchBusy || refreshing}
+            onPause={() => void configurePause(!detail.dispatch_paused)} onCancel={() => setStopOpen(true)}
+            onRerunAll={() => void rerunAll()} onRerunFailed={() => setGraphJobs(detail.nodes.filter((node) => node.status === "failed").map((node) => node.scope_path))} rerunAllRef={relaunchButton} />
+          <Button size="small" aria-label="Refresh" disabled={refreshing} onClick={() => void refreshRuns()}><ActionIcon name="refresh" /></Button>
+        </Stack>
+      </Box>}
       {dispatchPaused && <Alert severity="info">Paused. Running jobs will finish; nothing new will start until you resume.</Alert>}
       {pendingSettings && detail?.id === pendingSettings.runId && dispatchPaused && <RetrySettings
         key={`${pendingSettings.runId}:${pendingSettings.settings.scope_path}:pending`}
@@ -818,35 +843,19 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
       {retrySettings && detail && <RetrySettings key={`${detail.id}:${retrySettings.scope_path}`}
         problem={retrySettings} projectId={detail.project_id} onClose={() => setRetrySettings(null)} onRetry={rerunNode} />}
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
-      <Box className="run-layout">
-        <Paper variant="outlined" className="history-panel">
+      {!selectedRun ? <RunHistory project={project} runs={runs} waitingRuns={waitingRuns} more={Boolean(runCursor)} refreshing={refreshing}
+        onMore={() => void loadHistory(runCursor ?? undefined)} onSelect={onSelectRun} onRefresh={() => void refreshRuns()}
+        onRunWorkflow={onRunWorkflow} onEditWorkflow={onEditWorkflow} filters={filters} onFilters={setFilters} /> : <Box className="run-layout">
+        <Paper variant="outlined" className="history-panel actions-sidebar">
           {detail && <JobList nodes={detail.nodes} selected={selectedJob} repairOwners={repairOwners}
             hasMore={nodeCursor !== null} onSelect={(scope) => scope ? showStep(scope) : onSelectJob(null)}
             onMore={() => void loadMoreNodes()} pendingChoices={dispatchPaused ? pendingChoices.choices : undefined}
             onCheck={pendingChoices.retry} onEdit={(settings, choices) => setPendingSettings({ runId: detail.id, settings, choices })} />}
-          <Stack direction="row" sx={{ alignItems: "center", p: 2 }}>
-            <Typography variant="h6" sx={{ flex: 1 }}>Run history</Typography>
-            <Button size="small" disabled={refreshing} onClick={() => void refreshRuns()}>Refresh</Button>
-          </Stack>
-          <Divider />
-          <List disablePadding>
-            {runs.map((run) => (
-              <ListItemButton
-                key={run.id}
-                selected={run.id === selectedRun}
-                onClick={() => onSelectRun(run.id)}
-              >
-                <ListItemText
-                  primary={stageLabel(run.workflow_key.replace(/\.(yaml|yml)$/, ""))}
-                  secondary={`${waitingRuns.includes(run.id) ? "! Waiting for you" : runStatusLabel(detail?.id === run.id ? detail : run)} · ${run.started_at ? new Date(run.started_at).toLocaleString() : "Not started"}`}
-                />
-              </ListItemButton>
-            ))}
-          </List>
-          {runs.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>No runs yet. Open Workflows to start work in this project.</Typography>}
-          {runCursor && (
-            <Button fullWidth onClick={() => void loadHistory(runCursor)}>Load older runs</Button>
-          )}
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="caption" color="text.secondary" sx={{ px: 2 }}>Run details</Typography>
+          <ListItemButton onClick={() => { onSelectJob(null); setShowArtifacts(true); }}><ActionIcon name="artifact" /><ListItemText primary="Artifacts" /></ListItemButton>
+          {detail && <ListItemButton onClick={() => onEditWorkflow(detail.workflow_key)}><ActionIcon name="workflow" /><ListItemText primary="Workflow file" /></ListItemButton>}
+          <ListItemButton onClick={() => onSelectRun(null)}><ActionIcon name="clock" /><ListItemText primary="Run history" /></ListItemButton>
         </Paper>
 
         <Stack ref={jobContent} spacing={2} sx={{ minWidth: 0, scrollMarginTop: 80 }}>
@@ -864,35 +873,42 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
           ) : (
             <>
               <Paper variant="outlined" className="section-card">
-                <Stack
-                  direction={{ xs: "column", md: "row" }}
-                  spacing={2}
-                  sx={{ alignItems: { md: "center" } }}
-                >
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="h5">{stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Typography>
-                    <Typography variant="body2" color="text.secondary" className="mono-wrap">
-                      {detail.project.display_name} · Started {detail.started_at ? new Date(detail.started_at).toLocaleString() : "just now"}
-                    </Typography>
-                  </Box>
-                  <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={runStatusLabel(detail)} />
-                  <Button component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
-                </Stack>
-                <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  {!dispatchPaused && <Typography variant="subtitle1">{pendingInteractions.length ? "Choose Respond above to continue this job." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>}
-                  {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
-                  <LinearProgress variant="determinate" value={visibleStages.length ? 100 * complete / visibleStages.length : 0} />
-                  <Typography variant="body2" color="text.secondary">{complete} of {visibleStages.length} {nodeCursor !== null ? "loaded " : ""}stages complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
-                </Stack>
-                {detail.problem && ["failed", "canceling"].includes(detail.status)
-                  ? <RunProblemNotice problem={detail.problem} displayScope={repairOwners.get(detail.problem.scope_path)} onShowStep={showStep} onCancelRetry={() => void cancelRun()} />
-                  : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
+                <Box className="run-summary-metadata">
+                  <Box><Typography variant="body2" color="text.secondary">Started manually {detail.started_at ? new Date(detail.started_at).toLocaleString() : "just now"}</Typography><Typography variant="subtitle1">{detail.launcher} <ActionIcon name="commit" size={16} /> <code>{detail.source_commit.slice(0, 7)}</code> {detail.source_branch && <Box component="span" className="branch-label">{detail.source_branch}</Box>}</Typography></Box>
+                  <Box><Typography variant="body2" color="text.secondary">Status</Typography><Typography variant="subtitle1">{runStatusLabel(detail)}</Typography></Box>
+                  <Box><Typography variant="body2" color="text.secondary">Total duration</Typography><Typography variant="subtitle1">{jobDuration(detail.started_at, detail.ended_at, now)}</Typography></Box>
+                  <Box><Typography variant="body2" color="text.secondary">Artifacts</Typography><Button size="small" href="#run-artifacts">{artifacts.length || "None"}</Button></Box>
+                </Box>
+                {!dispatchPaused && <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>{summaryMessage}</Typography>}
+                <Button size="small" component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
                 {detail.status === "interrupted" && (
                   <Alert severity="info" sx={{ mt: 2 }}>
                     Restarting <code>relay up</code> resumes this run from durable state as a fresh attempt.
                   </Alert>
                 )}
-                <FormControlLabel sx={{ mt: 2 }}
+              </Paper>
+
+              {selectedInteraction && linkedRequest && linkedRequest.status !== "pending" && <Alert severity="info">The linked request has already been {linkedRequest.status}. Any current requests appear above.</Alert>}
+
+              <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
+                <Box className="graph-heading"><Typography variant="h6">{detail.workflow_key}</Typography><Typography variant="body2" color="text.secondary">Started manually · {visibleStages.length} jobs</Typography></Box>
+                <FlowCanvas key={detail.id} runMode nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => {
+                  const members = graph.nodes.find((node) => node.id === id)?.data.members;
+                  if (Array.isArray(members) && members.every((value): value is string => typeof value === "string")) setGraphJobs(members);
+                  else if (detail.nodes.some((node) => node.scope_path === id)) showStep(id);
+                }} />
+              </Paper>
+              {(detail.nodes.some((node) => node.status === "failed") || detail.problem || detail.failure_summary) && <Paper variant="outlined" className="section-card" aria-label="Annotations">
+                <Typography variant="h6">Annotations</Typography>
+                {detail.problem && ["failed", "canceling"].includes(detail.status)
+                  ? <RunProblemNotice problem={detail.problem} displayScope={repairOwners.get(detail.problem.scope_path)} onShowStep={showStep} onCancelRetry={() => void cancelRun()} />
+                  : detail.failure_summary && <Alert severity="error" sx={{ mt: 2 }}>{detail.failure_summary}</Alert>}
+                {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
+                  <StatusIcon status="failed" /><Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
+                  <Button onClick={() => showStep(node.scope_path)}>Open job log</Button>
+                </Stack>)}
+              </Paper>}
+              <Accordion><AccordionSummary>Run settings</AccordionSummary><AccordionDetails>                <FormControlLabel sx={{ mt: 2 }}
                   control={<Switch checked={detail.recovery?.enabled === true}
                     disabled={recoveryBusy || ["succeeded", "canceled"].includes(detail.status)}
                     onChange={(event) => void configureRecovery(event.target.checked)} />}
@@ -911,21 +927,42 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                     <Typography component="pre" className="activity-text">{recovery.instruction}</Typography>
                   </AccordionDetails>
                 </Accordion>}
+</AccordionDetails></Accordion>
+              <Paper variant="outlined" className="section-card" id="run-artifacts" aria-label="Artifacts">
+                <Typography variant="h6" sx={{ mb: 1 }}>Artifacts</Typography>
+                <Stack spacing={1}>
+                  {artifacts.map((artifact) => (
+                    <Stack
+                      key={artifact.id}
+                      direction="row"
+                      spacing={2}
+                      sx={{ alignItems: "center" }}
+                    >
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography>{artifact.name}</Typography>
+                        <Typography variant="caption" color="text.secondary" className="mono-wrap">
+                          {artifact.sha256} · {artifact.bytes.toLocaleString()} bytes
+                        </Typography>
+                      </Box>
+                      <Button
+                        component="a"
+                        href={`/api/artifacts/${encodeURIComponent(artifact.id)}`}
+                        download
+                      >
+                        Download
+                      </Button>
+                    </Stack>
+                  ))}
+                  {artifacts.length === 0 && (
+                    <Typography color="text.secondary">No preserved artifacts.</Typography>
+                  )}
+                  {artifactCursor !== null && (
+                    <Button onClick={() => void loadMoreArtifacts()}>
+                      Load more artifacts
+                    </Button>
+                  )}
+                </Stack>
               </Paper>
-
-              {selectedInteraction && linkedRequest && linkedRequest.status !== "pending" && <Alert severity="info">The linked request has already been {linkedRequest.status}. Any current requests appear above.</Alert>}
-
-              {detail.nodes.some((node) => node.status === "failed") && <Paper variant="outlined" className="section-card">
-                <Typography variant="h6">Jobs that need attention</Typography>
-                {detail.nodes.filter((node) => node.status === "failed").map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
-                  <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)}</Typography>
-                  <Button onClick={() => showStep(node.scope_path)}>Open job log</Button>
-                </Stack>)}
-              </Paper>}
-              <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
-                <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) showStep(id); }} followSelection focusRequest={stepFocusRequest} />
-              </Paper>
-
               {repairGroups.length > 0 && <Accordion><AccordionSummary><Typography>Repairs · {repairGroups.length} configured</Typography></AccordionSummary><AccordionDetails><Stack spacing={2}>
                 <Typography variant="body2">Relay handles these repairs behind each stage. Reports, attempts, and tool messages remain saved. Settings for this run are captured; edit the workflow to change future runs.</Typography>
                 {repairGroups.map((group) => {
@@ -961,7 +998,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                     <Stack spacing={1} sx={{ mt: 1 }}>{children.map((node) => <Button key={node.id} onClick={() => showStep(node.scope_path)}>{stageLabel(node.scope_path)} · {statusLabel(node.status)}</Button>)}</Stack>
                   </Paper>;
                 })}
-                <Button href={`/?view=author&project=${encodeURIComponent(detail.project_id)}&workflow=${encodeURIComponent(detail.workflow_key)}`}>Edit repairs for future runs</Button>
+                <Button href={`/?view=workflows&project=${encodeURIComponent(detail.project_id)}&workflow=${encodeURIComponent(detail.workflow_key)}`}>Edit repairs for future runs</Button>
               </Stack></AccordionDetails></Accordion>}
 
               <Paper variant="outlined" className="section-card">
@@ -993,41 +1030,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
               </Paper>
               </Box>
 
-              <Paper variant="outlined" className="section-card">
-                <Typography variant="h6" sx={{ mb: 1 }}>Artifacts</Typography>
-                <Stack spacing={1}>
-                  {artifacts.map((artifact) => (
-                    <Stack
-                      key={artifact.id}
-                      direction="row"
-                      spacing={2}
-                      sx={{ alignItems: "center" }}
-                    >
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography>{artifact.name}</Typography>
-                        <Typography variant="caption" color="text.secondary" className="mono-wrap">
-                          {artifact.sha256} · {artifact.bytes.toLocaleString()} bytes
-                        </Typography>
-                      </Box>
-                      <Button
-                        component="a"
-                        href={`/api/artifacts/${encodeURIComponent(artifact.id)}`}
-                        download
-                      >
-                        Download
-                      </Button>
-                    </Stack>
-                  ))}
-                  {artifacts.length === 0 && (
-                    <Typography color="text.secondary">No preserved artifacts.</Typography>
-                  )}
-                  {artifactCursor !== null && (
-                    <Button onClick={() => void loadMoreArtifacts()}>
-                      Load more artifacts
-                    </Button>
-                  )}
-                </Stack>
-              </Paper>
+
               </Stack></AccordionDetails></Accordion>
             </>
           )}
@@ -1059,7 +1062,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
             </Stack>
           </Paper></AccordionDetails></Accordion>
         </Stack>
-      </Box>
+      </Box>}
+      <Dialog open={graphJobs !== null} onClose={() => setGraphJobs(null)} fullWidth><DialogTitle>{graphJobs?.every((scope) => detail?.nodes.find((node) => node.scope_path === scope)?.status === "failed") ? "Choose a failed job" : "Parallel jobs"}</DialogTitle><DialogContent><List>{graphJobs?.map((scope) => <ListItemButton key={scope} onClick={() => { setGraphJobs(null); showStep(scope); }}><StatusIcon status={detail?.nodes.find((node) => node.scope_path === scope)?.status ?? "pending"} /><ListItemText primary={stageLabel(scope)} /></ListItemButton>)}</List></DialogContent><DialogActions><Button onClick={() => setGraphJobs(null)}>Close</Button></DialogActions></Dialog>
 
       <Dialog open={cleanupOpen} onClose={() => setCleanupOpen(false)}>
         <DialogTitle>Delete retained Relay data?</DialogTitle>

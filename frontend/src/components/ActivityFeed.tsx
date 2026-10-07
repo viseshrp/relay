@@ -15,20 +15,20 @@ export function toolStatus(status: string): { icon: string; text: string } {
   return { icon: "○", text: "Status unavailable" };
 }
 
-function Message({ message, workingFolder }: { message: ActivityMessage; workingFolder?: string }) {
+export function ActivityMessageView({ message, workingFolder, timestamps = true, expanded = false }: { message: ActivityMessage; workingFolder?: string; timestamps?: boolean; expanded?: boolean }) {
   const text = relativeActivityText(message.text, workingFolder);
   const attribution = `${stageLabel(message.scope)} · ${message.agent ? stageLabel(message.agent) : message.kind.startsWith("command.") ? "Command" : "Agent"}${message.attempt !== null ? ` · Attempt ${message.attempt}` : ""}`;
   const tool = message.tool;
   const status = tool ? toolStatus(tool.status) : null;
   return <Paper variant="outlined" component="article" className="activity-message">
-    <Typography variant="caption" color="text.secondary">{attribution} · {new Date(message.timestamp).toLocaleTimeString()}</Typography>
-    {tool && status ? <Box component="details" className="activity-tool">
+    <Typography variant="caption" color="text.secondary">{attribution}{timestamps ? ` · ${new Date(message.timestamp).toLocaleTimeString()}` : ""}</Typography>
+    {tool && status ? <Box component="details" className="activity-tool" open={expanded || undefined}>
       <Box component="summary"><Box component="span" aria-hidden sx={{ mr: 1 }}>{status.icon}</Box>
         {relativeActivityText(tool.title, workingFolder)} · {status.text}</Box>
       {tool.input && <Box component="pre" className="activity-text">{relativeActivityText(tool.input, workingFolder)}</Box>}
       {tool.output && <Box component="pre" className="activity-text">{relativeActivityText(tool.output, workingFolder)}</Box>}
       {!tool.input && !tool.output && <Typography>No output was included for this tool.</Typography>}
-    </Box> : message.kind === "agent.thought" ? <Box component="details">
+    </Box> : message.kind === "agent.thought" ? <Box component="details" open={expanded || undefined}>
       <Box component="summary">Thoughts</Box><SafeMarkdown text={text} />
     </Box> : ["agent.message", "agent.plan"].includes(message.kind) ? <SafeMarkdown text={text} />
       : <Box component="pre" className="activity-text">{ansiSpans(text).map((span, index) => <Box component="span" key={index} sx={{ color: span.color, fontWeight: span.bold ? 700 : 400 }}>{span.text}</Box>)}</Box>}
@@ -106,7 +106,7 @@ export function ActivityFeed({ events, nodes, workingFolder, live, command = fal
         <Box component="span" sx={{ color: line.stream === "stderr" ? "#fca5a5" : "#94a3b8", mr: 1 }}>{line.stream}</Box>
         {line.spans.map((span, part) => <Box component="span" key={part} sx={{ color: span.color, fontWeight: span.bold ? 700 : 400 }}>{span.text}</Box>)}
       </Box>)}
-    </Box> : <Stack spacing={1.5}>{rows.slice(-limit).map((message) => <Message key={message.id} message={message} workingFolder={workingFolder} />)}</Stack>}
+    </Box> : <Stack spacing={1.5}>{rows.slice(-limit).map((message) => <ActivityMessageView key={message.id} message={message} workingFolder={workingFolder} />)}</Stack>}
     {count === 0 && <Typography color="text.secondary">{search || scope ? "No messages match these filters." : "Messages will appear here when this job starts."}</Typography>}
     <Box ref={tail} aria-hidden />
   </Stack>;

@@ -47,13 +47,12 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   await expect(log.getByRole("alert")).toBeInViewport();
   await page.screenshot({ path: info.outputPath("job-error.png") });
   await expect(page).toHaveURL(/job=root%2Echeck|job=root.check/);
-  const terminal = log.getByRole("list", { name: "Command output lines" });
+  const terminal = log.getByRole("region", { name: "Command output lines" });
   await expect(terminal).toContainText("Command stdout");
-  await expect(terminal).toContainText("stdout");
-  await expect(terminal).toContainText("stderr");
   await expect(terminal.getByText("Final command error", { exact: true })).toHaveCSS("color", "rgb(248, 113, 113)");
   const downloading = page.waitForEvent("download");
-  await log.getByRole("button", { name: "Download output", exact: true }).click();
+  await log.getByRole("button", { name: "Log options", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Download logs", exact: true }).click();
   const download = await downloading;
   const path = info.outputPath("command.log");
   await download.saveAs(path);

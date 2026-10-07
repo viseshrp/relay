@@ -8,7 +8,9 @@ import { ansiSpans, commandLines, jobDuration } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
 import type { JobAttempt, JobChanges, RetryConfiguration, RunEvent, RunJob } from "../types";
 import { DiffViewer } from "./DiffViewer";
-import { ActivityFeed } from "./ActivityFeed";
+import { JobLog } from "./JobLog";
+import { ActionIcon, StatusIcon } from "./ActionIcon";
+import { useClock } from "../useClock";
 
 interface JobPage { job: RunJob; next: number | null }
 interface EventPage { events: RunEvent[]; next: number | null }
@@ -46,16 +48,19 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
   const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
   const [attemptCursor, setAttemptCursor] = useState<number | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
-  const [older, setOlder] = useState<number | null>(null);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logRevision, setLogRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingJob, setLoadingJob] = useState(true);
+  const [logsComplete, setLogsComplete] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const relevant = useMemo(() => liveEvents.filter((event) => event.payload.scope_path === scope), [liveEvents, scope]);
   const revision = relevant.filter((event) => event.type === "attempt.ended" || event.type === "attempt.started" || event.type.startsWith("node.")).at(-1)?.id;
   const attempts = useMemo(() => Array.from(new Map([...(job?.attempts ?? []), ...(job?.latest_attempt ? [job.latest_attempt] : [])].map((attempt) => [attempt.number, attempt])).values()).sort((a, b) => a.number - b.number), [job]);
   const attempt = attempts.find((row) => row.number === (attemptNumber ?? job?.latest_attempt?.number));
+  const now = useClock(attempt?.status === "running" || attempt?.status === "waiting");
   const failed = attempt?.stop_reason === "failed" || Boolean(attempt?.error_code);
   const query = `job=${encodeURIComponent(scope)}&limit=200`;
 
@@ -88,12 +93,24 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
   useEffect(() => {
     if (!attempt) return;
     const controller = new AbortController();
-    setEvents([]); setOlder(null); setChangesOpen(false);
-    void api<EventPage>(`/api/runs/${runId}/events?${query}&attempt=${attempt.number}&latest=true`, { signal: controller.signal })
-      .then((value) => { setEvents(value.events); setOlder(value.next); })
-      .catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); });
+    setError(null);
+    setEvents([]); setChangesOpen(false);
+    setLogsComplete(false);
+    setLoadingLogs(true);
+    void (async () => {
+      let before: number | null = null;
+      do {
+        const page: EventPage = await api<EventPage>(`/api/runs/${runId}/events?${query}&attempt=${attempt.number}&latest=true${before === null ? "" : `&before=${before}`}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setEvents((current) => mergeEvents(page.events, current));
+        if (page.next !== null && before !== null && page.next >= before) throw new Error("Log history did not advance. Refresh logs to try again.");
+        before = page.next;
+      } while (before !== null);
+      setLogsComplete(true);
+    })().catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); })
+      .finally(() => { if (!controller.signal.aborted) setLoadingLogs(false); });
     return () => controller.abort();
-  }, [runId, query, attempt?.number]);
+  }, [runId, query, attempt?.number, logRevision]);
   useEffect(() => {
     if (attempt) setEvents((current) => mergeEvents(current, relevant.filter((event) => event.payload.attempt_number === attempt.number)));
   }, [relevant, attempt?.number]);
@@ -106,49 +123,18 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
       setAttemptCursor(value.next);
     } catch (caught) { setError(errorMessage(caught)); }
   }
-  async function olderOutput() {
-    if (!attempt || older === null) return;
-    try {
-      const value = await api<EventPage>(`/api/runs/${runId}/events?${query}&attempt=${attempt.number}&latest=true&before=${older}`);
-      setEvents((current) => mergeEvents(value.events, current)); setOlder(value.next);
-    } catch (caught) { setError(errorMessage(caught)); }
-  }
-  async function exportOutput(download: boolean) {
-    if (!attempt) return;
-    setBusy(true); setError(null);
-    try {
-      const pages: RunEvent[] = [];
-      let since = 0;
-      for (;;) {
-        const value = await api<EventPage>(`/api/runs/${runId}/events?${query}&attempt=${attempt.number}&since=${since}`);
-        pages.push(...value.events);
-        if (value.next === null) break;
-        since = value.next;
-      }
-      const text = pages.filter((event) => event.type === "command.stdout" || event.type === "command.stderr")
-        .map((event) => String(event.payload.chunk ?? event.payload.text ?? "")).join("");
-      if (!download) await navigator.clipboard.writeText(text);
-      else {
-        const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-        const link = document.createElement("a"); link.href = url;
-        link.download = `${scope.replace(/[^a-zA-Z0-9_-]/g, "-")}-attempt-${attempt.number}.log`;
-        link.click(); URL.revokeObjectURL(url);
-      }
-    } catch (caught) { setError(errorMessage(caught)); }
-    finally { setBusy(false); }
-  }
   const lines = commandLines(events);
   const lastError = lines.filter((line) => line.stream === "stderr").slice(-12).map((line) => ansiSpans(line.text).map((span) => span.text).join("")).join("\n");
   if (!job) return <Paper className="section-card" aria-busy={!error}>{error ? <Alert severity="error">{error}</Alert> : "Loading job…"}</Paper>;
-  return <Stack spacing={2} component="section" aria-label="Job log">
-    <Paper variant="outlined" className="section-card">
-      <Typography ref={heading} tabIndex={-1} component="h2" variant="h5" sx={{ scrollMarginTop: 90 }}>{stageLabel(scope)}</Typography>
+  return <Stack spacing={0} component="section" aria-label="Job log" className="job-workspace">
+    <Paper variant="outlined" className="section-card job-heading">
+      <Typography ref={heading} tabIndex={-1} component="h2" variant="h5" sx={{ scrollMarginTop: 90 }}><span aria-hidden="true"><StatusIcon status={job.status} size={22} /></span> {stageLabel(scope)}</Typography>
       {failed && <Alert severity="error" sx={{ mt: 1 }}>
         <Typography>{attempt?.error_message ?? `Job failed${attempt?.exit_code !== null ? ` with exit code ${attempt?.exit_code}` : ""}.`}</Typography>
         {attempt?.provider_message && <Typography sx={{ whiteSpace: "pre-wrap" }}>{attempt.provider_message}</Typography>}
         {lastError && <Box component="pre" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", m: 0 }}>{lastError}</Box>}
       </Alert>}
-      <Typography sx={{ mt: 1 }}>{attempt?.agent_id ? `Runs on ${stageLabel(attempt.agent_id)} · ${attempt.model_value}` : stageLabel(job.node_type)} · {jobDuration(attempt?.started_at, attempt?.ended_at)}</Typography>
+      <Typography sx={{ mt: 1 }}>{attempt?.agent_id ? `Runs on ${stageLabel(attempt.agent_id)} · ${attempt.model_value}` : stageLabel(job.node_type)} · {jobDuration(attempt?.started_at, attempt?.ended_at, now)}</Typography>
       <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
         <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="job-attempt">Attempt</InputLabel>
           <Select labelId="job-attempt" label="Attempt" value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
@@ -162,12 +148,12 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
       </Stack>
     </Paper>
     {error && <Alert severity="error">{error}</Alert>}
-    <Accordion><AccordionSummary>Set up</AccordionSummary><AccordionDetails>
+    <Accordion><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Set up</AccordionSummary><AccordionDetails>
       <Typography>{job.writes ? "This job can write to its isolated working folder." : "This job reads its isolated working folder."}</Typography>
       <Typography>Captured job: {scope}</Typography>
       {job.command && <Box component="pre" className="activity-text">{job.command.join("\n")}</Box>}
     </AccordionDetails></Accordion>
-    <Accordion><AccordionSummary>Instructions</AccordionSummary><AccordionDetails>
+    <Accordion><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Instructions</AccordionSummary><AccordionDetails>
       {job.prompt && <Typography sx={{ whiteSpace: "pre-wrap" }}>{job.prompt}</Typography>}
       {job.instructions.map((instruction, index) => <Box key={index} sx={{ mb: 2 }}>
         <Typography variant="subtitle2">{instruction.reference.local ?? instruction.reference.global}</Typography>
@@ -177,27 +163,25 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
       {!job.prompt && !job.instructions.length && <Typography>No prompt files were captured for this job.</Typography>}
     </AccordionDetails></Accordion>
     <Accordion key={`${attempt?.number}-${failed}`} defaultExpanded={failed || job.node_type === "command" || job.node_type === "agent"}>
-      <AccordionSummary>{job.node_type === "command" ? "Command output" : "Agent conversation"}</AccordionSummary>
+      <AccordionSummary aria-label={job.node_type === "command" ? "Command output" : "Agent conversation"} expandIcon={<ActionIcon name="chevron" />}><span aria-hidden="true"><StatusIcon status={attempt?.status === "succeeded" ? "succeeded" : job.status} /></span> {job.node_type === "command" ? "Command output" : "Agent conversation"}<Typography className="step-duration" variant="caption">{jobDuration(attempt?.started_at, attempt?.ended_at, now)}</Typography></AccordionSummary>
       <AccordionDetails>
-        {job.node_type === "command" && <>
-          <Stack direction="row" spacing={1} sx={{ mb: 1 }}><Button disabled={busy || !attempt} onClick={() => void exportOutput(false)}>Copy output</Button><Button disabled={busy || !attempt} onClick={() => void exportOutput(true)}>Download output</Button></Stack>
-        </>}
-        <ActivityFeed key={`${runId}:${scope}:${attempt?.number}`} events={events} workingFolder={job.working_folder}
+        <JobLog key={`${runId}:${scope}:${attempt?.number}`} events={events} workingFolder={job.working_folder}
           live={attempt?.status === "running" || attempt?.status === "waiting"} command={job.node_type === "command"}
-          hasMore={older !== null} onMore={olderOutput} />
+          loading={loadingLogs} hasMore={!logsComplete} onMore={async () => setLogRevision((value) => value + 1)} onRefresh={() => setLogRevision((value) => value + 1)}
+          scope={scope} attempt={attempt?.number} />
       </AccordionDetails>
     </Accordion>
-    <Accordion><AccordionSummary>Outputs</AccordionSummary><AccordionDetails>
+    <Accordion><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Outputs</AccordionSummary><AccordionDetails>
       {attempt?.number === job.latest_attempt?.number ? Object.keys(job.outputs).length ? <Table size="small" aria-label="Declared outputs"><TableHead><TableRow><TableCell>Name</TableCell><TableCell>Value</TableCell></TableRow></TableHead><TableBody>
         {Object.entries(job.outputs).map(([name, value]) => <TableRow key={name}><TableCell>{name}</TableCell><TableCell>
           {typeof value === "object" && value !== null ? <Box component="details"><Box component="summary">Details</Box><Box component="pre" className="activity-text">{JSON.stringify(value, null, 2)}</Box></Box> : String(value)}
         </TableCell></TableRow>)}
       </TableBody></Table> : <Typography>No declared outputs.</Typography> : <Typography>Declared outputs describe the latest attempt. Select it to see them.</Typography>}
     </AccordionDetails></Accordion>
-    <Accordion expanded={changesOpen} onChange={(_event, expanded) => setChangesOpen(expanded)}><AccordionSummary>Changes</AccordionSummary><AccordionDetails>
+    <Accordion expanded={changesOpen} onChange={(_event, expanded) => setChangesOpen(expanded)}><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Changes</AccordionSummary><AccordionDetails>
       {changesOpen && attempt ? <JobChangesView runId={runId} scope={scope} attempt={attempt} /> : <Typography>No attempt has started.</Typography>}
     </AccordionDetails></Accordion>
-    <Accordion><AccordionSummary>Complete</AccordionSummary><AccordionDetails>
+    <Accordion><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Complete</AccordionSummary><AccordionDetails>
       <Typography>{attempt?.stop_reason ? stageLabel(attempt.stop_reason) : statusLabel(job.status)}{attempt?.exit_code !== null && attempt?.exit_code !== undefined ? ` · Exit code ${attempt.exit_code}` : ""}</Typography>
       {attempt?.ended_at && <Typography>Finished {new Date(attempt.ended_at).toLocaleString()}</Typography>}
     </AccordionDetails></Accordion>

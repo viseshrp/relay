@@ -1,17 +1,12 @@
-import { Box, Button, Divider, IconButton, List, ListItem, ListItemButton, ListItemText, SvgIcon, Typography } from "@mui/material";
+import { useState } from "react";
+import { useClock } from "../useClock";
+import { ActionIcon, StatusIcon } from "./ActionIcon";
+import { Box, Button, Divider, IconButton, List, ListItem, ListItemButton, ListItemText, SvgIcon, Typography, Menu, MenuItem } from "@mui/material";
 import type { RetryConfiguration, RunNode } from "../types";
 import { stageLabel, statusLabel } from "../navigation";
 import { jobDuration } from "../job";
 import { jobListRows } from "../job-list";
 import { choiceKey, type PendingChoice, type SettingsChoices } from "./usePendingChoices";
-
-function statusIcon(status: string): string {
-  if (status === "succeeded") return "✓";
-  if (status === "failed" || status === "repair_stopped") return "✕";
-  if (status === "running" || status === "repairing") return "◷";
-  if (status === "waiting") return "!";
-  return "○";
-}
 
 export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMore, pendingChoices, onEdit, onCheck }: {
   nodes: RunNode[]; selected: string | null; repairOwners: Map<string, string>;
@@ -20,13 +15,17 @@ export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMo
   onEdit?: (settings: RetryConfiguration, choices: SettingsChoices) => void;
   onCheck?: () => void;
 }) {
-  const rows = jobListRows(nodes, repairOwners);
+  const [filter, setFilter] = useState("all");
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const now = useClock(nodes.some((node) => ["running", "waiting", "repairing"].includes(node.status)));
+  const rows = jobListRows(nodes, repairOwners).filter((row) => filter === "all" || (filter === "attention" ? row.attention : row.node.status === filter));
   const attention = rows.filter((row) => row.attention);
   const other = rows.filter((row) => !row.attention);
   return <Box component="nav" aria-label="Jobs">
+    <ListItemButton selected={!selected} onClick={() => onSelect(null)}><ActionIcon name="summary" /><ListItemText primary="Summary" /></ListItemButton>
+    <Box className="jobs-sidebar-heading"><Typography variant="body2">All jobs</Typography><IconButton aria-label="Filter jobs" aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)}><ActionIcon name="filter" /></IconButton></Box>
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>{[["all", "All jobs"], ["attention", "Waiting and failed"], ["running", "In progress"], ["succeeded", "Complete"], ["skipped", "Skipped"]].map(([value, label]) => <MenuItem key={value} selected={filter === value} onClick={() => { setFilter(value); setAnchor(null); }}>{label}</MenuItem>)}</Menu>
     <Divider />
-    <Typography variant="h6" sx={{ p: 2 }}>Jobs</Typography>
-    <ListItemButton selected={!selected} onClick={() => onSelect(null)}><ListItemText primary="Summary" /></ListItemButton>
     {[attention, other].filter((group) => group.length > 0).map((group) => <Box key={group === attention ? "attention" : "jobs"}>
       {attention.length > 0 && <Typography variant="subtitle2" sx={{ px: 2, pt: 1 }}>{group === attention ? "Waiting and failed jobs" : "Other jobs"}</Typography>}
       <List disablePadding>{group.map(({ node, depth, context }) => {
@@ -37,10 +36,11 @@ export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMo
           onClick={() => { if (loaded?.ready) onEdit?.(settings, loaded.ready); }}>
           <SvgIcon><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.96 1.96 3.75 3.75 2.13-1.79z" /></SvgIcon>
         </IconButton>}>
-          <ListItemButton selected={node.scope_path === selected} data-job-scope={node.scope_path}
+          <ListItemButton selected={node.scope_path === selected} data-job-scope={node.scope_path} aria-label={`${stageLabel(node.scope_path)} ${statusLabel(node.status)}`}
             onClick={() => onSelect(node.scope_path)} sx={{ pl: 2 + depth * 1.5, pr: settings ? 6 : 2 }}>
-            <Box aria-hidden sx={{ mr: 1 }}>{statusIcon(node.status)}</Box>
-            <ListItemText primary={stageLabel(node.scope_path)} secondary={`${statusLabel(node.status)} · ${jobDuration(node.started_at, node.ended_at)}${context ? ` · ${context}` : ""}`} />
+            <span aria-hidden="true"><StatusIcon status={node.status} /></span>
+            <ListItemText primary={stageLabel(node.scope_path)} secondary={<><span className="sr-only">{statusLabel(node.status)}</span>{context}</>} />
+            <Typography variant="caption" color="text.secondary" className="sidebar-job-duration" title={statusLabel(node.status)}>{node.started_at ? jobDuration(node.started_at, node.ended_at, now) : ""}</Typography>
           </ListItemButton>
           {settings && !loaded && <Typography variant="caption" role="status" sx={{ px: 2 }}>Loading {stageLabel(node.scope_path)} settings…</Typography>}
           {loaded?.error && <Box sx={{ px: 2 }}>

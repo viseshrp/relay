@@ -28,6 +28,7 @@ test("enable recovery for a stopped report step and continue through the same pr
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   await page.goto(`/?view=runs&run=${runId}`);
+  await page.getByRole("button", { name: "Run settings", exact: true }).click();
   const recovery = page.getByRole("switch", { name: "Automatic recovery", exact: true });
   await expect(recovery).not.toBeChecked();
   await recovery.click();

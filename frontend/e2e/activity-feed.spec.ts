@@ -132,9 +132,10 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
   expect(original.events.some((event) => typeof event.payload.summary === "string" && event.payload.summary.includes(`${folder}/r-2/REVIEW.md`))).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
   await page.getByRole("button", { name: "Agent conversation", exact: true }).click();
-  await expect(feed.getByRole("heading", { name: "Review result", exact: true })).toBeVisible();
-  await expect(feed.getByRole("combobox", { name: "Filter by job", exact: true })).toHaveCount(0);
-  expect(await feed.evaluate((element) => getComputedStyle(element).overflowY)).toBe("visible");
+  const jobLog = page.getByRole("region", { name: "Agent conversation log", exact: true });
+  await expect(jobLog.getByRole("heading", { name: "Review result", exact: true })).toBeVisible();
+  await expect(jobLog.getByRole("combobox", { name: "Filter by job", exact: true })).toHaveCount(0);
+  expect(await jobLog.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
 });
 
 test("live output follows the page until scrolling up, then Jump to latest resumes it", async ({ page }) => {

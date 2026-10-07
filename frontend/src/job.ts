@@ -1,9 +1,10 @@
 import type { RunEvent } from "./types";
 
-export function jobDuration(started?: string | null, ended?: string | null): string {
+export function jobDuration(started?: string | null, ended?: string | null, now = Date.now()): string {
   if (!started) return "Not started";
-  const seconds = Math.max(0, Math.floor(((ended ? Date.parse(ended) : Date.now()) - Date.parse(started)) / 1000));
+  const seconds = Math.max(0, Math.floor(((ended ? Date.parse(ended) : now) - Date.parse(started)) / 1000));
   if (!Number.isFinite(seconds)) return "Duration unavailable";
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 

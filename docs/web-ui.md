@@ -80,8 +80,9 @@ Actions started without a login are attributed to `local`.
 
 After sign-in, or immediately with login disabled, a **Get started** checklist
 shows the selected project, all five supported agents, workflow choices, and
-the first-run controls. It stays visible until a run succeeds in that project.
-Use **Help › Get started** to open it again.
+the first-run controls. It appears in the editor and history until a run
+succeeds in that project. Opening a run gives its summary and logs the full
+page. Use **Help › Get started** to open the checklist again.
 
 Agent cards show **Ready to connect**, **Sign in required**, **Check failed**,
 or **Not installed**, with text and a status symbol. **Check again** uses the
@@ -107,8 +108,8 @@ selection; changing projects does not change another browser's selection.
 
 **Workflows** sets up stages, instructions, and inputs. **Runs** shows work
 already started. The run header names its captured workflow and project,
-shows completed steps, and states what happens next. Internal IDs, branch
-names, provider JSON, and cleanup controls are under advanced views.
+shows its run number and source branch, and states what happens next.
+Internal IDs, provider JSON, and cleanup controls are under advanced views.
 
 **New workflow** opens the same six-starter gallery as the checklist. Each
 card shows its purpose, job graph preview, required agent, and input types.
@@ -300,11 +301,12 @@ saving. Completed work, captured instructions, saved outputs, and other jobs
 stay unchanged. Settings for active or completed attempts
 cannot be changed through this control.
 
-The Runs tab lists history for the selected project. The header shows the
-current stages, progress, and next action. Pending requests appear before the
-graph; failed steps have Show step and Retry step controls. Agent failures also
-offer **Retry with settings**, which lets the owner keep the current tool and
-model or select another installed tool and one of its freshly loaded models.
+The Runs tab lists history for the selected project. A selected run shows
+its title, number, state, source, duration, and controls. Pending requests appear
+before the graph. Annotations open failed job logs, where **Re-run job**
+retries a job. Agent failures also offer **Re-run with settings**, which lets
+the owner keep the current tool and model or select another installed tool
+and one of its freshly loaded models.
 Every failed agent step has this control, including other failures below the
 run's initiating problem notice.
 For the current selection, keep its effort and permission mode, select
@@ -338,12 +340,11 @@ and **Re-run job** when the existing retry service allows it. Sections show
 **Command output**, declared **Outputs**, this attempt's committed **Changes**,
 and **Complete**. A failed attempt opens its output and places its public
 error and recent stderr at the top, independently of whole-run event pages.
-One **Load earlier messages** control reveals earlier visible messages or
-fetches the next event page. Attempts keep their own load control. Command
-lines show
-line numbers, stdout/stderr labels, and safe ANSI colors; escape sequences
-never become HTML or links. **Copy output** and **Download output** read the
-complete selected attempt's command streams, including earlier pages.
+Earlier log pages load automatically. A failed history fetch keeps a
+**Retry log history** control for recovery. Attempts keep their own load
+control. Command lines show line numbers and safe ANSI colors; escape
+sequences never become HTML or links. **Log options** contains **Copy output**
+and **Download logs** for the complete selected attempt's command streams.
 Captured instruction previews are bounded and show when text is omitted.
 Outputs describe the latest attempt; older attempts keep their own events
 and committed changes. Re-running a job uses the existing control service
@@ -402,8 +403,8 @@ and reader-folder prefixes become relative paths in the display; other paths
 and original event bytes remain unchanged. Thoughts are collapsed by default.
 
 **Filter by job** and **Search activity** search the loaded Summary messages.
-Job logs use the same search and display, scoped to their selected attempt.
-The feed and command output use the page's vertical scroll. **Follow latest**
+Job logs use **Search logs** across the selected attempt and scroll within
+their panel. The Summary feed uses the page's vertical scroll. **Follow latest**
 keeps new output visible while reading a live feed; opening a run leaves its
 header and requests in view. Scrolling up stops following. **Jump to latest**
 returns to the tail and resumes following. Filters and loading earlier output
@@ -437,9 +438,10 @@ When an approval is pending, its response form includes review instructions
 and retained material. At other times the panel is titled
 **Changes and documents** and does not ask for a response.
 
-When a step fails, the run header shows its name, the failure description or
-exit code, and the provider's last public message when available. **Show stopped
-step** opens that job's log and error, including when it is already selected.
+When a step fails, Summary annotations show its name, the failure description
+or exit code, and the provider's last public message when available.
+**Show stopped step** opens that job's log and error, including when it is
+already selected.
 Provider quota notices and reset
 times stay visible above Activity, including after a reload and in older runs
 whose saved failure summary is empty. Reset times and time zones keep the
@@ -656,3 +658,54 @@ If startup or shutdown reconciliation fails, retained state and the marker stay
 available for the next bounded reconciliation pass. Full trace context is in
 the platform-specific `relay-{pid}.log` files described in
 [Projects and storage](projects-and-storage.md#central-paths).
+
+## Actions layout and live job logs
+
+The header keeps the current project and **Workflows** and **Runs** tabs.
+Workflows have a sidebar, a file header, and the existing visual/YAML editor.
+`view=workflows` is the canonical editor URL; older `view=author` links open
+that view and update the URL. The Runs tab opens history. When a run needs a
+response, it returns to that run; visiting Workflows preserves the current
+waiting run so another request does not replace it. The history sidebar
+selects all workflows or one workflow.
+History rows show the captured title, permanent project run number, source
+commit and branch, launcher, time, and duration. Search, status, and branch
+filters apply on the server across history pages.
+
+A selected run keeps one header and job sidebar across **Summary** and job
+logs. The header shows the title and number, run controls, and refresh action.
+**Re-run jobs** contains **Re-run all jobs**, which opens the existing fresh
+launch panel. Failed runs also offer **Re-run failed jobs…**, which opens a
+job chooser. Select a failed job and use its existing **Re-run job** control;
+retries retain the runtime's single-job recovery rules. **Run settings**
+contains automatic recovery. Paused jobs and repair settings keep their
+existing controls.
+
+Summary shows source, status, total duration, and artifact count above a
+horizontal dependency graph. Equivalent parallel groups with more than five
+jobs become one card with **Show all jobs**; its dialog opens any member's
+log. Job lists still include each scope and iteration. The graph's wheel does
+not intercept page scrolling. **Artifacts** is a visible summary section,
+with the existing authenticated downloads and hashes. Annotations link to
+failed jobs. Agent messages, approvals, repairs, and code review stay in the
+same run.
+
+Job logs use compact, collapsible sections and a **Search logs** toolbar.
+The viewer automatically loads every public event page for the selected
+attempt, merging it with the run's existing live stream by event ID. Search
+covers all loaded output, including rows outside the visible viewport; the
+history-loading notice remains visible until all pages arrive. Enter and
+Shift+Enter move through matches, as do the next and previous buttons.
+Command lines keep their number and ANSI colors. Only visible command rows
+render, so a long log keeps streaming without a fixed line cutoff. Agent
+conversations keep Markdown, collapsed thoughts, and combined tool results.
+Selecting a search match opens its collapsed thought or tool details.
+
+**Log options** offers timestamps, full screen, raw logs, copying, and a text
+download. Full screen also responds to Shift+F while the log has focus; Escape
+closes it. Downloads wait for complete history and preserve the command's
+original output bytes, including ANSI codes. Search, scrolling away from the
+bottom, or **Stop following** pauses automatic scrolling. **Jump to latest**
+returns to the newest output and resumes following. Logs scroll within their
+panel. Active run and job durations update each second and freeze at the
+recorded end time; durations over an hour display hours, minutes, and seconds.

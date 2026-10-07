@@ -81,7 +81,8 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByLabel("Your response", { exact: true }).fill("AGREE");
   await page.getByRole("button", { name: "Send response and continue" }).click();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Guided browser flow Complete ·/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Guided browser flow #/ })).toBeVisible();
+  await expect(page.getByText("Complete", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Open changes and documents" }).click();
   await expect(page.getByText("No committed code changes yet.")).toBeVisible();
   await page.getByText("Advanced diagnostics and saved files", { exact: true }).click();
@@ -122,8 +123,9 @@ test("report handoffs explain retention and review material is readable beside t
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
   await page.getByRole("button", { name: "Cancel run" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Cancel run" }).click();
-  await expect(page.getByText("Work stopped. Finished steps and their changes remain available for review.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Retained review Stopped ·/ })).toBeVisible();
+  await expect(page.getByText("Work stopped. Finished jobs and their changes remain available for review.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Retained review #/ })).toBeVisible();
+  await expect(page.getByText("Stopped", { exact: true }).first()).toBeVisible();
 });
 
 test("permission requests send owner feedback through the same agent session", async ({ page }) => {
