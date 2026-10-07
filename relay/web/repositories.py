@@ -135,7 +135,7 @@ from relay.vcs.worktree import (
     run_worktree_path,
 )
 from relay.workflows.graph import CompiledGraph, compile_graph
-from relay.workflows.loader import load_workflow_text
+from relay.workflows.loader import load_workflow_text, workflow_key_parts
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy
 from relay.workflows.scope import (
     enclosing_scope,
@@ -1257,7 +1257,11 @@ class DjangoReadStore:
             if status is not None:
                 query = query.filter(status=status)
             if workflow is not None:
-                query = query.filter(workflow_key=workflow)
+                canonical = "/".join(workflow_key_parts(workflow))
+                aliases = {canonical, workflow}
+                if canonical.endswith(".yaml"):
+                    aliases.add(canonical[:-5])
+                query = query.filter(workflow_key__in=aliases)
             if branch is not None:
                 query = query.filter(source_branch=branch)
             if query_text:

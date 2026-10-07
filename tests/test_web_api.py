@@ -1819,7 +1819,13 @@ def test_history_filters_are_additive_and_titles_stay_captured(
     run_id = engine.launch(served, "identity")
     engine.drain(run_id)
     served.write_workflow("identity", workflow.replace("Build and review", "New workflow name"))
-    for query in ("workflow=identity", "branch=main", "query=review", "query=Build"):
+    for query in (
+        "workflow=identity",
+        "workflow=identity.yaml",
+        "branch=main",
+        "query=review",
+        "query=Build",
+    ):
         response = owner.get(f"/api/runs?project={served.project_id}&{query}")
         assert response.status_code == 200
         rows = response.json()["runs"]
