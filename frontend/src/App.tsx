@@ -58,6 +58,7 @@ export function App() {
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const [setupForced, setSetupForced] = useState(false);
   const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
+  const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
   const [workflowRevision, setWorkflowRevision] = useState(0);
   const runSucceeded = useCallback(() => setSetupRunSucceeded(true), []);
   const beforeLeave = useRef<(() => Promise<void>) | null>(null);
@@ -233,9 +234,12 @@ export function App() {
               project={selectedProject}
               requestProject={requestProject}
               initialWorkflow={location.workflow}
+              initialLaunch={launchWorkflow === location.workflow && launchWorkflow !== null}
+              onLaunchClosed={() => setLaunchWorkflow(null)}
               onWorkflowLoaded={workflowLoaded}
               onNavigationReady={registerNavigation}
               onRunLaunched={(runId) => {
+                setLaunchWorkflow(null);
                 navigate({ run: runId, interaction: null, job: null, view: "runs" });
               }}
             />
@@ -249,6 +253,10 @@ export function App() {
               onSelectJob={(job) => navigate({ job })}
               onRunSucceeded={runSucceeded}
               onSelectRun={selectRun}
+              onRunWorkflow={(workflow) => {
+                setLaunchWorkflow(workflow);
+                navigate({ workflow, view: "author", run: null, interaction: null, job: null });
+              }}
             />
           )}
         </Suspense>

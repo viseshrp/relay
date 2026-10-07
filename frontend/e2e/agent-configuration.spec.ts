@@ -28,7 +28,8 @@ async function choose(page: Page, tool: string, label: string, value: string) {
 async function launch(page: Page) {
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const created = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const response = await created;
   expect(response.status()).toBe(201);
   const { run_id: runId } = await response.json();

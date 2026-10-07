@@ -9,7 +9,8 @@ import tempfile
 from typing import Protocol
 
 from relay.constants import SCHEMA_VERSION
-from relay.errors import ProjectRelinkError
+from relay.errors import GitError, ProjectRelinkError
+from relay.vcs.git import run_git
 
 from .discovery import git_root
 from .identity import ProjectIdentity, canonical_path, identify_project
@@ -29,6 +30,26 @@ class ProjectRecord:
     canonical_path: str
     display_name: str
     git_root: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectLaunchSource:
+    """Current Git source shown before the immutable launch capture."""
+
+    branch: str | None
+    commit: str | None
+
+
+def project_launch_source(repository: Path) -> ProjectLaunchSource:
+    branch = run_git(repository, ["symbolic-ref", "--quiet", "--short", "HEAD"], check=False)
+    head = run_git(repository, ["rev-parse", "--verify", "--quiet", "HEAD"], check=False)
+    if branch.returncode not in {0, 1} or head.returncode not in {0, 1}:
+        message = "Relay could not read this project's Git source."
+        raise GitError(message, context={"project": str(repository)})
+    return ProjectLaunchSource(
+        branch.stdout.strip() if branch.returncode == 0 else None,
+        head.stdout.strip() if head.returncode == 0 else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)

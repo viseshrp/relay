@@ -32,6 +32,7 @@ from tests.support import (
     RelayProject,
     create_project,
     fake_executable,
+    git,
     run_status,
 )
 
@@ -686,6 +687,32 @@ def test_unknown_api_routes_return_not_found(owner: Client, path: str) -> None:
 def test_registered_projects_are_listed(owner: Client, project: RelayProject) -> None:
     rows = owner.get("/api/projects").json()["projects"]
     assert [row["id"] for row in rows] == [project.project_id]
+
+
+def test_project_context_adds_fresh_launch_source_for_the_selected_project(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    other = create_project(tmp_path / "other")
+    git(other.repository, "branch", "-m", "other/source")
+    source = owner.get(f"/api/projects/current?project={other.project_id}")
+    assert source.status_code == 200
+    assert source.json()["project"]["id"] == other.project_id
+    assert source.json()["launch_source"] == {
+        "branch": "other/source",
+        "commit": git(other.repository, "rev-parse", "HEAD"),
+    }
+    git(other.repository, "checkout", "--detach", "HEAD")
+    assert (
+        owner.get(f"/api/projects/current?project={other.project_id}").json()["launch_source"][
+            "branch"
+        ]
+        is None
+    )
+    assert owner.get("/api/projects/current").json()["project"]["id"] == served.project_id
+
+
+def test_project_context_launch_source_requires_owner_login(client: Client) -> None:
+    assert client.get("/api/projects/current").status_code == 401
 
 
 def test_opening_a_registered_project_keeps_its_identity(

@@ -46,6 +46,11 @@ export interface ProjectRecord {
   git_root: string;
 }
 
+export interface ProjectLaunchSource {
+  branch: string | null;
+  commit: string | null;
+}
+
 export interface HandoffWarning {
   workflow_key?: string;
   scope_path: string;

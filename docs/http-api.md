@@ -45,7 +45,7 @@ request header is `X-CSRFToken: abc`.
 | Method and path | Request | Success |
 | --- | --- | --- |
 | `GET /api/projects` | none | `200 {"projects":[...]}` |
-| `GET /api/projects/current` | optional `?project={id}` | `200 {"project":...}`; defaults to the served repository |
+| `GET /api/projects/current` | optional `?project={id}` | `200 {"project":...,"launch_source":{"branch":"main","commit":"..."}}`; defaults to the served repository |
 | `POST /api/projects/open` | `{"path":"/repo"}` | `200 {"project":...}` |
 | `POST /api/projects/relink` | `{"old":"/old","new":"/new"}` | `200 {"project":...}` |
 | `GET /api/workflows` | optional `?project={id}` | `200 {"workflows":[{"key":"review.yaml","name":"Review"}],"project":...}` |
@@ -57,6 +57,12 @@ request header is `X-CSRFToken: abc`.
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
+
+`launch_source` is a fresh read of the selected project's Git branch and commit.
+`branch` is `null` for a detached checkout; `commit` is `null` before the first
+commit. Reading it does not modify the repository. These fields are additive;
+`project` keeps its existing payload. Launch performs its own source capture
+and preflight rather than relying on this preview.
 
 Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
 resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.

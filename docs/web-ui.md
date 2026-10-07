@@ -211,24 +211,36 @@ again. A successful Save clears the draft and refreshes the base hash.
 
 ## Launch a run
 
-The launch form comes from the loaded workflow's typed `inputs` mapping:
+Choose **Run workflow** in the workflow header or its run history. The
+panel shows the current Git branch read-only; a detached checkout shows its
+commit instead. Each run still captures a fresh immutable snapshot through
+the existing launch service. The branch preview is advisory; launch checks the
+current source again.
 
-- string inputs use text fields;
-- integer and number inputs use numeric fields;
-- boolean inputs use checkboxes;
-- enum inputs use the declared finite values.
+The panel uses the workflow's typed `inputs` mapping. It shows each input's
+`description` and prefilled default. Strings expand to multiple lines for long
+text, integer and number inputs use numeric fields, booleans use checkboxes,
+and enums show their declared values. An untouched input stays omitted so the
+server applies its default or resolves an optional input to `null`. Edited
+values preserve their JSON types.
 
-An untouched optional input is omitted so the server can apply its declared
-default or resolve it to `null`. Once the owner enters a value, Relay preserves
-its JSON type in the launch request.
+The panel explains each blocked state beside **Run workflow**: loading or
+saving, no selected workflow, unsaved instructions, invalid YAML, unsaved
+workflow changes, an empty workflow, unavailable Git source, or a missing first
+commit. Unsaved workflow changes offer **Save** when this browser can save;
+lease conflicts and unsaved instructions explain what to fix in the editor.
+Launch failures appear in the panel, and the owner can retry after fixing them.
 
-Cached model observations appear as suggestions, but Relay sends the exact
-model value entered by the owner. Advanced start settings select
-`clean_on_success` or `retain` and one declared entry point. The form explains
-that tools work on a separate branch and pause for owner requests. Launch is
-disabled for empty workflows, unsaved changes, or invalid YAML. The server
-repeats validation, clean-Git,
-artifact, and exact-model preflight before it creates a run.
+**Advanced options** explains **Override model for this run**, **After a
+successful run**, and **Start from job**. Cached models are suggestions; Relay
+sends the exact entered value. Working copies can be deleted on success or
+kept; saved reports and commits remain available. Start points list only jobs
+declared in `entrypoints`. The server validates their required inputs and
+artifact evidence. **Automatic recovery** is a workflow setting in
+**Advanced workflow settings and YAML** and requires saving the workflow.
+
+The server repeats validation, clean-Git, artifact, and exact-model preflight
+before it creates a run.
 
 ## Monitor and control runs
 

@@ -56,6 +56,33 @@ def commit(repository: Path, name: str, text: str = "x") -> str:
     return current_head(repository)
 
 
+def test_launch_source_reads_the_branch_without_changing_owner_edits(repository: Path) -> None:
+    git(repository, "branch", "-m", "launch/source")
+    (repository / "loose.txt").write_text("owner edit", encoding="utf-8")
+    before = status_porcelain(repository)
+    source = service.project_launch_source(repository)
+    assert source == service.ProjectLaunchSource("launch/source", current_head(repository))
+    assert status_porcelain(repository) == before
+
+
+def test_launch_source_reads_a_detached_head(repository: Path) -> None:
+    head = current_head(repository)
+    git(repository, "checkout", "--detach", head)
+    assert service.project_launch_source(repository) == service.ProjectLaunchSource(None, head)
+
+
+def test_launch_source_reports_an_unborn_branch(tmp_path: Path) -> None:
+    repository = tmp_path / "unborn"
+    repository.mkdir()
+    git(repository, "init", "-q", "--initial-branch=main")
+    assert service.project_launch_source(repository) == service.ProjectLaunchSource("main", None)
+
+
+def test_launch_source_reports_git_failure_without_third_party_output(tmp_path: Path) -> None:
+    with pytest.raises(GitError, match="could not read this project's Git source"):
+        service.project_launch_source(tmp_path)
+
+
 @pytest.mark.parametrize("mode", ["text", "bytes", "file"])
 def test_git_handles_metacharacters_in_a_repository_path_as_one_operand(
     repository: Path, tmp_path: Path, mode: str

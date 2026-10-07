@@ -131,6 +131,7 @@ const VIRTUAL_ROW_OVERSCAN = 3;
 interface RunWorkspaceProps {
   selectedRun: string | null;
   onSelectRun: (runId: string | null) => void;
+  onRunWorkflow: (key: string) => void;
   project: ProjectRecord;
   selectedInteraction: string | null;
   selectedJob: string | null;
@@ -303,7 +304,7 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
+export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -756,6 +757,10 @@ export function RunWorkspace({ selectedRun, onSelectRun, project, selectedIntera
 
   return (
     <Stack spacing={2}>
+      {detail && <Stack component="header" role="region" aria-label="Workflow run history" direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+        <Typography variant="h5">{stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}</Typography>
+        <Button variant="contained" onClick={() => onRunWorkflow(detail.workflow_key)}>Run workflow</Button>
+      </Stack>}
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       <Box className="run-layout">
         <Paper variant="outlined" className="history-panel">

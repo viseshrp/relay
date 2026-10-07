@@ -5,14 +5,12 @@ import {
   AccordionSummary,
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -32,7 +30,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api, errorMessage, RelayApiError } from "../api";
 import { editorHolder } from "../editor-session";
 import { projectPath, stageLabel } from "../navigation";
-import type { AgentOptions, AgentsResponse, HandoffWarning, JsonScalar, ProjectRecord, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
+import type { AgentOptions, AgentsResponse, HandoffWarning, ProjectRecord, RepairDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import {
   canonicalYaml,
   flowElements,
@@ -49,6 +47,7 @@ import { PromptEditor } from "./PromptEditor";
 import { ModelPicker } from "./ModelPicker";
 import { RepairSettings } from "./RepairSettings";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
+import { LaunchPanel } from "./LaunchPanel";
 
 const YamlEditor = lazy(() =>
   import("./YamlEditor").then((module) => ({ default: module.YamlEditor })),
@@ -62,6 +61,8 @@ interface WorkflowWorkspaceProps {
   project: ProjectRecord;
   requestProject: string | null;
   initialWorkflow: string | null;
+  initialLaunch: boolean;
+  onLaunchClosed: () => void;
   onWorkflowLoaded: (key: string) => void;
   onNavigationReady: (callback: (() => Promise<void>) | null) => void;
 }
@@ -75,16 +76,7 @@ function workflowPath(key: string, suffix = ""): string {
   return `/api/workflows/${encoded}${suffix}`;
 }
 
-type LaunchInputValue = JsonScalar | undefined;
-
-function scalarDefault(value: unknown): LaunchInputValue {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  return undefined;
-}
-
-export function WorkflowWorkspace({ onRunLaunched, project, requestProject, initialWorkflow, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
+export function WorkflowWorkspace({ onRunLaunched, project, requestProject, initialWorkflow, initialLaunch, onLaunchClosed, onWorkflowLoaded, onNavigationReady }: WorkflowWorkspaceProps) {
   const holder = useRef(editorHolder());
   const initialKey = useRef(initialWorkflow);
   const [inventory, setInventory] = useState<Array<{ key: string; name: string }>>([]);
@@ -114,11 +106,8 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
   const [busy, setBusy] = useState(false);
   const [formattingYaml, setFormattingYaml] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
-  const [launchInputs, setLaunchInputs] = useState<Record<string, LaunchInputValue>>({});
-  const [launchModel, setLaunchModel] = useState("");
-  const [cleanupPolicy, setCleanupPolicy] = useState("clean_on_success");
-  const [entryPoint, setEntryPoint] = useState("");
-  const [launching, setLaunching] = useState(false);
+  const [launchOpen, setLaunchOpen] = useState(initialLaunch);
+  const launchButton = useRef<HTMLButtonElement>(null);
 
   const parsed = useMemo(() => parseWorkflow(yamlText), [yamlText]);
   const graph = useMemo(() => flowElements(parsed.value), [parsed.value]);
@@ -231,15 +220,6 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [dirty, leaseReady, loadedKey, busy, flushDraft]);
-
-  useEffect(() => {
-    const definitions = parsed.value?.inputs ?? {};
-    setLaunchInputs((current) =>
-      Object.fromEntries(
-        Object.entries(current).filter(([name]) => Object.hasOwn(definitions, name)),
-      ),
-    );
-  }, [parsed.value?.inputs]);
 
   function mutate(mutation: Parameters<typeof mutateWorkflow>[1]) {
     try {
@@ -410,53 +390,26 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
     }
   }
 
-  async function launch() {
-    if (loadedKey === null) return;
-    setLaunching(true);
-    setError(null);
-    try {
-      const suppliedInputs = Object.fromEntries(
-        Object.entries(launchInputs).flatMap(([name, value]) =>
-          value === undefined ? [] : [[name, value]],
-        ),
-      );
-      const response = await api<{ run_id: string }>(projectPath("/api/runs", requestProject), {
-        method: "POST",
-        body: JSON.stringify({
-          workflow_key: loadedKey,
-          project_id: project.id,
-          inputs: suppliedInputs,
-          ...(launchModel ? { model: launchModel } : {}),
-          cleanup_policy: cleanupPolicy,
-          ...(entryPoint ? { entry_point: entryPoint } : {}),
-        }),
-      });
-      onRunLaunched(response.run_id);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setLaunching(false);
-    }
-  }
-
   const modelOptions = Array.from(
     new Set(agents?.agents.flatMap((agent) => agent.models.map((model) => model.value)) ?? []),
   ).sort();
-  const inputDefinitions = parsed.value?.inputs ?? {};
   const candidateIds = Array.from(new Set([
     ...(definition?.agents ?? []),
     ...(parsed.value?.agents ?? []),
     ...(agents?.preferences ?? []),
   ]));
   const effectiveModel = (typeof definition?.model === "string" ? definition.model : "")
-    || launchModel || parsed.value?.model || "";
+    || parsed.value?.model || "";
 
   return (
     <Stack spacing={2}>
-      <Box>
-        <Typography variant="h4">{parsed.value?.name || "Choose a workflow"}</Typography>
-        <Typography color="text.secondary">1. Choose or create a workflow. 2. Set up its stages. 3. Save and start work.</Typography>
-      </Box>
+      <Stack component="header" role="region" aria-label="Workflow header" direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+        <Box>
+          <Typography variant="h4">{parsed.value?.name || "Choose a workflow"}</Typography>
+          <Typography color="text.secondary">Choose a workflow, edit its jobs, and save your changes.</Typography>
+        </Box>
+        <Button ref={launchButton} variant="contained" onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button>
+      </Stack>
       <Paper className="toolbar-card" variant="outlined">
         <Stack
           direction={{ xs: "column", md: "row" }}
@@ -531,6 +484,14 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
             <TextField size="small" label="Workflow key" value={workflowKey} onChange={(event) => setWorkflowKey(event.target.value)} />
             <Button onClick={() => void loadWorkflow(workflowKey)}>Load</Button>
           </Stack>
+          <FormControlLabel control={<Switch checked={parsed.value?.recovery?.enabled === true}
+            disabled={!leaseReady || parsed.value === null}
+            onChange={(event) => mutate((document) => document.setIn(["recovery", "enabled"], event.target.checked))} />}
+            label="Automatic recovery" />
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Retry eligible agent failures using the workflow's retry limit, with the same model and original instructions.
+            Unsafe failures and exhausted retries stop for your review.
+          </Typography>
           <Box className="yaml-panel">
           <Suspense fallback={<Box className="loading-panel">Loading YAML editor…</Box>}>
             <YamlEditor value={yamlText} onChange={setYamlText} />
@@ -714,166 +675,23 @@ export function WorkflowWorkspace({ onRunLaunched, project, requestProject, init
         stage={selectedNode} rule={parsed.value.repairs[selectedNode]} defaults={repairDefaults}
         sourceOutputs={definition?.outputs && typeof definition.outputs === "object" ? definition.outputs : {}}
         onSourceOutput={(output, selector) => mutate((document) => document.setIn(["nodes", selectedNode, "outputs", output], selector))}
-        agents={agents} model={typeof parsed.value.model === "string" ? parsed.value.model : launchModel}
+        agents={agents} model={typeof parsed.value.model === "string" ? parsed.value.model : ""}
         preferences={parsed.value.agents?.length ? parsed.value.agents : agents?.preferences ?? []}
         workflowPath={workflowPath(loadedKey)} workflowKey={loadedKey} project={requestProject}
         holder={holder.current} disabled={!leaseReady} onDirty={setPromptDirty}
         onChange={setRepairs} onClose={() => setRepairOpen(false)} />}
 
-      <Paper className="section-card" variant="outlined">
-        <Stack spacing={2}>
-          <Box>
-            <Typography variant="h6">Start work</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Your tools work on a separate Git branch. Work continues automatically unless a workflow stage or tool asks for your input.
-            </Typography>
-          </Box>
-          <FormControlLabel
-            control={<Switch checked={parsed.value?.recovery?.enabled === true}
-              disabled={!leaseReady || parsed.value === null}
-              onChange={(event) => setYamlText(mutateWorkflow(yamlText, (document) => {
-                document.setIn(["recovery", "enabled"], event.target.checked);
-              }))} />}
-            label="Automatic recovery"
-          />
-          <Typography variant="body2" color="text.secondary">
-            Retry eligible agent failures up to twice. Relay keeps the same model,
-            settings, and original instructions, then adds the error and a repair
-            instruction. Unsafe failures and exhausted retries stop visibly.
-          </Typography>
-          <Box className="field-grid">
-            {Object.entries(inputDefinitions).map(([name, input]) => {
-              const supplied = launchInputs[name];
-              const value = supplied === undefined
-                ? scalarDefault(input.default)
-                : supplied;
-              if (input.type === "boolean") {
-                return (
-                  <FormControlLabel
-                    key={name}
-                    control={
-                      <Checkbox
-                        checked={value === true}
-                        indeterminate={value === undefined}
-                        onChange={(event) =>
-                          setLaunchInputs((current) => ({ ...current, [name]: event.target.checked }))
-                        }
-                      />
-                    }
-                    label={`${name}${input.required ? " *" : ""}`}
-                  />
-                );
-              }
-              if (input.type === "enum") {
-                const values = Array.isArray(input.constraints?.values)
-                  ? input.constraints.values.filter(
-                      (item): item is JsonScalar =>
-                        item === null || ["string", "number", "boolean"].includes(typeof item),
-                    )
-                  : [];
-                return (
-                  <FormControl key={name} size="small" required={input.required}>
-                    <InputLabel id={`input-${name}`}>{name}</InputLabel>
-                    <Select
-                      labelId={`input-${name}`}
-                      label={name}
-                      value={value === undefined ? "" : JSON.stringify(value)}
-                      onChange={(event) =>
-                        setLaunchInputs((current) => ({
-                          ...current,
-                          [name]: event.target.value === ""
-                            ? undefined
-                            : JSON.parse(event.target.value) as JsonScalar,
-                        }))
-                      }
-                    >
-                      <MenuItem value="" disabled={input.required === true}>
-                        {input.required ? "Select a value" : "Unset"}
-                      </MenuItem>
-                      {values.map((item) => (
-                        <MenuItem key={JSON.stringify(item)} value={JSON.stringify(item)}>
-                          {String(item)}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                );
-              }
-              const numeric = input.type === "integer" || input.type === "number";
-              return (
-                <TextField
-                  key={name}
-                  size="small"
-                  label={stageLabel(name)}
-                  helperText={input.description}
-                  required={input.required}
-                  type={numeric ? "number" : "text"}
-                  value={value ?? ""}
-                  onChange={(event) =>
-                    setLaunchInputs((current) => ({
-                      ...current,
-                      [name]: event.target.value === ""
-                        ? (numeric ? null : "")
-                        : numeric
-                          ? Number(event.target.value)
-                          : event.target.value,
-                    }))
-                  }
-                />
-              );
-            })}
-            </Box>
-            <Accordion><AccordionSummary>Advanced start settings</AccordionSummary><AccordionDetails><Box className="field-grid">
-            <TextField
-              size="small"
-              label="Exact model (optional)"
-              value={launchModel}
-              onChange={(event) => setLaunchModel(event.target.value)}
-              slotProps={{ htmlInput: { list: "relay-model-options" } }}
-            />
-            <datalist id="relay-model-options">
-              {modelOptions.map((model) => <option key={model} value={model} />)}
-            </datalist>
-            <FormControl size="small">
-              <InputLabel id="cleanup-policy">Cleanup policy</InputLabel>
-              <Select
-                labelId="cleanup-policy"
-                value={cleanupPolicy}
-                label="Cleanup policy"
-                onChange={(event) => setCleanupPolicy(event.target.value)}
-              >
-                <MenuItem value="clean_on_success">Clean on success</MenuItem>
-                <MenuItem value="retain">Retain worktree</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small">
-              <InputLabel id="entry-point">Entry point</InputLabel>
-              <Select
-                labelId="entry-point"
-                value={entryPoint}
-                label="Entry point"
-                onChange={(event) => setEntryPoint(event.target.value)}
-              >
-                <MenuItem value="">Start at roots</MenuItem>
-                {(parsed.value?.entrypoints ?? []).map((entry) => (
-                  <MenuItem key={entry.scope_path} value={entry.scope_path}>{entry.scope_path}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box></AccordionDetails></Accordion>
-          <Divider />
-          <Stack direction="row" sx={{ justifyContent: "flex-end" }}>
-            <Button
-              variant="contained"
-              size="large"
-              onClick={() => void launch()}
-              disabled={launching || promptDirty || loadedKey === null || parsed.errors.length > 0 || dirty || Object.keys(parsed.value?.nodes ?? {}).length === 0}
-            >
-              {launching ? "Launching…" : "Launch workflow"}
-            </Button>
-          </Stack>
-        </Stack>
-      </Paper>
+      <LaunchPanel key={`${project.id}:${loadedKey}`} open={launchOpen} workflowKey={loadedKey}
+        workflow={parsed.value} project={project} requestProject={requestProject} modelOptions={modelOptions}
+        blockedReason={busy ? "Wait for the current workflow operation to finish."
+          : loadedKey === null ? "Choose or create a workflow first."
+          : promptDirty ? "Save the job's instructions in the editor first."
+          : parsed.errors.length > 0 ? "Fix the YAML errors in the editor before running this workflow."
+          : dirty ? (leaseReady ? "Save your changes first." : "This browser cannot save your changes. Restore its editing access before running.")
+          : graph.nodes.length === 0 ? "Add a job to this empty workflow before running it." : null}
+        saveError={error} onSave={dirty && leaseReady && !busy && !promptDirty && parsed.errors.length === 0 ? requestSave : undefined}
+        onClose={() => { setLaunchOpen(false); onLaunchClosed(); }}
+        onExited={() => launchButton.current?.focus()} onRunLaunched={onRunLaunched} />
 
       <Dialog open={handoffHelp} onClose={() => setHandoffHelp(false)} fullWidth maxWidth="md">
         <DialogTitle>Keep a report for the next stage</DialogTitle>

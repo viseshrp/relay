@@ -42,7 +42,8 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByLabel("Review instructions and expected response").fill("Review the command result. Type AGREE to continue.");
   await save(page);
   const launch = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const created = await launch;
   expect(created.status()).toBe(201);
   const { run_id: runId } = await created.json();
@@ -110,7 +111,8 @@ test("report handoffs explain retention and review material is readable beside t
   await page.getByRole("button", { name: "Retain the report" }).click();
   await expect(page.getByRole("dialog", { name: "Keep a report for the next stage" })).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
   await page.getByRole("combobox", { name: "Review material" }).click();
@@ -130,7 +132,8 @@ test("permission requests send owner feedback through the same agent session", a
   const created = await post(page, "/api/workflows", { key: "agent-feedback", holder, yaml: stringify({ version: 1, name: "Feedback", model: "m1", agents: ["codex"], nodes: { work: { type: "agent" } } }) });
   expect(created.ok()).toBeTruthy();
   await page.goto("/?view=author&workflow=agent-feedback.yaml");
-  await page.getByRole("button", { name: "Launch workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "A tool needs your permission" })).toBeVisible();
   await page.getByRole("combobox", { name: "Your decision" }).click();

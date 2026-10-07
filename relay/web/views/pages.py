@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import asdict
+from pathlib import Path
 
 from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
@@ -22,7 +23,7 @@ from relay.constants import (
 )
 from relay.errors import ConfigError, RelayError
 from relay.execution.state import RunStatus
-from relay.projects.service import list_registered_projects
+from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
     read_workflow_document,
@@ -117,7 +118,12 @@ def attention(request: HttpRequest) -> HttpResponse:
 @require_GET
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
-    return JsonResponse({"project": asdict(project)})
+    return JsonResponse(
+        {
+            "project": asdict(project),
+            "launch_source": asdict(project_launch_source(Path(project.git_root))),
+        }
+    )
 
 
 @api_errors
