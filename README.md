@@ -99,6 +99,20 @@ packaged-asset, and registry checks pass and at least one supported agent is
 ready. Missing optional agents remain visible in the report. A failed core
 check or no ready agent returns exit code 6.
 
+Administration commands show readable text by default. Use `relay doctor
+--json`, `relay project list --json`, `relay project relink OLD_PATH NEW_PATH
+--json`, or `relay data clean --json` to keep their previous sorted JSON
+output. `relay --json COMMAND` also selects that output for a nested command.
+Relay errors show `Error: <message>` and, when available,
+`Next: <next_action>`; `--json` keeps the previous error envelope and exit
+codes. Initialization and startup keep their previous text in `--json` mode.
+
+`relay doctor` uses the launch cleanliness checker for untouched starter files
+and root reports. It lists allowed changes as a warning. Unrelated edits and
+staged files still fail the check. Workflow-specific source exemptions are
+validated during launch for the selected workflow; `doctor` does not select
+a workflow or certify its inputs and model routes.
+
 ## Command reference
 
 <!-- [[[cog
@@ -133,6 +147,7 @@ Usage: relay [OPTIONS] COMMAND [ARGS]...
 
 Options:
   -v, --version  Show the version and exit.
+  --json         Keep the existing machine-readable output.
   -h, --help     Show this message and exit.
 
 Commands:
@@ -150,6 +165,7 @@ Usage: relay data clean [OPTIONS]
   Delete confirmed local run data and retained Git state.
 
 Options:
+  --json       Keep the existing machine-readable output.
   --runs       Delete run records, snapshots, and artifacts.
   --worktrees  Remove preserved run worktrees.
   --branches   Delete retained run and attempt refs.

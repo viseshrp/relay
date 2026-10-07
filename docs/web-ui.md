@@ -17,6 +17,10 @@ browser. Uvicorn 0.52.4 is pinned as the ASGI server and uses its plain `h11`
 HTTP implementation. The wheel supplies Uvicorn; an owner does not install or
 run a separate web server.
 
+When ready, `relay up` prints the URL, whether login is on, and how to stop
+with Ctrl+C. Open that URL to create your first workflow. `relay up --json`
+keeps the earlier startup text and JSON error envelopes for existing scripts.
+
 The command accepts these options:
 
 | Option | Default | Meaning |

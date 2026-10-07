@@ -27,8 +27,9 @@ from relay.web import static_view, supervisor
 from tests.support import FakeAgents, InlineEngine, RelayProject, init_repository
 
 
-def invoke(*arguments: str, input_text: str | None = None) -> Result:
-    return CliRunner().invoke(cli.main, list(arguments), input=input_text)
+def invoke(*arguments: str, input_text: str | None = None, json_output: bool = True) -> Result:
+    options = ["--json", *arguments] if json_output else list(arguments)
+    return CliRunner().invoke(cli.main, options, input=input_text)
 
 
 def report(result: Result) -> dict[str, object]:
@@ -181,6 +182,214 @@ def test_doctor_needs_at_least_one_ready_agent(
     assert [row["id"] for row in report(result)["agents"] if row["ready"]] == (
         ["codex"] if ready else []
     )
+
+
+@pytest.mark.usefixtures("registry_network")
+def test_doctor_accepts_the_uncommitted_init_surface(
+    fake_agents: FakeAgents, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = init_repository(tmp_path / "fresh")
+    monkeypatch.chdir(repository)
+    assets = tmp_path / "static"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<html></html>", encoding="utf-8")
+    (assets / "assets" / "app.js").write_text("export {};", encoding="utf-8")
+    monkeypatch.setattr(static_view, "STATIC_ROOT", assets)
+    fake_agents.install("codex")
+
+    assert invoke("init").exit_code == 0
+    result = invoke("doctor")
+
+    assert result.exit_code == 0, result.output
+    assert report(result)["checks"][0]["ok"] is True
+
+
+@pytest.mark.parametrize("placement", [["--json", "init"], ["init", "--json"]])
+def test_json_errors_preserve_the_exact_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, placement: list[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(cli.main, placement)
+    assert result.exit_code == EXIT_NOT_A_REPOSITORY
+    expected = {
+        "code": "project_discovery_error",
+        "context": {"project": str(tmp_path)},
+        "message": f"{tmp_path} is not inside a Git worktree.",
+        "next_action": "Run this command inside a Git repository.",
+    }
+    assert result.output == json.dumps(expected, sort_keys=True) + "\n"
+
+
+def test_human_errors_show_the_next_action(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = invoke("init", json_output=False)
+    assert result.exit_code == EXIT_NOT_A_REPOSITORY
+    assert result.output == (
+        f"Error: {tmp_path} is not inside a Git worktree.\n"
+        "Next: Run this command inside a Git repository.\n"
+    )
+
+
+@pytest.mark.parametrize("login_required", [False, True])
+def test_up_explains_startup_in_human_output(
+    supervisor_boundary: SupervisorBoundary, login_required: bool
+) -> None:
+    result = invoke("up", "--login" if login_required else "--no-login", json_output=False)
+    assert result.exit_code == 0
+    assert result.output == (
+        "Relay is ready at http://127.0.0.1:7845/\n"
+        f"Login: {'on' if login_required else 'off'}\n"
+        "Press Ctrl+C to stop Relay.\n"
+        "Open the URL above to create your first workflow.\n"
+        "Relay stopped cleanly.\n"
+    )
+
+
+def test_up_json_retains_the_previous_startup_lines(
+    supervisor_boundary: SupervisorBoundary,
+) -> None:
+    result = invoke("up")
+    assert result.exit_code == 0
+    assert result.output == ("Relay is ready at http://127.0.0.1:7845/\nRelay stopped cleanly.\n")
+
+
+def test_human_project_list_and_relink(project: RelayProject, tmp_path: Path) -> None:
+    result = invoke("project", "list", json_output=False)
+    assert result.exit_code == 0
+    assert result.output == f"Projects\n  repo — {project.repository}\n"
+    moved = tmp_path / "moved"
+    project.repository.rename(moved)
+    result = invoke("project", "relink", str(project.repository), str(moved), json_output=False)
+    assert result.exit_code == 0
+    assert result.output == f"Relinked moved to {moved}.\n"
+
+
+def test_human_project_list_is_clear_when_empty() -> None:
+    result = invoke("project", "list", json_output=False)
+    assert result.exit_code == 0
+    assert result.output == "No projects yet. Run relay up in your Git repository.\n"
+
+
+def test_human_cleanup_requires_a_selection() -> None:
+    result = invoke("data", "clean", json_output=False)
+    assert result.exit_code == EXIT_NOTHING_TO_CLEAN
+    assert result.output == (
+        "No cleanup selected. Choose --worktrees, --branches, --runs, or --all.\n"
+    )
+
+
+@pytest.mark.usefixtures("terminal_project")
+def test_human_cleanup_reports_counts() -> None:
+    result = invoke("data", "clean", "--all", input_text="y\n", json_output=False)
+    assert result.exit_code == 0
+    assert "Deleted Relay data:\n  runs: 1\n  worktrees: 1\n  branches: 1\n" in result.output
+
+
+@pytest.mark.usefixtures("registry_network")
+@pytest.mark.parametrize("mode", ["missing", "success", "auth", "close-error"])
+def test_human_doctor_explains_readiness_and_optional_agents(
+    project: RelayProject,
+    fake_agents: FakeAgents,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    assets = tmp_path / "static"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<html></html>", encoding="utf-8")
+    (assets / "assets/app.js").write_text("export {};", encoding="utf-8")
+    monkeypatch.setattr(static_view, "STATIC_ROOT", assets)
+    monkeypatch.chdir(project.repository)
+    ready = mode in {"success", "close-error"}
+    if mode != "missing":
+        fake_agents.install("codex", mode=mode)
+    result = invoke("doctor", json_output=False)
+    assert result.exit_code == (0 if ready else EXIT_DOCTOR_FAILED)
+    assert result.output.startswith(
+        "Relay checks\n✓ Git repository\n✓ Local database\n"
+        "✓ Browser application\n✓ Agent registry\n"
+    )
+    assert ("✓ Codex: Ready\n" in result.output) is ready
+    assert "✗ Claude Code: Not installed\n" in result.output
+    assert "Install: https://github.com/agentclientprotocol/claude-agent-acp\n" in result.output
+    assert result.output.endswith(
+        "Ready. Run relay up to open Relay.\n" if ready else "Fix the failed checks above.\n"
+    )
+    if not ready:
+        assert "✗ At least one ready agent\n" in result.output
+        assert (
+            "Next: Install and sign in to one agent below, then run relay doctor.\n"
+            in result.output
+        )
+    if mode == "auth":
+        assert "✗ Codex: Not ready\n" in result.output
+        assert "Authenticate the Codex CLI" in result.output
+    if mode == "close-error":
+        assert "Warning: The ACP probe session may not have closed cleanly." in result.output
+
+
+def test_human_error_without_next_action_keeps_the_message() -> None:
+    result = invoke("data", "clean", "--all", "--runs", json_output=False)
+    assert result.exit_code == ConfigError.cli_exit_code
+    assert result.output == "Error: Use --all by itself or select individual cleanup categories.\n"
+
+
+def test_human_cleanup_of_empty_project_has_nothing_to_delete(
+    project: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(project.repository)
+    result = invoke("data", "clean", "--all", input_text="y\n", json_output=False)
+    assert result.exit_code == EXIT_NOTHING_TO_CLEAN
+    assert result.output.endswith("No retained data to delete.\n")
+
+
+@pytest.mark.usefixtures("registry_network")
+@pytest.mark.parametrize("change", ["report", "code", "staged_report", "edited_starter"])
+def test_doctor_shares_launch_cleanliness_without_broadening_exemptions(
+    project: RelayProject,
+    fake_agents: FakeAgents,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from relay.vcs.cleanliness import require_launch_clean
+    from tests.support import git
+
+    assets = tmp_path / "static"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<html></html>", encoding="utf-8")
+    (assets / "assets/app.js").write_text("export {};", encoding="utf-8")
+    monkeypatch.setattr(static_view, "STATIC_ROOT", assets)
+    monkeypatch.chdir(project.repository)
+    fake_agents.install("codex")
+    if change == "code":
+        project.write("code.py", "modified\n")
+    elif change == "edited_starter":
+        git(project.repository, "rm", "--cached", ".relay/prompts/prompt.md")
+        git(project.repository, "commit", "-qm", "Remove starter from index")
+        project.write(".relay/prompts/prompt.md", "Owner instructions\n")
+    else:
+        project.write("REVIEW.md", "Ready: No\n")
+        if change == "staged_report":
+            git(project.repository, "add", "REVIEW.md")
+    result = invoke("doctor", json_output=False)
+    if change == "report":
+        require_launch_clean(project.repository, frozenset())
+        assert result.exit_code == 0
+        assert (
+            "Warning: These uncommitted starter files or reports do not block launch:\n"
+            in result.output
+        )
+        assert "?? REVIEW.md\n" in result.output
+    else:
+        from relay.errors import DirtyRepositoryError
+
+        with pytest.raises(DirtyRepositoryError):
+            require_launch_clean(project.repository, frozenset())
+        assert result.exit_code == EXIT_DOCTOR_FAILED
+        assert (
+            "✗ Git repository\n  Uncommitted code or staged files block a run.\n" in result.output
+        )
 
 
 def test_cleanup_without_selection_has_nothing_to_clean() -> None:

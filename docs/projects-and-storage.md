@@ -190,8 +190,10 @@ outside Relay's ownership. Cleanup failures are logged and reported as run
 events; they do not replace a completed attempt's result.
 
 Unexpected failures in `relay init`, `relay project list`,
-`relay project relink`, or `relay data clean` produce the same JSON error
-envelope as other administration commands. The local log retains the trace.
+`relay project relink`, or `relay data clean` show a plain error and a next
+action. Add `--json` to retain the previous JSON error envelope. The local log
+retains the trace. Project listings and cleanup counts also default to readable
+text; their `--json` output preserves the existing fields and sorted encoding.
 
 Static assets and retained artifact downloads use Python's built-in MIME
 tables, independent of operating-system registries and MIME files.
