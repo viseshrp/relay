@@ -1,6 +1,7 @@
 import {
   Background,
   Controls,
+  getNodesBounds,
   type Edge,
   MiniMap,
   type Node,
@@ -11,7 +12,8 @@ import {
   useNodesInitialized,
   useReactFlow,
 } from "@xyflow/react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 
 import { RunGraphNode } from "./RunGraphNode";
 
@@ -39,7 +41,30 @@ function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; f
   return null;
 }
 
+function InitialRunViewport({ container }: { container: RefObject<HTMLDivElement | null> }) {
+  const initialized = useNodesInitialized();
+  const positioned = useRef(false);
+  const { getNodes, fitView, setViewport } = useReactFlow();
+  useEffect(() => {
+    if (!initialized || positioned.current || !container.current) return;
+    const nodes = getNodes();
+    const first = nodes[0];
+    if (!first) return;
+    positioned.current = true;
+    const bounds = getNodesBounds(nodes);
+    const available = container.current;
+    const zoom = Math.min(available.clientWidth / (bounds.width * 1.4), available.clientHeight / (bounds.height * 1.4));
+    if (zoom < 0.65) {
+      void setViewport({ x: 24 - first.position.x * 0.8, y: 24 - first.position.y * 0.8, zoom: 0.8 });
+    } else {
+      void fitView({ padding: 0.2, minZoom: 0.65, maxZoom: 1 });
+    }
+  }, [initialized, container, getNodes, fitView, setViewport]);
+  return null;
+}
+
 export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0, initialFocusId }: FlowCanvasProps) {
+  const container = useRef<HTMLDivElement>(null);
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -63,7 +88,7 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
   const selectNode: NodeMouseHandler = (_event, node) => onSelect?.(node.id);
 
   return (
-    <div className="flow-canvas" onKeyDown={runMode ? (event) => {
+    <div ref={container} className="flow-canvas" onKeyDown={runMode ? (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       const target = event.target;
       if (!(target instanceof HTMLElement) || !target.classList.contains("react-flow__node")) return;
@@ -83,10 +108,11 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
         panOnScroll={false}
         zoomOnDoubleClick={!runMode}
         fitViewOptions={runMode ? { padding: 0.2, minZoom: 0.65, maxZoom: 1 } : undefined}
-        fitView
+        fitView={!runMode}
         minZoom={0.25}
         maxZoom={1.75}
       >
+        {runMode && <InitialRunViewport container={container} />}
         {/* Authoring can focus a stage while retaining manually dragged positions. */}
         {(followSelection || initialFocusId) && <FocusStep selectedId={selectedId ?? initialFocusId} focusRequest={focusRequest} />}
         {!runMode && <MiniMap pannable zoomable />}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from relay.agents.models import ModelObservation
 from relay.constants import (
     APPLICATION_LOG_OWNERSHIP_LINE,
     DATABASE_INTEGER_MAX,
+    REVIEW_PREVIEW_MAX_BYTES,
     RUN_PROBLEM_MESSAGE_MAX_EVENTS,
     RUN_PROBLEM_TEXT_MAX_CHARS,
 )
@@ -1108,6 +1110,7 @@ def test_artifacts_download_as_byte_exact_attachments(owner: Client, finished_ru
 def test_artifact_pages_expose_retained_evidence(owner: Client, finished_run: str) -> None:
     rows = owner.get(f"/api/runs/{finished_run}/artifacts").json()["artifacts"]
     assert {row["name"] for row in rows} >= {"commits"}
+    assert all(row["scope_path"].startswith("root.") and row["attempt_number"] == 1 for row in rows)
 
 
 @pytest.mark.parametrize("artifact_id", ["0", "invalid", str(DATABASE_INTEGER_MAX)])
@@ -1838,3 +1841,30 @@ def test_history_filters_are_additive_and_titles_stay_captured(
     assert owner.get("/api/runs?query=missing").json()["runs"] == []
     assert owner.get("/api/runs?workflow=missing").json()["runs"] == []
     assert owner.get("/api/runs?query=" + "x" * 1025).status_code == 400
+
+
+def test_captured_workflow_is_immutable_and_bounded(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    original = "version: 1\nname: Captured\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    served.write_workflow("captured", original)
+    run_id = engine.launch(served, "captured")
+    snapshot = RunSnapshot.objects.get(run_id=run_id)
+    captured = snapshot.workflow_yaml
+    served.write_workflow("captured", original.replace("Captured", "Changed"))
+    response = owner.get(f"/api/runs/{run_id}/workflow")
+    assert response.status_code == 200
+    assert response.json() == {
+        "workflow_key": "captured",
+        "yaml": captured,
+        "sha256": sha256(captured.encode()).hexdigest(),
+        "truncated": False,
+    }
+    snapshot.workflow_yaml = "é" * (REVIEW_PREVIEW_MAX_BYTES + 1)
+    snapshot.save(update_fields=["workflow_yaml"])
+    bounded = owner.get(f"/api/runs/{run_id}/workflow").json()
+    assert bounded["truncated"] is True
+    assert len(bounded["yaml"].encode()) <= REVIEW_PREVIEW_MAX_BYTES
+    assert bounded["sha256"] == sha256(snapshot.workflow_yaml.encode()).hexdigest()
+    assert owner.get("/api/runs/not-a-uuid/workflow").status_code == 404
+    assert Client().get(f"/api/runs/{run_id}/workflow").status_code == 401

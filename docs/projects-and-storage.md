@@ -32,6 +32,13 @@ their Git changes before launch.
 From a subdirectory, Relay walks upward to the nearest `.relay/` directory but
 never above the containing Git worktree.
 
+The browser's **Open a project** dialog can browse directories inside the
+owner's home folder. **Up one folder** and **Home folder** navigate; **Use
+this folder** fills the repository path. The existing **Open project** action
+still validates and registers that Git repository. Typed paths remain
+available for repositories elsewhere. Browsing follows symlinks before
+checking containment and does not read or return file contents.
+
 ## Central paths
 
 Relay 1.0 uses `platformdirs` 4.11.8 with app name `relay`, no app author, and

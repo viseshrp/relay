@@ -204,6 +204,24 @@ to the selected project's effective policy. For `merge_on_success`, every
 changed file blocks launch, including usual workflow/report exemptions.
 `GET /api/projects/current` adds the resolved `cleanup_policy` for the panel.
 
+`GET /api/runs/{id}/workflow` returns the immutable captured workflow:
+`workflow_key`, `yaml`, `truncated`, and `sha256`. The YAML preview is at
+most 256 KiB and ends on a UTF-8 boundary. The SHA-256 covers the full source.
+The endpoint requires the existing owner authentication and never reads a
+mutable authoring draft. Missing runs keep the existing error envelope.
+
+`GET /api/projects/folders` lists directories under the owner's home.
+Optional `path` selects a directory, `since` is the last returned name,
+and `limit` uses the existing page bounds. The response includes `root`,
+`path`, `parent`, `folders`, and `next`. Each folder has `name`,
+resolved `path`, and a `repository` hint based on its Git marker. Paths
+resolve symlinks before containment checks. Files and their contents are
+never returned. Permission and invalid-path failures use Relay envelopes.
+
+Artifact records add `scope_path` and `attempt_number` to identify their
+origin. Existing metadata, download routes, cursors, and byte bounds remain
+unchanged.
+
 Command stdout and stderr events arrive while a command runs. Chunk
 payloads and replay ordering are unchanged; clients merge them by event ID.
 

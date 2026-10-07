@@ -27,6 +27,7 @@ import { api, errorMessage } from "./api";
 import { useAttention } from "./attention";
 import { AuthView } from "./components/AuthView";
 import { GetStarted } from "./components/GetStarted";
+import { FolderPicker } from "./components/FolderPicker";
 import { readLocation, saveLocation, type LocationState } from "./navigation";
 import type { AuthState, ProjectRecord } from "./types";
 
@@ -81,7 +82,13 @@ export function App() {
   const beforeLeave = useRef<(() => Promise<void>) | null>(null);
   const registerNavigation = useCallback((callback: (() => Promise<void>) | null) => { beforeLeave.current = callback; }, []);
 
+  const historyIntent = useRef<"push" | "replace">("replace");
+  const currentLocation = useRef(location);
+  currentLocation.current = location;
+  const navigationRevision = useRef(0);
   const navigate = useCallback((patch: Partial<LocationState>) => {
+    navigationRevision.current += 1;
+    historyIntent.current = "push";
     setLocation((current) => ({ ...current, ...patch }));
   }, []);
   const workflowLoaded = useCallback((workflow: string) => { setWorkflowCreate(false); navigate({ workflow }); }, [navigate]);
@@ -90,6 +97,8 @@ export function App() {
     catch (caught) { setProjectError(errorMessage(caught)); }
   }, [navigate]);
   const selectRun = useCallback((run: string | null) => {
+    navigationRevision.current += 1;
+    historyIntent.current = "push";
     setLocation((current) => ({ ...current, run, interaction: run === current.run ? current.interaction : null, job: run === current.run ? current.job : null }));
   }, []);
   async function openWaitingRun(run: string, project?: string): Promise<void> {
@@ -100,10 +109,28 @@ export function App() {
   }
   const attention = useAttention(auth?.authenticated === true, (run, project) => void openWaitingRun(run, project));
 
-  useEffect(() => saveLocation(location, true), [location]);
+  useEffect(() => {
+    saveLocation(location, historyIntent.current === "replace");
+    historyIntent.current = "replace";
+  }, [location]);
 
   useEffect(() => {
-    const restore = () => setLocation(readLocation());
+    const restore = () => {
+      const target = readLocation();
+      const revision = ++navigationRevision.current;
+      void (async () => {
+        try {
+          await beforeLeave.current?.();
+          if (revision !== navigationRevision.current) return;
+          historyIntent.current = "replace";
+          setLocation(target);
+        } catch (caught) {
+          if (revision !== navigationRevision.current) return;
+          saveLocation(currentLocation.current, true);
+          setProjectError(errorMessage(caught));
+        }
+      })();
+    };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
@@ -292,6 +319,8 @@ export function App() {
           ) : (
             <RunWorkspace
               selectedRun={location.run}
+              selectedWorkflow={location.workflow}
+              onSelectWorkflow={(workflow) => navigate({ workflow })}
               project={selectedProject}
               selectedInteraction={location.interaction}
               selectedJob={location.job}
@@ -313,6 +342,7 @@ export function App() {
         <DialogContent>
           <Typography sx={{ mb: 2 }}>Choose a Git repository on this computer. Relay adds a blank workflow folder if one is missing. Your code and Git branch stay in place.</Typography>
           <TextField fullWidth label="Repository folder" value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" />
+          <Box sx={{ mt: 2 }}><FolderPicker disabled={projectBusy} onSelect={setProjectPath} /></Box>
           {projectError && <Alert severity="error" sx={{ mt: 2 }}>{projectError}</Alert>}
         </DialogContent>
         <DialogActions><Button onClick={() => setOpeningProject(false)} disabled={projectBusy}>Cancel</Button><Button variant="contained" onClick={() => void openProject()} disabled={projectBusy || !projectPath.trim()}>Open project</Button></DialogActions>

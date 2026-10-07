@@ -23,8 +23,8 @@ function Highlight({ text, ranges, offset }: { text: string; ranges: Array<{ sta
   }
   return <>{parts}{text.slice(after)}</>;
 }
-export function JobLog({ events, command, workingFolder, live, loading, hasMore, onMore, onRefresh, scope, attempt }: {
-  events: RunEvent[]; command: boolean; workingFolder?: string; live: boolean; loading: boolean;
+export function JobLog({ events, command, label, workingFolder, live, loading, hasMore, onMore, onRefresh, scope, attempt }: {
+  events: RunEvent[]; command: boolean; label: string; workingFolder?: string; live: boolean; loading: boolean;
   hasMore: boolean; onMore: () => Promise<void>; onRefresh: () => void; scope: string; attempt: number | undefined;
 }) {
   const rows = useMemo(() => logRows(events, command, workingFolder), [events, command, workingFolder]);
@@ -109,7 +109,7 @@ export function JobLog({ events, command, workingFolder, live, loading, hasMore,
     </Stack>
     {error && <Alert severity="error">{error}</Alert>}
     {hasMore && <Button disabled={loading} onClick={() => void onMore()}>{loading ? "Loading earlier logs…" : "Retry log history"}</Button>}
-    <Box ref={viewport} className={`job-log-viewport ${command ? "terminal" : "conversation"}`} tabIndex={0} role="region" aria-label={command ? "Command output lines" : "Agent conversation log"}
+    <Box ref={viewport} className={`job-log-viewport ${command ? "terminal" : "conversation"}`} tabIndex={0} role="region" aria-label={command ? "Command output lines" : `${label} log`}
       onScroll={(event) => {
         const element = event.currentTarget;
         setScrollTop(element.scrollTop);

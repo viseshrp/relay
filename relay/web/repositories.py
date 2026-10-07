@@ -1022,7 +1022,11 @@ def _event_record(event: RunEvent) -> dict[str, object]:
 
 
 def _artifact_record(artifact: Artifact) -> dict[str, object]:
+    attempt = _related(artifact, "attempt", NodeAttempt)
+    node = _related(attempt, "node_run", NodeRun)
     return {
+        "scope_path": _string(node, "scope_path"),
+        "attempt_number": _integer(attempt, "attempt_number"),
         "id": _identifier(artifact),
         "attempt_id": _foreign_key_text(artifact, "attempt"),
         "name": _string(artifact, "declared_name"),
@@ -1521,6 +1525,26 @@ class DjangoReadStore:
         else:
             return result, next_value
 
+    def run_workflow(self, run_id: str) -> dict[str, object]:
+        """Read the immutable workflow captured for a run, with a bounded preview."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+            )
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            content = _string(snapshot, "workflow_yaml").encode("utf-8")
+            return {
+                "workflow_key": _string(run, "workflow_key"),
+                "yaml": content[:REVIEW_PREVIEW_MAX_BYTES].decode("utf-8", errors="ignore"),
+                "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
+                "sha256": sha256(content).hexdigest(),
+            }
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read the captured workflow."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
     def page_artifacts(
         self,
         run_id: str,
@@ -1535,7 +1559,9 @@ class DjangoReadStore:
                 Artifact.objects.filter(
                     attempt__node_run__run_id=run_id,
                     pk__gt=since,
-                ).order_by("pk")[: bounded + 1]
+                )
+                .select_related("attempt__node_run")
+                .order_by("pk")[: bounded + 1]
             )
             records, more = _bounded_page(rows, bounded, _artifact_record)
             next_value = int(str(records[-1]["id"])) if more and records else None

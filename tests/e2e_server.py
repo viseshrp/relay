@@ -64,6 +64,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     from relay.execution.state import EventSource
     from relay.manage import apply_migrations
     from relay.paths import artifacts_dir, settings_path
+    from relay.projects import folders
     from relay.projects.service import initialize_project
     from relay.web.auth import owner_required
     from relay.web.models import EditorLease, Installation, NodeAttempt, Project, Run, WorkflowDraft
@@ -81,6 +82,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
 
     apply_migrations()
     patch = pytest.MonkeyPatch()
+    patch.setattr(folders, "_home_directory", lambda: root)
     if assets_root := os.environ.get("RELAY_TEST_ASSETS_ROOT"):
         from relay.web import static_view
 

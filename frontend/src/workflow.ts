@@ -17,6 +17,12 @@ export interface WorkflowNodeValue {
   auto_retry?: boolean;
   prompts?: Array<{ local?: string; global?: string }>;
   outputs?: Record<string, unknown>;
+  branches?: Record<string, string>;
+  body?: Record<string, WorkflowNodeValue>;
+  max_iterations?: number;
+  until?: string | null;
+  exhausted?: string;
+  workflow?: string;
   [key: string]: unknown;
 }
 
@@ -148,7 +154,7 @@ export function nodeDefaults(type: string): WorkflowNodeValue {
     case "human_wait":
       return { type, prompt: "Continue?" };
     case "condition":
-      return { type, expr: "true", branches: { true: "" } };
+      return { type, expr: "${{ \"true\" }}", branches: { true: "" } };
     case "loop":
       return { type, body: {}, max_iterations: 1, exhausted: "" };
     case "subworkflow":

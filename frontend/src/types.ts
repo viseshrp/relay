@@ -335,7 +335,16 @@ export interface RunEvent {
   payload: Record<string, JsonValue>;
 }
 
+export interface CapturedRunWorkflow {
+  workflow_key: string;
+  yaml: string;
+  truncated: boolean;
+  sha256: string;
+}
+
 export interface ArtifactRecord {
+  scope_path: string;
+  attempt_number: number;
   id: string;
   attempt_id: string;
   name: string;
@@ -398,4 +407,13 @@ export interface StorageUsage {
   branches: number;
   attempt_refs: number;
   cleanup_blocked: boolean;
+}
+
+
+export interface FolderListing {
+  root: string;
+  path: string;
+  parent: string | null;
+  folders: Array<{ name: string; path: string; repository: boolean }>;
+  next: string | null;
 }

@@ -137,7 +137,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
     else await route.continue();
   });
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
-  await page.getByRole("button", { name: "Agent conversation", exact: true }).click();
+  await page.getByRole("button", { name: "Human review", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "The saved log page could not be read." })).toBeVisible();
   failing = false;
   await page.getByRole("button", { name: "Refresh logs" }).click();
@@ -147,7 +147,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
   await expect(log.getByText("Saved message 0", { exact: true })).toBeAttached();
   await log.getByRole("textbox", { name: "Search logs" }).fill("hidden searchable");
   await expect(log.getByText("Hidden searchable thought", { exact: true })).toBeVisible();
-  const viewport = log.getByRole("region", { name: "Agent conversation log" });
+  const viewport = log.getByRole("region", { name: "Human review log" });
   const top = await viewport.evaluate((element) => element.scrollTop);
   await append(page, id, "New streamed message");
   await expect(log.getByText("New streamed message", { exact: true })).toBeAttached();

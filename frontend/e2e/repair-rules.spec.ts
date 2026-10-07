@@ -98,6 +98,8 @@ test("a new repair rule keeps provider defaults and saves independent role choic
   await page.getByRole("button", { name: "Work", exact: true }).click();
   await page.getByRole("button", { name: "Repairs", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Repairs for Work" });
+  await expect(dialog.getByRole("switch", { name: "Enable automatic repairs", exact: true })).not.toBeChecked();
+  await dialog.getByRole("switch", { name: "Enable automatic repairs", exact: true }).check();
   const fixer = dialog.getByRole("region", { name: "Codex configuration" });
   const effort = fixer.getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeEnabled();

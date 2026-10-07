@@ -211,6 +211,9 @@ validation state.
 
 Switching views, workflows, or projects flushes the recovery draft first.
 Requests are serialized so an older draft cannot overwrite a newer one.
+**Discard changes** restores the saved YAML bytes and replaces the recovery
+draft without rewriting the workflow file. Restoring the saved text directly
+in the YAML editor also updates the recovery draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
 Save validates the complete workflow, prompts, and subworkflows, then replaces
@@ -622,7 +625,10 @@ confirmed schedule. Automatic recovery never answers a declared human wait.
 
 ## Stage repairs
 
-Select an agent or command stage in the editor and open **Repairs**. Enable
+Select an agent or command stage in the editor and open **Repairs**. Opening
+this dialog does not edit the workflow. New rules start disabled. **Done**
+applies the settings to the YAML document; **Cancel**, Escape, and the
+backdrop leave the document unchanged. Enable
 automatic repairs, choose the verdict output and accepted value, and set the
 number of fix-and-verify rounds. Configure the **Fixer** and **Verifier** with
 their own tools, exact models, effort, permissions, and instructions. Agent
@@ -695,6 +701,21 @@ the platform-specific `relay-{pid}.log` files described in
 
 The header keeps the current project and **Workflows** and **Runs** tabs.
 Workflows have a sidebar, a file header, and the existing visual/YAML editor.
+Browser navigation adds history entries for views, workflows, runs, and
+jobs. Back and Forward restore the previous selection after flushing any
+recovery draft. The run sidebar's workflow filter is stored in the
+`workflow` URL parameter and survives reloads.
+
+**Add a stage** offers agent work, commands, human reviews, conditions,
+loops, and subworkflows. New conditions include an editable continuation
+job; new loops include a command body and an exhaustion job. Condition
+result branches and loop stop/exhaustion settings edit the YAML document.
+Subworkflow creation requires selecting another existing workflow. Detailed
+loop-body definitions remain editable in YAML.
+
+An empty project keeps the workspace sidebar and offers **New workflow**.
+Its editor and launch controls wait until a workflow is selected.
+
 `view=workflows` is the canonical editor URL; older `view=author` links open
 that view and update the URL. The Runs tab opens history. When a run needs a
 response, it returns to that run; visiting Workflows preserves the current
@@ -717,10 +738,20 @@ Summary shows source, status, total duration, and artifact count above a
 horizontal dependency graph. Equivalent parallel groups with more than five
 jobs become one card with **Show all jobs**; its dialog opens any member's
 log. Job lists still include each scope and iteration. The graph's wheel does
-not intercept page scrolling. **Artifacts** is a visible summary section,
-with the existing authenticated downloads and hashes. Annotations link to
+not intercept page scrolling. Long graphs start at the entry job at a
+readable scale; **Fit View** remains available for the whole graph. Refreshes
+do not reset a manually chosen viewport. Skipped or canceled jobs that never
+started show no elapsed duration. **Artifacts** is a visible summary section,
+with job, attempt, readable size, authenticated downloads, and expandable
+file hashes. Each download has a distinct accessible name. **Workflow file**
+opens the immutable captured YAML in a read-only dialog. **Edit current
+workflow** opens the saved source editor separately. Annotations link to
 failed jobs. Agent messages, approvals, repairs, and code review stay in the
 same run.
+
+Unstarted jobs show a waiting explanation without a log-history error.
+Human reviews use a **Human review** heading, and control jobs use **Job
+activity**. Only agent jobs use **Agent conversation**.
 
 Job logs use compact, collapsible sections and a **Search logs** toolbar.
 The viewer automatically loads every public event page for the selected

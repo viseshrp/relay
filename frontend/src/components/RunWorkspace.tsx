@@ -59,6 +59,8 @@ import { JobWorkspace } from "./JobWorkspace";
 import { RunActions } from "./RunActions";
 import { LaunchPanel } from "./LaunchPanel";
 import { ActivityFeed } from "./ActivityFeed";
+import { RunArtifacts } from "./RunArtifacts";
+import { RunWorkflowFile } from "./RunWorkflowFile";
 import { RunHistory } from "./RunHistory";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { runSummaryGraph } from "../run-graph";
@@ -141,6 +143,8 @@ const VIRTUAL_ROW_OVERSCAN = 3;
 
 interface RunWorkspaceProps {
   selectedRun: string | null;
+  selectedWorkflow: string | null;
+  onSelectWorkflow: (key: string | null) => void;
   onSelectRun: (runId: string | null) => void;
   onRunWorkflow: (key: string) => void;
   onEditWorkflow: (key: string) => void;
@@ -314,9 +318,11 @@ function VirtualEvents({ events, mode }: { events: RunEvent[]; mode: "output" | 
 }
 
 
-export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWorkflow, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
-  const [filters, setFilters] = useState({ workflow: "", status: "", branch: "", query: "" });
+export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, onSelectRun, onRunWorkflow, onEditWorkflow, project, selectedInteraction, selectedJob, onSelectJob, waitingRuns, onRunSucceeded }: RunWorkspaceProps) {
+  const [localFilters, setLocalFilters] = useState({ status: "", branch: "", query: "" });
+  const filters = useMemo(() => ({ ...localFilters, workflow: selectedWorkflow ?? "" }), [localFilters, selectedWorkflow]);
   const [graphJobs, setGraphJobs] = useState<string[] | null>(null);
+  const [workflowFileOpen, setWorkflowFileOpen] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
   useEffect(() => {
     if (showArtifacts && !selectedJob) {
@@ -830,9 +836,11 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
       {retrySettings && detail && <RetrySettings key={`${detail.id}:${retrySettings.scope_path}`}
         problem={retrySettings} projectId={detail.project_id} onClose={() => setRetrySettings(null)} onRetry={rerunNode} />}
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+      {workflowFileOpen && detail && <RunWorkflowFile key={detail.id} runId={detail.id}
+        onClose={() => setWorkflowFileOpen(false)} onEdit={(key) => { setWorkflowFileOpen(false); onEditWorkflow(key); }} />}
       {!selectedRun ? <RunHistory project={project} runs={runs} waitingRuns={waitingRuns} more={Boolean(runCursor)} refreshing={refreshing}
         onMore={() => void loadHistory(runCursor ?? undefined)} onSelect={onSelectRun} onRefresh={() => void refreshRuns()}
-        onRunWorkflow={onRunWorkflow} onEditWorkflow={onEditWorkflow} filters={filters} onFilters={setFilters} /> : <Box className="run-layout">
+        onRunWorkflow={onRunWorkflow} onEditWorkflow={onEditWorkflow} filters={filters} onFilters={(next) => { setLocalFilters({ status: next.status, branch: next.branch, query: next.query }); if (next.workflow !== filters.workflow) onSelectWorkflow(next.workflow || null); }} /> : <Box className="run-layout">
         <Paper variant="outlined" className="history-panel actions-sidebar">
           {detail && <JobList nodes={detail.nodes} selected={selectedJob} repairOwners={repairOwners}
             hasMore={nodeCursor !== null} onSelect={(scope) => scope ? showStep(scope) : onSelectJob(null)}
@@ -841,7 +849,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
           <Divider sx={{ my: 2 }} />
           <Typography variant="caption" color="text.secondary" sx={{ px: 2 }}>Run details</Typography>
           <ListItemButton onClick={() => { onSelectJob(null); setShowArtifacts(true); }}><ActionIcon name="artifact" /><ListItemText primary="Artifacts" /></ListItemButton>
-          {detail && <ListItemButton onClick={() => onEditWorkflow(detail.workflow_key)}><ActionIcon name="workflow" /><ListItemText primary="Workflow file" /></ListItemButton>}
+          {detail && <ListItemButton onClick={() => setWorkflowFileOpen(true)}><ActionIcon name="workflow" /><ListItemText primary="Workflow file" /></ListItemButton>}
           <ListItemButton onClick={() => onSelectRun(null)}><ActionIcon name="clock" /><ListItemText primary="Run history" /></ListItemButton>
         </Paper>
 
@@ -917,41 +925,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, onEditWo
                   </AccordionDetails>
                 </Accordion>}
 </AccordionDetails></Accordion>
-              <Paper variant="outlined" className="section-card" id="run-artifacts" aria-label="Artifacts">
-                <Typography variant="h6" sx={{ mb: 1 }}>Artifacts</Typography>
-                <Stack spacing={1}>
-                  {artifacts.map((artifact) => (
-                    <Stack
-                      key={artifact.id}
-                      direction="row"
-                      spacing={2}
-                      sx={{ alignItems: "center" }}
-                    >
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography>{artifact.name}</Typography>
-                        <Typography variant="caption" color="text.secondary" className="mono-wrap">
-                          {artifact.sha256} · {artifact.bytes.toLocaleString()} bytes
-                        </Typography>
-                      </Box>
-                      <Button
-                        component="a"
-                        href={`/api/artifacts/${encodeURIComponent(artifact.id)}`}
-                        download
-                      >
-                        Download
-                      </Button>
-                    </Stack>
-                  ))}
-                  {artifacts.length === 0 && (
-                    <Typography color="text.secondary">No preserved artifacts.</Typography>
-                  )}
-                  {artifactCursor !== null && (
-                    <Button onClick={() => void loadMoreArtifacts()}>
-                      Load more artifacts
-                    </Button>
-                  )}
-                </Stack>
-              </Paper>
+              <RunArtifacts artifacts={artifacts} more={artifactCursor !== null} onMore={() => void loadMoreArtifacts()} />
               {repairGroups.length > 0 && <Accordion><AccordionSummary><Typography>Repairs · {repairGroups.length} configured</Typography></AccordionSummary><AccordionDetails><Stack spacing={2}>
                 <Typography variant="body2">Relay handles these repairs behind each stage. Reports, attempts, and tool messages remain saved. Settings for this run are captured; edit the workflow to change future runs.</Typography>
                 {repairGroups.map((group) => {

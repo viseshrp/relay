@@ -47,6 +47,7 @@ import { AgentConfiguration } from "./AgentConfiguration";
 import { PromptEditor } from "./PromptEditor";
 import { ModelPicker } from "./ModelPicker";
 import { RepairSettings } from "./RepairSettings";
+import { ControlJobFields } from "./ControlJobFields";
 import { CommandFields } from "./CommandFields";
 import { EnvironmentEditor } from "./EnvironmentEditor";
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
@@ -89,10 +90,12 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   const [addingStage, setAddingStage] = useState(false);
   const [stageName, setStageName] = useState("Check project");
   const [stageKind, setStageKind] = useState("command");
+  const [stageWorkflow, setStageWorkflow] = useState("");
   const [warnings, setWarnings] = useState<HandoffWarning[]>([]);
   const [handoffHelp, setHandoffHelp] = useState(false);
   const [promptDirty, setPromptDirty] = useState(false);
-  const [repairOpen, setRepairOpen] = useState(false);
+  const [repairDraft, setRepairDraft] = useState<{ rule: RepairRuleValue; outputs: Record<string, unknown> } | null>(null);
+  const repairOpen = repairDraft !== null;
   const [repairDefaults, setRepairDefaults] = useState<RepairDefaults | null>(null);
   const [workflowKey, setWorkflowKey] = useState("workflow");
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -123,10 +126,11 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   );
   const definition = selectedNode ? parsed.value?.nodes[selectedNode] : undefined;
   const dirty = loadedKey !== null && yamlText !== savedYaml;
+  const needsDraftWrite = loadedKey !== null && (draft ? draft.yaml !== yamlText : dirty);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
   const flushDraft = useCallback(async () => {
     if (promptDirty) throw new Error("Save the agent's instructions before leaving this stage.");
-    if (!dirty || loadedKey === null) return;
+    if (!needsDraftWrite || loadedKey === null) return;
     if (!leaseReady) throw new Error("Save or recover this workflow before switching projects. Its editing lease is unavailable.");
     const write = draftWrites.current.catch(() => undefined).then(async () => {
       const response = await api<{ draft: WorkflowDraft }>(projectPath(workflowPath(loadedKey, "/draft"), requestProject), {
@@ -136,7 +140,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     });
     draftWrites.current = write;
     await write;
-  }, [dirty, loadedKey, leaseReady, requestProject, yamlText, baseHash, promptDirty]);
+  }, [needsDraftWrite, loadedKey, leaseReady, requestProject, yamlText, baseHash, promptDirty]);
   useEffect(() => { onNavigationReady(flushDraft); return () => onNavigationReady(null); }, [onNavigationReady, flushDraft]);
   const flushCurrent = useRef(flushDraft);
   useEffect(() => { flushCurrent.current = flushDraft; }, [flushDraft]);
@@ -163,7 +167,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     setDraft(document.draft);
     setWarnings(document.warnings);
     setRepairDefaults(document.repair_defaults);
-    setRepairOpen(false);
+    setRepairDraft(null);
     setSelectedNode(null);
     setStageFilter("");
     setStageFocusRequest(0);
@@ -221,12 +225,12 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   }, [acquireLease, loadedKey]);
 
   useEffect(() => {
-    if (!dirty || loadedKey === null || !leaseReady || busy) return;
+    if (!needsDraftWrite || loadedKey === null || !leaseReady || busy) return;
     const timer = window.setTimeout(() => {
       void flushDraft().catch((caught: unknown) => setError(errorMessage(caught)));
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [dirty, leaseReady, loadedKey, busy, flushDraft]);
+  }, [needsDraftWrite, leaseReady, loadedKey, busy, flushDraft]);
 
   function mutate(mutation: Parameters<typeof mutateWorkflow>[1]) {
     try {
@@ -243,7 +247,21 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     const prefix = stageName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "step";
     const id = nextNodeId(parsed.value, /^[a-z]/.test(prefix) ? prefix : `step_${prefix}`);
     const previous = Object.keys(parsed.value?.nodes ?? {}).at(-1);
-    mutate((document) => document.setIn(["nodes", id], { ...nodeDefaults(stageKind), ...(previous ? { needs: [previous] } : {}) }));
+    mutate((document, value) => {
+      const next: WorkflowNodeValue = { ...nodeDefaults(stageKind), ...(previous ? { needs: [previous] } : {}) };
+      if (stageKind === "condition" || stageKind === "loop") {
+        const target = nextNodeId(value, `${id}_${stageKind === "loop" ? "exhausted" : "continue"}`);
+        if (stageKind === "condition") next.branches = { true: target };
+        else {
+          next.body = { check: nodeDefaults("command") };
+          next.until = "${{ loop.index >= 1 }}";
+          next.exhausted = target;
+        }
+        document.setIn(["nodes", target], { ...nodeDefaults("command"), needs: [id] });
+      }
+      if (stageKind === "subworkflow") next.workflow = stageWorkflow;
+      document.setIn(["nodes", id], next);
+    });
     setSelectedNode(id);
     setStageFocusRequest((value) => value + 1);
     setAddingStage(false);
@@ -299,31 +317,63 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     });
   }
 
-  function setRepairs(rule: RepairRuleValue) {
-    if (selectedNode === null) return;
-    mutate((document) => document.setIn(["repairs", selectedNode], rule));
+  async function discardChanges() {
+    if (!loadedKey || !leaseReady || promptDirty) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await draftWrites.current.catch(() => undefined);
+      const response = await api<{ draft: WorkflowDraft }>(projectPath(workflowPath(loadedKey, "/draft"), requestProject), {
+        method: "POST", body: JSON.stringify({ yaml: savedYaml, base_hash: baseHash, holder: holder.current }),
+      });
+      setDraft(response.draft);
+      setYamlText(savedYaml);
+      setRepairDraft(null);
+      setSelectedNode(null);
+      setNotice("Changes discarded. The saved workflow is unchanged.");
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openRepairs() {
     if (promptDirty) { setError("Save the stage instructions before opening repairs."); return; }
     if (!selectedNode || !definition || !repairDefaults) return;
-    if (!parsed.value?.repairs?.[selectedNode]) {
-      const outputs = definition.outputs && typeof definition.outputs === "object" ? definition.outputs : {};
-      const acceptedOutput = Object.keys(outputs)[0] ?? "ready";
-      const rule = { accepted_output: acceptedOutput, accepted_value: "Yes", fix: {
-        type: "agent", writes: true, model: definition.model, agents: definition.agents,
-        agent_options: definition.agent_options,
-      }, verify: {
-        type: "agent", writes: true, allow_no_commit: true, model: definition.model,
-        agents: definition.agents, agent_options: definition.agent_options,
-        outputs: { [acceptedOutput]: { label: { artifact: "REVIEW_FIX_VERIFICATION.md", label: "Ready" } } },
-      } };
-      mutate((document) => {
-        document.setIn(["repairs", selectedNode], rule);
-        if (!Object.keys(outputs).length) document.setIn(["nodes", selectedNode, "outputs", acceptedOutput], { label: { artifact: "REVIEW.md", label: "Ready" } });
-      });
+    const outputs = definition.outputs && typeof definition.outputs === "object" ? definition.outputs : {};
+    const acceptedOutput = Object.keys(outputs)[0] ?? "ready";
+    const existing = parsed.value?.repairs?.[selectedNode];
+    const rule: RepairRuleValue = existing ?? { enabled: false, accepted_output: acceptedOutput, accepted_value: "Yes", fix: {
+      type: "agent", writes: true, model: definition.model, agents: definition.agents,
+      agent_options: definition.agent_options,
+    }, verify: {
+      type: "agent", writes: true, allow_no_commit: true, model: definition.model,
+      agents: definition.agents, agent_options: definition.agent_options,
+      outputs: { [acceptedOutput]: { label: { artifact: "REVIEW_FIX_VERIFICATION.md", label: "Ready" } } },
+    } };
+    setRepairDraft({ rule, outputs: existing || Object.keys(outputs).length ? outputs : {
+      [acceptedOutput]: { label: { artifact: "REVIEW.md", label: "Ready" } },
+    } });
+  }
+
+  function applyRepairs() {
+    if (!selectedNode || !repairDraft || promptDirty) return;
+    const existing = parsed.value?.repairs?.[selectedNode];
+    const outputs = definition?.outputs ?? {};
+    if ((!existing && repairDraft.rule.enabled === false) ||
+        (JSON.stringify(existing) === JSON.stringify(repairDraft.rule) &&
+         JSON.stringify(outputs) === JSON.stringify(repairDraft.outputs))) {
+      setRepairDraft(null);
+      return;
     }
-    setRepairOpen(true);
+    mutate((document) => {
+      document.setIn(["repairs", selectedNode], repairDraft.rule);
+      if (JSON.stringify(outputs) !== JSON.stringify(repairDraft.outputs)) {
+        document.setIn(["nodes", selectedNode, "outputs"], repairDraft.outputs);
+      }
+    });
+    setRepairDraft(null);
   }
 
   function setAgentOption(agentId: string, field: keyof AgentOptions, value: string | null) {
@@ -425,9 +475,14 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           <Typography component="h1" variant="h5">{parsed.value?.name || "Choose a workflow"}</Typography>
           <Typography variant="body2" color="text.secondary">{loadedKey}</Typography>
         </Box>
-        <Button ref={launchButton} variant="contained" onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button>
+        <Button ref={launchButton} variant="contained" disabled={loadedKey === null || busy} onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button>
       </Stack>
-      <Paper className="toolbar-card" variant="outlined">
+      {loadedKey === null && <Paper className="section-card" variant="outlined">
+        <Typography variant="h6">{busy ? "Loading workflow…" : inventory.length ? "Choose a workflow" : "No workflows yet"}</Typography>
+        <Typography color="text.secondary">{inventory.length ? "Select a workflow in the sidebar." : "Create a workflow to add jobs and start a run."}</Typography>
+        <Button onClick={() => setNewWorkflow(true)}>New workflow</Button>
+      </Paper>}
+      {loadedKey !== null && <Paper className="toolbar-card" variant="outlined">
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
@@ -442,6 +497,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           <Button variant="contained" onClick={requestSave} disabled={!dirty || busy || !leaseReady}>
             Save
           </Button>
+          <Button onClick={() => void discardChanges()} disabled={!dirty || busy || !leaseReady || promptDirty}>Discard changes</Button>
           <Button onClick={() => setAddingStage(true)} disabled={parsed.value === null || !leaseReady}>Add stage</Button>
           <Box sx={{ flex: 1 }} />
           <Chip
@@ -452,7 +508,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           {draft && <Chip size="small" label={`Draft ${draft.validation_state}`} />}
           {dirty && <Chip size="small" color="primary" variant="outlined" label="Unsaved" />}
         </Stack>
-      </Paper>
+      </Paper>}
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>}
@@ -460,11 +516,11 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         {warning.workflow_key ? `${warning.workflow_key} · ` : ""}{stageLabel(warning.scope_path)}: {warning.artifact} is only checked for existence. {warning.message}
       </Alert>)}
       {loadedKey && Object.keys(parsed.value?.nodes ?? {}).length === 0 && <Alert severity="info" action={<Button onClick={() => setAddingStage(true)}>Add first stage</Button>}>Your workflow is empty. Add a command, agent task, or review step to begin.</Alert>}
-      {parsed.errors.length > 0 && (
+      {loadedKey !== null && parsed.errors.length > 0 && (
         <Alert severity="warning">{parsed.errors.join(" ")}</Alert>
       )}
 
-      <Box>
+      {loadedKey !== null && <Box>
         <Paper className="canvas-panel" variant="outlined">
           <Box sx={{ p: 2 }}>
             <Typography variant="subtitle2">Workflow stages</Typography>
@@ -521,7 +577,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           </Box>
           </AccordionDetails>
         </Accordion>
-      </Box>
+      </Box>}
 
       {selectedNode && definition && (
         <Paper className="section-card" variant="outlined" role="region" aria-label="Stage settings">
@@ -615,23 +671,9 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                   onChange={(event) => setNodeField("prompt", event.target.value)}
                 />
               )}
-              {definition.type === "condition" && (
-                <TextField
-                  size="small"
-                  label="Expression"
-                  value={typeof definition.expr === "string" ? definition.expr : ""}
-                  onChange={(event) => setNodeField("expr", event.target.value)}
-                />
-              )}
-              {definition.type === "loop" && (
-                <TextField
-                  size="small"
-                  type="number"
-                  label="Maximum iterations"
-                  value={typeof definition.max_iterations === "number" ? definition.max_iterations : 1}
-                  onChange={(event) => setNodeField("max_iterations", Number(event.target.value))}
-                />
-              )}
+              {["condition", "loop"].includes(definition.type) && <ControlJobFields node={definition}
+                targets={Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode)}
+                onChange={(next) => mutate((document) => document.setIn(["nodes", selectedNode], next))} />}
               {definition.type === "subworkflow" && (
                 <TextField
                   size="small"
@@ -676,15 +718,16 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         </Paper>
       )}
 
-      {repairOpen && selectedNode && loadedKey && repairDefaults && parsed.value?.repairs?.[selectedNode] && <RepairSettings
-        stage={selectedNode} rule={parsed.value.repairs[selectedNode]} defaults={repairDefaults}
-        sourceOutputs={definition?.outputs && typeof definition.outputs === "object" ? definition.outputs : {}}
-        onSourceOutput={(output, selector) => mutate((document) => document.setIn(["nodes", selectedNode, "outputs", output], selector))}
+      {repairDraft && selectedNode && loadedKey && repairDefaults && parsed.value && <RepairSettings
+        stage={selectedNode} rule={repairDraft.rule} defaults={repairDefaults}
+        sourceOutputs={repairDraft.outputs}
+        onSourceOutput={(output, selector) => setRepairDraft((current) => current ? { ...current, outputs: { ...current.outputs, [output]: selector } } : null)}
         agents={agents} commands={commands} model={typeof parsed.value.model === "string" ? parsed.value.model : ""}
         preferences={parsed.value.agents?.length ? parsed.value.agents : agents?.preferences ?? []}
         workflowPath={workflowPath(loadedKey)} workflowKey={loadedKey} project={requestProject}
         holder={holder.current} disabled={!leaseReady} onDirty={setPromptDirty}
-        onChange={setRepairs} onClose={() => setRepairOpen(false)} />}
+        onChange={(rule) => setRepairDraft((current) => current ? { ...current, rule } : null)}
+        onApply={applyRepairs} onClose={() => setRepairDraft(null)} />}
 
       <LaunchPanel key={`${project.id}:${loadedKey}`} open={launchOpen} workflowKey={loadedKey}
         workflow={parsed.value} project={project} requestProject={requestProject} modelOptions={modelOptions} previousRun={null}
@@ -717,7 +760,8 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           await loadWorkflow(key);
         }} />
       <Dialog open={addingStage} onClose={() => setAddingStage(false)} fullWidth>
-        <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem></Select></FormControl><Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim()}>Add stage</Button></DialogActions>
+        <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem><MenuItem value="condition">Check a result</MenuItem><MenuItem value="loop">Repeat stages</MenuItem><MenuItem value="subworkflow">Run another workflow</MenuItem></Select></FormControl>
+          {stageKind === "subworkflow" && <FormControl><InputLabel id="new-stage-workflow">Workflow to run</InputLabel><Select labelId="new-stage-workflow" label="Workflow to run" value={stageWorkflow} onChange={(event) => setStageWorkflow(event.target.value)}>{inventory.filter((item) => item.key !== loadedKey).map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}</Select><Typography variant="caption">Create another workflow first if this list is empty.</Typography></FormControl>}<Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim() || (stageKind === "subworkflow" && !inventory.some((item) => item.key === stageWorkflow && item.key !== loadedKey))}>Add stage</Button></DialogActions>
       </Dialog>
 
       <Dialog open={formattingYaml !== null} onClose={() => setFormattingYaml(null)}>

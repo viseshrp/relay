@@ -126,6 +126,7 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
   const lines = commandLines(events);
   const lastError = lines.filter((line) => line.stream === "stderr").slice(-12).map((line) => ansiSpans(line.text).map((span) => span.text).join("")).join("\n");
   if (!job) return <Paper className="section-card" aria-busy={!error}>{error ? <Alert severity="error">{error}</Alert> : "Loading job…"}</Paper>;
+  const outputLabel = job.node_type === "command" ? "Command output" : job.node_type === "agent" ? "Agent conversation" : job.node_type === "human_wait" ? "Human review" : "Job activity";
   return <Stack spacing={0} component="section" aria-label="Job log" className="job-workspace">
     <Paper variant="outlined" className="section-card job-heading">
       <Typography ref={heading} tabIndex={-1} component="h2" variant="h5" sx={{ scrollMarginTop: 90 }}><span aria-hidden="true"><StatusIcon status={job.status} size={22} /></span> {stageLabel(scope)}</Typography>
@@ -134,10 +135,10 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
         {attempt?.provider_message && <Typography sx={{ whiteSpace: "pre-wrap" }}>{attempt.provider_message}</Typography>}
         {lastError && <Box component="pre" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", m: 0 }}>{lastError}</Box>}
       </Alert>}
-      <Typography sx={{ mt: 1 }}>{attempt?.agent_id ? `Runs on ${stageLabel(attempt.agent_id)} · ${attempt.model_value}` : stageLabel(job.node_type)} · {jobDuration(attempt?.started_at, attempt?.ended_at, now)}</Typography>
+      <Typography sx={{ mt: 1 }}>{attempt?.agent_id ? `Runs on ${stageLabel(attempt.agent_id)} · ${attempt.model_value}` : job.node_type === "human_wait" ? "Human review" : stageLabel(job.node_type)} · {jobDuration(attempt?.started_at, attempt?.ended_at, now, attempt?.status ?? job.status)}</Typography>
       <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
         <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="job-attempt">Attempt</InputLabel>
-          <Select labelId="job-attempt" label="Attempt" value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
+          <Select labelId="job-attempt" label="Attempt" disabled={!attempts.length} value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
             {attempts.map((row) => <MenuItem key={row.number} value={row.number}>Attempt {row.number} · {row.stop_reason ? stageLabel(row.stop_reason) : statusLabel(row.status)}</MenuItem>)}
           </Select></FormControl>
         {canRetry && job.status === "failed" && <>
@@ -163,12 +164,12 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
       {!job.prompt && !job.instructions.length && <Typography>No prompt files were captured for this job.</Typography>}
     </AccordionDetails></Accordion>
     <Accordion key={`${attempt?.number}-${failed}`} defaultExpanded={failed || job.node_type === "command" || job.node_type === "agent"}>
-      <AccordionSummary aria-label={job.node_type === "command" ? "Command output" : "Agent conversation"} expandIcon={<ActionIcon name="chevron" />}><span aria-hidden="true"><StatusIcon status={attempt?.status === "succeeded" ? "succeeded" : job.status} /></span> {job.node_type === "command" ? "Command output" : "Agent conversation"}<Typography className="step-duration" variant="caption">{jobDuration(attempt?.started_at, attempt?.ended_at, now)}</Typography></AccordionSummary>
+      <AccordionSummary aria-label={outputLabel} expandIcon={<ActionIcon name="chevron" />}><span aria-hidden="true"><StatusIcon status={attempt?.status === "succeeded" ? "succeeded" : job.status} /></span> {outputLabel}<Typography className="step-duration" variant="caption">{jobDuration(attempt?.started_at, attempt?.ended_at, now, attempt?.status ?? job.status)}</Typography></AccordionSummary>
       <AccordionDetails>
-        <JobLog key={`${runId}:${scope}:${attempt?.number}`} events={events} workingFolder={job.working_folder}
+        {attempt ? <JobLog key={`${runId}:${scope}:${attempt?.number}`} events={events} label={outputLabel} workingFolder={job.working_folder}
           live={attempt?.status === "running" || attempt?.status === "waiting"} command={job.node_type === "command"}
           loading={loadingLogs} hasMore={!logsComplete} onMore={async () => setLogRevision((value) => value + 1)} onRefresh={() => setLogRevision((value) => value + 1)}
-          scope={scope} attempt={attempt?.number} />
+          scope={scope} attempt={attempt.number} /> : <Typography>{["canceled", "skipped"].includes(job.status) ? "This job did not run." : "No attempt has started yet."}</Typography>}
       </AccordionDetails>
     </Accordion>
     <Accordion><AccordionSummary expandIcon={<ActionIcon name="chevron" />}>Outputs</AccordionSummary><AccordionDetails>

@@ -14,12 +14,12 @@ import { RepairReportSelector } from "./RepairReportSelector";
 import { CommandFields } from "./CommandFields";
 
 export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, commands, model, preferences, project, workflowPath,
-  workflowKey, holder, disabled, onChange, onSourceOutput, onClose, onDirty }: {
+  workflowKey, holder, disabled, onChange, onSourceOutput, onClose, onApply, onDirty }: {
   stage: string; rule: RepairRuleValue; defaults: RepairDefaults; agents: AgentsResponse | null;
   commands: Record<string, string[]>;
   model: string; preferences: string[]; project: string | null; workflowPath: string;
   workflowKey: string; holder: string; disabled: boolean;
-  onChange: (rule: RepairRuleValue) => void; onClose: () => void; onDirty: (dirty: boolean) => void;
+  onChange: (rule: RepairRuleValue) => void; onClose: () => void; onApply: () => void; onDirty: (dirty: boolean) => void;
   sourceOutputs: Record<string, unknown>;
   onSourceOutput: (output: string, selector: Record<string, unknown>) => void;
 }) {
@@ -27,7 +27,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
   const [promptDirty, setPromptDirty] = useState(false);
   const handleDirty = useCallback((dirty: boolean) => { setPromptDirty(dirty); onDirty(dirty); }, [onDirty]);
   const node = rule[role];
-  const settingsDisabled = disabled || promptDirty;
+  const settingsDisabled = disabled || promptDirty || rule.enabled === false;
   const candidates = node.agents?.length ? node.agents : preferences;
   const selectedModel = typeof node.model === "string" ? node.model : "";
   const effectiveModel = selectedModel || model || agents?.defaults?.model
@@ -48,7 +48,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
     <DialogTitle id="repair-settings-title">Repairs for {stageLabel(stage)}</DialogTitle>
     <DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
       <Typography>Relay runs the fixer and verifier when this stage rejects its result. Later stages wait for a passing verification. Repair attempts stay in their own panel.</Typography>
-      <FormControlLabel label="Enable automatic repairs" control={<Switch checked={rule.enabled !== false} disabled={settingsDisabled} onChange={(event) => onChange({ ...rule, enabled: event.target.checked })} />} />
+      <FormControlLabel label="Enable automatic repairs" control={<Switch checked={rule.enabled !== false} disabled={disabled || promptDirty} onChange={(event) => onChange({ ...rule, enabled: event.target.checked })} />} />
       <TextField label="Maximum repair rounds" type="number" value={rule.max_rounds ?? defaults.max_rounds} disabled={settingsDisabled}
         slotProps={{ htmlInput: { min: 1, max: defaults.max_allowed_rounds } }}
         onChange={(event) => onChange({ ...rule, max_rounds: Number(event.target.value) })}
@@ -84,7 +84,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
           </Select></FormControl>
           <ModelPicker key={`${role}-${candidates.join(",")}`} agents={agents?.agents.filter((agent) => candidates.includes(agent.id)) ?? []} value={selectedModel} project={project} disabled={settingsDisabled} onChange={(value) => setNode({ ...node, model: value || undefined, agent_options: {} })} />
           {candidates.map((id) => { const agent = agents?.agents.find((item) => item.id === id); return agent ? <AgentConfiguration key={id} agent={agent} model={effectiveModel} inheritDefaults={Boolean(effectiveModel && agents?.defaults?.providers[id]?.model === effectiveModel)} options={node.agent_options?.[id] ?? {}} project={project} disabled={settingsDisabled} onChange={(field, value) => setOption(id, field, value)} /> : null; })}
-          <PromptEditor workflowPath={workflowPath} project={project} holder={holder} disabled={disabled}
+          <PromptEditor workflowPath={workflowPath} project={project} holder={holder} disabled={disabled || rule.enabled === false}
             reference={node.prompts?.find((prompt) => prompt.local)?.local ?? null}
             newReference={promptReference}
             onDirty={handleDirty}
@@ -100,6 +100,6 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
       </Stack>
       {promptDirty && <Alert severity="warning">Save the instructions before changing repair settings or closing this panel.</Alert>}
     </Stack></DialogContent>
-    <DialogActions><Button disabled={promptDirty} onClick={close}>Done</Button></DialogActions>
+    <DialogActions><Button disabled={promptDirty} onClick={close}>Cancel</Button><Button disabled={disabled || promptDirty} onClick={onApply}>Done</Button></DialogActions>
   </Dialog>;
 }

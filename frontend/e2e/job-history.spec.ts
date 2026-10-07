@@ -180,3 +180,9 @@ test("terminal text keeps stream boundaries, ANSI colors, and inert escape seque
   expect(jobDuration(null)).toBe("Not started");
   expect(jobDuration("invalid", "invalid")).toBe("Duration unavailable");
 });
+
+
+test("unstarted terminal jobs have no elapsed duration while pending jobs stay explicit", () => {
+  for (const status of ["skipped", "canceled", "failed", "succeeded"]) expect(jobDuration(null, null, 0, status)).toBe("—");
+  expect(jobDuration(null, null, 0, "pending")).toBe("Not started");
+});

@@ -25,7 +25,7 @@ export function runSummaryGraph(records: RunNode[], now: number): { nodes: Node<
       nodes.push({ id, type: "runJob", position: { x: 0, y: 0 }, data: { label: `${group.length} parallel jobs`, kind: "group", status, members: group.map((node) => node.id), duration: `${statuses.filter((value) => value === "succeeded").length} completed` } });
     } else for (const node of group) {
       const record = byScope.get(node.id);
-      nodes.push({ ...node, type: "runJob", className: undefined, data: { ...node.data, duration: record ? jobDuration(record.started_at, record.ended_at, now) : "" } });
+      nodes.push({ ...node, type: "runJob", className: undefined, data: { ...node.data, duration: record ? jobDuration(record.started_at, record.ended_at, now, record.status) : "" } });
     }
   }
   const edges = Array.from(new Map(graph.edges.map((edge) => {

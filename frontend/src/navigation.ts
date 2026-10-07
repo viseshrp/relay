@@ -12,7 +12,10 @@ const LOCATION_KEY = "relay.location";
 
 export function readLocation(): LocationState {
   // ?view=runs&run=abc&interaction=42 opens that request; a plain reload uses the saved selection.
-  const query = window.location.search || localStorage.getItem(LOCATION_KEY) || "";
+  let stored = "";
+  try { stored = localStorage.getItem(LOCATION_KEY) ?? ""; }
+  catch { /* Navigation remains available when browser storage is disabled. */ }
+  const query = window.location.search || stored;
   const parameters = new URLSearchParams(query);
   return {
     view: parameters.get("view") === "settings" ? "settings" : parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
@@ -31,7 +34,8 @@ export function saveLocation(location: LocationState, replace = false): void {
     if (value) query.set(key, value);
   }
   const search = `?${query.toString()}`;
-  localStorage.setItem(LOCATION_KEY, search);
+  try { localStorage.setItem(LOCATION_KEY, search); }
+  catch { /* The URL remains authoritative without browser storage. */ }
   if (search !== window.location.search) {
     if (replace) window.history.replaceState(null, "", search);
     else window.history.pushState(null, "", search);

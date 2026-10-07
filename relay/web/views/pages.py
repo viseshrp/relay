@@ -23,6 +23,7 @@ from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import CleanupPolicy, RunStatus
 from relay.owner_settings import effective_config
+from relay.projects.folders import browse_folders
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
@@ -90,6 +91,16 @@ def _attempt_parameter(request: HttpRequest) -> int | None:
         message = "attempt must be at least 1."
         raise ConfigError(message)
     return number
+
+
+@api_errors
+@owner_required
+@require_GET
+def project_folders(request: HttpRequest) -> HttpResponse:
+    listing = browse_folders(
+        request.GET.get("path"), since=request.GET.get("since", ""), limit=_page_limit(request)
+    )
+    return JsonResponse(asdict(listing))
 
 
 @api_errors
@@ -380,6 +391,15 @@ def run_job(request: HttpRequest, run_id: str) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def run_workflow(request: HttpRequest, run_id: str) -> HttpResponse:
+    del request
+    workflow = DjangoReadStore().run_workflow(canonical_uuid(run_id, resource="run"))
+    return JsonResponse(workflow)
+
+
+@api_errors
+@owner_required
+@require_GET
 def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
     since, limit = _page_parameters(request)
     artifacts, next_value = DjangoReadStore().page_artifacts(
@@ -463,10 +483,12 @@ __all__ = [
     "agents",
     "api_not_found",
     "artifact",
+    "project_folders",
     "projects",
     "run_artifacts",
     "run_detail",
     "run_events",
+    "run_workflow",
     "runs",
     "workflow",
 ]

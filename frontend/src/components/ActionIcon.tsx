@@ -1,7 +1,8 @@
 import { statusPresentation } from "../status";
 
-export type ActionGlyph = "summary" | "workflow" | "clock" | "branch" | "commit" | "search" | "chevron" | "up" | "down" | "refresh" | "settings" | "more" | "fullscreen" | "artifact" | "back" | "filter" | "check" | "cross" | "pause" | "skip" | "circle";
+export type ActionGlyph = "folder" | "summary" | "workflow" | "clock" | "branch" | "commit" | "search" | "chevron" | "up" | "down" | "refresh" | "settings" | "more" | "fullscreen" | "artifact" | "back" | "filter" | "check" | "cross" | "pause" | "skip" | "circle";
 const paths: Record<ActionGlyph, string> = {
+  folder: "M3 7V4h6l3 3h9v13H3ZM3 7h18",
   summary: "M3 10 12 3l9 7v11h-6v-7H9v7H3Z", workflow: "M4 3h11l5 5v13H4ZM15 3v6h5M8 13h8M8 17h6",
   clock: "M12 6v6l4 2", branch: "M6 6v12M18 6v4c0 4-12 0-12 6M3 3h6v6H3ZM3 15h6v6H3ZM15 3h6v6h-6Z",
   commit: "M3 12h5m8 0h5M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0", search: "M16 16l5 5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",

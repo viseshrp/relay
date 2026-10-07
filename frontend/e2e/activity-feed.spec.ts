@@ -131,8 +131,8 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
   const original: { events: RunEvent[] } = await (await page.request.get(`/api/runs/${id}/events?limit=200`)).json();
   expect(original.events.some((event) => typeof event.payload.summary === "string" && event.payload.summary.includes(`${folder}/r-2/REVIEW.md`))).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
-  await page.getByRole("button", { name: "Agent conversation", exact: true }).click();
-  const jobLog = page.getByRole("region", { name: "Agent conversation log", exact: true });
+  await page.getByRole("button", { name: "Human review", exact: true }).click();
+  const jobLog = page.getByRole("region", { name: "Human review log", exact: true });
   await expect(jobLog.getByRole("heading", { name: "Review result", exact: true })).toBeVisible();
   await expect(jobLog.getByRole("combobox", { name: "Filter by job", exact: true })).toHaveCount(0);
   expect(await jobLog.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
