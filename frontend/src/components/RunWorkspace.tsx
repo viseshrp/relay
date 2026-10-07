@@ -56,6 +56,7 @@ import { attentionChanged } from "../attention";
 import { RunProblemNotice } from "./RunProblemNotice";
 import { RetrySettings } from "./RetrySettings";
 import { JobList } from "./JobList";
+import { usePendingChoices, type SettingsChoices } from "./usePendingChoices";
 import { JobWorkspace } from "./JobWorkspace";
 import { RunActions } from "./RunActions";
 import { LaunchPanel } from "./LaunchPanel";
@@ -336,7 +337,7 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   }, [selectedRun, project.id]);
   const [stopOpen, setStopOpen] = useState(false);
   const [retrySettings, setRetrySettings] = useState<RetryConfiguration | null>(null);
-  const [pendingSettings, setPendingSettings] = useState<RetryConfiguration | null>(null);
+  const [pendingSettings, setPendingSettings] = useState<{ runId: string; settings: RetryConfiguration; choices: SettingsChoices } | null>(null);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
@@ -785,6 +786,9 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
   const needsAttention = pendingInteractions.length > 0 || detail?.nodes.some((node) => node.status === "failed");
   const canPause = detail !== null && PAUSABLE_RUNS.has(detail.status);
   const dispatchPaused = canPause && detail.dispatch_paused;
+  const pendingChoices = usePendingChoices(detail?.id ?? null, detail?.project_id ?? project.id, dispatchPaused,
+    detail?.nodes.flatMap((node) => node.pending_settings ? [node.pending_settings] : []) ?? []);
+  useEffect(() => { setPendingSettings(null); }, [selectedRun, dispatchPaused]);
   const recovery = detail?.recovery?.current;
   const recoveryPending = PENDING_RECOVERY.has(recovery?.state ?? "");
   const recovering = recovery?.state === "resumed" && detail?.status === "running"
@@ -800,6 +804,11 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
       {detail && <RunActions run={detail} busy={pauseBusy || relaunchBusy || refreshing}
         onPause={() => void configurePause(!detail.dispatch_paused)} onCancel={() => setStopOpen(true)}
         onRerunAll={() => void rerunAll()} rerunAllRef={relaunchButton} />}
+      {dispatchPaused && <Alert severity="info">Paused. Running jobs will finish; nothing new will start until you resume.</Alert>}
+      {pendingSettings && detail?.id === pendingSettings.runId && dispatchPaused && <RetrySettings
+        key={`${pendingSettings.runId}:${pendingSettings.settings.scope_path}:pending`}
+        purpose="pending" problem={pendingSettings.settings} initialChoices={pendingSettings.choices} projectId={detail.project_id}
+        onClose={() => setPendingSettings(null)} onRetry={savePendingSettings} />}
       {runAgain && <LaunchPanel open={runAgain.open} workflowKey={runAgain.source.workflow_key} workflow={runAgain.workflow}
         project={project} requestProject={runAgain.source.project_id} modelOptions={runAgain.models} previousRun={runAgain.source}
         blockedReason={Object.keys(runAgain.workflow.nodes).length === 0 ? "Add a job to this empty workflow before running it." : null}
@@ -813,7 +822,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
         <Paper variant="outlined" className="history-panel">
           {detail && <JobList nodes={detail.nodes} selected={selectedJob} repairOwners={repairOwners}
             hasMore={nodeCursor !== null} onSelect={(scope) => scope ? showStep(scope) : onSelectJob(null)}
-            onMore={() => void loadMoreNodes()} />}
+            onMore={() => void loadMoreNodes()} pendingChoices={dispatchPaused ? pendingChoices.choices : undefined}
+            onCheck={pendingChoices.retry} onEdit={(settings, choices) => setPendingSettings({ runId: detail.id, settings, choices })} />}
           <Stack direction="row" sx={{ alignItems: "center", p: 2 }}>
             <Typography variant="h6" sx={{ flex: 1 }}>Run history</Typography>
             <Button size="small" disabled={refreshing} onClick={() => void refreshRuns()}>Refresh</Button>
@@ -868,12 +878,8 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                   <Chip color={detail.status === "succeeded" ? "success" : needsAttention ? "warning" : "default"} label={runStatusLabel(detail)} />
                   <Button component="a" href={`?view=runs&project=${project.id}&run=${detail.id}`}>Link to run</Button>
                 </Stack>
-                {dispatchPaused && <Alert severity="info" sx={{ mt: 2 }}>
-                  New jobs are paused. Running jobs can finish; their sessions are not interrupted.
-                  Change an unstarted job's settings below, then choose Resume when ready.
-                </Alert>}
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  <Typography variant="subtitle1">{pendingInteractions.length ? "Choose Respond above to continue this job." : dispatchPaused ? "New jobs will wait until you resume. Current jobs can finish normally." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>
+                  {!dispatchPaused && <Typography variant="subtitle1">{pendingInteractions.length ? "Choose Respond above to continue this job." : recoveryPending ? "Preparing retry. Relay is preserving reports and waiting for active work to stop." : recovering ? `Retrying step — ${recovery?.retry_number} of ${detail.recovery.max_retries}.` : detail.status === "failed" && detail.problem?.retry?.state === "scheduled" ? "Relay is waiting for the provider's reset. It will retry automatically." : detail.status === "failed" ? "Next: inspect the failed step below, then retry it when the cause is resolved." : detail.status === "succeeded" ? "Work is complete. Review the saved documents and code changes below." : detail.status === "canceled" ? "Work stopped. Finished steps and their changes remain available for review." : detail.status === "canceling" ? "Relay is stopping active tools and preserving their results." : "Relay is working. You can follow progress here; it will ask when it needs your input."}</Typography>}
                   {currentStages.length > 0 && <Typography>Current: {currentStages.map((node) => stageLabel(node.scope_path)).join(", ")}</Typography>}
                   <LinearProgress variant="determinate" value={visibleStages.length ? 100 * complete / visibleStages.length : 0} />
                   <Typography variant="body2" color="text.secondary">{complete} of {visibleStages.length} {nodeCursor !== null ? "loaded " : ""}stages complete or skipped. {streamState === "live" ? "Updates are live." : streamState === "complete" ? "All updates received." : "Connecting to live updates…"}</Typography>
@@ -916,20 +922,6 @@ export function RunWorkspace({ selectedRun, onSelectRun, onRunWorkflow, project,
                   <Button onClick={() => showStep(node.scope_path)}>Open job log</Button>
                 </Stack>)}
               </Paper>}
-              {dispatchPaused && detail.nodes.some((node) => node.pending_settings) && <Paper variant="outlined" className="section-card">
-                <Typography variant="h6">Unstarted agent steps</Typography>
-                {detail.nodes.filter((node) => node.pending_settings).map((node) => <Stack key={node.id} direction="row" spacing={2} sx={{ mt: 1, alignItems: "center" }}>
-                  <Typography sx={{ flex: 1 }}>{stageLabel(node.scope_path)} · {node.pending_settings?.model_value}</Typography>
-                  <Button onClick={() => showStep(node.scope_path)}>Show step</Button>
-                  <Button variant="outlined" disabled={refreshing} onClick={() => setPendingSettings(node.pending_settings ?? null)}>Change settings</Button>
-                </Stack>)}
-              </Paper>}
-              {pendingSettings && <RetrySettings
-                key={`${detail.id}:${pendingSettings.scope_path}:pending`}
-                purpose="pending" problem={pendingSettings} projectId={detail.project_id}
-                onClose={() => setPendingSettings(null)} onRetry={savePendingSettings}
-              />}
-
               <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
                 <FlowCanvas key={detail.id} nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => { if (detail.nodes.some((node) => node.scope_path === id)) showStep(id); }} followSelection focusRequest={stepFocusRequest} />
               </Paper>

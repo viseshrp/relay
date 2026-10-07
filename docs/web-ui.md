@@ -281,13 +281,23 @@ agent keeps its session and can finish normally. The header and history show
 automatic error recovery and quota retries; deadlines continue to apply.
 Choose **Resume** explicitly when ready.
 
-While paused, **Unstarted agent steps** lists agents that have never begun an
-attempt. Choose **Change settings** to select a freshly advertised tool, model,
-effort, or permission mode. Defaults remain the provider defaults. A changed
-tool/model reveals editable **Handoff instructions** for the unstarted step;
+While paused, the header says: "Paused. Running jobs will finish; nothing new
+will start until you resume." Upcoming agent jobs have an **Edit** icon in the
+job list, available from both Summary and job logs. Relay prefetches their
+provider choices, shares probes for identical agent/model routes, and limits
+the number of routes loading at once. The icon becomes available when the
+dialog can open populated. A failed probe shows **Check again** beside the job.
+Switching runs or resuming discards pending probes and edit controls.
+
+Choose **Edit** to select an advertised tool, model, effort, or permission mode.
+The dialog uses provider labels for current effort and permission choices;
+defaults remain the provider defaults. Cancel or Escape returns focus to the
+job's edit control. A changed tool/model reveals editable **Handoff
+instructions** for the unstarted job;
 effort and permission changes alone keep that editor hidden. **Save settings**
-keeps the run paused. Completed work, captured instructions, saved outputs,
-and other stages stay unchanged. Settings for active or completed attempts
+keeps the run paused. The server validates changed choices afresh before
+saving. Completed work, captured instructions, saved outputs, and other jobs
+stay unchanged. Settings for active or completed attempts
 cannot be changed through this control.
 
 The Runs tab lists history for the selected project. The header shows the

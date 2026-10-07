@@ -7,21 +7,25 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath, stageLabel } from "../navigation";
 import type { AgentConfiguration, AgentsResponse, ModelObservation, RetryConfiguration, RetryOptions } from "../types";
+import type { SettingsChoices } from "./usePendingChoices";
 
 type RetryModel = Pick<ModelObservation, "value" | "name">;
 
-export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = "retry" }: {
+export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = "retry", initialChoices }: {
   problem: RetryConfiguration;
   projectId: string;
   onClose: () => void;
   onRetry: (scope: string, options?: RetryOptions) => Promise<void>;
   purpose?: "retry" | "pending";
+  initialChoices?: SettingsChoices;
 }) {
-  const [agents, setAgents] = useState<AgentsResponse | null>(null);
+  const [agents, setAgents] = useState<AgentsResponse | null>(initialChoices?.agents ?? null);
   const [agentId, setAgentId] = useState(problem.agent_id);
   const [model, setModel] = useState(problem.model_value);
-  const [models, setModels] = useState<{ agentId: string; choices: RetryModel[] } | null>(null);
-  const [state, setState] = useState<{ key: string; configuration: AgentConfiguration | null }>({ key: "", configuration: null });
+  const [models, setModels] = useState<{ agentId: string; choices: RetryModel[] } | null>(initialChoices ? { agentId: problem.agent_id, choices: initialChoices.models } : null);
+  const [state, setState] = useState<{ key: string; configuration: AgentConfiguration | null }>(initialChoices
+    ? { key: JSON.stringify([problem.agent_id, problem.model_value, projectId]), configuration: initialChoices.configuration }
+    : { key: "", configuration: null });
   const [selection, setSelection] = useState(0);
   const [permissionSelection, setPermissionSelection] = useState(0);
   const [handoff, setHandoff] = useState(problem.default_handoff_prompt ?? "");
@@ -34,6 +38,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
     && new TextEncoder().encode(handoff).length > problem.handoff_prompt_max_bytes;
 
   useEffect(() => {
+    if (initialChoices) return;
     const controller = new AbortController();
     void api<AgentsResponse>("/api/agents", { signal: controller.signal }).then((value) => {
       if (!controller.signal.aborted) setAgents(value);
@@ -41,9 +46,13 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
       if (!controller.signal.aborted) setError(errorMessage(caught));
     });
     return () => controller.abort();
-  }, []);
+  }, [initialChoices]);
 
   useEffect(() => {
+    if (initialChoices && agentId === problem.agent_id) {
+      setModels({ agentId, choices: initialChoices.models });
+      return;
+    }
     const controller = new AbortController();
     void api<{ models: RetryModel[] }>(
       projectPath(`/api/agents/${encodeURIComponent(agentId)}/models`, projectId),
@@ -54,9 +63,13 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
       if (!controller.signal.aborted) setError(errorMessage(caught));
     });
     return () => controller.abort();
-  }, [agentId, projectId]);
+  }, [agentId, projectId, initialChoices, problem.agent_id]);
 
   useEffect(() => {
+    if (initialChoices && agentId === problem.agent_id && model === problem.model_value) {
+      setState({ key, configuration: initialChoices.configuration });
+      return;
+    }
     const controller = new AbortController();
     if (!model) return () => controller.abort();
     void api<AgentConfiguration>(
@@ -68,10 +81,12 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
       if (!controller.signal.aborted) setError(errorMessage(caught));
     });
     return () => controller.abort();
-  }, [agentId, model, key, projectId]);
+  }, [agentId, model, key, projectId, initialChoices, problem.agent_id, problem.model_value]);
   const selector = configuration?.effort;
   const editable = selector !== null && selector !== undefined && selector.transport !== "native";
   const choices = models?.agentId === agentId ? models.choices : [];
+  const currentEffort = selector?.choices.find((choice) => choice.value === problem.effort)?.name ?? problem.effort ?? "Provider default";
+  const currentPermission = configuration?.permission_mode?.choices.find((choice) => choice.value === problem.permission_mode)?.name ?? problem.permission_mode ?? "Provider default";
 
   function changeAgent(value: string) {
     setAgentId(value);
@@ -115,7 +130,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
       <Stack spacing={2} sx={{ pt: 1 }}>
         <Typography variant="body2">
           {purpose === "pending"
-            ? "Choose settings for this unstarted step. Saving keeps the run paused. Completed work and captured instructions stay saved."
+            ? "Choose settings for this upcoming job. Saving keeps the run paused. Completed work and captured instructions stay saved."
             : "Choose the tool and model for this step's new attempts. Completed steps, prompts, and earlier attempts stay saved. Automatic retries keep your choice."}
         </Typography>
         <FormControl fullWidth disabled={!agents || submitting}>
@@ -142,7 +157,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
           <InputLabel id="retry-effort-label">Effort</InputLabel>
           <Select<number> labelId="retry-effort-label" label="Effort" value={selection}
             onChange={(event) => setSelection(Number(event.target.value))}>
-            {!changed && <MenuItem value={0}>Keep current effort ({problem.effort ?? "Provider default"})</MenuItem>}
+            {!changed && <MenuItem value={0}>Keep current effort ({currentEffort})</MenuItem>}
             <MenuItem value={1}>Provider default</MenuItem>
             {editable && selector.choices.map((choice, index) => <MenuItem key={choice.value} value={index + 2}>
               {choice.name}
@@ -157,7 +172,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
           <InputLabel id="retry-permission-label">Permission mode</InputLabel>
           <Select<number> labelId="retry-permission-label" label="Permission mode" value={permissionSelection}
             onChange={(event) => setPermissionSelection(Number(event.target.value))}>
-            {!changed && <MenuItem value={0}>Keep current permission mode ({problem.permission_mode ?? "Provider default"})</MenuItem>}
+            {!changed && <MenuItem value={0}>Keep current permission mode ({currentPermission})</MenuItem>}
             <MenuItem value={1}>Provider default</MenuItem>
             {configuration.permission_mode?.choices.map((choice, index) => <MenuItem key={choice.value} value={index + 2}>{choice.name}</MenuItem>)}
           </Select>
