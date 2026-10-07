@@ -254,7 +254,8 @@ sort_by_size = true
 exclude = ["venv/", ".venv/"]
 
 [tool.deptry]
-exclude = ["venv/.*", ".venv/.*", "tests/.*"]
+# Tox installs third-party source into generated environments.
+exclude = ["venv/.*", ".venv/.*", "tests/.*", '^\.tox/']
 # Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
 per_rule_ignores = { DEP002 = ["uvicorn"], DEP003 = ["hatchling"] }
 

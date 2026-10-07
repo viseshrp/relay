@@ -76,6 +76,13 @@ install the pinned Node version before building the source distribution and whee
 The release publication job downloads the already-built artifacts and does not
 rebuild them.
 
+## Source dependency checks
+
+The dependency scan in `make check` excludes installed Python environments,
+including the `.tox/` directories created by `make test`. It scans Relay
+source without treating third-party packages as project imports. The
+lockfile, vulnerability and license checks still validate dependencies.
+
 ## Runtime check without Node
 
 Install the wheel into a fresh virtual environment, remove Node from `PATH`,
