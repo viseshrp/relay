@@ -36,7 +36,7 @@ export function FolderPicker({ disabled, onSelect }: { disabled: boolean; onSele
     <Typography variant="body2" color="text.secondary">Choose a folder inside your home directory, or enter a repository path above.</Typography>
     {error && <Alert severity="error" action={<Button onClick={() => setRevision((value) => value + 1)}>Retry</Button>}>{error}</Alert>}
     {listing && <>
-      <PathDisplay path={listing.path} label="current folder" />
+      <PathDisplay path={listing.path} label="current folder" display={listing.path === listing.root ? "Home folder" : undefined} />
       <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
         <Button disabled={disabled || loading || !listing.parent} onClick={() => setPath(listing.parent)}>Up one folder</Button>
         <Button disabled={disabled || loading || path === null} onClick={() => setPath(null)}>Home folder</Button>

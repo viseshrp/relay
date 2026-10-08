@@ -79,7 +79,7 @@ test("search and keyboard selection restore an off-screen stage without changing
   await review.focus();
   await review.press("Enter");
   await expectCenteredStage(page, "review");
-  await expect(page.getByRole("region", { name: "Workflow canvas", exact: true })).toBeFocused();
+  await expect(page.getByRole("region", { name: "Stage settings", exact: true })).toBeFocused();
   await expect(review).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Stage settings", exact: true }).getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Fit View" }).click();

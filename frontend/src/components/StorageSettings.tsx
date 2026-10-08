@@ -18,7 +18,7 @@ function size(bytes: number): string { return bytes < 1024 ? `${bytes} B` : byte
 function count(value: number, singular: string): string { return `${value} ${singular}${value === 1 ? "" : "s"}`; }
 
 function StorageMetric({ label, value, detail, description }: { label: string; value: string; detail?: string; description: string }) {
-  return <Box className="storage-metric"><Typography component="dt">{label}</Typography><Box component="dd"><Typography className="storage-total">{value}</Typography>{detail && <Typography className="storage-size">{detail}</Typography>}<Typography variant="body2" color="text.secondary">{description}</Typography></Box></Box>;
+  return <Box className="storage-metric"><Typography component="dt">{label}</Typography><Box component="dd"><Box className="storage-values"><Typography className="storage-total">{value}</Typography>{detail && <Typography className="storage-size">{detail}</Typography>}</Box><Box component="details" className="storage-explanation"><Box component="summary">About {label.toLowerCase()}</Box><Typography variant="body2" color="text.secondary">{description}</Typography></Box></Box></Box>;
 }
 
 export function StorageSettings({ project, requestProject }: { project: ProjectRecord; requestProject: string | null }) {

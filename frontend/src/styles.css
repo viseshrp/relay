@@ -312,7 +312,7 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 /* The run header is shared by the summary and each job's log page. */
 .app-content { padding: 20px 28px 40px !important; }
 .app-header .MuiToolbar-root { gap: 8px; flex-wrap: wrap; min-height: 64px; padding-block: 6px; }
-.app-header .project-context { margin: 0 14px 0 0; gap: 8px; }
+.app-header .project-context { margin: 0 14px 0 0; gap: 8px; flex-direction: row; align-items: center; }
 .project-context > .help-field { width: 200px; flex: 0 1 200px; }
 .project-context .help-field-heading { gap: 4px; }
 .project-context .help-field-heading > label { font-size: 12px; }
@@ -329,9 +329,9 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .run-heading-row { align-items: center; margin-top: 6px; flex-wrap: wrap; row-gap: 10px; }
 .run-heading-row h1 { display: flex; align-items: center; gap: 10px; font-size: 23px; min-width: 240px; }
 .run-layout, .actions-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
-.actions-sidebar { position: sticky; top: 86px; overflow: auto; max-height: calc(100vh - 106px); padding: 8px 12px; border-radius: 0 !important; border-width: 0 1px 0 0 !important; border-color: #dce1ec !important; background: transparent !important; }
+.actions-sidebar { position: sticky; top: calc(var(--relay-header-height, 76px) + 10px); overflow: auto; max-height: calc(100dvh - var(--relay-header-height, 76px) - 30px); padding: 8px 12px; border-radius: 0 !important; border-width: 0 1px 0 0 !important; border-color: #dce1ec !important; background: transparent !important; }
 .actions-sidebar .MuiListItemButton-root { min-height: 38px; padding-top: 5px; padding-bottom: 5px; border-radius: 6px; gap: 9px; }
-.actions-sidebar .MuiListItemText-primary { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.actions-sidebar .MuiListItemText-primary { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions-sidebar .MuiListItemText-secondary { font-size: 11px; }
 .actions-sidebar .MuiListItemButton-root.Mui-selected { background: #e8edfc; box-shadow: -4px 0 #3156d3; }
 .actions-sidebar .MuiListItemText-root { margin: 2px 0; }
@@ -340,7 +340,7 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .actions-main { min-width: 0; padding-top: 8px; }
 .history-heading { align-items: center; flex-wrap: wrap; }
 .history-filters { padding: 16px; flex-wrap: wrap; row-gap: 10px; background: #f8f9fd; }
-.history-filters .MuiTextField-root:first-child { flex: 1; min-width: 200px; }
+.history-filters .MuiTextField-root:first-child { flex: 1; min-width: 200px; max-width: 320px; }
 .run-workflow-banner { padding: 12px 16px; align-items: center; border-top: 1px solid #dce1ec; border-bottom: 1px solid #dce1ec; }
 .run-history-row { gap: 12px; padding: 12px 16px !important; border-bottom: 1px solid #dce1ec !important; }
 .history-run-title { flex: 1; min-width: 0; }
@@ -389,7 +389,7 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .conversation-log-row .log-line-number { margin-top: 12px; }
 .fullscreen-log .job-log-viewport { height: calc(100vh - 190px); }
 .workflow-author-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 24px; }
-#run-artifacts { scroll-margin-top: 90px; }
+#run-artifacts, .section-heading, .stage-settings, .job-heading h2 { scroll-margin-top: calc(var(--relay-header-height, 76px) + 16px) !important; }
 @media (max-width: 1050px) {
   .app-content { padding: 16px !important; }
   .run-layout, .actions-layout { grid-template-columns: 235px minmax(0, 1fr); gap: 18px; }
@@ -525,5 +525,85 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 }
 @media (pointer: coarse) {
   .MuiButton-root, .MuiIconButton-root, .MuiMenuItem-root { min-height: 44px; }
-  .help-tip .MuiIconButton-root { min-height: 32px; }
+  .MuiIconButton-root { min-width: 44px; }
+  .help-tip .MuiIconButton-root { min-height: 44px; }
 }
+
+/* Field widths describe content, rather than the available page width. */
+.help-field.field-width-short { width: 320px; max-width: 100%; }
+.help-field.field-width-standard { width: 320px; max-width: 100%; }
+.help-field.field-width-wide { width: 480px; max-width: 100%; }
+.help-field.field-width-content { width: 640px; max-width: 100%; }
+.field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 960px; }
+.command-fields, .control-job-fields { width: 640px; max-width: 100%; }
+.model-picker { display: flex !important; flex-flow: row wrap !important; gap: 8px; align-items: flex-end; }
+.model-picker > button { margin: 0 0 2px !important; }
+.model-picker > .MuiAlert-root { width: 100%; }
+.project-override { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.project-override .MuiFormControlLabel-label { font-size: 12px; }
+.settings-content .MuiAccordionDetails-root { padding-top: 8px; }
+.settings-content .settings-save { margin-top: 16px !important; padding: 8px 0 0; border: 0; border-top: 1px solid #dce1ec; border-radius: 0; }
+.settings-content [data-tour] { scroll-margin-top: calc(var(--relay-header-height, 76px) + 16px); }
+.storage-metrics { display: block; }
+.storage-metric { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; padding: 12px 0; border: 0; border-bottom: 1px solid #edf0f6; border-radius: 0; background: transparent; }
+.storage-metric dt { color: #27334b; font-size: 13px; }
+.storage-values { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; }
+.storage-total.MuiTypography-root { font-size: 14px; margin: 0; }
+.storage-size.MuiTypography-root { font-size: 13px; margin: 0; }
+.storage-explanation { margin-top: 4px; font-size: 12px; color: #526078; }
+.storage-explanation summary, .launch-guidance summary { cursor: pointer; color: #3156d3; }
+.storage-explanation p { padding-top: 6px; }
+.run-choice { display: grid; grid-template-columns: 20px 40px minmax(0, 1fr); gap: 8px; align-items: center; width: 100%; min-width: 0; }
+.run-choice-number { color: #526078; font-variant-numeric: tabular-nums; }
+.run-choice-title { overflow-wrap: anywhere; }
+.run-choice-status { grid-column: 3; color: #526078; font-size: 12px; }
+.dashboard { gap: 16px; }
+.dashboard-stat { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dashboard-stat .MuiTypography-h4 { font-size: 22px; margin: 0; }
+.dashboard-empty { padding: 16px; }
+.dashboard-waiting-empty { font-size: 13px !important; }
+.dashboard-run { padding: 10px 16px; }
+.dashboard-section > .dashboard-section-heading { padding: 12px 16px; }
+.dashboard-project { padding: 16px; }
+.job-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; }
+.job-heading > h2 { grid-column: 1; }
+.job-heading > p { grid-column: 1; margin-top: 0; font-size: 13px; color: #526078; overflow-wrap: anywhere; }
+.job-heading > .MuiStack-root { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
+.job-heading > .MuiAlert-root { grid-column: 1 / -1; grid-row: 3; }
+.job-workspace .MuiAccordionSummary-root { min-height: 42px; }
+.log-toolbar { gap: 8px; padding: 4px 0 8px; }
+.log-toolbar .MuiTextField-root { max-width: 320px; }
+.captured-source { white-space: pre; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 12px; border: 1px solid #dce1ec; border-radius: 6px; background: #f8f9fd; }
+.launch-guidance { font-size: 13px; }
+.launch-guidance > .MuiStack-root { padding-top: 8px; }
+@media (max-width: 1050px) {
+  .field-grid { grid-template-columns: minmax(0, 1fr); }
+  .app-header .MuiToolbar-root { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; }
+  .app-header .project-context { grid-column: 1 / -1; grid-row: 2; order: 0; width: auto; margin: 0; padding-bottom: 4px; }
+  .app-header .MuiTabs-root { min-width: 0; }
+  .app-header .relay-home-link { margin-right: 0; }
+  .app-header .project-context > .help-field { flex: 0 1 200px; width: 200px; }
+}
+@media (max-width: 600px) {
+  .field-grid { grid-template-columns: minmax(0, 1fr); }
+  .server-fields { grid-template-columns: repeat(2, minmax(0, 144px)); }
+  .job-heading { grid-template-columns: minmax(0, 1fr); }
+  .job-heading > .MuiStack-root, .job-heading > .MuiAlert-root { grid-column: 1; grid-row: auto; }
+  .storage-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .app-header .project-context > .help-field { flex: 0 1 160px; width: 160px; }
+  .app-header .project-context > button { flex: 0 1 auto; }
+  .app-header .MuiTab-root { padding-inline: 8px; }
+}
+
+.artifacts-section { container-type: inline-size; }
+.artifacts-section td:first-child { overflow-wrap: anywhere; }
+@container (max-width: 650px) {
+  .artifacts-section thead { display: none; }
+  .artifacts-section table, .artifacts-section tbody { display: block; }
+  .artifacts-section tr { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border-color, #dce0e9); padding: 8px 0; }
+  .artifacts-section td { border: 0; padding: 4px 8px; overflow-wrap: anywhere; }
+  .artifacts-section td:first-child, .artifacts-section td:last-child { grid-column: 1 / -1; }
+  .artifacts-section td:not(:first-child):not(:last-child)::before { content: attr(data-label); display: block; font-size: 12px; color: #626979; }
+}
+
+@media (max-width: 600px) { .app-header .project-context > .help-field { min-width: 150px; flex-shrink: 0; } }

@@ -30,13 +30,13 @@ export function LaunchPreflight({ result, error, onCheck }: {
         </Box>)}
       </Box>}
       {result.truncated && <Alert severity="info">Showing {result.files.length} changed files. The counts include every changed file. Run git status in your project folder to see the full list.</Alert>}
-      {!result.clean && <Stack spacing={1}>
+      {!result.clean && <Box component="details" className="launch-guidance"><Box component="summary">How to resolve these changes</Box><Stack spacing={1}>
         <Typography variant="body2">Run a command in your project folder after choosing which changes to keep.</Typography>
         <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}><Box component="code">git commit</Box><Button aria-label="Copy git commit" onClick={() => void copy("git commit")}>Copy</Button></Stack>
         <Typography variant="body2">Stage the files you want to keep, then commit them.</Typography>
         <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}><Box component="code">git stash -u</Box><Button aria-label="Copy git stash -u" onClick={() => void copy("git stash -u")}>Copy</Button></Stack>
         <Typography variant="body2">Stash temporarily removes tracked and untracked changes, including workflow files and reports.</Typography>
-      </Stack>}
+      </Stack></Box>}
     </>}
     {copied && <Typography role="status">Copied {copied}.</Typography>}
     {copyError && <Alert severity="error">{copyError}</Alert>}

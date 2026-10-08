@@ -93,7 +93,7 @@ export function capturedRunGraph(allRecords: RunNode[]): { nodes: Node<WorkflowN
       connect(node.scope_path, control.target, control.label);
       controlTargets.add(control.target);
     }
-    if (node.parent_scope) {
+    if (node.parent_scope && node.parent_scope !== "root") {
       const group = children.get(node.parent_scope) ?? [];
       group.push(node);
       children.set(node.parent_scope, group);

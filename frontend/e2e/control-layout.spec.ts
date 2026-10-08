@@ -120,6 +120,9 @@ test("empty model and repair choices explain inheritance without changing YAML",
   await expect(dialog.getByRole("combobox", { name: "Agent tools", exact: true })).toHaveText("Workflow and owner preferences");
   await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Use workflow model");
   expect((await bounds(dialog.getByRole("spinbutton", { name: "Maximum repair rounds", exact: true }))).width).toBeLessThanOrEqual(144);
+  expect((await bounds(dialog.getByRole("combobox", { name: "Review report format", exact: true }))).width).toBeLessThanOrEqual(320);
+  expect((await bounds(dialog.getByRole("textbox", { name: "Review report file", exact: true }))).width).toBeLessThanOrEqual(480);
+  expect((await bounds(dialog.getByRole("textbox", { name: "Fixer repair instructions", exact: true }))).width).toBeLessThanOrEqual(640);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Run workflow", exact: true }).click();
@@ -136,7 +139,7 @@ test("run graph headings stay above jobs and empty history filters remain readab
   const launched = await post(page, "/api/runs", { workflow_key: "graph-layout", inputs: {} });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const id = (await launched.json()).run_id;
-  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status, { timeout: 30_000 }).toBe("succeeded");
   await page.goto(`/?view=runs&run=${id}`);
   const graph = page.getByRole("region", { name: "Step progress", exact: true });
   const heading = await bounds(graph.getByRole("heading", { name: "graph-layout", exact: true }));
@@ -198,4 +201,119 @@ test("all six stage forms remain contained on narrow and wide screens", async ({
     await expect(page.getByRole("region", { name: "Stage settings", exact: true })).toHaveCount(0);
     await expect(page.getByText("Your workflow is empty. Add a command, agent task, or review step to begin.", { exact: true })).toBeVisible();
   }
+});
+
+for (const width of [390, 760, 900, 1050, 1440, 1920]) test(`header and settings navigation stay compact at ${width}px`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 1000 });
+  await page.goto("/?view=settings");
+  const nav = page.getByRole("navigation", { name: "Settings sections" });
+  const header = page.locator(".app-header");
+  const box = await bounds(header);
+  expect(box.height).toBeLessThanOrEqual(width <= 1050 ? 140 : 90);
+  expect((await bounds(page.getByRole("combobox", { name: "Project", exact: true }))).height).toBeLessThanOrEqual(40);
+  await page.getByRole("button", { name: "Save global settings", exact: true }).scrollIntoViewIfNeeded();
+  await nav.getByRole("button", { name: "Storage", exact: true }).click();
+  const heading = page.getByRole("heading", { name: "Storage", exact: true });
+  await expect(heading).toBeFocused();
+  await expect.poll(async () => (await bounds(heading)).y).toBeGreaterThanOrEqual(box.height);
+  expect((await bounds(heading)).y).toBeLessThan(box.height + 250);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: info.outputPath(`compact-storage-${width}.png`), fullPage: true, animations: "disabled" });
+});
+
+test("completed runs scroll inside a bounded menu and keep all options reachable", async ({ page }) => {
+  const launched = await post(page, "/api/runs", { workflow_key: "workflow", inputs: {} });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const id = (await launched.json()).run_id;
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  const list = await (await page.request.get("/api/runs")).json();
+  const record = list.runs[0];
+  await page.route("**/api/runs?**", (route) => route.fulfill({ json: { runs: Array.from({ length: 40 }, (_, index) => ({ ...record, id: `run-${index}`, number: index + 1, title: `Long completed run title ${index + 1}` })), next: null } }));
+  await page.goto("/?view=settings");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Storage", exact: true }).click();
+  const picker = page.getByRole("combobox", { name: "Completed run", exact: true });
+  await picker.click();
+  expect((await bounds(page.getByRole("listbox"))).height).toBeLessThanOrEqual(320);
+  await page.getByRole("option").last().scrollIntoViewIfNeeded();
+  await expect(page.getByRole("option").last()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(picker).toBeFocused();
+});
+
+for (const path of ["/tmp/repo", "C:\\work\\repo", "\\\\server\\share\\repo"]) test(`short absolute paths are abbreviated: ${path}`, async ({ page }) => {
+  const settings: SettingsResponse = await (await page.request.get("/api/settings")).json();
+  await page.route("**/api/settings", (route) => route.fulfill({ json: { ...settings, paths: { ...settings.paths, data: path } } }));
+  await page.goto("/?view=settings");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Storage", exact: true }).click();
+  const button = page.getByRole("button", { name: "Full path for Data", exact: true });
+  await expect(button).toContainText("…/");
+  await button.click();
+  await expect(page.locator(".path-details code").filter({ hasText: path })).toHaveText(path);
+});
+
+test("artifact downloads and captured source remain readable at every layout width", async ({ page }, info) => {
+  const launched = await post(page, "/api/runs", { workflow_key: "workflow", inputs: {} });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const id = (await launched.json()).run_id;
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  for (const width of [390, 760, 900, 1050, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`/?view=runs&run=${id}`);
+    const table = page.getByRole("table", { name: "Retained artifacts", exact: true });
+    const links = table.getByRole("link", { name: /^Download / });
+    await expect(links.first()).toBeVisible();
+    for (const link of await links.all()) {
+      await link.scrollIntoViewIfNeeded();
+      const box = await bounds(link);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(await link.getAttribute("href")).toMatch(/^\/api\/artifacts\//);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: info.outputPath(`artifacts-${width}.png`), fullPage: true, animations: "disabled" });
+    await page.getByRole("button", { name: "Workflow file", exact: true }).click();
+    const source = page.getByRole("dialog", { name: "Workflow file", exact: true }).getByLabel("Captured workflow YAML", { exact: true });
+    await expect(source).toContainText("version");
+    expect(await source.evaluate((element) => getComputedStyle(element).fontFamily)).toContain("mono");
+    await page.keyboard.press("Escape");
+  }
+});
+
+test("launch inheritance and help fit within the active dialog", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 1000 });
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await page.getByRole("button", { name: "Run workflow", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Run workflow", exact: true });
+  await dialog.getByRole("button", { name: "Advanced options", exact: true }).click();
+  await expect(dialog.getByLabel("Override model for this run", { exact: true })).toHaveAttribute("placeholder", "Use workflow, project, and global defaults");
+  const button = dialog.getByRole("button", { name: "About Model", exact: true });
+  await button.focus();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible();
+  const paper = await bounds(dialog), tip = await bounds(tooltip);
+  expect(tip.x).toBeGreaterThanOrEqual(paper.x);
+  expect(tip.x + tip.width).toBeLessThanOrEqual(paper.x + paper.width);
+  await button.press("Escape");
+  await expect(tooltip).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(button).toBeFocused();
+});
+
+
+test("touch controls retain 44px targets without stretching desktop fields", async ({ browser, page }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 900 }, storageState: await page.context().storageState() });
+  try {
+    const touch = await context.newPage();
+    await touch.goto("/?view=settings");
+    const help = touch.getByRole("button", { name: "About Shared default model", exact: true });
+    const box = await bounds(help);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    await expect(touch.getByRole("textbox", { name: "Shared default model", exact: true })).toBeVisible();
+    const picker = touch.getByRole("combobox", { name: "Project", exact: true });
+    await picker.click();
+    await expect.poll(async () => (await bounds(touch.getByRole("option").first())).height).toBeGreaterThanOrEqual(44);
+    await touch.keyboard.press("Escape");
+    expect(await touch.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  } finally { await context.close(); }
 });

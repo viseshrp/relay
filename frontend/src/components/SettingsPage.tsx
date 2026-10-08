@@ -40,6 +40,14 @@ export function SettingsPage({ project, requestProject, notifications, onToggleN
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const preview = useRef<AbortController | null>(null);
+  const heading = useRef<HTMLHeadingElement | null>(null);
+  const previousSection = useRef(section);
+  useEffect(() => {
+    if (loading || section === previousSection.current) return;
+    previousSection.current = section;
+    heading.current?.scrollIntoView({ block: "start" });
+    if (!tourSection) heading.current?.focus({ preventScroll: true });
+  }, [section, loading, tourSection]);
   const dirty = Boolean(response && draft && JSON.stringify(response.settings) !== JSON.stringify(draft)) || Boolean(projectResponse && JSON.stringify(projectResponse.overrides) !== JSON.stringify(overrides));
 
   const preventLeave = useCallback(async () => { if (dirty) throw new Error("Save or discard your settings before leaving."); }, [dirty]);
@@ -110,10 +118,10 @@ export function SettingsPage({ project, requestProject, notifications, onToggleN
     <Box component="nav" aria-label="Settings sections" data-tour="settings-navigation" className="actions-sidebar"><Typography variant="h6" sx={{ p: 2 }}>Settings</Typography><List>{sections.map((name) => <ListItemButton key={name} aria-current={name === section ? "page" : undefined} selected={name === section} onClick={() => { setSection(name); setNotice(null); }}><ListItemText primary={name} /></ListItemButton>)}</List></Box>
     <Paper component="section" aria-label={section} variant="outlined" className="settings-content" data-tour={section === "Storage" ? "storage" : undefined}>
       <Stack spacing={3}>
-        <Box><Typography variant="h5">{section}</Typography><Typography color="text.secondary" sx={{ mt: 1 }}>{projectView ? `Overrides for ${project?.display_name ?? "the selected project"}. Turn an override off to inherit the saved global value.` : section === "Global defaults" ? "Defaults for this Relay installation, across all projects. Saved runs keep their captured choices." : section === "Server and account" ? "Local access and server settings. Changes apply after restarting Relay." : section === "Notifications" ? "Notification preferences for this browser." : section === "Storage" ? "Installation folders and retained project data." : "Learn Relay at your own pace. These preferences belong to this browser."}</Typography></Box>
+        <Box><Typography ref={heading} tabIndex={-1} component="h1" variant="h5" className="section-heading">{section}</Typography><Typography color="text.secondary" sx={{ mt: 1 }}>{projectView ? `Overrides for ${project?.display_name ?? "the selected project"}. Turn an override off to inherit the saved global value.` : section === "Global defaults" ? "Defaults for this Relay installation, across all projects. Saved runs keep their captured choices." : section === "Server and account" ? "Local access and server settings. Changes apply after restarting Relay." : section === "Notifications" ? "Notification preferences for this browser." : section === "Storage" ? "Installation folders and retained project data." : "Learn Relay at your own pace. These preferences belong to this browser."}</Typography></Box>
         {error && <Alert severity="error" action={<Button disabled={busy} onClick={() => setRevision((value) => value + 1)}>Reload settings</Button>}>{error}</Alert>}
         {notice && <Alert severity="success">{notice}</Alert>}
-        {section === "Global defaults" && <><Alert severity="info">Models resolve from the job, run override, workflow, then project and global defaults. Thinking effort and permissions respect explicit job choices and exact model matches.</Alert><DefaultSettingsForm settings={draft} agents={agents?.agents ?? []} onChange={(values) => { setDraft(values); setNotice(null); }} project={requestProject} disabled={busy} tourActive={Boolean(tourSection)} /></>}
+        {section === "Global defaults" && <><Typography variant="body2" color="text.secondary">Saved job and workflow choices take precedence over these defaults.</Typography><DefaultSettingsForm settings={draft} agents={agents?.agents ?? []} onChange={(values) => { setDraft(values); setNotice(null); }} project={requestProject} disabled={busy} tourActive={Boolean(tourSection)} /></>}
         {section === "Global defaults" && !agents && <Alert severity="info">Open a project with available agent discovery to choose models and thinking effort. Other global settings remain editable.</Alert>}
         {projectView && (project && effective ? <DefaultSettingsForm settings={effective} agents={agents?.agents ?? []} onChange={setEffective} project={requestProject} disabled={busy} overrides={overrides} onOverrides={updateOverrides} /> : <Alert severity="info">{project ? "Project defaults could not be loaded. Reload settings to try again." : "Open a project to set its overrides."}</Alert>)}
         {section === "Server and account" && <Stack spacing={3}>
@@ -131,7 +139,7 @@ export function SettingsPage({ project, requestProject, notifications, onToggleN
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}><Button variant="outlined" onClick={onShowWelcome}>Replay welcome slides</Button><Button variant="outlined" onClick={onShowTour}>Replay guided tour</Button><Button onClick={() => setOnboardingNotice(onResetOnboarding() ? "Onboarding reset. The welcome slides and tour will appear the next time you open or reload Relay in this browser." : "This browser cannot save onboarding preferences. You can still replay the slides or tour here.")}>Reset onboarding</Button></Stack>
           {onboardingNotice && <Alert severity="info">{onboardingNotice}</Alert>}
         </Stack>}
-        {editable && <Stack direction="row" spacing={1} className="settings-save"><Button variant="contained" disabled={busy || (projectView && !projectResponse)} onClick={() => void save(projectView)}>{busy ? "Saving…" : projectView ? "Save project defaults" : "Save global settings"}</Button><Button disabled={busy || !dirty} onClick={discard}>Discard changes</Button></Stack>}
+        {editable && <Stack direction="row" spacing={1} className="settings-save"><Button variant="contained" disabled={busy || !dirty || (projectView && !projectResponse)} onClick={() => void save(projectView)}>{busy ? "Saving…" : projectView ? "Save project defaults" : "Save global settings"}</Button><Button disabled={busy || !dirty} onClick={discard}>Discard changes</Button></Stack>}
       </Stack>
     </Paper>
   </Box>;

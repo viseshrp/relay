@@ -1,4 +1,4 @@
-import { HelpSelectField } from "./HelpTip";
+import { HelpLabel, HelpSelectField } from "./HelpTip";
 import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Typography } from "@mui/material";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -63,15 +63,15 @@ export function TemporaryResourceCleanup({ projectId }: { projectId: string }) {
   }
 
   return <Stack component="section" aria-label="Temporary run resources" spacing={2}>
-    <Typography variant="h6">Temporary run resources</Typography>
-    <Typography variant="body2">Relay removes scratch folders and private browser profiles automatically. Choose a completed run to retry removing leftover folders. Only Relay-marked folders from ended attempts are removed. Saved reports, working copies, credentials, and personal browser profiles are kept.</Typography>
+    <Typography variant="h6"><HelpLabel topic="temporaryCleanup">Temporary run resources</HelpLabel></Typography>
+    <Typography variant="body2">Retry removal of leftover temporary folders for a completed run. Saved reports and working copies are kept.</Typography>
     {notice && <Alert severity="success">{notice}</Alert>}
     {error && !open && <Alert severity="error" action={<Button disabled={loading || busy} onClick={() => void load()}>Reload completed runs</Button>}>{error}</Alert>}
     {loading && <CircularProgress size={24} aria-label="Loading completed runs" />}
     {!loading && !error && runs.length === 0 && <Typography>No completed runs are available for temporary cleanup in this project.</Typography>}
-    <HelpSelectField topic="temporaryCleanup" label="Completed run" fullWidth value={selectedId} disabled={loading || busy || runs.length === 0} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
+    <HelpSelectField topic="temporaryCleanup" label="Completed run" fullWidth value={selectedId} renderValue={() => selected ? `#${selected.number} ${selected.title} · ${statusLabel(selected.status)}` : runs.length ? "Choose a completed run" : "No completed runs"} disabled={loading || busy || runs.length === 0} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
       <MenuItem value="">{!loading && runs.length === 0 ? "No completed runs" : "Choose a completed run"}</MenuItem>
-      {runs.map((run) => <MenuItem key={run.id} value={run.id}><Box component="span" sx={{ display: "flex", gap: 1, alignItems: "center" }}><StatusIcon status={run.status} />#{run.number} {run.title} · {statusLabel(run.status)}</Box></MenuItem>)}
+      {runs.map((run) => <MenuItem key={run.id} value={run.id} aria-label={`#${run.number} ${run.title} ${statusLabel(run.status)}`}><Box component="span" className="run-choice"><StatusIcon status={run.status} /><span className="run-choice-number">#{run.number}</span><span className="run-choice-title">{run.title}</span><span className="run-choice-status">{statusLabel(run.status)}</span></Box></MenuItem>)}
     </HelpSelectField>
     <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
       <Button variant="outlined" disabled={!selected || loading || busy} onClick={() => { setError(null); setOpen(true); }}>Retry temporary resource cleanup</Button>

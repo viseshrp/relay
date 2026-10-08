@@ -1,5 +1,5 @@
 import { HelpControl, HelpTextField, HelpSelectField } from "./HelpTip";
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, Switch, Typography } from "@mui/material";
 import { useCallback, useState } from "react";
 
 import type { AgentsResponse, AgentOptions, RepairDefaults } from "../types";
@@ -83,7 +83,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
             onSaved={(reference) => setNode({ ...node, prompts: [...(node.prompts ?? []).filter((prompt) => prompt.local !== reference), { local: reference }] })} />
         </>}
         {node.type === "command" && <CommandFields key={role} node={node} commands={commands} disabled={settingsDisabled} onChange={setNode} />}
-        <TextField label={role === "fix" ? "Fixer repair instructions" : "Verifier repair instructions"} multiline minRows={3} maxRows={8} disabled={settingsDisabled}
+        <HelpTextField topic={role === "fix" ? "fixer" : "verifier"} label={role === "fix" ? "Fixer repair instructions" : "Verifier repair instructions"} multiline minRows={3} maxRows={8} disabled={settingsDisabled}
           value={role === "fix" ? rule.fix_instruction ?? defaults.fix_instruction : rule.verify_instruction ?? defaults.verify_instruction}
           onChange={(event) => onChange({ ...rule, [`${role}_instruction`]: event.target.value || undefined })}
           helperText="Appended separately to the frozen agent instructions. You can replace the default." />

@@ -27,7 +27,7 @@ export function RunWorkflowFile({ runId, onClose, onEdit }: {
         <Typography variant="subtitle2">{workflow.workflow_key}</Typography>
         <Typography variant="caption" className="mono-wrap">SHA-256: {workflow.sha256}</Typography>
         {workflow.truncated && <Alert severity="info">This workflow exceeds the preview limit. The hash covers the full captured workflow.</Alert>}
-        <Box component="pre" aria-label="Captured workflow YAML" className="activity-text" sx={{ overflow: "auto", maxHeight: "65vh" }}>{workflow.yaml}</Box>
+        <Box component="pre" aria-label="Captured workflow YAML" className="captured-source" sx={{ overflow: "auto", maxHeight: "65vh" }}>{workflow.yaml}</Box>
       </>}
     </Stack></DialogContent>
     <DialogActions>

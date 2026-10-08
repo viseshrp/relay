@@ -73,6 +73,12 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState("");
   const [stageFocusRequest, setStageFocusRequest] = useState(0);
+  const stageSettings = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!selectedNode) return;
+    stageSettings.current?.scrollIntoView({ block: "start" });
+    stageSettings.current?.focus({ preventScroll: true });
+  }, [selectedNode, stageFocusRequest]);
   const stageCanvas = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -433,7 +439,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
       <Box component="nav" aria-label="Workflow sidebar" data-tour="workflows" className="actions-sidebar">
         <Typography variant="h6" sx={{ p: 1 }}>Workflows</Typography>
         <Button fullWidth variant="outlined" onClick={() => setNewWorkflow(true)}>New workflow</Button>
-        <List>{inventory.map((item) => <ListItemButton key={item.key} selected={item.key === loadedKey} disabled={busy} onClick={() => void loadWorkflow(item.key)}><ActionIcon name="workflow" /><ListItemText primary={item.name} /></ListItemButton>)}</List>
+        <List>{inventory.map((item) => <ListItemButton key={item.key} selected={item.key === loadedKey} disabled={busy} onClick={() => void loadWorkflow(item.key)}><ActionIcon name="workflow" /><ListItemText title={item.name} primary={item.name} /></ListItemButton>)}</List>
       </Box>
       <Stack spacing={2} sx={{ minWidth: 0 }}>
       <Stack component="header" role="region" aria-label="Workflow header" direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between" }}>
@@ -497,7 +503,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
               <TextField fullWidth size="small" label="Find a stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} />
               <List sx={{ maxHeight: { xs: 210, md: 490 }, overflowY: "auto", mt: 1 }}>
                 {matchingStages.map((node) => <ListItemButton key={node.id} component="button" selected={selectedNode === node.id} aria-pressed={selectedNode === node.id} onClick={() => selectStage(node.id, true)} sx={{ width: "100%", textAlign: "left" }}>
-                  <ListItemText primary={node.data.label} secondary={parsed.value?.repairs?.[node.id]?.enabled !== false && parsed.value?.repairs?.[node.id] ? "Automatic repairs configured" : undefined} />
+                  <ListItemText title={node.data.label} primary={node.data.label} secondary={parsed.value?.repairs?.[node.id]?.enabled !== false && parsed.value?.repairs?.[node.id] ? "Automatic repairs configured" : undefined} />
                 </ListItemButton>)}
               </List>
               {matchingStages.length === 0 && graph.nodes.length > 0 && <Typography variant="body2" sx={{ p: 1 }}>No stages match. Try another name.</Typography>}
@@ -546,7 +552,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
       </Box>}
 
       {selectedNode && definition && (
-        <Paper className="section-card" variant="outlined" role="region" aria-label="Stage settings">
+        <Paper ref={stageSettings} tabIndex={-1} className="section-card stage-settings" variant="outlined" role="region" aria-label="Stage settings">
           <Stack spacing={2}>
             <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
               <Typography variant="h6" sx={{ flex: 1 }}>{stageLabel(selectedNode)}</Typography>
@@ -605,7 +611,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                 targets={Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode)}
                 onChange={(next) => mutate((document) => document.setIn(["nodes", selectedNode], next))} />}
               {definition.type === "subworkflow" && (
-                <HelpTextField topic="subworkflow" label="Workflow key" size="small" value={typeof definition.workflow === "string" ? definition.workflow : ""} onChange={(event) => setNodeField("workflow", event.target.value)} />
+                <HelpTextField topic="subworkflow" width="wide" label="Workflow key" size="small" value={typeof definition.workflow === "string" ? definition.workflow : ""} onChange={(event) => setNodeField("workflow", event.target.value)} />
               )}
             </Box>
             {definition.type === "agent" && loadedKey && selectedNode && !repairOpen && (
@@ -685,7 +691,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           await loadWorkflow(key);
         }} />
       <Dialog open={addingStage} onClose={() => setAddingStage(false)} fullWidth>
-        <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem><MenuItem value="condition">Check a result</MenuItem><MenuItem value="loop">Repeat stages</MenuItem><MenuItem value="subworkflow">Run another workflow</MenuItem></Select></FormControl>
+        <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField sx={{ width: 320, maxWidth: "100%" }} label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl sx={{ width: 320, maxWidth: "100%" }}><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem><MenuItem value="condition">Check a result</MenuItem><MenuItem value="loop">Repeat stages</MenuItem><MenuItem value="subworkflow">Run another workflow</MenuItem></Select></FormControl>
           {stageKind === "subworkflow" && <FormControl><InputLabel id="new-stage-workflow" shrink>Workflow to run</InputLabel><Select displayEmpty renderValue={stageWorkflow === "" ? () => "Choose a workflow" : undefined} labelId="new-stage-workflow" label="Workflow to run" value={stageWorkflow} onChange={(event) => setStageWorkflow(event.target.value)}>{inventory.filter((item) => item.key !== loadedKey).map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}</Select><Typography variant="caption">Create another workflow first if this list is empty.</Typography></FormControl>}<Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim() || (stageKind === "subworkflow" && !inventory.some((item) => item.key === stageWorkflow && item.key !== loadedKey))}>Add stage</Button></DialogActions>
       </Dialog>
 

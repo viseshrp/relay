@@ -21,6 +21,7 @@ export function HomeDashboard({ onOpenProject, onShowWelcome, onNavigate }: {
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [query, setQuery] = useState("");
+  const [expandedRecent, setExpandedRecent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [updated, setUpdated] = useState<string | null>(null);
@@ -87,7 +88,7 @@ export function HomeDashboard({ onOpenProject, onShowWelcome, onNavigate }: {
     return <Paper component="section" aria-label={title} variant="outlined" className={`dashboard-section dashboard-${section}`}>
       <div className="dashboard-section-heading"><Typography component="h2" variant="h6">{title}</Typography><span className="dashboard-section-count">{section === "waiting" ? data?.counts.waiting : section === "active" ? Math.max(0, (data?.counts.unfinished ?? 0) - (data?.counts.waiting ?? 0)) : "Latest results"}</span></div>
       {!page?.items.length && <Typography className="dashboard-empty" color="text.secondary">{empty}</Typography>}
-      <div className="dashboard-run-list">{page?.items.map((run) => <div className="dashboard-run" key={run.id}>
+      <div className="dashboard-run-list">{(section === "recent" && !expandedRecent ? page?.items.slice(0, 5) : page?.items)?.map((run) => <div className="dashboard-run" key={run.id}>
         <StatusIcon status={run.request ? "waiting" : run.status} size={22} />
         <div className="dashboard-run-body"><Button className="dashboard-run-link" onClick={() => onNavigate(run.project, "runs", run)}>{run.title || stageLabel(run.workflow_key.replace(/\.ya?ml$/, ""))} <span className="dashboard-run-number">#{run.number}</span></Button>
           <Typography variant="body2" color="text.secondary">{run.project.display_name} · {run.request ? `${stageLabel(run.request.kind)} · ${stageLabel(run.request.scope_path)}` : `${statusLabel(run.status)}${run.dispatch_paused ? " · Paused" : ""}`}</Typography>
@@ -96,17 +97,17 @@ export function HomeDashboard({ onOpenProject, onShowWelcome, onNavigate }: {
         <Typography variant="body2" className="dashboard-duration" color="text.secondary"><ActionIcon name="clock" size={14} /> {jobDuration(run.started_at, run.ended_at, now)}</Typography>
         {run.request && <Button variant="outlined" size="small" onClick={() => onNavigate(run.project, "runs", run)}>Open request</Button>}
       </div>)}</div>
-      {page?.next_cursor && <Button disabled={busy} fullWidth onClick={() => more.current(section)}>Show more {title.toLowerCase()}</Button>}
+      {section === "recent" && !expandedRecent && (page?.items.length ?? 0) > 5 ? <Button onClick={() => setExpandedRecent(true)}>Show more recent results</Button> : page?.next_cursor && <Button disabled={busy} onClick={() => more.current(section)}>Show more {title.toLowerCase()}</Button>}
     </Paper>;
   }
 
   return <Box className="dashboard" component="main" aria-label="Relay home">
-    <div className="dashboard-heading"><Box><Typography component="h1" variant="h4">Your work at a glance</Typography><Typography color="text.secondary">Projects, runs, and requests that need your attention.</Typography></Box>
+    <div className="dashboard-heading"><Box><Typography component="h1" variant="h5">Your work at a glance</Typography><Typography color="text.secondary">Projects, runs, and requests that need your attention.</Typography></Box>
       <Stack direction="row" spacing={1}><Button variant="outlined" startIcon={<ActionIcon name="refresh" />} disabled={busy} onClick={() => refresh.current()}>Refresh</Button><Button variant="contained" onClick={onOpenProject}>Open project</Button></Stack></div>
     {error && <Alert severity="warning">{data ? "Updates unavailable. Showing the last successful refresh. " : ""}{error}</Alert>}
     {!data ? <div className="loading-panel">{!error && <CircularProgress aria-label="Loading dashboard" />}</div> : data.counts.projects === 0 ? <GettingStartedHome onOpenProject={onOpenProject} onShowWelcome={onShowWelcome} /> : <>
       <div className="dashboard-stats">{[["Projects", data.counts.projects], ["Waiting for you", data.counts.waiting], ["Unfinished runs", data.counts.unfinished], ["Paused runs", data.counts.paused]].map(([label, value]) => <Paper variant="outlined" className="dashboard-stat" key={label}><Typography variant="body2" color="text.secondary">{label}</Typography><Typography variant="h4">{value}</Typography></Paper>)}</div>
-      {runList("waiting", "Waiting for you", "No requests need your response.")}
+      {data.waiting.items.length ? runList("waiting", "Waiting for you", "No requests need your response.") : <Typography component="section" aria-label="Waiting for you" className="dashboard-waiting-empty" color="text.secondary">No requests need your response.</Typography>}
       <div className="dashboard-work-grid">{runList("active", "Active and paused runs", "No jobs are running or paused.")}{runList("recent", "Recent results", "Completed runs will appear here.")}</div>
       <section aria-label="Projects"><div className="dashboard-section-heading"><Typography component="h2" variant="h5">Your projects</Typography><TextField size="small" label="Find a project" value={query} onChange={(event) => setQuery(event.target.value)} slotProps={{ htmlInput: { maxLength: 1024 } }} /></div>
         <div className="dashboard-project-grid">{data.projects.items.map((project) => <Paper variant="outlined" component="article" aria-label={project.display_name} key={project.id} className="dashboard-project">

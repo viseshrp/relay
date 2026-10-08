@@ -66,6 +66,16 @@ export function App() {
   const [setupForced, setSetupForced] = useState(false);
   const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
   const helpButton = useRef<HTMLButtonElement>(null);
+  const header = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const measure = () => document.documentElement.style.setProperty("--relay-header-height", `${element.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [auth]);
   const setupWasOpen = useRef(false);
   const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
   const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
@@ -257,7 +267,7 @@ export function App() {
 
   return (
     <Box sx={{ minHeight: "100vh" }}>
-      <AppBar position="sticky" color="inherit" elevation={0} className="app-header">
+      <AppBar ref={header} position="sticky" color="inherit" elevation={0} className="app-header">
         <Toolbar>
           <Button component="a" href="/?view=home" aria-label="Relay home" className="relay-home-link" onClick={(event) => {
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -376,7 +386,7 @@ export function App() {
   );
 
   function renderProjectContext() {
-    return <Stack data-tour="project" className="project-context" direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mr: 2, alignItems: "center" }}>
+    return <Stack data-tour="project" className="project-context" direction="row" spacing={1} sx={{ mr: 2, alignItems: "center" }}>
       {projects.length > 0 && <HelpSelectField topic="project" label="Project" size="small" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, view: location.view === "home" ? "workflows" : location.view, workflow: null, run: null, interaction: null, job: null })}>
           {projects.map((project) => <MenuItem key={project.id} value={project.id}>{project.display_name}</MenuItem>)}
         </HelpSelectField>}

@@ -17,13 +17,17 @@ for (const width of [320, 390, 760, 1440]) test(`help stays beside labels at ${w
   await expect(page.getByRole("textbox", { name: "Verifier instructions", exact: true })).toBeVisible();
   for (const field of await page.locator(".settings-content .help-field:visible").all()) {
     await field.scrollIntoViewIfNeeded();
-    const label = await field.locator("label").boundingBox();
-    const about = await field.getByRole("button", { name: /^About / }).boundingBox();
-    const input = await field.locator(".MuiInputBase-root").boundingBox();
+    const { label, about, input } = await field.evaluate((element) => {
+      const box = (selector: string) => {
+        const rect = element.querySelector(selector)?.getBoundingClientRect();
+        return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+      };
+      return { label: box("label"), about: box(".help-tip button"), input: box(".MuiInputBase-root") };
+    });
     if (!label || !about || !input) throw new Error("A help field is missing its label, button, or input.");
     expect(about.x - (label.x + label.width)).toBeGreaterThanOrEqual(3);
     expect(about.x - (label.x + label.width)).toBeLessThanOrEqual(8);
-    expect(Math.abs((about.y + about.height / 2) - (label.y + label.height / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs((about.y + about.height / 2) - (label.y + label.height / 2)), await field.locator("label").innerText()).toBeLessThanOrEqual(1);
     expect(input.y - (about.y + about.height)).toBeGreaterThanOrEqual(5);
   }
   const button = page.getByRole("button", { name: "About Shared default model", exact: true });

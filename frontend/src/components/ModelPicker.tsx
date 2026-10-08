@@ -23,7 +23,7 @@ export function ModelPicker({ agents, value, project, disabled = false, onChange
     }
     setObserved(available); setError(failures.join("\n") || (available.length ? null : "No models were returned. Check that a selected tool is installed and signed in.")); setBusy(false);
   }
-  return <Stack spacing={1}>
+  return <Stack spacing={1} className="model-picker">
     <HelpSelectField topic="model" label="Model" fullWidth size="small" value={value} disabled={disabled || busy} onChange={(event) => onChange(event.target.value)}>
       <MenuItem value="">{defaultLabel}</MenuItem>
       {value && !models.has(value) && <MenuItem value={value}>{value}</MenuItem>}

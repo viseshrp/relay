@@ -128,6 +128,7 @@ test("storage has no deletion selected, explains retained data, and notification
   const panel = page.getByRole("region", { name: "Storage", exact: true });
   await expect(panel.getByRole("region", { name: "Project storage" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Review deletion", exact: true })).toBeDisabled();
+  await panel.getByText("About working copies", { exact: true }).click();
   await expect(panel.getByText(/Your repository is not touched/)).toBeVisible();
   const resources = panel.getByRole("region", { name: "Temporary run resources", exact: true });
   await expect(resources.getByText("No completed runs are available for temporary cleanup in this project.")).toBeVisible();

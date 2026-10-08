@@ -859,19 +859,38 @@ groups have visible chevrons, and narrow screens stack adjacent fields.
 Closed agent-settings groups do not initialize configuration probes. Open a
 group to load the choices for its selected model.
 
-Fields and buttons use compact desktop sizes. Numeric values, timeouts, and
-the loopback address have short controls; their explanations retain a wider
-line length. Actions use their content width. Touch devices keep larger tap
-targets. Command editors and condition branches occupy a complete form row;
-long instruction and argument fields scroll after eight lines without changing
-their text. Menus wrap long names within the screen. Closed selectors keep one
-line and show an explicit empty or inherited choice instead of a blank box.
-On small screens, the welcome banner's actions sit below its message.
+Desktop inputs are 36 pixels tall and buttons are 32 pixels tall. Touch
+controls keep 44-pixel targets. Numeric inputs and timeouts are 144 pixels
+wide; their labels and guidance can use more space. Ordinary choices use
+320 pixels, exact models and paths use 480, and multiline content uses 640,
+all capped by the available width. Related controls have an 8-pixel gap;
+fields use 16 pixels and sections use 24.
 
-If a workspace cannot load, including an old tab requesting a replaced file
-after a rebuild, Relay shows **Reload Relay** instead of a blank page. Reload
-is explicit so a failed load never silently discards editing state. Browser
-workflow recovery drafts remain available after reloading.
+The header uses one row where space permits and two rows below 1,050 pixels.
+Sidebar positions and section anchors follow its measured height. Changing
+Settings sections brings the new heading below that header and focuses it.
+Project overrides distinguish the override switch, inherited state, and actual
+value. Save stays disabled until the form changes.
+
+Menus scroll internally within 320 pixels or the available viewport height.
+Closed selectors show one line and an explicit empty or inherited choice.
+Workflow and job navigation uses ellipsis; accessible names and hover titles
+retain full labels. Selecting a workflow stage brings its settings into view.
+Command editors and condition branches occupy a complete form row. Long
+instructions and arguments scroll after eight lines without changing their
+text. On small screens, welcome banner actions sit below its message.
+
+Storage uses labeled rows for counts and available sizes. Extended explanations
+are disclosures. Displayed absolute paths are abbreviated, including short
+POSIX, Windows drive, and network paths. Full-path disclosures and copy actions
+retain exact values; editable paths and captured output stay complete. Artifact
+rows stack in narrow panels so download links remain accessible. Captured
+workflow source uses a monospace view. Only real nested scopes add graph
+completion junctions; the top-level scope adds none.
+
+If a workspace cannot load, Relay shows **Reload Relay** instead of a blank
+page. Reload is explicit so a failed load never silently discards editing
+state. Browser workflow recovery drafts remain available after reloading.
 
 Global defaults cover ordered agents, exact shared and per-agent models,
 thinking effort, agent permissions, job timeouts, retry participation,

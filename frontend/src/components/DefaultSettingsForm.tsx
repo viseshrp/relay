@@ -43,7 +43,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
     if (!onOverrides || !overrides) return null;
     const root = key === "agent_preferences" || key === "cleanup_policy";
     const selected = Object.hasOwn(root ? overrides : overrides.workflow_defaults ?? {}, key);
-    return <HelpControl topic="override"><FormControlLabel control={<Switch size="small" checked={selected} disabled={disabled} onChange={(_event, checked) => {
+    return <Box className="project-override"><HelpControl topic="override"><FormControlLabel control={<Switch size="small" slotProps={{ input: { "aria-label": `Override ${overrideLabels[key]} for this project` } }} checked={selected} disabled={disabled} onChange={(_event, checked) => {
       const next = { ...overrides, workflow_defaults: { ...overrides.workflow_defaults } };
       if (root) {
         if (checked) Object.assign(next, { [key]: settings[key] });
@@ -51,7 +51,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       } else if (checked) Object.assign(next.workflow_defaults, { [key]: defaults[key] });
       else delete next.workflow_defaults[key];
       onOverrides(next);
-    }} />} label={`Override ${overrideLabels[key]} for this project`} /></HelpControl>;
+    }} />} label="Override for this project" /></HelpControl><Typography variant="caption" color="text.secondary">{selected ? "Project override" : "Using global default"}</Typography></Box>;
   }
   function locked(key: keyof WorkflowDefaults | "agent_preferences" | "cleanup_policy") {
     return disabled || (projectMode && !Object.hasOwn(key === "agent_preferences" || key === "cleanup_policy" ? overrides : overrides.workflow_defaults ?? {}, key));
@@ -77,9 +77,9 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
         </FormControl>
       </Stack>
     </Box>
-    <Box>{inherit("model")}<HelpTextField topic="sharedModel" tour label="Shared default model" fullWidth value={defaults.model ?? ""} disabled={locked("model")} onChange={(event) => update("model", event.target.value || null)} helperText="Optional exact value. Used when the job, run, and workflow have no model. Leave blank to use the first preferred agent's model below." /></Box>
+    <Box>{inherit("model")}<HelpTextField topic="sharedModel" tour label="Shared default model" fullWidth value={defaults.model ?? ""} disabled={locked("model")} onChange={(event) => update("model", event.target.value || null)} helperText="Optional. Leave blank to use the preferred agent’s model." /></Box>
     <Box data-tour="providers" className="settings-group"><Typography variant="h6"><HelpLabel topic="providers">Agent models and thinking</HelpLabel></Typography>
-      <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>Thinking effort and permissions apply only when the exact model matches. Saved workflow choices take precedence. Unsupported choices stop preflight.</Typography>
+      <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>Defaults apply to the same exact model. Saved workflow choices take precedence.</Typography>
       {inherit("providers")}
       {agents.map((agent) => {
         const value = defaults.providers[agent.id] ?? { model: null };
@@ -94,7 +94,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       })}
     </Box>
     <Box data-tour="commands" className="settings-group"><Typography variant="h6"><HelpLabel topic="commands">Shared commands</HelpLabel></Typography>
-      <Typography variant="body2" color="text.secondary">Save named programs and arguments for command jobs to select. Each run captures the selected command. Existing program and argument lists stay explicit.</Typography>
+      <Typography variant="body2" color="text.secondary">Named programs and arguments for command jobs.</Typography>
       {inherit("commands")}
       <SharedCommandsEditor value={defaults.commands} disabled={locked("commands")} onChange={(commands) => update("commands", commands)} />
     </Box>
@@ -104,10 +104,10 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       <EnvironmentEditor value={defaults.env} disabled={locked("env")} onChange={(env) => update("env", env)} />
     </Box>
     <Box><Typography variant="h6">Job defaults</Typography><Stack spacing={2} sx={{ mt: 2 }}>
-      <Box>{inherit("timeout")}<HelpTextField compact topic="timeout" tour label="Job timeout" fullWidth value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></Box>
+      <Box>{inherit("timeout")}<HelpTextField compact topic="timeout" tour label="Job timeout" fullWidth value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="Use 30s, 15m, or 2h. Blank keeps existing limits." /></Box>
       <Box data-tour="autoRetry">{inherit("auto_retry")}<HelpControl topic="autoRetry"><FormControlLabel control={<Switch checked={defaults.auto_retry} disabled={locked("auto_retry")} onChange={(_event, checked) => update("auto_retry", checked)} />} label="Allow automatic retries for jobs" /></HelpControl><Typography variant="body2" color="text.secondary">Requires an enabled recovery policy. Each job can opt out.</Typography></Box>
       <Box>{inherit("recovery")}<HelpControl topic="recovery" tour><FormControlLabel control={<Switch checked={defaults.recovery.enabled} disabled={locked("recovery")} onChange={(_event, checked) => update("recovery", { ...defaults.recovery, enabled: checked })} />} label="Automatic recovery for new runs" /></HelpControl><Box sx={{ height: 16 }} />
-        <HelpTextField topic="retryLimit" tour label="Maximum automatic retries" fullWidth type="number" value={defaults.recovery.max_retries} disabled={locked("recovery")} onChange={(event) => update("recovery", { ...defaults.recovery, max_retries: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2 } }} helperText="One or two additional attempts per failed agent job. Models, permissions, and completed work stay captured." /></Box>
+        <HelpTextField topic="retryLimit" tour label="Maximum automatic retries" fullWidth type="number" value={defaults.recovery.max_retries} disabled={locked("recovery")} onChange={(event) => update("recovery", { ...defaults.recovery, max_retries: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2 } }} helperText="One or two additional attempts per eligible agent job." /></Box>
       <Box>{inherit("cleanup_policy")}<HelpSelectField topic="cleanup" tour label="After a successful run" fullWidth value={settings.cleanup_policy} disabled={locked("cleanup_policy")} onChange={(event) => ownerUpdate("cleanup_policy", event.target.value === "merge_on_success" ? "merge_on_success" : event.target.value === "retain" ? "retain" : "clean_on_success")} helperText={<> {settings.cleanup_policy === "merge_on_success" ? "Fast-forwards the branch selected at launch. The checkout must be completely clean at launch and completion. Dirty, switched, or diverged branches fail and keep the run working copy." : "Reports, commits, and history remain available. Run workflow can override this choice."} </>}><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem></HelpSelectField></Box>
     </Stack></Box>
     <Box data-tour="repairs"><Typography variant="h6" sx={{ mb: 1 }}><HelpLabel topic="repairs">New repair rules</HelpLabel></Typography><Accordion expanded={tourActive || repairOpen} onChange={(_event, expanded) => setRepairOpen(expanded)}><AccordionSummary expandIcon={<ActionIcon name="down" />}>Defaults for new repair rules</AccordionSummary><AccordionDetails><Stack spacing={2}>

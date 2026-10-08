@@ -188,11 +188,12 @@ test("file blockers and exemptions appear before launch and copied fixes leave G
   await expect(files).toContainText("staged, modified");
   await expect(files).toContainText("untracked code.py");
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await files.locator("summary").click();
+  await files.locator("summary").first().click();
   await expect(files).toContainText("REVIEW.md");
   await expect(files).toContainText("Root workflow report");
   await expect(files).toContainText(".relay/workflows/file-launch.yaml");
   await expect(files).toContainText("Captured workflow source");
+  await files.getByText("How to resolve these changes", { exact: true }).click();
   for (const command of ["git commit", "git stash -u"]) {
     await files.getByRole("button", { name: `Copy ${command}`, exact: true }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
