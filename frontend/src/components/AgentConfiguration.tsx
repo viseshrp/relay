@@ -17,9 +17,10 @@ interface AgentConfigurationProps {
   defaultLabel?: string;
   inheritDefaults?: boolean;
   labels?: Record<keyof AgentOptions, string>;
+  fields?: Array<keyof AgentOptions>;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false, fields = ["effort", "permission_mode"] }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;
@@ -87,8 +88,8 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
       <Typography variant="subtitle2">{agent.display_name}</Typography>
       {error && <Alert severity="error" action={<Button disabled={disabled} onClick={() => setRefresh((current) => current + 1)}>Retry</Button>}>{error}</Alert>}
       <Box className="field-grid">
-        {selector("effort", labels?.effort ?? "Effort", configuration?.effort ?? null)}
-        {selector("permission_mode", labels?.permission_mode ?? "Permission mode", configuration?.permission_mode ?? null)}
+        {fields.includes("effort") && selector("effort", labels?.effort ?? "Effort", configuration?.effort ?? null)}
+        {fields.includes("permission_mode") && selector("permission_mode", labels?.permission_mode ?? "Permission mode", configuration?.permission_mode ?? null)}
       </Box>
     </Stack>
   );

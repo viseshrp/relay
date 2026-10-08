@@ -20,6 +20,7 @@ from .routing import effective_agent_order
 from .schema import (
     DURATION_PATTERN,
     NODE_ID_PATTERN,
+    ActionsJobNode,
     AgentNode,
     AgentOptions,
     CommandNode,
@@ -165,6 +166,12 @@ def _nodes_with_defaults(
                 {**inherited_env, **definition.env, **node.env}
                 if node.inherit_env
                 else dict(node.env)
+            )
+        elif isinstance(node, ActionsJobNode):
+            if "timeout-minutes" not in node.job and defaults.timeout:
+                updates["timeout"] = defaults.timeout
+            updates["bound_agents"] = _nodes_with_defaults(
+                node.bound_agents, definition, defaults, owner_agents, launch_model
             )
         elif isinstance(node, LoopNode):
             updates["body"] = _nodes_with_defaults(

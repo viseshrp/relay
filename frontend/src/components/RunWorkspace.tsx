@@ -41,6 +41,7 @@ import type {
 import { repairOwnership, visibleRunStages } from "../graph";
 import { projectPath, stageLabel, statusLabel } from "../navigation";
 import { parseWorkflow, type WorkflowValue } from "../workflow";
+import { launchView, parseActions } from "../actions-workflow";
 import { FlowCanvas } from "./FlowCanvas";
 import { ReviewEvidence } from "./RunReview";
 import { WaitingRequests } from "./WaitingRequests";
@@ -61,8 +62,10 @@ import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { runSummaryGraph } from "../run-graph";
 import { useClock } from "../useClock";
 import { jobDuration } from "../job";
+import { ActionsRunProducts } from "./ActionsRunProducts";
 
 const EVENT_TYPES = [
+  "actions.summary", "actions.error", "actions.warning", "actions.notice", "actions.debug", "actions.group", "actions.endgroup", "environment.approved", "step.recovery_resumed",
   "run.created",
   "run.started",
   "run.paused",
@@ -681,7 +684,11 @@ export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, 
       if (controller.signal.aborted) return;
       const parsed = parseWorkflow(document.yaml);
       if (parsed.value === null) throw new Error(`Fix the saved workflow's YAML before running it again. ${parsed.errors.join(" ")}`);
-      setRunAgain({ source, workflow: parsed.value, open: true,
+      const actions = parseActions(document.yaml);
+      const environments = await api<{ environments: Array<{ name: string }> }>(projectPath("/api/workflow-environments", source.project_id), { signal: controller.signal });
+      if (!actions.value) throw new Error("Convert this saved workflow to jobs and ordered steps before starting a new run.");
+      if (controller.signal.aborted) return;
+      setRunAgain({ source, workflow: launchView(actions.value, environments.environments.map(item => item.name))!, open: true,
         models: Array.from(new Set(agents?.agents.flatMap((agent) => agent.models.map((model) => model.value)) ?? [])).sort() });
     } catch (caught) { if (!controller.signal.aborted) setError(errorMessage(caught)); }
     finally {
@@ -849,6 +856,7 @@ export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, 
         </Paper>
 
         <Stack ref={jobContent} spacing={2} sx={{ minWidth: 0, scrollMarginTop: 80 }}>
+          {detail && detail.nodes.some(node => node.node_type === "actions_job") && <ActionsRunProducts runId={detail.id} projectId={detail.project_id} events={events} nodes={detail.nodes} />}
           {detail && <WaitingRequests key={detail.id} requests={pendingInteractions} runId={detail.id} artifacts={artifacts}
             selected={selectedInteraction} hasMore={interactionCursor !== null} onMore={() => void loadMoreInteractions()}
             onAnswered={async () => { await refreshDetail(); attentionChanged(); }} />}

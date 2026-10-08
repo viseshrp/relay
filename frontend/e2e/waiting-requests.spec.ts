@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
 import type { RunDetail } from "../src/types";
 

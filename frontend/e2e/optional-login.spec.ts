@@ -35,7 +35,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Password", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   expect(await (await page.request.get("/api/auth")).json()).toMatchObject({
     owner_created: false, authenticated: true, username: "local", login_required: false,
   });
@@ -47,7 +47,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
     headers,
     data: {
       key: "local-run", holder: "local-browser",
-      yaml: "version: 1\nname: Local run\nnodes:\n  work: {type: command, run: [git, status]}\n",
+      yaml: "name: Local run\njobs: {work: {runs-on: self-hosted, steps: [{run: git status}]}}\n",
     },
   });
   expect(workflow.ok(), await workflow.text()).toBeTruthy();

@@ -62,6 +62,40 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up Node 20 for local action tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '20'
+
+      - name: Capture Node 20 runtime
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          executable = shutil.which("node")
+          assert executable is not None
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"RELAY_TEST_NODE_20={executable}\n")
+          PY
+
+      - name: Set up Node 24 for local action tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Capture Node 24 runtime
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          executable = shutil.which("node")
+          assert executable is not None
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"RELAY_TEST_NODE_24={executable}\n")
+          PY
+
       - name: Run tests
         run: make test
 

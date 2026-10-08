@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 test("refreshing unchanged job geometry keeps measured nodes and their connection visible", async ({ page }) => {
   await page.addInitScript(() => {

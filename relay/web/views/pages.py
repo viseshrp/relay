@@ -183,6 +183,11 @@ def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
         }
     ).cleanup_policy
     strict = policy == CleanupPolicy.MERGE_ON_SUCCESS.value
+    from relay.workflows.actions.language import load as load_actions
+    from relay.workflows.loader import load_workflow, resolve_workflow_path
+
+    source = resolve_workflow_path(relay_root / "workflows", key)
+    load_actions(load_workflow(source).text, source=source)
     preview = inspect_launch_cleanliness(relay_root, key, merge_on_success=strict)
     return JsonResponse(asdict(preview))
 

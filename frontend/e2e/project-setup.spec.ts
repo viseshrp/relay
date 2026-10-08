@@ -22,8 +22,8 @@ test("switching to an empty project keeps the workspace and does not reopen setu
     if (new URL(request.url()).pathname === "/api/agents/check") checks += 1;
   });
   await page.goto("/?view=workflows");
-  const setup = page.getByRole("region", { name: "Get started", exact: true });
-  const sidebar = page.getByRole("navigation", { name: "Workflow sidebar", exact: true });
+  const setup = page.getByRole("dialog", { name: "Get started", exact: true });
+  const sidebar = page.getByRole("region", { name: "Workflow header", exact: true });
   await expect(sidebar).toBeVisible();
   await expect(setup).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Welcome to Relay", exact: true })).toBeVisible();
@@ -34,7 +34,7 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   await page.getByRole("option", { name: empty.display_name, exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Project", exact: true })).toHaveText(empty.display_name);
   await expect(page.getByRole("region", { name: "Workflow header", exact: true })).toContainText("Choose a workflow");
-  await expect(sidebar.getByRole("button", { name: "New workflow", exact: true })).toBeEnabled();
+  await expect(sidebar.getByRole("button", { name: "Create workflow", exact: true })).toBeEnabled();
   await expect(setup).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "No workflows yet", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
@@ -95,12 +95,12 @@ test("a failed connection check never traps the owner in setup", async ({ page }
   await setup.getByRole("button", { name: "Close checklist", exact: true }).click();
   await expect(setup).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^(Help|Account menu for owner)$/ })).toBeFocused();
-  await expect(page.getByRole("navigation", { name: "Workflow sidebar", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Workflow header", exact: true })).toBeVisible();
 });
 
 test("closing setup before inventory arrives prevents a later connection probe", async ({ page }) => {
   await page.goto("/?view=workflows");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const inventory: AgentsResponse = await (await page.request.get("/api/agents")).json();
   let releaseInventory: (() => void) | undefined;
   const blocked = new Promise<void>((resolve) => { releaseInventory = resolve; });

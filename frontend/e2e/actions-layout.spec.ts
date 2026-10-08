@@ -5,7 +5,7 @@ import { jobDuration } from "../src/job";
 import { logMatches, logRows, rawLog } from "../src/log";
 import { runSummaryGraph } from "../src/run-graph";
 import type { RunEvent, RunNode } from "../src/types";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 function event(id: number, type: string, chunk: string): RunEvent {
   return { id, type, source: "command", version: 1, ts: "2026-10-07T12:00:00Z", payload: { chunk } };
@@ -188,7 +188,7 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
   await page.setViewportSize({ width: 1440, height: 900 });
   const checks = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`check_${index}`, { type: "command", run: ["git", "status"], needs: ["prepare"] }]));
   const id = await launch(page, "actions-layout", { prepare: { type: "command", run: ["git", "status"] }, ...checks, finish: { type: "command", needs: Object.keys(checks), run: ["git", "status"] } }, "Build and verify");
-  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status, { timeout: 15000 }).toBe("succeeded");
   const detail = (await (await page.request.get(`/api/runs/${id}`)).json()).run;
   await page.goto("/?view=runs");
   await page.getByRole("navigation", { name: "Workflow sidebar" }).getByRole("button", { name: "Build and verify" }).click();

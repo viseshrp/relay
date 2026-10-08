@@ -210,6 +210,13 @@ export type DashboardSection = "projects" | "waiting" | "active" | "recent";
 export type DashboardResponse = Pick<DashboardData, "counts"> & Partial<Omit<DashboardData, "counts">>;
 
 export interface RunNode {
+  display_name?: string;
+  matrix?: Record<string, JsonValue>;
+  outcome?: string;
+  conclusion?: string;
+  job_id?: string;
+  step_id?: string;
+  matrix_index?: number | null;
   id: string;
   scope_path: string;
   node_id: string;
@@ -259,6 +266,8 @@ export interface JobAttempt {
 }
 
 export interface RunJob {
+  activity_type?: string;
+  display_name?: string;
   working_folder: string;
   scope_path: string;
   node_type: string;

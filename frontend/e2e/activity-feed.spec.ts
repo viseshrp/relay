@@ -4,7 +4,7 @@ import { activityRows, relativeActivityText } from "../src/activity";
 import { safeMarkdownHref } from "../src/components/SafeMarkdown";
 import { toolStatus } from "../src/components/ActivityFeed";
 import type { RunEvent } from "../src/types";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 function event(id: number, type: string, payload: RunEvent["payload"]): RunEvent {
   return { id, type, version: 1, source: "agent", ts: "2026-10-07T12:00:00Z", payload: { scope_path: "root.review", attempt_number: 1, turn: 1, ...payload } };

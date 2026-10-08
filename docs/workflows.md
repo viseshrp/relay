@@ -1,763 +1,612 @@
 # Workflows
 
-Relay reads versioned YAML files from `.relay/workflows/`. A workflow is a map
-of named nodes. Relay rejects unknown keys, unsupported schema versions,
-invalid references, recursive subworkflows, and dependency cycles before a run
-is created.
+Relay saves workflow YAML under `.relay/workflows/`. Its public language uses
+GitHub Actions jobs, ordered steps, expressions, and hyphenated field names.
+Jobs run serially on this computer in one cumulative run worktree. Agents,
+owner decisions, reports, artifacts, and caches use local `relay/...@v1`
+actions. These files require Relay to execute.
 
-`relay init` supplies only an empty version 1 workflow. The examples below
-explain the format; Relay does not install them as templates.
+The grammar comes from a pinned MIT-licensed GitHub language-services revision.
+Relay rejects unknown fields and unsupported platform features.
+`GET /api/workflow-language` returns the support manifest. Validation reads
+sources without starting processes or retrieving credentials. See
+[language compatibility](workflow-language-compatibility.md) for provenance,
+limits, and the implementation map.
 
-## Top-level fields
+Historical `version: 1` / `nodes` snapshots retain their original interpreter.
+New saves and launches require `jobs`. The browser offers a conversion preview
+for old files; review its issues before saving the draft. An old source is
+never rewritten automatically.
 
-| Field | Required | Value |
-| --- | --- | --- |
-| `version` | yes | Integer `1`. Other versions fail without rewriting the file. |
-| `name` | yes | Non-empty display name. |
-| `inputs` | no | Map of typed launch inputs. |
-| `model` | no | Exact, case-sensitive default model value. |
-| `agents` | no | Ordered default agent IDs. |
-| `nodes` | yes | Node ID to node-definition map; an empty map is valid. |
-| `env` | no | String variable map for this workflow's command jobs, overriding project/global variables; defaults to `{}`. |
-| `inherit_env` | no | Whether command jobs inherit project/global variables; defaults to `true`. Child workflows have their own environment settings. |
-| `entrypoints` | no | Declared midstream scopes and their required evidence. |
-| `recovery` | no | `{enabled: false, max_retries: 2}` by default. `max_retries` accepts `1` or `2`. |
-| `repairs` | no | Stage ID to a fix-and-verify policy. See [Stage repair rules](#stage-repair-rules). |
+## Jobs and ordered steps
 
-Node and input IDs match `^[a-z][a-z0-9_]*$`. A node accepts `needs`, `if`,
-`timeout`, and `on_timeout` in addition to its type-specific fields. `needs` is
-an ordered list of sibling node IDs. Expressions and edge targets are checked
-when the graph is compiled.
-
-Durations contain digits followed by `ms`, `s`, `m`, or `h`: `250ms`, `30s`,
-`5m`, and `2h` are valid. There is no implicit unit.
-Loop and subworkflow deadlines also bound their nested attempts. A timeout
-while a node is running fails that attempt; `on_timeout` is taken when a
-`human_wait` deadline expires while waiting.
-
-## Automatic recovery
-
-Set `recovery: {enabled: true}` to retry eligible failed agent steps without an
-owner action. Each step gets at most two additional attempts over the run's
-lifetime. Set `max_retries: 1` for one additional attempt. Agent nodes can opt
-out with `auto_retry: false`; they allow retries by default when the workflow
-policy is enabled. An omitted policy uses the saved project or global default;
-recovery remains off when no such default has been configured.
-The root workflow's policy applies to agent steps in loops and subworkflows;
-use the child agent's `auto_retry` field for an individual opt-out.
-
-Relay retries invalid reports, commit or cleanliness errors, timeouts, and
-protocol failures. Authentication, permissions, model availability, unsafe
-paths, storage, preservation, and Git recovery errors stop for inspection.
-Provider limits follow the separate confirmed-reset schedule. Neither policy
-changes the assigned model, effort, permissions, or original instructions.
-
-The same agent receives the error and a bounded repair instruction after its
-original instructions. Rejected reports and successful upstream report
-handoffs remain available. A failed command needs its existing workflow repair
-route; Relay does not choose a repair agent for a standalone command. Declared
-human waits still require the owner. See
-[Automatic step recovery](execution.md#automatic-step-recovery).
-
-## Stage repair rules
-
-Configure `repairs` on an agent or command stage that produces a verdict. Relay
-runs the stage first. If its declared output equals `accepted_value`, work
-continues. Otherwise Relay runs the configured fixer, then the verifier. A
-rejected verification starts another round; an accepted verification releases
-dependent stages. Exhausting the budget fails with `repair_exhausted`.
-
-Each rule requires `accepted_output`, `fix`, and `verify`. The source and
-verifier must declare that output. `accepted_value` defaults to the string
-`"Yes"`; comparison preserves JSON kinds and case. For example, the string
-`"Yes"` accepts `"Yes"` but rejects `"yes"`, and the boolean `true` rejects the
-number `1`. Numeric values `1` and `1.0` match. `enabled` defaults to `true`.
-`max_rounds` defaults to four and
-accepts integers from one through 100. A disabled rule adds no execution gate.
-
-Fixers and verifiers are ordinary `agent` or `command` definitions with their
-own prompts, outputs, write permissions, model, effort, and permission mode.
-They cannot set `needs`, `if`, or `on_timeout`; Relay owns their ordering.
-`fix_instruction` and `verify_instruction` have defaults that preserve scope
-and require fresh evidence. Custom instructions replace those defaults. Agent
-roles receive their instruction and rejection context after their original
-prompts. Commands execute their configured argument vector.
-
-Use a required retained selector such as `label`, `json_path`, or `yaml_path`
-for a report. `exists` tests only presence and retains no report. Relay keeps
-the original rejection and every round's reports. Dependent expressions see
-the accepted verifier's outputs under the original stage name; recorded
-source outputs remain unchanged. In the example, `needs.review.outputs.ready`
-can become `"Yes"` for delivery while the first review still records `"No"`.
-
-<!-- relay-example: valid stage-repairs -->
+<!-- relay-example: valid ordered-steps -->
 ```yaml
-version: 1
-name: Review with automatic repairs
-model: exact-model-value
-agents: [codex]
-nodes:
-  review:
-    type: agent
-    prompts: [{local: prompts/review.md}]
-    writes: true
-    allow_no_commit: true
-    outputs:
-      ready: {label: {artifact: REVIEW.md, label: Ready}}
-  deliver:
-    type: command
-    needs: [review]
-    if: '${{ needs.review.outputs.ready == "Yes" }}'
-    run: [git, status, --short]
-repairs:
-  review:
-    accepted_output: ready
-    accepted_value: "Yes"
-    max_rounds: 4
-    fix:
-      type: agent
-      writes: true
-      allow_no_commit: true
-    verify:
-      type: agent
-      writes: true
-      allow_no_commit: true
-      outputs:
-        ready:
-          label:
-            artifact: REVIEW_FIX_VERIFICATION.md
-            label: Ready
+name: Check the repository
+run-name: Check ${{ inputs.task }}
+on:
+  workflow_dispatch:
+    inputs:
+      task: {type: string, required: true, default: Inspect the repository}
+defaults:
+  run: {shell: python}
+jobs:
+  main:
+    name: Repository checks
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - id: inspect
+        run: |
+          import subprocess
+          subprocess.run(['git', 'status', '--short'], check=True)
+      - uses: relay/command@v1
+        with: {argv: '["git", "diff", "--check"]'}
 ```
 
-Rules apply to root workflows and loaded subworkflows. Embedded loop bodies
-keep their explicit graphs. Relay reserves the generated node ID
-`relay_repair_<stage>`; a conflicting source ID fails validation. The portable
-YAML keeps the rule, while the captured graph contains durable coordinators.
-The browser shows the original stages and a separate Repairs panel.
+The root accepts `name`, `run-name`, `on`, `env`, `defaults`, `concurrency`,
+`cache-mode`, and `jobs`. A job accepts `name`, `needs`, `if`, `runs-on`,
+`env`, `defaults`, `environment`, `timeout-minutes`, `continue-on-error`,
+`strategy`, `concurrency`, `cache-mode`, and either `steps` or reusable
+workflow `uses` with `with` and `secrets`. `runs-on` accepts `self-hosted`,
+including its one-element list form; it does not select another machine.
 
-Pausing, restarting, or recovering a failed role preserves completed rounds
-and the frozen policy. Action failures use the existing failure and recovery
-rules; they do not count as accepted verdicts or replenish the repair budget.
-See [Execution](execution.md#stage-repair-rules).
+Steps accept `id`, `name`, `if`, `env`, `timeout-minutes`,
+`continue-on-error`, and either `run` with `shell` and `working-directory`,
+or `uses` with `with`. IDs match `^[A-Za-z_][A-Za-z0-9_-]*$` and are unique
+within their scope. `needs` names a sibling job or a list of sibling jobs.
+Dependency cycles fail validation. Ready siblings run in source order.
+Display names can use expressions; IDs remain stable.
 
-## Starter workflows
+Every physical job uses the primary run worktree. Steps edit, test, and then
+commit in that same directory. A successful job with code changes must finish
+with a descendant commit and a clean index and code worktree. A clean no-op is
+valid. An individual agent step need not commit. Accepted job B starts at
+accepted job A's head. Failed-job bytes and evidence are retained before later
+jobs continue from the last accepted head. The source checkout is never reset
+or checked out. See [Git and evidence](git-and-artifacts.md#actions-job-boundaries).
 
-**Get started** and **New workflow** offer six starters. Each needs one
-compatible coding agent. Choose an exact available model before launch; no
-template pins a provider model or changes permission defaults. The gallery
-copies the chosen YAML and prompts byte-for-byte into the project's `.relay`
-folders. Runs use these saved files, which remain editable and uncommitted.
-Existing owner files are never replaced.
+An installation-wide durable lease admits one Actions job, including its
+matrix and nested children, at a time. `strategy.max-parallel` must be `1`.
+Containers, services, background processes, remote actions, hosted runners,
+and YAML `permissions` are unsupported. Provider permissions remain owner
+administration settings.
 
-| Starter | Jobs | Sample input |
-| --- | --- | --- |
-| Ask an agent | One read-only agent | Explain the repository and its main code |
-| Plan, approve, implement | Read-only plan, owner approval, implementation | Explain the main code folder in the README |
-| Implement and test | Implementation, test-command choice, pytest or npm test | Improve the README's code-folder explanation |
-| Review my branch | Agent report with a `Ready` output | Review for bugs and missing tests |
-| Fix until tests pass | Implementation, pytest, bounded fix and verification | Fix test failures without changing their intent |
-| Write docs for a change | Documentation agent | Document how to run tests |
+## Scripts and command actions
 
-All starters define a typed `task` input with a sample default.
-**Implement and test** also has a `test_runner` enum, `pytest` or `npm`.
-Its command jobs run `python -m pytest` or `npm test` as argument vectors.
-The project must already provide the selected test command and dependencies.
+`run` accepts a string or block scalar. Relay writes a private script file and
+starts the interpreter with an argument vector and `shell=False`. Shells are
+`bash`, `sh`, `pwsh`, `powershell`, `cmd`, `python`, or an installed custom
+interpreter command containing `{0}` for the script path. The default is the
+platform's ordinary script shell. Workflow and job `defaults.run` provide a
+shell and working directory; step values override them. Working directories
+must resolve inside the run workspace.
 
-**Review my branch** has `writes: true` and `allow_no_commit: true`, because
-a read-only job cannot create its required report. Its instructions permit
-only `REVIEW.md` and forbid code edits and commits. The `Ready` label supplies
-a retained verdict. This instruction does not add a new runtime permission.
+`relay/command@v1` requires exactly one of `argv` (a JSON string containing a
+nonempty argument vector) or `command` (an owner-configured command name).
+Arguments are never reinterpreted as shell syntax. Relay owns process groups
+or Windows Job Objects and performs bounded shutdown on cancellation/timeout.
 
-**Fix until tests pass** records pytest's exit code and boolean verdict in
-`AUDIT_CHECKPOINT.json`. The test job returns that verdict to the existing
-repair policy, allowing a test failure to start the configured fixer rather
-than fail the run immediately. The verifier repeats the same command. At most
-two repair rounds run; passing tests accept `ready: true`. Each command uses
-an argument vector with `shell=False`. Neither starter installs dependencies.
+<!-- relay-example: valid explicit-command -->
+```yaml
+jobs:
+  check:
+    runs-on: self-hosted
+    steps:
+      - uses: relay/command@v1
+        with: {argv: '["python", "-m", "pytest"]'}
+      - shell: python
+        run: |
+          import subprocess
+          subprocess.run(['git', 'add', '--all'], check=True)
+          changed = subprocess.run(
+              ['git', 'diff', '--cached', '--quiet'], check=False
+          ).returncode
+          if changed:
+              subprocess.run(['git', 'commit', '-m', 'Apply changes'],
+                             check=True)
+```
 
-## Typed inputs
+Commit only the changes intended by the workflow. This example belongs to an
+isolated run job and does not authorize staging unrelated owner changes.
 
-Each input has `type`, optional `description`, optional `required`, optional
-`default`, and type-specific `constraints`.
+## Inputs
 
-| Type | Constraints |
+`on.workflow_dispatch.inputs` declares `type`, `description`, `required`, and
+`default`. Types are `string`, `boolean`, `number`, `choice` with `options`,
+and `environment`. The browser provides typed controls and configured
+environment choices. `inputs` preserves JSON types; `github.event.inputs`
+exposes strings. Unknown supplied names and invalid defaults fail validation.
+Dispatch declarations are limited to 25 inputs.
+
+`on.workflow_call.inputs` supports `string`, `boolean`, and `number`.
+`relay/validate-input@v1` provides explicit constraints: `value`, `type`, and
+JSON `constraints`, using Relay's string, integer, number, boolean, or enum
+validators. It exports string `value` and `valid` outputs.
+
+<!-- relay-example: valid typed-dispatch -->
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      task: {type: string, required: true}
+      apply: {type: boolean, default: false}
+      rounds: {type: number, default: 2}
+      target: {type: choice, options: [docs, tests], default: docs}
+jobs:
+  show:
+    runs-on: self-hosted
+    steps:
+      - env: {TASK: '${{ inputs.task }}'}
+        run: echo "$TASK"
+```
+
+## Expressions and conditions
+
+Use `${{ ... }}` for interpolation. `if` also accepts a bare expression.
+String literals use single quotes; two single quotes escape a quote.
+Literals include boolean, null, decimal, hexadecimal, and exponent numbers.
+Operators are `!`, comparisons, `==`, `!=`, `&&`, and `||`, with grouping,
+property access, indexing, and `*` object/array filters. Missing properties
+yield the empty value. Equality follows Actions' loose numeric coercion and
+case-insensitive string comparison. Logical operators return the selected
+operand rather than forcing a boolean.
+
+Functions are `contains`, `startsWith`, `endsWith`, `format`, `join`,
+`toJSON`, `fromJSON`, `hashFiles`, `case`, `success`, `failure`, `cancelled`,
+and `always`. `case(condition, value, ..., fallback)` selects the first match.
+`hashFiles` hashes matching workspace file contents and yields an empty string
+when nothing matches. Bounded globs never follow links or read `.git`.
+
+Contexts are checked per field:
+
+| Context | Contents |
 | --- | --- |
-| `string` | `min_length`, `max_length`, and `pattern` |
-| `integer` | `min` and `max` |
-| `number` | `min` and `max` |
-| `boolean` | none |
-| `enum` | non-empty, unique `values` |
+| `github` | Local event, repository, ref/SHA, workflow and run identity; no GitHub token or remote API |
+| `inputs` | Typed manual/reusable inputs |
+| `vars` | Frozen installation, project, and approved environment variables |
+| `env` | Workflow, job, and current step environment |
+| `secrets` | Current scope's resolved bindings, after environment gates |
+| `needs` | Direct dependency jobs' string outputs and effective result |
+| `steps` | Completed named steps' string outputs, raw outcome, and conclusion |
+| `jobs` | Reusable workflow output evaluation |
+| `matrix`, `strategy` | Current serial variant, index, total, and strategy |
+| `job`, `runner` | Local status, OS, architecture, and private resource paths |
 
-Input validation is strict: Relay does not turn the string `"4"` into the
-integer `4`. String patterns compile through Pydantic's linear-time,
-RE2-compatible regex engine. Unknown inputs and all independent input errors
-are reported together.
+`if` defaults to `success()`. Failed steps skip later ordinary steps;
+`failure()` or `always()` admits follow-up steps. Failed jobs do not stop
+unrelated jobs. Dependents require successful dependencies unless their
+condition explicitly admits another result.
 
-```text
-inputs:
-  target:
-    type: string
-    required: true
-    constraints:
-      min_length: 2
-      max_length: 40
-      pattern: '^[a-z][a-z0-9-]+$'
-  passes:
-    type: integer
-    default: 2
-    constraints: {min: 1, max: 5}
-  mode:
-    type: enum
-    default: review
-    constraints:
-      values: [review, implement]
+`continue-on-error` preserves raw `outcome: failure` and changes effective
+`conclusion` to `success`. Status checks use conclusions. Tolerating a job
+failure does not accept its failed workspace as a new checkpoint.
+
+<!-- relay-example: valid failure-followup -->
+```yaml
+jobs:
+  check:
+    runs-on: self-hosted
+    steps:
+      - id: test
+        continue-on-error: true
+        uses: relay/command@v1
+        with: {argv: '["python", "-m", "pytest"]'}
+      - if: steps.test.outcome == 'failure'
+        run: echo Tests need repair
+      - if: always()
+        run: echo Check completed
 ```
+
+`timeout-minutes` must be greater than zero and at most 360, including resolved
+expressions. Jobs default to 360 minutes. Persisted deadlines bound descendants
+and survive suspension, restart, and retry. A step cannot extend its job's
+deadline. A timed-out step records failure; eligible follow-ups can run within
+the remaining job deadline.
 
 ## Agent nodes
 
-An `agent` node receives ordered static prompts plus launch inputs, run
-metadata, and named upstream outputs as separate values. It may set an exact
-`model`, an ordered `agents` preference, per-tool `agent_options`, a legacy
-`permission_profile`, declared
-`outputs`, and `writes: true`. A writing node may set `allow_no_commit: true`
-when a verified no-op is a successful outcome. Relay does not append previous
-transcripts.
+`relay/agent@v1` accepts `agent` or ordered JSON `agents`, `model`, `effort`,
+newline-separated `prompt-files`, `prompt`, and optional `report`, `selector`,
+`format`, `field`, `label`, and `auto-retry`. Local prompt paths resolve under
+`.relay/`; `global:NAME` resolves in the owner's global prompt directory.
+A runtime `prompt` follows the frozen ordered prompt files.
 
-<!-- relay-example: valid agent -->
+<!-- relay-example: valid local-agent -->
 ```yaml
-version: 1
-name: Agent review
-model: exact-model-value
-agents: [codex]
-nodes:
-  review:
-    type: agent
-    prompts:
-      - local: prompts/review.md
-    agent_options:
-      codex:
-        effort: high
-        permission_mode: workspace-write
-    outputs:
-      ready:
-        label:
-          artifact: report.md
-          label: Ready
-```
-
-`agent_options` is keyed by agent ID. Each tool accepts optional `effort` and
-`permission_mode` strings, using the exact values advertised for the selected
-model. Omit either key to inherit saved project or global choices for that
-exact model, or the provider's default when none is configured. Use an explicit
-null to keep the provider's default even when a saved override exists. Browser
-labels are never serialized as option values. Empty strings and unknown option
-fields are invalid. The editor removes a key when the owner chooses to inherit
-and removes empty option mappings.
-
-Launch preflight checks each candidate's own overrides after selecting the
-exact model. A candidate must confirm every requested value before its route
-is frozen. Two nodes can use the same model with different effort or mode
-values. The worker applies the frozen values in a fresh session before sending
-the prompt and rejects unsupported or changed values. Existing workflows that
-omit `agent_options` use provider defaults until the owner configures defaults
-in Settings.
-
-This invalid workflow attempts to leave the project prompt root.
-
-<!-- relay-example: invalid agent-prompt-escape -->
-```yaml
-version: 1
-name: Escaping prompt
-model: exact-model-value
-agents: [codex]
-nodes:
-  review:
-    type: agent
-    prompts:
-      - local: ../secret.md
-```
-
-## Command nodes
-
-A `command` node requires `run`: a non-empty argument vector or a named shared
-command reference, `{command: test}`. Shared names follow the node ID pattern.
-The name must exist in the project's effective **Settings › Shared commands**
-at launch. Relay freezes its argument vector in the run snapshot. An existing
-argument vector continues to run exactly as declared.
-
-Relay invokes the resolved command with `shell=False` in the node worktree.
-For example, `[git, status, --short]`
-becomes three process arguments exactly as written; Relay performs no shell
-splitting, variable expansion, or platform-specific quoting.
-
-Job `env` entries override workflow variables, which override project/global
-variables. `inherit_env` defaults to `true` on both workflows and command jobs.
-Setting it to `false` on a workflow skips project/global variables. Setting it
-to `false` on a job skips all declared inherited variables while keeping that
-job's own map and the worker environment. Variable names must be nonempty,
-without `=` or NUL characters; values must be strings without NUL characters.
-These settings affect command jobs, including loop bodies and repair roles.
-Child workflows retain their own environment layers. See
-[Global defaults and project overrides](projects-and-storage.md#global-defaults-and-project-overrides).
-
-`writes` and `outputs` have the same meaning as on an agent node, including the
-explicit `allow_no_commit` exception.
-
-<!-- relay-example: valid command -->
-```yaml
-version: 1
-name: Command check
-nodes:
-  status:
-    type: command
-    run: [git, status, --short]
-    env:
-      RELAY_CHECK: enabled
-```
-
-Select a shared command without copying its arguments into every workflow:
-
-<!-- relay-example: valid shared-command -->
-```yaml
-version: 1
-name: Shared tests
-env:
-  TEST_MODE: workflow
-nodes:
-  test:
-    type: command
-    run: {command: test}
-    env:
-      TEST_MODE: job
-```
-
-Save `test` in Settings before launching this example. Saving or validating a
-portable workflow checks the reference's shape; launch resolves its name.
-
-A scalar command is invalid because its argument boundaries are unknown.
-
-<!-- relay-example: invalid command-scalar -->
-```yaml
-version: 1
-name: Invalid command
-nodes:
-  status:
-    type: command
-    run: git status --short
-```
-
-## Human-wait nodes
-
-A `human_wait` node records a question for the owner. `deadline` is optional;
-without it the wait is indefinite. A timed wait may name an `on_timeout`
-target. The response is correlated to the current node attempt.
-
-<!-- relay-example: valid human-wait -->
-```yaml
-version: 1
-name: Approval
-nodes:
-  approve:
-    type: human_wait
-    prompt: Continue with the implementation?
-    deadline: 15m
-    on_timeout: stop
-  stop:
-    type: command
-    needs: [approve]
-    run: [python, -c, "print('stopped')"]
-```
-
-The word `later` is not a duration.
-
-<!-- relay-example: invalid human-wait-duration -->
-```yaml
-version: 1
-name: Invalid approval
-nodes:
-  approve:
-    type: human_wait
-    prompt: Continue?
-    deadline: later
-```
-
-## Condition nodes
-
-A `condition` evaluates `expr` and selects the matching key in `branches`.
-Quote YAML keys such as `"true"` and `"false"`; unquoted keys are booleans in
-YAML 1.1 and fail Relay's string-key schema. Branch target nodes normally name
-the condition in `needs`, allowing the scheduler to skip the unselected path.
-
-<!-- relay-example: valid condition -->
-```yaml
-version: 1
-name: Conditional path
-inputs:
-  mode:
-    type: enum
-    default: review
-    constraints:
-      values: [review, implement]
-nodes:
-  choose:
-    type: condition
-    expr: "${{ inputs.mode }}"
-    branches:
-      review: review_path
-      implement: implement_path
-  review_path:
-    type: command
-    needs: [choose]
-    run: [python, -c, "print('review')"]
-  implement_path:
-    type: command
-    needs: [choose]
-    run: [python, -c, "print('implement')"]
-```
-
-Function calls are outside the expression language.
-
-<!-- relay-example: invalid condition-call -->
-```yaml
-version: 1
-name: Unsafe expression
-nodes:
-  choose:
-    type: condition
-    expr: "${{ __import__('os') }}"
-    branches:
-      yes: done
-  done:
-    type: command
-    needs: [choose]
-    run: [python, -c, "print('done')"]
-```
-
-## Loop nodes
-
-A `loop` contains its own node map. It runs at most `max_iterations`; the value
-must be between 1 and 100. Relay evaluates `until` after each iteration. If it
-never becomes true, Relay selects the required `exhausted` edge. The maximum
-expanded workflow, including nested loops and subworkflows, is 10,000 node
-instances so individually valid loop bounds cannot create impractical work.
-
-<!-- relay-example: valid loop -->
-```yaml
-version: 1
-name: Bounded inspection
-nodes:
-  inspect:
-    type: loop
-    max_iterations: 3
-    until: "${{ loop.index >= 2 }}"
-    exhausted: fallback
-    body:
-      status:
-        type: command
-        run: [git, status, --short]
-  fallback:
-    type: command
-    needs: [inspect]
-    run: [python, -c, "print('limit reached')"]
-```
-
-This loop exceeds the fixed expansion bound.
-
-<!-- relay-example: invalid loop-bound -->
-```yaml
-version: 1
-name: Unbounded work
-nodes:
-  inspect:
-    type: loop
-    max_iterations: 101
-    exhausted: fallback
-    body:
-      status:
-        type: command
-        run: [git, status, --short]
-  fallback:
-    type: command
-    needs: [inspect]
-    run: [python, -c, "print('limit reached')"]
-```
-
-## Subworkflow nodes
-
-A `subworkflow` runs another file inside the same run. Child execution is inline
-while work is runnable. A nested human wait releases the worker; answering it
-resumes the same parent attempt from durable child state. The
-reference `child` resolves to `.relay/workflows/child.yaml`; `child.yml` or
-`nested/child.yaml` keeps its explicit suffix and relative path. Resolution
-uses relative POSIX keys on Linux and Windows: empty segments, backslashes,
-`.` and `..` are rejected. References cannot leave `.relay/workflows/`, and
-recursive references fail validation.
-Inputs are explicit. Each parent output names a child output as
-`<child-node>.<output>`. Relay evaluates parent expressions, applies the child
-input defaults, and validates the resulting values against the child's typed
-input contract before materializing its scope.
-
-<!-- relay-example: valid subworkflow -->
-```yaml
-version: 1
-name: Child invocation
-nodes:
-  verify:
-    type: subworkflow
-    workflow: child
+on:
+  workflow_dispatch:
     inputs:
-      target: relay
-    outputs:
-      ready: check.ready
-```
-
-A missing child is invalid before a run is created.
-
-<!-- relay-example: invalid subworkflow-missing -->
-```yaml
-version: 1
-name: Missing child
-nodes:
-  verify:
-    type: subworkflow
-    workflow: missing-child
-```
-
-## Dependencies and expressions
-
-Relay compiles data and control edges with Kahn's topological algorithm in
-`O(V + E)` time.
-All referenced dependency, branch, timeout, and exhausted targets must exist.
-The top-level graph and every loop body must be acyclic across both kinds of
-edge. A branch, timeout, or exhausted edge cannot point to its own source or
-back to an upstream node.
-
-<!-- relay-example: invalid control-cycle -->
-```yaml
-version: 1
-name: Cyclic branch
-nodes:
-  build:
-    type: command
-    run: [git, status]
-  choose:
-    type: condition
-    needs: [build]
-    expr: "${{ True }}"
-    branches:
-      "true": build
-```
-
-Expressions use the exact `${{ ... }}` wrapper. They can read only these
-mappings:
-
-- `inputs.<name>`
-- `needs.<node>.outputs.<name>`
-- `run.<meta>`
-- `loop.<index>`
-
-Supported operations are mapping attribute or item access, literal lists,
-tuples, sets, and maps, equality and ordered comparisons, `in` and `not in`,
-`and`, `or`, `not`, and unary numeric signs. Calls, comprehensions, arbitrary
-object attributes, dunder access, and Python `eval` are not available.
-
-## Prompts
-
-Prompt lists preserve their order and file bytes. A local reference such as
-`prompts/review.md` resolves to `<repo>/.relay/prompts/review.md`. A global
-reference such as `coding/review.md` resolves to
-`<config>/prompts/coding/review.md`. Both paths are resolved through symlinks
-and rejected if the result leaves the allowed root.
-
-```text
-prompts:
-  - local: prompts/review.md
-  - global: coding/review.md
-```
-
-Prompt Markdown is static. Relay does not replace braces, environment-variable
-syntax, or other text inside a prompt. Launch inputs, run metadata, and
-upstream outputs travel as separate agent context blocks.
-
-## Outputs
-
-Agent and command outputs use one selector per name:
-
-```text
-outputs:
-  report_exists:
-    exists: reports/result.md
-  readiness:
-    label:
-      artifact: reports/result.md
-      label: Ready for implementation
-  json_status:
-    json_path:
-      artifact: reports/result.json
-      path: build.status
-  yaml_status:
-    yaml_path:
-      artifact: reports/result.yaml
-      path: build.status
-```
-
-For `{exists: "reports/result.md"}`, Relay returns a boolean. A label selector
-reads the text after the first exact line prefix; `Ready: Yes` becomes `Yes`
-for label `Ready`, while `ready: Yes` does not match. A dotted data path walks
-mapping keys only: `build.status` reads key `build`, then key `status`.
-Missing files, labels, or keys fail the node with `output_invalid`.
-
-Every artifact path is resolved beneath the node worktree after following
-symlinks. Selectors cannot read a file outside that worktree.
-
-Files named by `label`, `json_path`, and `yaml_path` selectors are also the
-node's required retained artifacts. Relay preserves each file and its SHA-256
-hash before removing an attempt worktree. An `exists` selector is only a
-boolean check: `false` is a valid output, so that path is not a required file.
-
-### Required handoffs and automatic gates
-
-An agent can finish its turn after reporting a blocker. A dependency in `needs`
-waits for the node's execution result; it does not check that the agent completed
-the requested work. Declare a required artifact with a `label`, `json_path`, or
-`yaml_path` selector before handing work to the next node. A missing artifact or
-field then fails the producer and blocks its dependents automatically. An
-`exists` selector alone does not enforce this requirement.
-
-Use a condition to advance on an explicit verification result. This example
-expects the report to contain exactly `Ready: Yes` or `Ready: No`. Keep generated
-reports in an ignored repository path when they must remain uncommitted; writer
-nodes still have to leave code and the Git index clean. Root workflow reports
-can remain unstaged; see [Git checks](git-and-artifacts.md#clean-launch).
-
-<!-- relay-example: valid required-handoff -->
-```yaml
-version: 1
-name: Required report and readiness gate
-nodes:
-  verify:
-    type: agent
-    writes: true
-    allow_no_commit: true
-    prompts:
-      - local: prompts/review.md
-    outputs:
-      ready:
-        label:
-          artifact: report.md
+      task: {type: string, required: true}
+jobs:
+  review:
+    runs-on: self-hosted
+    steps:
+      - id: inspect
+        uses: relay/agent@v1
+        with:
+          agents: '["codex", "claude"]'
+          model: exact-model-value
+          prompt-files: prompts/review.md
+          prompt: ${{ inputs.task }}
+          report: REVIEW.md
+          format: label
           label: Ready
-  gate:
-    type: condition
-    needs: [verify]
-    expr: "${{ needs.verify.outputs.ready == 'Yes' }}"
-    branches:
-      "true": proceed
-      "false": blocked
-  proceed:
-    type: command
-    needs: [gate]
-    run: [python, -c, "print('Verification passed')"]
-  blocked:
-    type: human_wait
-    needs: [gate]
-    prompt: Review the failed verification before deciding the next step.
+          auto-retry: false
 ```
 
-For handoffs without a stable field, add a command node that validates the
-required files and exits nonzero when a file is missing or empty. If those files
-are ignored and shared between phases, that command needs `writes: true` and
-`allow_no_commit: true` to use the primary worktree. Read-only nodes use separate
-worktrees and cannot see another node's uncommitted files. Reserve `human_wait`
-for decisions that require an owner, rather than checks a command or condition
-can perform.
+Routes, exact model/effort values, and prompt references must resolve from
+launch-static inputs, variables, local `github` context, and static matrix
+values. Runtime outputs, secrets, and dynamic matrices cannot choose a route.
+Omitting `with.effort` inherits saved settings for the exact model. Explicit
+`effort: null` or an empty string preserves the provider's own default and
+suppresses saved effort overrides. The editor offers both choices when saved
+defaults apply. A different explicit value requires fresh provider support.
+Relay freezes transitive routes and prompt bytes and requires fresh exact model
+selection at launch and execution. It never changes provider, model, effort,
+or approval settings to bypass a failure. Agent steps may edit code and defer
+the commit until their job ends. Transport remains ACP for Codex, Claude Code,
+Copilot CLI, and Cursor CLI; Antigravity uses its native headless adapter.
 
-## Scope paths
+## Automatic recovery
 
-Every runtime node has an unambiguous scope path:
+The owner can enable bounded recovery in defaults or an active run's controls.
+`with.auto-retry: true` explicitly enables bounded agent repair; `false` opts
+that step out. Omission follows the run policy. Eligible report, protocol, and
+timeout failures retain rejected evidence and append a separate repair
+instruction after original prompts. The budget is durable over the step's
+lifetime and is never replenished by restart or owner retry. Completed
+upstream work, exact routes, and original prompt bytes remain frozen.
 
-| Definition | Runtime scope | Parent scope |
-| --- | --- | --- |
-| Top-level node `review` | `root.review` | none |
-| Loop `build_loop`, iteration 2 | `root.build_loop#2` | `root` |
-| Subworkflow `verify` in that iteration | `root.build_loop#2.verify` | `root.build_loop#2` |
-| Child node `check` | `root.build_loop#2.verify.check` | `root.build_loop#2.verify` |
+Authentication, model drift, unsafe paths, preservation failures, and missing
+permissions require inspection. Usage recovery also requires a structured
+provider confirmation of a future reset. Prose and cached usage observations
+do not authorize retry. A human wait remains an owner decision. See
+[execution recovery](execution.md#automatic-step-recovery).
 
-Loop indexes are one-based. Node IDs cannot contain `.` or `#`, so parsing is
-deterministic. `needs.<id>` resolves to the same enclosing scope; from
-`root.build_loop#2.verify.check`, sibling `format` becomes
-`root.build_loop#2.verify.format`.
+## Stage repair rules
 
-Relay eagerly compiles route keys for every possible bounded loop iteration
-and transitive subworkflow instance. Runtime node rows remain scoped, and
-execution can stop before unused loop instances are materialized.
+Use ordered test/report, repair, and verification steps with raw outcome
+conditions for a fixed number of repair rounds. **Fix until tests pass** uses
+two repair rounds and commits after verification. For a reusable repair body,
+`relay/loop@v1` accepts `workflow`, JSON `inputs`, `max-iterations` from 1
+through 100, `until-output`, and `equals`. Every iteration is a durable serial
+scope. Exhausting the budget fails the loop.
 
-For example, iteration 2 of loop `build_loop` can contain subworkflow `verify`
-and its child `check`:
+Historical `repairs`, embedded loop bodies, switch nodes, and entrypoint graphs
+remain readable in legacy captured runs. They are not public Actions keys and
+are not silently converted to a different repair contract.
 
-```text
-root.build_loop#2
-root.build_loop#2.verify
-root.build_loop#2.verify.check
+## Human waits
+
+`relay/human-wait@v1` accepts a rendered `prompt` and optional
+`timeout-minutes`. It creates one durable interaction on the current step
+attempt and exports `steps.ID.outputs.answer`. Restart preserves that request
+and completed steps. Duplicate, stale, expired, or mismatched responses cannot
+resume another attempt.
+
+<!-- relay-example: valid owner-answer -->
+```yaml
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+      - id: approval
+        uses: relay/human-wait@v1
+        with:
+          prompt: Review the change. Type Approved to continue.
+          timeout-minutes: 30
+      - if: steps.approval.outputs.answer == 'Approved'
+        run: echo Approved
 ```
 
-If `verify` maps child output `check.ready` to `ready`, the loop body reads it
-as `needs.verify.outputs.ready`. Relay resolves that reference only inside
-`root.build_loop#2`; output values do not cross iteration boundaries.
+## Outputs and file commands
 
-## Midstream entry points
+Step outputs are strings, including typed report values. Typed values remain
+in private execution state. Jobs export expression values; reusable workflows
+export `on.workflow_call.outputs.NAME.value` from their jobs. Limits are 1 MiB
+per step/job and 50 MiB across job exports per run, measured in UTF-16.
+Secret-bearing job exports are skipped with a warning.
 
-An entry point names a `scope_path`, required launch input IDs, and retained
-artifact evidence. Artifact hashes are lowercase SHA-256 values.
+Scripts receive private `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`,
+`GITHUB_STATE`, `GITHUB_STEP_SUMMARY`, and `GITHUB_ARTIFACTS` paths. Each file
+is consumed once and limited to 1 MiB. UTF-8, a UTF-8 BOM, LF, and CRLF are
+accepted. Key/value files support `name=value` and multiline
+`name<<DELIMITER` records. NULs, malformed records, and linked files fail.
 
-```text
-entrypoints:
-  - scope_path: root.implement
-    inputs: [target]
-    artifacts:
-      approved_plan:
-        path: artifacts/plan.md
-        sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+<!-- relay-example: valid file-outputs -->
+```yaml
+jobs:
+  main:
+    runs-on: self-hosted
+    outputs:
+      answer: ${{ steps.capture.outputs.answer }}
+    steps:
+      - id: capture
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          Path(os.environ['GITHUB_OUTPUT']).write_text('answer=ready\n')
+          Path(os.environ['GITHUB_ENV']).write_text('NEXT_VALUE=ready\n')
+          Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('# Checked\n')
+      - shell: python
+        run: |
+          import os
+          assert os.environ['NEXT_VALUE'] == 'ready'
 ```
 
-Before a midstream launch, Relay validates the inputs and confirms that every
-artifact exists with the recorded hash. No run row is created when this
-preflight fails.
+`GITHUB_ENV` changes subsequent steps and cannot replace `GITHUB_*`,
+`RUNNER_*`, or `NODE_OPTIONS`. `GITHUB_PATH` prepends later search paths.
+`GITHUB_STATE` supplies `STATE_*` only to the registering JavaScript action's
+post hook. File state stays local to its owning job.
 
-## Snapshots and routing
+Command/JavaScript logs recognize `::warning::`, `::error::`, `::notice::`,
+`::debug::`, `::group::`, `::endgroup::`, `::add-mask::`, and
+`::stop-commands::TOKEN` / `::TOKEN::`. Annotation properties are file, line,
+endLine, col, endColumn, and title. Percent escapes are decoded. Agent prose is
+never interpreted as commands. Secrets and added masks are removed before
+logs, summaries, annotations, and outputs enter public events, including
+secrets split across stream chunks.
 
-Launch captures the exact root YAML, every transitive child YAML, ordered
-prompt content and hashes, typed inputs, route table, agent preferences, Relay
-version, and runtime versions. SHA-256 hashing uses the UTF-8 bytes as read;
-Relay does not deduplicate snapshots or mutate one after creation.
+`relay/validate-report@v1` accepts `path` or `report`, `format` (`label`,
+`json`, `yaml`, or `exists`), and `label` or `field`. Alternatively supply a
+JSON `selector` with retained `label`, `json_path`, or `yaml_path` selectors.
+It exports `value`. Required selectors retain exact bytes; `exists` returns a
+boolean string and does not require or retain a report. A successful agent
+turn alone does not establish a required report or verdict.
 
-An agent route is keyed by runtime scope, not only by model. Model values are
-exact and case-sensitive. Candidate order concatenates node preferences,
-workflow preferences, then owner preferences while removing later duplicates.
-For example, node `[codex, cursor]`, workflow `[cursor, claude]`, and owner
-`[codex, copilot]` becomes `[codex, cursor, claude, copilot]`. A later model
-preflight records the first candidate that proves it can select the exact
-value; there is no automatic model fallback.
+## Artifacts and caches
+
+`relay/upload-artifact@v1` accepts newline-separated glob `path`, optional
+`name` (default `artifact`), and `retention-days` from 0 through 365. Zero
+retains the named product without automatic expiry. Names are immutable within
+a run. Outputs are `artifact-id` and `artifact-digest`.
+`relay/download-artifact@v1` accepts `name`, optional `run-id`, and workspace
+`path`; it verifies hashes and reads only the same project's artifacts. The
+browser offers verified ZIP downloads, names, digests, sizes, and expiry.
+
+Products have hashed manifests, ownership markers, and limits of 10,000 files
+and 1 GiB. Linked paths, `.git`, and traversal are rejected. Cache restoration
+also rejects `.relay`. Optional product expiry is separate from required
+execution evidence and never deletes report or Git preservation.
+
+`GITHUB_ARTIFACTS` declares newline-separated file subjects (`path` or
+`file://path`) or OCI subjects with full SHA-256/384/512 digests, optionally
+prefixed by `oci://`. Comments and blank lines are ignored. A job permits 500
+subjects; conflicting digests fail. File subjects become verified required
+evidence. `GITHUB_ARTIFACTS_LIST` contains earlier subjects' JSON metadata.
+Relay neither creates GitHub attestations nor uploads OCI data.
+
+Cache actions accept `key` and newline-separated `path` patterns.
+`relay/restore-cache@v1` and `relay/cache@v1` also accept ordered
+newline-separated `restore-keys`. Matching uses exact keys, then recent prefix
+matches with the same path-derived version and project namespace. Outputs are
+`cache-hit`, `cache-primary-key`, and `cache-matched-key`. `relay/cache@v1`
+registers a save after job success; `relay/save-cache@v1` saves explicitly.
+Entries are immutable. A project has a 10 GiB quota with least-recently-used
+eviction after ownership/hash checks.
+
+Workflow/job `cache-mode` is `write` (read and write, default), `read`,
+`write-only`, or `none`. Reusable callers can reduce a callee's capabilities;
+a callee cannot regain them. Caches never replace required evidence.
+
+## Matrix jobs
+
+`strategy.matrix` accepts static axes, `include`, `exclude`, and a dynamic
+object such as `fromJSON(needs.prepare.outputs.matrix)`. Expansion is limited
+to 256 variants and frozen before the first variant. Restart reuses that
+manifest. `strategy.fail-fast` defaults to true; an effective failed variant
+skips remaining pending variants. Set false to continue them.
+`strategy.max-parallel` must be `1`.
+
+<!-- relay-example: valid serial-matrix -->
+```yaml
+jobs:
+  check:
+    name: Check ${{ matrix.target }}
+    runs-on: self-hosted
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        target: [docs, tests]
+        include:
+          - target: docs
+            detail: documentation
+    steps:
+      - env: {TARGET: '${{ matrix.target }}'}
+        run: echo "$TARGET"
+```
+
+Matrix outputs use the last successful nonempty value per key in serial order,
+including reusable matrix calls. Each physical variant has private step state
+and its own accepted job checkpoint.
+
+## Reusable workflows and local actions
+
+Reusable jobs use `./.relay/workflows/NAME.yml` or `.yaml`, `with` inputs, and
+explicit `secrets` or `inherit`. Callees declare `on.workflow_call`, typed
+inputs, required secret names, and expression outputs. Omission does not
+inherit secrets. Every nested contract is enforced; approved environment
+bindings override passed names for that job. Bounds are ten reusable levels
+and fifty unique referenced workflows. Cycles and missing sources fail.
+
+<!-- relay-example: valid reusable-call -->
+```yaml
+jobs:
+  verify:
+    uses: ./.relay/workflows/child.yaml
+    with: {target: docs}
+```
+
+Calls, loops, and local actions freeze all transitive source bytes at launch.
+Owner edits cannot change the executing snapshot. Credentials remain
+references rather than captured credential values.
+
+Steps can use `./.relay/actions/NAME` with `action.yml` or `action.yaml`.
+Metadata accepts `name`, `description`, `author`, `inputs`, `outputs`, `runs`,
+and `branding`. Missing required or unknown supplied inputs fail. Composite
+metadata uses `runs.using: composite`, ordered steps, and expression outputs.
+Composite `run` steps require `shell`. Files are frozen in private storage;
+`github.action_path` and `GITHUB_ACTION_PATH` identify that directory.
+
+JavaScript metadata uses `runs.using: node20` or `node24`, local `main`, and
+optional `post` and `post-if`. The exact installed Node major is required;
+Relay does not download it or install dependencies. Bundle dependencies with
+the action. `pre` is unsupported. Registered post hooks run in reverse order
+with isolated state. Already registered cleanup can run under a separate
+bounded deadline after owner stop. Cancellation never authorizes a new
+ordinary step or agent turn.
+
+A failed post hook fails its job. Post file commands, declared artifacts, and
+summaries use the same validation and masking as main scripts. Cache filesystem
+restore/save failures emit warnings; ownership or integrity failures stop the job.
+
+## Variables, secrets, and environments
+
+Workflow settings manage installation, project, and environment bindings.
+Project values override installation values; approved environment values
+override project values. Each scope permits 100 variables and 100 secrets,
+with values limited to 48 KiB. Names are case-insensitive identifiers and
+cannot start with `GITHUB_` or `RUNNER_`.
+
+Variables freeze by value. Secrets freeze source, reference, and revision and
+resolve from either process environment variables or the explicit native
+backend: macOS Keychain, Windows Credential Manager, or Linux Secret Service.
+Credential operations run in a bounded subprocess with no plaintext fallback.
+Secret values are never returned by the binding API or saved in snapshots or
+binding rows. Missing bindings fail rather than changing secret source.
+
+Jobs select `environment` as a name or `{name, url}`. Settings provide branch
+patterns, optional owner approval, and a wait timer. The gate belongs to the
+current job attempt and runs before environment secrets resolve. Generic human
+answers cannot approve it. Timer/approval requirements survive restart, and
+existing runs retain frozen environment settings.
+
+Environment URLs resolve after the steps finish, so a URL can use a step output.
+The run page exposes HTTP(S) links without embedded credentials. URLs containing
+registered secrets are omitted.
+
+## Concurrency queues
+
+Workflow/job `concurrency` accepts a string or `{group, cancel-in-progress,
+queue}`. Groups use field-specific expression contexts, compare
+case-insensitively, and are bounded to 256 characters. Workflow and job queues
+have distinct scopes.
+
+Local `queue: single` keeps one pending owner and supersedes older pending
+owners. `cancel-in-progress: true` also requests active-owner cancellation.
+`queue: max` is FIFO with at most 100 pending owners and cannot combine with
+cancel-in-progress. Job cancellation targets that job's descendants; workflow
+cancellation targets its run. Nested scopes cannot queue behind their own
+active ancestor. Queue reservation precedes the global lease, so queued work
+does not hold that lease.
+
+## Local automatic triggers
+
+Declaring an event does not activate it. **Activate EVENT** explicitly
+authorizes that trigger's writing jobs on this computer. Activation freezes
+source/prompt hashes and binding revisions; changed sources block delivery
+until reactivation. Automatic launches still apply normal clean-source,
+provider, input, and environment gates. Delivery identities are deduplicated.
+Blocked and uncertain launches remain visible for owner review.
+
+`on.schedule` uses POSIX five-field cron, optional IANA `timezone` (UTC by
+default), and at least five minutes between occurrences. Ranges, lists, steps,
+and Sunday 0 or 7 are supported. Day-of-month/day-of-week use POSIX OR.
+Missing DST times advance to the first valid time; ambiguous folds fire once.
+Downtime coalesces the latest due occurrence instead of replaying the backlog.
+
+<!-- relay-example: valid local-schedule -->
+```yaml
+on:
+  schedule:
+    - cron: '15 9 * * 1-5'
+      timezone: America/New_York
+jobs:
+  check:
+    runs-on: self-hosted
+    steps: [{run: echo Scheduled check}]
+```
+
+`on.push` observes changed local branch/tag refs, without watching GitHub,
+fetching remotes, or checking out another source. `branches`, `tags`, `paths`,
+their `-ignore` forms, and ordered negative patterns filter changes. Observed
+ref/SHA must match the launch source; other deliveries block for review.
+
+`on.repository_dispatch` accepts optional `types`. The authenticated loopback
+API accepts `event_type` up to 100 characters, at most ten `client_payload`
+properties within 65,535 bytes, and a bounded `idempotency_key`. Normal owner
+and CSRF requirements apply in both login modes.
+
+`on.workflow_run` supports completed local runs, workflow name/key and branch
+filters, and local `conclusions: [success, failure, cancelled]`. Follow-ups
+reject cycles and chain at most three levels. No GitHub token is inherited.
+
+## Anchors and diagnostics
+
+Bounded anchors/aliases are supported. Duplicate keys, cycles, merge keys
+(`<<`), custom tags, invalid field contexts, and unsupported keys fail with
+field diagnostics. Bounds are 1 MiB YAML, 10,000 nodes, depth 50, 100 aliases,
+21,000 expression characters, depth 50 expressions, and 10 MiB captured sources.
+
+The browser preserves comments, anchors, aliases, expressions, field order,
+and unsupported fields in drafts. Editing one alias detaches that occurrence
+without changing its anchor. Invalid drafts recover across navigation/reload
+but cannot be saved or launched. Server validation and leases remain
+ authoritative.
+
+<!-- relay-example: valid aliases -->
+```yaml
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+      - &check
+        run: echo Ready
+      - *check
+```
+
+<!-- relay-example: invalid merge-key -->
+```yaml
+jobs:
+  main:
+    <<: {runs-on: self-hosted}
+    steps: [{run: echo Ready}]
+```
+
+<!-- relay-example: invalid remote-action -->
+```yaml
+jobs:
+  main:
+    runs-on: self-hosted
+    steps: [{uses: actions/checkout@v4}]
+```
+
+## Starter workflows
+
+**Get started** and **Create workflow** offer six editable starters: Ask an
+agent; Plan, approve, implement; Implement and test; Review my branch; Fix
+until tests pass; and Write docs for a change. All use ordered local actions
+and typed task inputs. Implement and test also offers a test-runner choice.
+Writing starters commit at the job end. Existing owner files are never replaced.
+
+The owner library imports/exports bounded JSON bundles containing `yaml`,
+`sources`, and gallery `metadata` (`name`, `description`, `iconName`,
+`categories`, `filePatterns`). Saving the current workflow captures local
+reusable/action sources and project prompts. The library stays in installation
+storage. Instantiate an editable copy in `.relay/`; normal launch gates apply.
+`$default-branch` resolves from the recorded remote default, then configured
+`init.defaultBranch`, then `main`, without a network call.
 
 ## Installation defaults
 
-[Settings](projects-and-storage.md#global-defaults-and-project-overrides) can
-supply models, agent order, provider options, shared commands, command variables,
-job timeouts, retry participation, and recovery fields omitted from a workflow.
-Job models still win over run model overrides, which win over workflow models.
-Defaults come afterwards.
-Explicit job effort/permission values remain exact; `null` keeps that option
-at the agent's default and skips project/global inheritance.
+Owner settings supply exact provider order, model/effort defaults, named
+commands, bounded recovery, and completion policy. Provider permissions remain
+operational settings and never appear in public workflow YAML. Workflow
+settings manage scoped variables and secret references.
 
-`timeout: null` skips an inherited agent/command timeout. Human waits retain
-only their declared deadlines. Recovery fields inherit individually, so an
-explicit `enabled: false` keeps automatic recovery off.
-Saved repair rounds and instructions are unchanged; global repair defaults
-initialize new rules in the editor only. These additive fields retain workflow
-schema version 1; existing argument-list workflows remain valid.
-
-Launch retains original YAML and prompt bytes while freezing resolved node
-definitions, recovery, and provider routes. Snapshots additionally record
-`launch_defaults`; captured child records include their resolved `definition`
-alongside original YAML and hash. Older snapshots keep an empty defaults record
-and continue reading their original child YAML. Updating settings never
-rewrites an existing snapshot, source workflow, or completed job.
+Sources are portable. Databases, claims, credentials, logs, artifacts, caches,
+private state, and worktrees stay in platform-specific installation storage.
+See [projects and storage](projects-and-storage.md) and [HTTP API](http-api.md).

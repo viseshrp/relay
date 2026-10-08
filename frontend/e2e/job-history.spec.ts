@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 import { ansiSpans, commandLines, jobDuration } from "../src/job";
 import { jobListRows } from "../src/job-list";
 import type { RunEvent, RunNode } from "../src/types";

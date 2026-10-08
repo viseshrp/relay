@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { RunSummary } from "../src/types";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");

@@ -161,6 +161,17 @@ def _resolved_prompts(
 
 def validate_loaded_workflow(root: LoadedWorkflow, relay_root: Path) -> ValidatedWorkflow:
     """Validate root and transitive workflows, aggregating independent issues."""
+    if root.definition.actions:
+        from dataclasses import replace
+
+        from .actions.compiler import definition as compile_actions
+        from .actions.language import capture_sources
+        from .actions.language import load as load_actions
+
+        document = load_actions(root.text, source=root.path)
+        captured = capture_sources(document, relay_root.parent)
+        root = replace(root, definition=compile_actions(document, captured))
+        return ValidatedWorkflow(root, compile_graph(root.definition.nodes), {}, {}, ())
     workflows_root = (relay_root / "workflows").resolve()
     subworkflows = load_workflow_tree(root, workflows_root)
     issues = _definition_issues(root.definition, label=root.path.name)

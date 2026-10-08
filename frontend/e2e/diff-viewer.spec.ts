@@ -1,3 +1,4 @@
+import { historicalPost as post } from "./setup-helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
@@ -75,17 +76,12 @@ test("empty, unrecognized, and partial patches do not invent missing changes", (
   expect(files[0].patch.endsWith("+part")).toBeTruthy();
 });
 
-async function post(page: Page, path: string, data: object = {}) {
-  const csrf = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
-  return page.request.post(path, { data, headers: { "X-CSRFToken": csrf?.value ?? "" } });
-}
-
 async function review(page: Page, key: string, text: string, truncated = false) {
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/?view=workflows");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   expect((await post(page, "/api/workflows", {
     key, holder,

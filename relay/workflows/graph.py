@@ -9,7 +9,14 @@ from dataclasses import dataclass
 from relay.errors import WorkflowValidationError
 
 from .expressions import validate_expression
-from .schema import ConditionNode, HumanWaitNode, LoopNode, NodeDefinition
+from .schema import (
+    ActionsJobNode,
+    ActionsStepNode,
+    ConditionNode,
+    HumanWaitNode,
+    LoopNode,
+    NodeDefinition,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +33,9 @@ class CompiledGraph:
 
 
 def _expression_errors(node_id: str, node: NodeDefinition) -> list[str]:
+    if isinstance(node, (ActionsJobNode, ActionsStepNode)):
+        # Actions expressions are validated with their exact per-field contexts.
+        return []
     expressions = []
     if node.condition is not None:
         expressions.append(("if", node.condition))

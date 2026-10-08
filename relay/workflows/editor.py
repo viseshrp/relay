@@ -12,7 +12,7 @@ import re
 import tempfile
 from typing import Protocol
 
-from relay.constants import API_MAX_PAGE, API_MAX_PAGE_BYTES, SCHEMA_VERSION
+from relay.constants import API_MAX_PAGE, API_MAX_PAGE_BYTES
 from relay.errors import (
     PermissionFlowError,
     ProjectDiscoveryError,
@@ -153,23 +153,29 @@ def create_workflow_document(
         yaml_text
         if yaml_text is not None
         # JSON quotes preserve a name such as "Review: API" as one YAML scalar.
-        else (f"version: {SCHEMA_VERSION}\nname: {json.dumps(name)}\nnodes: {{}}\n")
+        else (
+            f"name: {json.dumps(name)}\non: workflow_dispatch\njobs:\n"
+            "  check:\n    runs-on: self-hosted\n    steps:\n      - run: echo Ready\n"
+        )
     )
+    from .actions.language import load
+
+    load(text, source=path)
     loaded = load_workflow_text(text, source=path)
     validate_loaded_workflow(loaded, relay_root)
     _atomic_create(path, text)
     return read_workflow_document(store, relay_root, project_id, workflow_key)
 
 
-def _atomic_create(path: Path, text: str) -> None:
+def _atomic_create(path: Path, text: str | bytes) -> None:
     """Publish complete UTF-8 bytes without overwriting an owner file."""
     temporary = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
         temporary = Path(temporary_name)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
-            stream.write(text)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(text.encode("utf-8") if isinstance(text, str) else text)
             stream.flush()
             os.fsync(stream.fileno())
         # A hard link publishes complete bytes atomically and fails if the owner already has a file.
@@ -270,6 +276,9 @@ def autosave_workflow_draft(
     path = _path(relay_root, workflow_key)
     state = DraftValidationState.VALID
     try:
+        from .actions.language import load
+
+        load(yaml_text, source=path)
         loaded = load_workflow_text(yaml_text, source=path)
         validate_loaded_workflow(loaded, relay_root)
     except RelayError:
@@ -329,6 +338,9 @@ def save_workflow_document(
             context={"workflow": workflow_key},
             next_action="Reload the saved file and reconcile the recovery draft before saving.",
         )
+    from .actions.language import load
+
+    load(yaml_text, source=path)
     loaded = load_workflow_text(yaml_text, source=path)
     validate_loaded_workflow(loaded, relay_root)
     _atomic_replace(path, yaml_text)

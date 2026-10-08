@@ -10,6 +10,7 @@ from relay.errors import WorkflowValidationError
 
 from .loader import LoadedWorkflow, resolve_workflow_path
 from .schema import (
+    ActionsJobNode,
     AgentNode,
     AgentOptions,
     LoopNode,
@@ -87,6 +88,16 @@ def _routes_for_nodes(
     subworkflows: Mapping[str, LoadedWorkflow],
 ) -> Iterable[RouteRequirement]:
     for node_id, node in nodes.items():
+        if isinstance(node, ActionsJobNode):
+            for step_scope, agent in node.bound_agents.items():
+                scope = node_scope(parent_scope, node_id) + "." + step_scope
+                model = agent.model or launch_model or definition.model
+                agents = effective_agent_order(agent.agents, definition.agents, owner_agents)
+                if not model or not agents:
+                    message = f"Agent step {scope} requires an exact model and provider."
+                    raise WorkflowValidationError(message)
+                yield RouteRequirement(scope, model, agents, agent_options=agent.agent_options)
+            continue
         if isinstance(node, AgentNode):
             model = node.model or launch_model or definition.model
             agents = effective_agent_order(node.agents, definition.agents, owner_agents)

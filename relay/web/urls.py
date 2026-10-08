@@ -3,9 +3,19 @@
 from django.urls import URLPattern, URLResolver, path
 
 from .static_view import serve_spa
-from .views import actions, pages, settings, stream
+from .views import actions, actions_language, pages, settings, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("api/workflow-language", actions_language.manifest),
+    path("api/workflow-library", actions_language.library),
+    path("api/workflow-language/validate", actions_language.validate),
+    path("api/workflow-language/convert", actions_language.convert),
+    path("api/workflow-bindings", actions_language.bindings),
+    path("api/workflow-environments", actions_language.environments),
+    path("api/workflow-triggers", actions_language.triggers),
+    path("api/repository-dispatch", actions_language.dispatch),
+    path("api/attempts/<str:attempt_id>/environment", actions_language.approve),
+    path("api/runs/<str:run_id>/products", actions_language.products),
     path("api/auth", actions.authentication_state, name="auth-state"),
     path("api/auth/onboard", actions.onboard, name="auth-onboard"),
     path("api/auth/login", actions.sign_in, name="auth-login"),
@@ -76,6 +86,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("api/data/usage", settings.storage_usage, name="data-usage"),
     path("api/data/clean", actions.clean_data, name="data-clean"),
+    path(
+        "api/workflow-artifacts/<str:artifact_id>/download",
+        actions_language.download_product,
+        name="workflow-artifact-download",
+    ),
     path("api", pages.api_not_found, name="api-root-not-found"),
     path("api/", pages.api_not_found, name="api-slash-not-found"),
     path("api/<path:path>", pages.api_not_found, name="api-not-found"),

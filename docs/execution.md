@@ -1,5 +1,18 @@
 # Relay execution
 
+Current workflows use the [Actions jobs/steps dialect](workflows.md). One
+durable installation-wide lease admits a job and its nested/matrix steps
+serially. Each step is a committed attempt. Jobs suspend for owner/environment
+gates without repeating completed steps. Deadlines and matrix manifests
+persist through restart. Job success validates the cumulative Git checkpoint;
+agents can defer commits until that boundary.
+
+Raw outcomes and effective conclusions are stored separately. Failed steps
+admit explicit failure follow-ups; failed jobs do not cancel unrelated jobs.
+`continue-on-error` affects conclusions while retaining rejected evidence.
+Historical snapshots keep their captured interpreter and the legacy node
+contracts described below where they differ.
+
 Relay runs each workflow from durable state in `relay.db`. Huey carries only an
 opaque claim token. A queue item is never the record of whether work ran.
 
@@ -25,7 +38,9 @@ target state already holds is a no-op.
 | `pending` | `worktree_failed` | `creation_error` | `failed` | `run.failed` |
 | `running` | `node_waiting` | `one_or_more_nodes_waiting` | `paused_wait` | `run.paused` |
 | `paused_wait` | `wait_answered` | `no_waiting_nodes_and_none_failed` | `running` | `run.resumed` |
+| `paused_wait` | `jobs_settled` | `actions_jobs_and_descendants_terminal` | `running` | `run.resumed` |
 | `running` | `all_succeeded` | `all_nodes_terminal_success` | `succeeded` | `run.succeeded` |
+| `running` | `jobs_canceled` | `all_jobs_terminal_with_cancellation_and_none_failed` | `canceled` | `run.canceled` |
 | `running` | `completion_started` | `all_nodes_terminal_success_and_merge_requested` | `completing` | `run.completing` |
 | `completing` | `completion_succeeded` | `merge_and_worktree_removal_durable` | `succeeded` | `run.succeeded` |
 | `completing` | `completion_failed` | `merge_or_worktree_removal_failed` | `failed` | `run.failed` |
@@ -65,6 +80,7 @@ or `failed`; restart never reopens canceled nodes.
 | `pending` | `guard_false` | `if_expression_false` | `skipped` | `node.skipped` |
 | `pending` | `dependencies_unreachable` | `upstream_terminal_blocks_needs` | `skipped` | `node.skipped` |
 | `ready` | `dispatch` | `claim_created` | `dispatched` | `node.dispatched` |
+| `dispatched` | `admission_failed` | `invalid_frozen_admission_policy` | `failed` | `node.failed` |
 | `dispatched` | `attempt_started` | `claim_won_and_gate_acquired` | `running` | `node.running` |
 | `running` | `interaction_requested` | `interaction_created` | `waiting` | `node.waiting` |
 | `waiting` | `interaction_answered` | `control_applied` | `running` | `node.running` |

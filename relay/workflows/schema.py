@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -311,8 +311,56 @@ class SubworkflowNode(NodeBase):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
+class ActionsStepNode(NodeBase):
+    """Internal compiled step; public fields come from the Actions language."""
+
+    type: Literal["actions_step"] = "actions_step"
+    step: dict[str, Any]
+    workflow: dict[str, Any]
+    job: dict[str, Any]
+    job_id: str
+    step_id: str
+    index: int
+    matrix: dict[str, Any] = Field(default_factory=dict)
+    sources: dict[str, str] = Field(default_factory=dict)
+    bound_agent: AgentNode | None = None
+    bound_agents: dict[str, AgentNode] = Field(default_factory=dict)
+    caller_inputs: dict[str, Any] = Field(default_factory=dict)
+    state_scope: str = ""
+    action_path: str = ""
+
+
+class ActionsJobNode(NodeBase):
+    """Internal job coordinator owns the shared checkout and commit boundary."""
+
+    type: Literal["actions_job"] = "actions_job"
+    writes: bool = True
+    allow_no_commit: bool = True
+    job_id: str
+    job: dict[str, Any]
+    workflow: dict[str, Any]
+    sources: dict[str, str] = Field(default_factory=dict)
+    matrix: dict[str, Any] = Field(default_factory=dict)
+    matrix_index: int | None = None
+    bound_agents: dict[str, AgentNode] = Field(default_factory=dict)
+    coordinator: bool = False
+    caller_inputs: dict[str, Any] = Field(default_factory=dict)
+    caller_secrets: dict[str, str] = Field(default_factory=dict)
+    caller_secret_scope: str | None = None
+    caller_secret_mapping: dict[str, Any] | Literal["inherit"] | None = None
+    caller_cache_mode: str | None = None
+    workflow_scope: str = "root"
+
+
 NodeDefinition = Annotated[
-    AgentNode | CommandNode | HumanWaitNode | ConditionNode | LoopNode | SubworkflowNode,
+    AgentNode
+    | CommandNode
+    | HumanWaitNode
+    | ConditionNode
+    | LoopNode
+    | SubworkflowNode
+    | ActionsJobNode
+    | ActionsStepNode,
     Field(discriminator="type"),
 ]
 
@@ -373,7 +421,7 @@ class RepairRule(StrictModel):
 
 
 class WorkflowDefinition(StrictModel):
-    """One complete Relay workflow document."""
+    """Internal execution IR; version 1 is retained for historical snapshots."""
 
     version: int
     name: str = Field(min_length=1)
@@ -386,6 +434,7 @@ class WorkflowDefinition(StrictModel):
     entrypoints: list[EntryPoint] = Field(default_factory=list)
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
     repairs: dict[str, RepairRule] = Field(default_factory=dict)
+    actions: dict[str, Any] = Field(default_factory=dict)
 
     validate_env = field_validator("env")(validate_environment)
 
@@ -407,7 +456,7 @@ class WorkflowDefinition(StrictModel):
                 message = f"repair coordinator id conflicts with a stage for {source!r}"
                 raise ValueError(message)
         for name in self.inputs:
-            if NODE_ID_PATTERN.fullmatch(name) is None:
+            if not self.actions and NODE_ID_PATTERN.fullmatch(name) is None:
                 message = f"input id {name!r} must match {NODE_ID_PATTERN.pattern}"
                 raise ValueError(message)
         scopes = [entry.scope_path for entry in self.entrypoints]
@@ -419,7 +468,12 @@ class WorkflowDefinition(StrictModel):
 
 def _validate_node_map(nodes: dict[str, NodeDefinition], location: str) -> None:
     for node_id, node in nodes.items():
-        if NODE_ID_PATTERN.fullmatch(node_id) is None:
+        pattern = (
+            r"^[A-Za-z_][A-Za-z0-9_-]*$"
+            if isinstance(node, (ActionsJobNode, ActionsStepNode))
+            else NODE_ID_PATTERN.pattern
+        )
+        if re.fullmatch(pattern, node_id) is None:
             message = f"{location} id {node_id!r} must match {NODE_ID_PATTERN.pattern}"
             raise ValueError(message)
         if isinstance(node, LoopNode):

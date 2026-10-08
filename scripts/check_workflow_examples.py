@@ -18,19 +18,20 @@ EXAMPLE_PATTERN = re.compile(
     re.DOTALL,
 )
 
-CHILD_WORKFLOW = """version: 1
-name: Child verifier
-inputs:
-  target:
-    type: string
-    required: true
-nodes:
+CHILD_WORKFLOW = """name: Child verifier
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+jobs:
   check:
-    type: command
-    run: [python, -c, \"print('checked')\"]
-    outputs:
-      ready:
-        exists: report.json
+    runs-on: self-hosted
+    steps:
+      - uses: relay/command@v1
+        with:
+          argv: '["python", "-c", "print(42)"]'
 """
 
 
@@ -58,6 +59,9 @@ def check_examples(path: Path) -> int:
             workflow_path.write_text(match.group("source"), encoding="utf-8")
             rejected = False
             try:
+                from relay.workflows.actions.language import load
+
+                load(match.group("source"), source=workflow_path)
                 loaded = load_workflow(workflow_path)
                 validate_loaded_workflow(loaded, relay_root)
             except RelayError:

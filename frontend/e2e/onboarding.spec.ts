@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { post, openSettings } from "./setup-helpers";
+import { post, openSettings, currentWorkflow } from "./setup-helpers";
 import { stringify } from "yaml";
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -63,7 +63,7 @@ test("the full spotlight tour reaches each settings control without changing sav
     await tour.getByRole("button", { name: index === titles.length - 1 ? "Finish" : "Next", exact: true }).click();
   }
   await expect(tour).toBeHidden();
-  await expect(page.getByRole("navigation", { name: "Workflow sidebar" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Workflow header" })).toBeVisible();
   expect(mutations).toEqual([]);
   expect((await (await page.request.get("/api/settings")).json()).revision).toBe(before.revision);
 });
@@ -122,22 +122,23 @@ test("touch-sized help works for disabled settings and closes with Escape withou
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
-test("long workflow names retain full-size aligned icons and settings never overlap their save controls", async ({ page }, testInfo) => {
+test("long workflow names fit the header and settings never overlap their save controls", async ({ page }, testInfo) => {
   await page.addInitScript(() => { localStorage.setItem("relay.welcome-seen", "true"); localStorage.setItem("relay.tour-seen", "true"); localStorage.setItem("relay.setup-dismissed", "true"); });
   await page.goto("/?view=workflows");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const name = "Automatic tab suspension: fresh build without size caps and independently verified results";
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
-  const created = await post(page, "/api/workflows", { key: "long.yaml", holder, yaml: stringify({ version: 1, name, nodes: { test: { type: "command", run: ["python3", "-V"] } } }) });
+  const created = await post(page, "/api/workflows", { key: "long.yaml", holder, yaml: stringify(currentWorkflow({ version: 1, name, nodes: { test: { type: "command", run: ["python3", "-V"] } } })) });
   expect(created.ok(), await created.text()).toBeTruthy();
-  await page.reload();
-  const sidebar = page.getByRole("navigation", { name: "Workflow sidebar" });
-  const long = sidebar.getByRole("button", { name, exact: true });
+  await page.goto("/?view=workflows&workflow=long.yaml");
+  const sidebar = page.getByRole("region", { name: "Workflow header" });
+  const long = sidebar.getByRole("heading", { name, exact: true });
   await expect(long).toBeVisible();
-  const icon = await long.locator("svg").boundingBox();
+  const icon = await sidebar.getByRole("combobox", { name: "Workflow", exact: true }).locator("..").locator("svg").boundingBox();
   expect(icon?.width).toBeGreaterThanOrEqual(18);
-  const shortIcon = await sidebar.getByRole("button", { name: "Configuration", exact: true }).locator("svg").boundingBox();
-  expect(icon?.x).toBe(shortIcon?.x);
+  const headerBox = await sidebar.boundingBox(); const titleBox = await long.boundingBox();
+  if (!headerBox || !titleBox) throw new Error("Expected a visible workflow header.");
+  expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
   await long.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("workflow-sidebar.png") });
   await openSettings(page);
@@ -189,7 +190,7 @@ test("an unavailable workspace bundle offers explicit reload instead of a blank 
   await expect(page.getByRole("alert").filter({ hasText: "Relay could not open this workspace." })).toBeVisible();
   await page.unroute("**/WorkflowWorkspace-*.js");
   await page.getByRole("button", { name: "Reload Relay", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
 });
 
 test("blocked browser storage allows dismissal and explains why reset cannot persist", async ({ page }) => {

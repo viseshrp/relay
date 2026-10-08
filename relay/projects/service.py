@@ -8,14 +8,16 @@ import shutil
 import tempfile
 from typing import Protocol
 
-from relay.constants import SCHEMA_VERSION
 from relay.errors import GitError, ProjectRelinkError
 from relay.vcs.git import run_git
 
 from .discovery import git_root
 from .identity import ProjectIdentity, canonical_path, identify_project
 
-_BLANK_WORKFLOW = f"version: {SCHEMA_VERSION}\nname: Blank workflow\nnodes: {{}}\n"
+_BLANK_WORKFLOW = (
+    "name: Blank workflow\non: workflow_dispatch\njobs:\n"
+    "  main:\n    runs-on: self-hosted\n    steps:\n      - run: echo Ready\n"
+)
 INITIAL_PROJECT_FILES = (
     ("workflows/workflow.yaml", _BLANK_WORKFLOW),
     ("prompts/prompt.md", ""),

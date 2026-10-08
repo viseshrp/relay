@@ -112,7 +112,9 @@ def starter_inventory() -> list[dict[str, object]]:
                 },
             }
         )
-    return records
+    from .library import inventory
+
+    return [*records, *inventory()]
 
 
 def _require_matching_prompt(path: Path, text: str) -> None:
@@ -128,6 +130,10 @@ def create_starter_workflow(
     workflow_key: str,
     starter_id: str,
 ) -> WorkflowDocument:
+    if starter_id.startswith("owner:"):
+        from .library import instantiate
+
+        return instantiate(store, relay_root, project_id, workflow_key, starter_id)
     """Serialize shared prompt creation and rollback across browser requests."""
     filename = sha256(project_id.encode("utf-8")).hexdigest()
     with MigrationLock(

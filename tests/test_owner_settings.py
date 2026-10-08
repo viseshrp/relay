@@ -273,11 +273,14 @@ def test_launch_freezes_defaults_and_nested_jobs_without_rewriting_sources(
     fake_agents.install("codex", mode="configuration")
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     source = (
-        "version: 1\nname: Defaults\nnodes:\n"
-        "  wait: {type: human_wait, prompt: Approve}\n"
-        "  child: {type: subworkflow, workflow: child, needs: [wait]}\n"
+        "name: Defaults\njobs:\n  wait:\n    runs-on: self-hosted\n"
+        "    steps: [{uses: relay/human-wait@v1, with: {prompt: Approve}}]\n"
+        "  child: {uses: ./.relay/workflows/child.yaml, needs: wait}\n"
     )
-    child = "version: 1\nname: Child\nnodes:\n  work: {type: agent}\n"
+    child = (
+        "name: Child\non: workflow_call\njobs:\n  work:\n    runs-on: self-hosted\n"
+        "    steps: [{uses: relay/agent@v1}]\n"
+    )
     served.write_workflow("parent", source)
     served.write_workflow("child", child)
     save_global(
@@ -297,9 +300,12 @@ def test_launch_freezes_defaults_and_nested_jobs_without_rewriting_sources(
     snapshot = RunSnapshot.objects.get(run_id=run_id)
     before = snapshot.launch_defaults
     assert snapshot.workflow_yaml == source
-    assert snapshot.subworkflows["child.yaml"]["yaml"] == child
-    assert snapshot.subworkflows["child.yaml"]["definition"]["nodes"]["work"]["timeout"] == "15m"
-    assert snapshot.route_table["root.child.work"]["effort"] == "low"
+    assert (
+        snapshot.resolved_definition["nodes"]["child"]["sources"][".relay/workflows/child.yaml"]
+        == child
+    )
+    assert snapshot.resolved_definition["nodes"]["child"]["timeout"] == "15m"
+    assert snapshot.route_table["root.child.work.step_1"]["effort"] == "low"
     assert Run.objects.get(pk=run_id).cleanup_policy == "retain"
     assert Run.objects.get(pk=run_id).recovery_policy == {"enabled": True, "max_retries": 1}
     save_global({"agent_preferences": ["claude"], "workflow_defaults": {"timeout": "1s"}})
@@ -318,13 +324,13 @@ def test_launch_freezes_defaults_and_nested_jobs_without_rewriting_sources(
     assert engine.store.resolve_human_wait_controls() == 1
     dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
     engine.drain(run_id)
-    nested = NodeRun.objects.get(run_id=run_id, scope_path="root.child.work")
+    nested = NodeRun.objects.get(run_id=run_id, scope_path="root.child.work.step_1")
     assert nested.frozen_def["timeout"] == "15m"
-    assert nested.frozen_def["agent_options"]["codex"]["effort"] == "low"
+    assert nested.frozen_def["bound_agent"]["agent_options"]["codex"]["effort"] == "low"
     assert Run.objects.get(pk=run_id).status == "succeeded"
     snapshot.refresh_from_db()
     assert snapshot.launch_defaults == before
-    assert snapshot.route_table["root.child.work"]["model_value"] == "m1"
+    assert snapshot.route_table["root.child.work.step_1"]["model_value"] == "m1"
     assert (served.relay_root / "workflows/parent.yaml").read_text() == source
 
 
@@ -347,6 +353,7 @@ def test_saving_login_is_restart_only_and_preserves_account(
     assert User.objects.count() == 1
 
 
+@pytest.mark.usefixtures("served")
 def test_invalid_combined_project_defaults_are_not_saved(owner: Client) -> None:
     current = owner.get("/api/projects/defaults").json()
     result = post(
@@ -367,7 +374,10 @@ def test_invalid_saved_provider_choices_fail_fresh_launch_proof_without_creating
     owner: Client, served: RelayProject, fake_agents: FakeAgents, option: dict[str, str]
 ) -> None:
     fake_agents.install("codex", mode="configuration")
-    served.write_workflow("defaults", "version: 1\nname: Defaults\nnodes:\n  work: {type: agent}\n")
+    served.write_workflow(
+        "defaults",
+        "name: Defaults\njobs: {work: {runs-on: self-hosted, steps: [{uses: relay/agent@v1}]}}\n",
+    )
     save_global(
         {"agent_preferences": ["codex"], "workflow_defaults": {"providers": {"codex": option}}}
     )
