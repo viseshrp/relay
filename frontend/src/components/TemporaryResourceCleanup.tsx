@@ -1,3 +1,4 @@
+import { HelpField } from "./HelpTip";
 import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -68,10 +69,10 @@ export function TemporaryResourceCleanup({ projectId }: { projectId: string }) {
     {error && !open && <Alert severity="error" action={<Button disabled={loading || busy} onClick={() => void load()}>Reload completed runs</Button>}>{error}</Alert>}
     {loading && <CircularProgress size={24} aria-label="Loading completed runs" />}
     {!loading && !error && runs.length === 0 && <Typography>No completed runs are available for temporary cleanup in this project.</Typography>}
-    <FormControl fullWidth><InputLabel id="resource-cleanup-run">Completed run</InputLabel><Select labelId="resource-cleanup-run" label="Completed run" value={selectedId} disabled={loading || busy} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
+    <HelpField topic="temporaryCleanup"><FormControl fullWidth><InputLabel id="resource-cleanup-run">Completed run</InputLabel><Select labelId="resource-cleanup-run" label="Completed run" value={selectedId} disabled={loading || busy} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
       <MenuItem value="">Choose a completed run</MenuItem>
       {runs.map((run) => <MenuItem key={run.id} value={run.id}><Box component="span" sx={{ display: "flex", gap: 1, alignItems: "center" }}><StatusIcon status={run.status} />#{run.number} {run.title} · {statusLabel(run.status)}</Box></MenuItem>)}
-    </Select></FormControl>
+    </Select></FormControl></HelpField>
     <Stack direction="row" spacing={1}>
       <Button variant="outlined" disabled={!selected || loading || busy} onClick={() => { setError(null); setOpen(true); }}>Retry temporary resource cleanup</Button>
       <Button disabled={loading || busy} onClick={() => void load()}>Refresh completed runs</Button>

@@ -270,6 +270,7 @@ The complete settings inventory is:
 | Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
 | Worker count | Server and account, positive integer | Explicit `relay up --workers` | Restart required |
 | Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
+| Welcome slides and guided tour | Welcome and guided tour provides replay and reset | This browser and installation address; no project override | Reset applies on next opening |
 | Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |
 | Local account | Server and account shows the current account and active login policy | Existing onboarding and sign-in | Read-only in the page |
 | Retained data deletion | Storage shows project counts, sizes, and deletion categories | Explicit confirmed project cleanup | On confirmation |

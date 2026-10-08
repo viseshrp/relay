@@ -374,5 +374,51 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 
 .settings-layout { align-items: start; }
 .settings-content { padding: 28px; width: 100%; max-width: 1000px; min-width: 0; }
-.settings-save { position: sticky; bottom: 12px; padding: 12px; background: #fff; border: 1px solid #dce1ec; border-radius: 6px; }
+.settings-save { padding: 12px; background: #fff; border: 1px solid #dce1ec; border-radius: 6px; }
 @media (max-width: 900px) { .settings-content { padding: 18px; } }
+
+/* List icons keep their own column even when a title spans several lines. */
+.actions-sidebar .MuiListItemButton-root { align-items: flex-start; padding-block: 10px; }
+.workflow-author-layout > .actions-sidebar .MuiListItemButton-root { padding-inline: 12px; }
+.actions-sidebar .MuiListItemButton-root > svg,
+.actions-sidebar .MuiListItemButton-root > .status-icon { margin-top: 3px; flex-shrink: 0; }
+.actions-sidebar .MuiListItemText-root { min-width: 0; flex: 1; }
+.actions-sidebar .MuiListItemText-primary { line-height: 1.5; }
+.actions-sidebar .MuiList-root { display: grid; gap: 4px; }
+.settings-content .MuiFormControlLabel-root { margin-left: 0; margin-right: 0; }
+.settings-content .MuiAccordionSummary-root { gap: 12px; }
+.settings-content .MuiAccordionDetails-root { padding-top: 16px; }
+.settings-save { position: static; flex-wrap: wrap; gap: 8px; margin-top: 28px !important; }
+.help-tip { display: inline-flex; flex: 0 0 auto; align-self: flex-start; }
+.help-tip .MuiIconButton-root { color: #526078; min-width: 32px; min-height: 32px; }
+.help-field { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: start; gap: 8px; min-width: 0; }
+.help-field-control { min-width: 0; }
+.help-field-control > .MuiFormControl-root { width: 100%; }
+.help-label { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.help-label .help-tip { align-self: center; }
+.settings-group > .MuiTypography-root { margin-bottom: 8px; }
+.settings-group > section { margin-top: 12px; }
+.settings-content [data-tour] { scroll-margin-top: 150px; }
+.settings-content .MuiInputBase-root { min-width: 0; }
+.settings-content .MuiSelect-select { white-space: normal; overflow-wrap: anywhere; }
+.settings-content .MuiFormControlLabel-label { overflow-wrap: anywhere; }
+.getting-started-home { max-width: 1000px; padding: 32px; margin: 24px auto; }
+.getting-started-steps { margin: 0; padding-left: 24px; display: grid; gap: 16px; }
+.onboarding-image { display: block; width: 100%; height: auto; }
+.welcome-viewport { overflow: hidden; }
+.welcome-track { display: flex; touch-action: pan-y pinch-zoom; }
+.welcome-slide { flex: 0 0 100%; min-width: 0; }
+.welcome-slide > .MuiTypography-root { padding-inline: 4px; }
+.relay-tour.driver-popover { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: #27334b; background: #fff; border-radius: 10px; padding: 22px; max-width: min(370px, calc(100vw - 24px)); }
+.relay-tour .driver-popover-title { padding-right: 48px; font-size: 18px; line-height: 1.4; }
+.relay-tour .driver-popover-description { font-size: 14px; line-height: 1.65; margin-top: 12px; }
+.relay-tour .driver-popover-close-btn { font: inherit; font-size: 13px; color: #526078; top: 14px; right: 12px; width: auto; height: 32px; padding: 0 6px; }
+.relay-tour .driver-popover-footer button { font: inherit; text-shadow: none; padding: 8px 12px; border-radius: 6px; }
+.relay-tour .driver-popover-next-btn { background: #3156d3; color: white; border-color: #3156d3; }
+.relay-tour button:focus-visible { outline: 2px solid #3156d3; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .settings-content { padding: 16px; }
+  .settings-save { flex-direction: column !important; align-items: stretch; }
+  .settings-save > button { margin-left: 0 !important; }
+  .getting-started-home { padding: 20px; }
+}

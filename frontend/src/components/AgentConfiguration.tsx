@@ -1,3 +1,4 @@
+import { HelpField } from "./HelpTip";
 import {
   Alert, Box, Button, FormControl, FormHelperText, InputLabel, MenuItem,
   Select, Stack, Typography,
@@ -75,7 +76,7 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
         : inheritDefaults && raw === undefined ? "Use the saved defaults for this exact model." : `${defaultLabel} leaves this override unset.`);
     const labelId = `${agent.id}-${field}-label`;
     return (
-      <FormControl size="small" error={!available && !loading && !error}>
+      <HelpField topic={field === "effort" ? "effort" : "permissions"}><FormControl fullWidth size="small" error={!available && !loading && !error}>
         <InputLabel id={labelId} shrink>{label}</InputLabel>
         <Select
           labelId={labelId}
@@ -95,7 +96,7 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
           {choices.map((choice) => <MenuItem key={choice.value} value={`choice:${choice.value}`}>{choice.name}</MenuItem>)}
         </Select>
         <FormHelperText>{message}</FormHelperText>
-      </FormControl>
+      </FormControl></HelpField>
     );
   }
 

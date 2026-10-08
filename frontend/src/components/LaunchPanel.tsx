@@ -1,3 +1,5 @@
+import { ActionIcon } from "./ActionIcon";
+import { HelpField } from "./HelpTip";
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
@@ -105,22 +107,22 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
         {launchError && <Alert severity="error">{launchError}</Alert>}
         {!blockedReason && <LaunchPreflight result={preflight} error={preflightError} onCheck={() => setSourceRevision((value) => value + 1)} />}
         <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} onChange={(name, value) => setInputs((current) => ({ ...current, [name]: value }))} />
-        <Accordion><AccordionSummary>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
-          <TextField label="Override model for this run" value={model} onChange={(event) => setModel(event.target.value)}
+        <Accordion><AccordionSummary expandIcon={<ActionIcon name="down" />}>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
+          <HelpField topic="model"><TextField label="Override model for this run" value={model} onChange={(event) => setModel(event.target.value)}
             helperText="Leave blank to use the workflow, project, or global model. Values must match the provider exactly, including case."
-            slotProps={{ htmlInput: { list: "launch-model-options" } }} />
+            slotProps={{ htmlInput: { list: "launch-model-options" } }} /></HelpField>
           <datalist id="launch-model-options">{modelOptions.map((value) => <option key={value} value={value} />)}</datalist>
-          <FormControl fullWidth><InputLabel id="launch-cleanup">After a successful run</InputLabel>
+          <HelpField topic="cleanup"><FormControl fullWidth><InputLabel id="launch-cleanup">After a successful run</InputLabel>
             <Select labelId="launch-cleanup" label="After a successful run" value={cleanup} onChange={(event) => setCleanup(event.target.value)}>
               <MenuItem value="">Use project and global defaults</MenuItem><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem>
             </Select><FormHelperText>{cleanup === "merge_on_success" ? "Fast-forwards the branch shown above after every job succeeds. Commit all workflow, report, and code changes first. Dirty, switched, or diverged branches fail and keep the run working copy." : "Saved reports and committed changes remain available after the working copy is deleted."}</FormHelperText>
-          </FormControl>
-          <FormControl fullWidth><InputLabel id="launch-entry">Start from job</InputLabel>
+          </FormControl></HelpField>
+          <HelpField topic="entry"><FormControl fullWidth><InputLabel id="launch-entry">Start from job</InputLabel>
             <Select labelId="launch-entry" label="Start from job" value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)}>
               <MenuItem value="">Start at the beginning</MenuItem>
               {(workflow?.entrypoints ?? []).map((entry) => <MenuItem key={entry.scope_path} value={entry.scope_path}>{stageLabel(entry.scope_path)}</MenuItem>)}
             </Select><FormHelperText>Only jobs declared as start points are listed. Relay checks their required inputs and saved reports before starting.</FormHelperText>
-          </FormControl>
+          </FormControl></HelpField>
         </Stack></AccordionDetails></Accordion>
       </Stack></DialogContent>
       <DialogActions><Button onClick={onClose} disabled={launching}>Cancel</Button>

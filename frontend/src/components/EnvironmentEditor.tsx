@@ -1,3 +1,4 @@
+import { HelpField } from "./HelpTip";
 import { Alert, Button, Stack, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 
@@ -13,8 +14,8 @@ export function EnvironmentEditor({ value, onChange, disabled = false }: {
   return <Stack component="section" aria-label="Environment variables" spacing={1}>
     {error && <Alert severity="error">{error}</Alert>}
     {Object.entries(value).map(([name, content], index) => <Stack component="section" aria-label={`Environment variable ${index + 1}`} key={index} direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
-      <TextField fullWidth sx={{ flex: "1 1 220px" }} size="small" label="Variable name" value={name} disabled={disabled} onChange={(event) => rename(name, event.target.value)} />
-      <TextField fullWidth sx={{ flex: "1 1 220px" }} multiline minRows={1} size="small" label="Value" value={content} disabled={disabled} onChange={(event) => onChange({ ...value, [name]: event.target.value })} />
+      <HelpField topic="variableName"><TextField fullWidth sx={{ flex: "1 1 220px" }} size="small" label="Variable name" value={name} disabled={disabled} onChange={(event) => rename(name, event.target.value)} /></HelpField>
+      <HelpField topic="variableValue"><TextField fullWidth sx={{ flex: "1 1 220px" }} multiline minRows={1} size="small" label="Value" value={content} disabled={disabled} onChange={(event) => onChange({ ...value, [name]: event.target.value })} /></HelpField>
       <Button disabled={disabled} aria-label={`Remove environment variable ${name}`} onClick={() => { setError(null); onChange(Object.fromEntries(Object.entries(value).filter(([key]) => key !== name))); }}>Remove</Button>
     </Stack>)}
     {Object.keys(value).length === 0 && <Typography variant="body2" color="text.secondary">No environment variables declared here.</Typography>}

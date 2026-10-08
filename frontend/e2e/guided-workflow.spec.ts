@@ -42,7 +42,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page.getByLabel("Review instructions and expected response").fill("Review the command result. Type AGREE to continue.");
   await save(page);
   const launch = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const created = await launch;
   expect(created.status()).toBe(201);
@@ -112,7 +112,7 @@ test("report handoffs explain retention and review material is readable beside t
   await page.getByRole("button", { name: "Retain the report" }).click();
   await expect(page.getByRole("dialog", { name: "Keep a report for the next stage" })).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your review is needed" })).toBeVisible();
@@ -121,8 +121,8 @@ test("report handoffs explain retention and review material is readable beside t
   await expect(page.locator(".review-preview")).toContainText("Ready: Yes");
   await expect(page.locator(".review-preview")).toContainText("Read this report before approving.");
   await expect(page.getByRole("button", { name: "Send response and continue" })).toBeDisabled();
-  await page.getByRole("button", { name: "Cancel run" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel run" }).click();
+  await page.getByRole("button", { name: "Cancel run", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel run", exact: true }).click();
   await expect(page.getByText("Work stopped. Finished jobs and their changes remain available for review.")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Retained review #/ })).toBeVisible();
   await expect(page.getByText("Stopped", { exact: true }).first()).toBeVisible();
@@ -134,7 +134,7 @@ test("permission requests send owner feedback through the same agent session", a
   const created = await post(page, "/api/workflows", { key: "agent-feedback", holder, yaml: stringify({ version: 1, name: "Feedback", model: "m1", agents: ["codex"], nodes: { work: { type: "agent" } } }) });
   expect(created.ok()).toBeTruthy();
   await page.goto("/?view=author&workflow=agent-feedback.yaml");
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("region", { name: "Waiting for you", exact: true }).getByRole("button", { name: "Respond", exact: true }).click();
   await expect(page.getByRole("heading", { name: "A tool needs your permission" })).toBeVisible();

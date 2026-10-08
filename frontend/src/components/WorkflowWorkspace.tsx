@@ -1,3 +1,4 @@
+import { HelpField, HelpLabel, HelpTip } from "./HelpTip";
 import {
   Alert,
   Accordion,
@@ -464,18 +465,18 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
 
   return (
     <Box className="workflow-author-layout">
-      <Box component="nav" aria-label="Workflow sidebar" className="actions-sidebar">
+      <Box component="nav" aria-label="Workflow sidebar" data-tour="workflows" className="actions-sidebar">
         <Typography variant="h6" sx={{ p: 1 }}>Workflows</Typography>
         <Button fullWidth variant="outlined" onClick={() => setNewWorkflow(true)}>New workflow</Button>
         <List>{inventory.map((item) => <ListItemButton key={item.key} selected={item.key === loadedKey} disabled={busy} onClick={() => void loadWorkflow(item.key)}><ActionIcon name="workflow" /><ListItemText primary={item.name} /></ListItemButton>)}</List>
       </Box>
       <Stack spacing={2} sx={{ minWidth: 0 }}>
-      <Stack component="header" role="region" aria-label="Workflow header" direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+      <Stack component="header" role="region" aria-label="Workflow header" direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between" }}>
         <Box>
           <Typography component="h1" variant="h5">{parsed.value?.name || "Choose a workflow"}</Typography>
           <Typography variant="body2" color="text.secondary">{loadedKey}</Typography>
         </Box>
-        <Button ref={launchButton} variant="contained" disabled={loadedKey === null || busy} onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><Button ref={launchButton} data-tour="launch" variant="contained" disabled={loadedKey === null || busy} onClick={() => { setError(null); setLaunchOpen(true); }}>Run workflow</Button><HelpTip topic="launch" /></Stack>
       </Stack>
       {loadedKey === null && <Paper className="section-card" variant="outlined">
         <Typography variant="h6">{busy ? "Loading workflow…" : inventory.length ? "Choose a workflow" : "No workflows yet"}</Typography>
@@ -496,7 +497,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           </FormControl>
           <Button variant="contained" onClick={requestSave} disabled={!dirty || busy || !leaseReady}>
             Save
-          </Button>
+          </Button><HelpTip topic="save" />
           <Button onClick={() => void discardChanges()} disabled={!dirty || busy || !leaseReady || promptDirty}>Discard changes</Button>
           <Button onClick={() => setAddingStage(true)} disabled={parsed.value === null || !leaseReady}>Add stage</Button>
           <Box sx={{ flex: 1 }} />
@@ -523,7 +524,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
       {loadedKey !== null && <Box>
         <Paper className="canvas-panel" variant="outlined">
           <Box sx={{ p: 2 }}>
-            <Typography variant="subtitle2">Workflow stages</Typography>
+            <Typography variant="subtitle2"><HelpLabel topic="stages">Workflow stages</HelpLabel></Typography>
             <Typography variant="body2" color="text.secondary">Choose a stage to center it and edit its settings below.</Typography>
           </Box>
           <Stack direction={{ xs: "column", md: "row" }}>
@@ -550,22 +551,22 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
           </Stack>
         </Paper>
         <Accordion expanded={advanced} onChange={(_event, open) => setAdvanced(open)}>
-          <AccordionSummary><Typography>Advanced workflow settings and YAML</Typography></AccordionSummary>
+          <AccordionSummary expandIcon={<ActionIcon name="down" />}><Typography>Advanced workflow settings and YAML</Typography></AccordionSummary>
           <AccordionDetails>
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-            <TextField size="small" label="Workflow key" value={workflowKey} onChange={(event) => setWorkflowKey(event.target.value)} />
+            <HelpField topic="workflowKey"><TextField size="small" label="Workflow key" value={workflowKey} onChange={(event) => setWorkflowKey(event.target.value)} /></HelpField>
             <Button onClick={() => void loadWorkflow(workflowKey)}>Load</Button>
           </Stack>
           <Stack component="section" aria-label="Workflow environment" spacing={1} sx={{ mb: 2 }}>
             <Typography variant="h6">Workflow environment variables</Typography>
-            <FormControlLabel label="Use project and global environment variables" control={<Switch checked={parsed.value?.inherit_env !== false} disabled={!leaseReady || parsed.value === null} onChange={(_event, checked) => mutate((document) => document.setIn(["inherit_env"], checked))} />} />
+            <HelpField topic="environment"><FormControlLabel label={<span>Use project and global environment variables</span>} control={<Switch checked={parsed.value?.inherit_env !== false} disabled={!leaseReady || parsed.value === null} onChange={(_event, checked) => mutate((document) => document.setIn(["inherit_env"], checked))} />} /></HelpField>
             <Typography variant="body2" color="text.secondary">These variables apply to this workflow's command jobs. Child workflows keep their own workflow variables.</Typography>
             <EnvironmentEditor value={parsed.value?.env ?? {}} disabled={!leaseReady || parsed.value === null} onChange={(env) => mutate((document) => document.setIn(["env"], env))} />
           </Stack>
-          <FormControlLabel control={<Switch checked={parsed.value?.recovery?.enabled === true}
+          <HelpField topic="recovery"><FormControlLabel control={<Switch checked={parsed.value?.recovery?.enabled === true}
             disabled={!leaseReady || parsed.value === null}
             onChange={(event) => mutate((document) => document.setIn(["recovery", "enabled"], event.target.checked))} />}
-            label="Automatic recovery" />
+            label={<span>Automatic recovery</span>} /></HelpField>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Retry eligible agent failures using the workflow's retry limit, with the same model and original instructions.
             Unsafe failures and exhausted retries stop for your review.
@@ -588,7 +589,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
               {["agent", "command"].includes(definition.type) && <Button variant="outlined" disabled={!leaseReady || promptDirty || !repairDefaults} onClick={openRepairs}>Repairs</Button>}
             </Stack>
             <Box className="field-grid">
-              <FormControl size="small">
+              <HelpField topic="stageType"><FormControl size="small">
                 <InputLabel id="stage-action">What this stage does</InputLabel>
                 <Select
                   labelId="stage-action"
@@ -600,41 +601,41 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                     <MenuItem key={type} value={type}>{{ agent: "Agent work", command: "Run a command", human_wait: "Human review", condition: "Check a result", loop: "Repeat stages", subworkflow: "Run another workflow" }[type]}</MenuItem>
                   ))}
                 </Select>
-              </FormControl>
-              <FormControl size="small">
+              </FormControl></HelpField>
+              <HelpField topic="dependencies"><FormControl size="small">
                 <InputLabel id="stage-dependencies">Start after</InputLabel>
                 <Select multiple labelId="stage-dependencies" label="Start after" value={definition.needs ?? []} onChange={(event) => setNodeField("needs", event.target.value)} renderValue={(items) => items.map(stageLabel).join(", ")}>
                   {Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode).map((id) => <MenuItem key={id} value={id}>{stageLabel(id)}</MenuItem>)}
                 </Select>
-              </FormControl>
+              </FormControl></HelpField>
               {(definition.type === "agent" || definition.type === "command") && (
-                <FormControlLabel
+                <HelpField topic="writes"><FormControlLabel
                   control={
                     <Switch
                       checked={definition.writes === true}
                       onChange={(event) => setNodeField("writes", event.target.checked)}
                     />
                   }
-                  label="Allow file changes"
-                />
+                  label={<span>Allow file changes</span>}
+                /></HelpField>
               )}
               {definition.type === "agent" && (
                 <>
-                  <FormControlLabel
+                  <HelpField topic="autoRetry"><FormControlLabel
                     control={<Switch checked={definition.auto_retry !== false}
                       onChange={(event) => setNodeField("auto_retry", event.target.checked)} />}
-                    label="Allow automatic retries for this step"
-                  />
+                    label={<span>Allow automatic retries for this step</span>}
+                  /></HelpField>
                   <ModelPicker key={`${selectedNode}-${candidateIds.join(",")}`} agents={agents?.agents.filter((agent) => candidateIds.includes(agent.id)) ?? []} value={typeof definition.model === "string" ? definition.model : ""} project={requestProject} onChange={setAgentModel} />
-                  <TextField
+                  <HelpField topic="model"><TextField
                     size="small"
                     label="Exact model override"
                     helperText="Choose a model offered by the selected tool. Leave empty to use the workflow's model."
                     value={typeof definition.model === "string" ? definition.model : ""}
                     onChange={(event) => setAgentModel(event.target.value)}
                     slotProps={{ htmlInput: { list: "relay-model-options" } }}
-                  />
-                  <FormControl size="small">
+                  /></HelpField>
+                  <HelpField topic="agentOrder"><FormControl size="small">
                     <InputLabel id="agent-tools-label" shrink>Agent tools</InputLabel>
                     <Select
                       multiple
@@ -649,7 +650,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                     >
                       {agents?.agents.map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.display_name}</MenuItem>)}
                     </Select>
-                  </FormControl>
+                  </FormControl></HelpField>
                 </>
               )}
               {definition.type === "command" && <CommandFields key={selectedNode} node={definition} commands={commands} disabled={!leaseReady || busy} onChange={(next) => {
@@ -663,24 +664,24 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                 });
               }} />}
               {definition.type === "human_wait" && (
-                <TextField
+                <HelpField topic="humanReview"><TextField
                   size="small"
                   label="Review instructions and expected response"
                   multiline minRows={4}
                   value={typeof definition.prompt === "string" ? definition.prompt : ""}
                   onChange={(event) => setNodeField("prompt", event.target.value)}
-                />
+                /></HelpField>
               )}
               {["condition", "loop"].includes(definition.type) && <ControlJobFields node={definition}
                 targets={Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode)}
                 onChange={(next) => mutate((document) => document.setIn(["nodes", selectedNode], next))} />}
               {definition.type === "subworkflow" && (
-                <TextField
+                <HelpField topic="subworkflow"><TextField
                   size="small"
                   label="Workflow key"
                   value={typeof definition.workflow === "string" ? definition.workflow : ""}
                   onChange={(event) => setNodeField("workflow", event.target.value)}
-                />
+                /></HelpField>
               )}
             </Box>
             {definition.type === "agent" && loadedKey && selectedNode && !repairOpen && (

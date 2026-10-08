@@ -47,7 +47,7 @@ test.beforeEach(async ({ page }) => {
 
 test("the header is reachable on a long workflow and Escape returns focus", async ({ page }) => {
   await create(page, "long-launch", { nodes: Object.fromEntries(Array.from({ length: 24 }, (_, i) => [`check_${i}`, { type: "command", run: ["git", "status"] }])) });
-  const trigger = page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" });
+  const trigger = page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true });
   await expect(trigger).toBeInViewport();
   const source = (await (await page.request.get("/api/projects/current")).json()).launch_source;
   const panel = await open(page);
@@ -100,7 +100,7 @@ test("edited inputs preserve JSON types and advanced options use declared start 
   });
   expect(response.status(), await response.text()).toBe(201);
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await page.getByRole("region", { name: "Workflow run history" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow run history" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const reopened = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await expect(reopened.getByRole("heading", { name: "typed-launch", exact: true })).toBeVisible();
   await expect(reopened.getByRole("textbox", { name: "Task" })).toHaveValue(longTask);
@@ -141,7 +141,7 @@ test("dirty instructions and empty or invalid workflows explain their blockers",
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.insertText("nodes: [");
   await expect(page.getByRole("alert").filter({ hasText: "Flow sequence" })).toBeVisible();
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await expect(panel.getByText("Fix the YAML errors in the editor before running this workflow.", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
 });
@@ -149,7 +149,7 @@ test("dirty instructions and empty or invalid workflows explain their blockers",
 test("an unavailable Git source can be checked again and an unborn branch explains the required commit", async ({ page }) => {
   await create(page, "source-launch");
   await page.route("**/api/projects/current", (route) => route.fulfill({ status: 503, json: { code: "git_error", message: "Git is unavailable.", context: {} } }));
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await expect(panel.getByText("Relay could not check the current branch. Check again before running.", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
@@ -158,7 +158,7 @@ test("an unavailable Git source can be checked again and an unborn branch explai
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
   await panel.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.route("**/api/projects/current", (route) => route.fulfill({ json: { launch_source: { branch: "main", commit: null } } }));
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await expect(panel.getByText("Create the first Git commit in this project before running a workflow.", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
 });

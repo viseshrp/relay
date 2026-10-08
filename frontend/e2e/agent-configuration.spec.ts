@@ -28,7 +28,7 @@ async function choose(page: Page, tool: string, label: string, value: string) {
 async function launch(page: Page) {
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const created = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await page.getByRole("dialog", { name: "Run workflow" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const response = await created;
   expect(response.status()).toBe(201);
@@ -126,7 +126,7 @@ test("failed capability reads offer retry without writing an override", async ({
   const region = page.getByRole("region", { name: "Codex configuration" });
   await expect(region.getByText("Probe failed.")).toBeVisible();
   await page.unroute("**/api/agents/codex/configuration");
-  await region.getByRole("button", { name: "Retry" }).click();
+  await region.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(region.getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
   await expect(region.getByRole("combobox", { name: "Effort", exact: true })).toHaveText("Provider default");
   await save(page);

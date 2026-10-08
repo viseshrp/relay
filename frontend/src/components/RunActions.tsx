@@ -2,6 +2,7 @@ import { Button, Menu, MenuItem, Stack } from "@mui/material";
 import { useState, type Ref } from "react";
 import type { RunDetail } from "../types";
 import { ActionIcon } from "./ActionIcon";
+import { HelpTip } from "./HelpTip";
 
 export function runActions(status: string): { pause: boolean; cancel: boolean; rerunAll: boolean; rerunFailed: boolean } {
   return {
@@ -17,10 +18,10 @@ export function RunActions({ run, busy, onPause, onCancel, onRerunAll, onRerunFa
 }) {
   const actions = runActions(run.status);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  return <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-    {actions.pause && <Button variant="outlined" disabled={busy} onClick={onPause}>{run.dispatch_paused ? "Resume" : "Pause"}</Button>}
-    {actions.cancel && <Button color="error" variant="outlined" disabled={busy} onClick={onCancel}>Cancel run</Button>}
-    {actions.rerunAll && <Button ref={rerunAllRef} variant="outlined" disabled={busy} aria-haspopup="menu" aria-expanded={Boolean(anchor)} startIcon={<ActionIcon name="refresh" />} endIcon={<ActionIcon name="down" />} onClick={(event) => setAnchor(event.currentTarget)}>Re-run jobs</Button>}
+  return <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+    {actions.pause && <><Button variant="outlined" disabled={busy} onClick={onPause}>{run.dispatch_paused ? "Resume" : "Pause"}</Button><HelpTip topic="pause" /></>}
+    {actions.cancel && <><Button color="error" variant="outlined" disabled={busy} onClick={onCancel}>Cancel run</Button><HelpTip topic="cancel" /></>}
+    {actions.rerunAll && <><Button ref={rerunAllRef} variant="outlined" disabled={busy} aria-haspopup="menu" aria-expanded={Boolean(anchor)} startIcon={<ActionIcon name="refresh" />} endIcon={<ActionIcon name="down" />} onClick={(event) => setAnchor(event.currentTarget)}>Re-run jobs</Button><HelpTip topic="rerun" /></>}
     <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
       <MenuItem onClick={() => { setAnchor(null); onRerunAll(); }}>Re-run all jobs</MenuItem>
       {actions.rerunFailed && (run.problem || run.nodes.some((node) => node.status === "failed")) && onRerunFailed && <MenuItem onClick={() => { setAnchor(null); onRerunFailed(); }}>Re-run failed jobs…</MenuItem>}

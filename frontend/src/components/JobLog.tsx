@@ -1,3 +1,4 @@
+import { HelpTip } from "./HelpTip";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Menu, MenuItem, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../api";
@@ -97,7 +98,7 @@ export function JobLog({ events, command, label, workingFolder, live, loading, h
         <IconButton aria-label="Previous match" disabled={!matches.length} onClick={() => next(-1)}><ActionIcon name="up" /></IconButton>
         <IconButton aria-label="Next match" disabled={!matches.length} onClick={() => next(1)}><ActionIcon name="down" /></IconButton>
       </>}
-      <Tooltip title="Refresh logs"><IconButton aria-label="Refresh logs" onClick={onRefresh}><ActionIcon name="refresh" /></IconButton></Tooltip>
+      <HelpTip topic="logs" /><Tooltip title="Refresh logs"><IconButton aria-label="Refresh logs" onClick={onRefresh}><ActionIcon name="refresh" /></IconButton></Tooltip>
       <Tooltip title="Log options"><IconButton ref={menuButton} aria-label="Log options" aria-haspopup="menu" aria-expanded={Boolean(options)} onClick={(event) => setOptions(event.currentTarget)}><ActionIcon name="settings" /></IconButton></Tooltip>
       <Menu anchorEl={options} open={Boolean(options)} onClose={() => setOptions(null)}>
         <MenuItem onClick={() => { setTimestamps((value) => !value); setOptions(null); }}>{timestamps ? "Hide timestamps" : "Show timestamps"}</MenuItem>

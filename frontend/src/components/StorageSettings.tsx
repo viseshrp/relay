@@ -1,3 +1,4 @@
+import { HelpField, HelpLabel } from "./HelpTip";
 import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -42,7 +43,7 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
     finally { setBusy(false); }
   }
   return <Stack component="section" aria-label="Project storage" spacing={2}>
-    <Typography variant="h6">{project.display_name} storage</Typography>
+    <Typography variant="h6"><HelpLabel topic="storage">{project.display_name} storage</HelpLabel></Typography>
     {notice && <Alert severity="success">{notice}</Alert>}
     {error && <Alert severity="error" action={!open ? <Button onClick={() => setRevision((value) => value + 1)}>Retry storage</Button> : undefined}>{error}</Alert>}
     {!usage && !error && <CircularProgress aria-label="Measuring project storage" />}
@@ -55,9 +56,9 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
       </Box>
       {usage.working_copies.truncated && <Alert severity="info">The disk scan reached its limit or could not read a folder. The size is a lower bound; symlinks are excluded.</Alert>}
       {usage.cleanup_blocked && <Alert severity="info">Finish or cancel active project runs before deleting retained data.</Alert>}
-      <FormControl fullWidth><InputLabel id="storage-scope">Data to delete</InputLabel><Select labelId="storage-scope" label="Data to delete" value={scope} disabled={busy || usage.cleanup_blocked} onChange={(event) => { if (isScope(event.target.value)) setScope(event.target.value); }}>
+      <HelpField topic="storage"><FormControl fullWidth><InputLabel id="storage-scope">Data to delete</InputLabel><Select labelId="storage-scope" label="Data to delete" value={scope} disabled={busy || usage.cleanup_blocked} onChange={(event) => { if (isScope(event.target.value)) setScope(event.target.value); }}>
         <MenuItem value="" disabled>Choose data to delete</MenuItem>{Object.entries(scopes).map(([key, value]) => <MenuItem key={key} value={key}>{value.label}</MenuItem>)}
-      </Select></FormControl>
+      </Select></FormControl></HelpField>
       {scope && <Typography>{scopes[scope].description}</Typography>}
       <Button color="error" variant="outlined" disabled={!scope || usage.cleanup_blocked || busy} onClick={() => { setName(""); setOpen(true); }}>Review deletion</Button>
     </>}

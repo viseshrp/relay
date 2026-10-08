@@ -46,3 +46,21 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
   await expect(page.locator(".run-header").getByRole("heading", { name: /Local run #/ })).toBeVisible();
 });
+
+test.describe("First-use introduction without login", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+  test("welcome and tour can be skipped once without creating an owner account", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "Welcome to Relay", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Skip introduction", exact: true }).click();
+    await page.locator(".relay-tour").getByRole("button", { name: "Skip tour", exact: true }).click();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+    await expect(page.getByRole("dialog", { name: "Welcome to Relay", exact: true })).toHaveCount(0);
+    await expect(page.locator(".relay-tour")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Server and account", exact: true }).click();
+    await expect(page.getByText("Login is disabled. This browser uses local access without signing in.", { exact: true })).toBeVisible();
+    expect((await (await page.request.get("/api/auth")).json()).owner_created).toBe(false);
+  });
+});

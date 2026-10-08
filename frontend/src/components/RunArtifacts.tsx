@@ -1,6 +1,7 @@
 import { Box, Button, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import { stageLabel } from "../navigation";
 import type { ArtifactRecord } from "../types";
+import { HelpLabel } from "./HelpTip";
 
 function sizeLabel(bytes: number): string {
   if (bytes < 1024) return `${bytes.toLocaleString()} B`;
@@ -12,7 +13,7 @@ export function RunArtifacts({ artifacts, more, onMore }: {
   artifacts: ArtifactRecord[]; more: boolean; onMore: () => void;
 }) {
   return <Paper variant="outlined" className="section-card" id="run-artifacts" aria-label="Artifacts">
-    <Typography variant="h6" sx={{ mb: 1 }}>Artifacts</Typography>
+    <Typography variant="h6" sx={{ mb: 1 }}><HelpLabel topic="artifacts">Artifacts</HelpLabel></Typography>
     {artifacts.length ? <TableContainer><Table size="small" aria-label="Retained artifacts">
       <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Job</TableCell><TableCell>Attempt</TableCell><TableCell>Size</TableCell><TableCell>Download</TableCell></TableRow></TableHead>
       <TableBody>{artifacts.map((artifact) => <TableRow key={artifact.id}>

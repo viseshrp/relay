@@ -1,3 +1,4 @@
+import { HelpField } from "./HelpTip";
 import { Checkbox, FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 
 import { stageLabel } from "../navigation";
@@ -19,16 +20,16 @@ export function LaunchInputs({ definitions, values, onChange }: {
     {Object.entries(definitions).map(([name, input]) => {
       const value = values[name] === undefined && scalar(input.default) ? input.default : values[name];
       const label = stageLabel(name);
-      if (input.type === "boolean") return <FormControl key={name} required={input.required}>
+      if (input.type === "boolean") return <HelpField key={name} topic="inputs"><FormControl required={input.required}>
         <FormControlLabel label={`${label}${input.required ? " *" : ""}`} control={<Checkbox
           checked={value === true} indeterminate={value === undefined}
           slotProps={{ input: { "aria-describedby": input.description ? `launch-help-${name}` : undefined } }}
           onChange={(event) => onChange(name, event.target.checked)} />} />
         {input.description && <FormHelperText id={`launch-help-${name}`}>{input.description}</FormHelperText>}
-      </FormControl>;
+      </FormControl></HelpField>;
       if (input.type === "enum") {
         const choices = Array.isArray(input.constraints?.values) ? input.constraints.values.filter(scalar) : [];
-        return <FormControl key={name} required={input.required} fullWidth>
+        return <HelpField key={name} topic="inputs"><FormControl required={input.required} fullWidth>
           <InputLabel id={`launch-input-${name}`}>{label}</InputLabel>
           <Select labelId={`launch-input-${name}`} label={label} value={value === undefined ? "" : JSON.stringify(value)}
             inputProps={{ "aria-describedby": input.description ? `launch-help-${name}` : undefined }}
@@ -37,14 +38,14 @@ export function LaunchInputs({ definitions, values, onChange }: {
             {choices.map((choice) => <MenuItem key={JSON.stringify(choice)} value={JSON.stringify(choice)}>{String(choice)}</MenuItem>)}
           </Select>
           {input.description && <FormHelperText id={`launch-help-${name}`}>{input.description}</FormHelperText>}
-        </FormControl>;
+        </FormControl></HelpField>;
       }
       const numeric = input.type === "integer" || input.type === "number";
       const long = typeof value === "string" && (value.length > 80 || value.includes("\n"));
-      return <TextField key={name} label={label} helperText={input.description} required={input.required}
+      return <HelpField key={name} topic="inputs"><TextField label={label} helperText={input.description} required={input.required}
         type={numeric ? "number" : "text"} value={value ?? ""} multiline={!numeric} minRows={numeric ? undefined : long ? 3 : 1} maxRows={8}
         slotProps={{ htmlInput: numeric ? { step: input.type === "integer" ? 1 : "any" } : {} }}
-        onChange={(event) => onChange(name, event.target.value === "" ? (numeric ? null : "") : numeric ? Number(event.target.value) : event.target.value)} />;
+        onChange={(event) => onChange(name, event.target.value === "" ? (numeric ? null : "") : numeric ? Number(event.target.value) : event.target.value)} /></HelpField>;
     })}
   </Stack>;
 }

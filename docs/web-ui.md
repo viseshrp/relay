@@ -78,6 +78,42 @@ Actions started without a login are attributed to `local`.
 
 ## Get started
 
+After sign-in, or immediately with login disabled, a new browser shows four
+welcome slides: projects, workflow editing, run inspection, and settings.
+Embla Carousel provides slide navigation and swipe support. The illustrations
+highlight the relevant controls and contain no project or provider content.
+Use **Next**, **Back**, numbered slide buttons, or the arrow keys. **Skip
+introduction**, Escape, or clicking outside closes the introduction.
+
+A Driver.js spotlight tour follows the first introduction. It explains the
+navigation and each settings group, including model and permission defaults,
+commands, variables, recovery, repair rules, server options, and storage. Use
+**Next**, **Back**, **Finish**, or **Skip**; Escape also dismisses it. Tour
+controls retain keyboard focus, and highlighted settings cannot be edited.
+The tour opens settings sections as needed, then restores the starting view.
+It does not launch jobs, probe agent sessions, or save settings.
+
+Each introduction is marked seen when opened. Skipping, finishing, reloading,
+and switching projects do not repeat it. These choices are local to the
+browser and installation address. **Help** can replay either introduction.
+**Settings > Welcome and guided tour** also provides replay buttons and
+**Reset onboarding**, which makes both appear on the next opening or reload.
+When browser storage is blocked, dismissal lasts for the current app session;
+reset reports the storage limitation instead of claiming it was saved.
+Closing the welcome slides also hides the older setup welcome prompt; the
+agent checklist remains available from **Help > Get started**.
+
+When the project inventory is empty, the workspace shows a **Start using
+Relay** homepage with setup steps and **Open your first project**. Global
+settings remain accessible. A registered project with no workflows uses the
+normal workspace layout, so changing repositories does not change the UI.
+
+Question-mark buttons beside settings and workflow controls explain their
+meaning, inheritance, and effects on future runs. Open a tooltip by clicking,
+hovering, or focusing its button; Escape or clicking elsewhere dismisses it.
+Help remains available beside disabled controls. Controls and their help have
+separate accessible names and keyboard targets.
+
 Every project uses the same workflow and run workspace, including projects
 with no previous runs. After sign-in, or immediately with login disabled, a
 small welcome prompt offers **Get started**. Opening the checklist or choosing
@@ -777,8 +813,21 @@ recorded end time; durations over an hour display hours, minutes, and seconds.
 
 The header's **Settings** tab opens `view=settings`. Its sidebar contains
 **Global defaults**, **Project defaults**, **Server and account**,
-**Notifications**, and **Storage**, using the same colors and typography as
+**Notifications**, **Storage**, and **Welcome and guided tour**, using the
+same colors and typography as
 the workflow and run views. The setup checklist stays hidden here.
+
+Settings rows leave space between switches, labels, and help buttons. Long
+agent and workflow names wrap while their icons retain a fixed width. The
+save controls follow the form rather than floating over fields. Expanded
+groups have visible chevrons, and narrow screens stack adjacent fields.
+Closed agent-settings groups do not initialize configuration probes. Open a
+group to load the choices for its selected model.
+
+If a workspace cannot load, including an old tab requesting a replaced file
+after a rebuild, Relay shows **Reload Relay** instead of a blank page. Reload
+is explicit so a failed load never silently discards editing state. Browser
+workflow recovery drafts remain available after reloading.
 
 Global defaults cover ordered agents, exact shared and per-agent models,
 thinking effort, agent permissions, job timeouts, retry participation,

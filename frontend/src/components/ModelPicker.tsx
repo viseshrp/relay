@@ -1,3 +1,4 @@
+import { HelpField } from "./HelpTip";
 import { Alert, Button, FormControl, InputLabel, MenuItem, Select, Stack } from "@mui/material";
 import { useId, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -24,11 +25,11 @@ export function ModelPicker({ agents, value, project, disabled = false, onChange
     setObserved(available); setError(failures.join("\n") || (available.length ? null : "No models were returned. Check that a selected tool is installed and signed in.")); setBusy(false);
   }
   return <Stack spacing={1}>
-    <FormControl size="small"><InputLabel id={labelId}>Model</InputLabel><Select labelId={labelId} label="Model" value={value} disabled={disabled || busy} onChange={(event) => onChange(event.target.value)}>
+    <HelpField topic="model"><FormControl fullWidth size="small"><InputLabel id={labelId}>Model</InputLabel><Select labelId={labelId} label="Model" value={value} disabled={disabled || busy} onChange={(event) => onChange(event.target.value)}>
       <MenuItem value="">{defaultLabel}</MenuItem>
       {value && !models.has(value) && <MenuItem value={value}>{value}</MenuItem>}
       {Array.from(models, ([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
-    </Select></FormControl>
+    </Select></FormControl></HelpField>
     <Button disabled={disabled || busy || agents.every((agent) => !agent.installed)} onClick={() => void load()}>{busy ? "Loading models…" : "Load available models"}</Button>
     {error && <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>{error}</Alert>}
   </Stack>;

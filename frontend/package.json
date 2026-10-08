@@ -21,6 +21,8 @@
     "@pierre/diffs": "1.5.1",
     "@xyflow/react": "12.11.6",
     "codemirror": "6.0.2",
+    "driver.js": "1.9.0",
+    "embla-carousel-react": "8.6.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "yaml": "2.9.1"
