@@ -835,9 +835,11 @@ Selecting a search match opens its collapsed thought or tool details.
 
 **Log options** offers timestamps, full screen, raw logs, copying, and a text
 download. Full screen also responds to Shift+F while the log has focus; Escape
-closes it. Downloads wait for complete history and preserve the command's
-original output bytes, including ANSI codes. Search, scrolling away from the
-bottom, or **Stop following** pauses automatic scrolling. **Jump to latest**
+closes it. Entering and leaving full screen preserves the reading position;
+an active search match stays visible. Downloads wait for complete history and
+preserve the command's original output bytes, including ANSI codes. Search,
+scrolling away from the bottom, or **Stop following** pauses automatic
+scrolling. **Jump to latest**
 returns to the newest output and resumes following. Logs scroll within their
 panel. Active run and job durations update each second and freeze at the
 recorded end time; durations over an hour display hours, minutes, and seconds.

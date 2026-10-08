@@ -1,6 +1,6 @@
 import { HelpTip } from "./HelpTip";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Menu, MenuItem, Stack, TextField, Tooltip, Typography } from "@mui/material";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../api";
 import { logMatches, logRows, rawLog } from "../log";
 import type { RunEvent } from "../types";
@@ -38,37 +38,45 @@ export function JobLog({ events, command, label, workingFolder, live, loading, h
   const [error, setError] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
   const follow = useRef(true);
-  const viewport = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+  const scrollPosition = useRef(0);
   const root = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const previousRevision = useRef("");
   const [viewportHeight, setViewportHeight] = useState(460);
   const [scrollTop, setScrollTop] = useState(0);
-  useEffect(() => {
-    const element = viewport.current;
+  // The dialog mounts its viewport after opening; restore when it attaches.
+  useLayoutEffect(() => {
+    const element = viewport;
     if (!element) return;
+    element.scrollTop = scrollPosition.current;
+    rememberScroll(element);
     const observer = new ResizeObserver(() => setViewportHeight(element.clientHeight));
     observer.observe(element);
     setViewportHeight(element.clientHeight);
     return () => observer.disconnect();
-  }, [fullscreen]);
+  }, [viewport]);
   const matches = useMemo(() => logMatches(rows, search), [rows, search]);
   const current = matches[Math.min(matchIndex, Math.max(0, matches.length - 1))];
   const revision = `${events.at(-1)?.id ?? 0}:${rows.length}:${rows.at(-1)?.text.length ?? 0}`;
+  function rememberScroll(element: HTMLDivElement) {
+    scrollPosition.current = element.scrollTop;
+    setScrollTop(element.scrollTop);
+  }
   function setFollow(value: boolean) { follow.current = value; setFollowing(value); }
-  function jump() { setFollow(true); const element = viewport.current; if (element) { element.scrollTop = element.scrollHeight; setScrollTop(element.scrollTop); } }
+  function jump() { setFollow(true); if (viewport) { viewport.scrollTop = viewport.scrollHeight; rememberScroll(viewport); } }
   useEffect(() => {
     const previous = previousRevision.current;
     previousRevision.current = revision;
     if (previous && previous !== revision && live && !loading && follow.current) jump();
   }, [revision, live, loading]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!current) return;
-    const element = viewport.current;
+    const element = viewport;
     if (!element) return;
-    if (command) { element.scrollTop = Math.max(0, current.row * ROW_HEIGHT - 100); setScrollTop(element.scrollTop); }
+    if (command) { element.scrollTop = Math.max(0, current.row * ROW_HEIGHT - 100); rememberScroll(element); }
     else element.querySelector(`[data-log-row="${current.row}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [current?.row, current?.start, command, fullscreen]);
+  }, [current?.row, current?.start, command, viewport]);
   useEffect(() => {
     const element = root.current;
     const key = (event: KeyboardEvent) => {
@@ -110,10 +118,10 @@ export function JobLog({ events, command, label, workingFolder, live, loading, h
     </Stack>
     {error && <Alert severity="error">{error}</Alert>}
     {hasMore && <Button disabled={loading} onClick={() => void onMore()}>{loading ? "Loading earlier logs…" : "Retry log history"}</Button>}
-    <Box ref={viewport} className={`job-log-viewport ${command ? "terminal" : "conversation"}`} tabIndex={0} role="region" aria-label={command ? "Command output lines" : `${label} log`}
+    <Box ref={setViewport} className={`job-log-viewport ${command ? "terminal" : "conversation"}`} tabIndex={0} role="region" aria-label={command ? "Command output lines" : `${label} log`}
       onScroll={(event) => {
         const element = event.currentTarget;
-        setScrollTop(element.scrollTop);
+        rememberScroll(element);
         if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) setFollow(false);
       }}>
       {command ? <Box style={{ height: rows.length * ROW_HEIGHT, position: "relative" }}>
