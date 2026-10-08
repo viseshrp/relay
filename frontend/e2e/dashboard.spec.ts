@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { stringify } from "yaml";
 import { openSettings, post } from "./setup-helpers";
+import type { DashboardData } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => sessionStorage.setItem("relay.editor-holder", "dashboard-test"));
@@ -101,4 +102,34 @@ test("refresh failure retains results and hidden tabs do not poll", async ({ pag
   expect(requests).toBe(0);
   await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
   await expect.poll(() => requests).toBe(1);
+});
+
+
+test("compact recent results reveal loaded records and still page to older runs", async ({ page }) => {
+  const launched = await post(page, "/api/runs", { workflow_key: "workflow.yaml", inputs: {} });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const body: { run_id: string } = await launched.json();
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${body.run_id}`)).json()).run.status).toBe("succeeded");
+  const data: DashboardData = await (await page.request.get("/api/dashboard")).json();
+  const record = data.recent.items[0];
+  if (!record) throw new Error("The completed fixture run must appear on Home.");
+  await page.route("**/api/dashboard?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    expect(query.get("limit")).toBe("10");
+    const older = query.has("cursor");
+    return route.fulfill({ json: { ...data, recent: { items: Array.from({ length: older ? 1 : 10 }, (_, index) => {
+      const number = older ? 11 : index + 1;
+      return { ...record, id: `result-${number}`, number, title: `Completed result ${number}` };
+    }), next_cursor: older ? null : "older-results" } } });
+  });
+  await page.goto("/?view=home");
+  const results = page.getByRole("region", { name: "Recent results", exact: true });
+  const rows = results.getByRole("button", { name: /^Completed result / });
+  await expect(rows).toHaveCount(5);
+  await results.getByRole("button", { name: "Show more recent results", exact: true }).click();
+  await expect(rows).toHaveCount(10);
+  await results.getByRole("button", { name: "Show more recent results", exact: true }).click();
+  await expect(rows).toHaveCount(11);
+  await expect(results.getByRole("button", { name: /^Completed result 11/ })).toBeVisible();
+  await expect(results.getByRole("button", { name: "Show more recent results", exact: true })).toHaveCount(0);
 });

@@ -318,3 +318,117 @@ artifacts, settings, resources, and worktrees. Only navigation timestamps,
 supervisor heartbeats, and successful model-observation IDs and timestamps were
 excluded; the observed models and configuration values were compared. All 17
 protected owner documents stayed unchanged and outside the commits.
+
+## Compact layout follow-up
+
+This pass addresses the approved cleanup plan. Native Computer observations
+use the running app for read-only checks and a disposable fake-agent app for
+form edits, launches, and onboarding. Owner settings and run controls are not
+changed during the audit.
+
+| Status | Reproduction | Expected behavior and regression |
+| --- | --- | --- |
+| Verified | Resize below 1,050 pixels. The project picker becomes a 200-pixel-tall flex item. | Keep its flex direction horizontal, use two deliberate header rows, and measure header height for anchors. `control-layout.spec.ts` covers all six requested widths. |
+| Verified | Open Storage with many completed runs. The menu nearly fills the page. | Bound the list and paper, scroll internally, separate run number/title/status, and retain every option. The 40-run menu regression reaches the final option and dismisses with Escape. |
+| Verified | Scroll to the bottom of Global defaults, then select another section. | Bring its heading below the sticky header and focus it. The navigation regression checks position and focus. |
+| Verified | Open project defaults. Repeated switch labels obscure the actual setting and inherited state. | Show a separate override row and inherited-state caption. `settings.spec.ts` retains exact inherited values and independently saved overrides. |
+| Verified | Open models, timeouts, commands, and environment editors. Fields expand to the whole panel. | Use widths by purpose, retain wider numeric labels, and group model selection with its loading action. Existing six-form and command-byte checks remain in place. |
+| Verified | Choose workflows or nested jobs with long names. Navigation occupies several lines. | Keep single-line labels with full accessible names and hover titles; retain nested-job context for assistive technology. |
+| Verified | Open a job log. Title and attempt controls take separate full rows. | Use a responsive heading toolbar, compact output controls, and preserve live following, search, attempt selection, output colors, and manual scrolling. `actions-layout.spec.ts` checks search and full-screen restoration. |
+| Verified | Open artifacts in a narrow run panel. Download actions are clipped. | Stack labeled artifact cells inside narrow containers. The regression reaches every download at six widths. |
+| Verified | Open Workflow file from a run. Source uses the body font. | Use monospace while retaining captured bytes. Frozen-source and responsive artifact regressions cover it. |
+| Verified | Open launch preflight with dirty Git files. Extended instructions overwhelm inputs. | Keep blockers visible and place Git instructions in a disclosure. `launch-panel.spec.ts` opens it and verifies copying does not change Git. |
+| Verified | Expand launch options. The optional model field looks blank and unexplained. | Show an inheritance placeholder on the existing text/datalist control. The dialog regression checks it and help placement/dismissal. |
+| Verified | View short POSIX, Windows drive, and network paths. They remain absolute in ordinary views. | Abbreviate display only; full disclosures and copy retain exact values. Path regressions cover all three forms and clipboard failures. |
+| Verified | Open a top-level run graph. A synthetic Root completion node appears. | Exclude only the root scope from completion junctions. `run-presentation.spec.ts` retains real nested completions and loop ordering. |
+| Verified | Build while a tab has not opened its lazy workspace yet. Its old chunk disappears. | Publish from staging, replace the entry page last, and retain earlier chunks. Publication tests exercise copy failure and an actual open browser tab. Clean wheel builds remain separate. |
+
+### Decisions
+
+1. Keep complete values in editors, captured source, disclosures, and copy
+   actions. Abbreviation changes display only.
+2. Use container width for artifact rows, because a run panel can be narrow
+   inside a wide browser. Each download stays in the same semantic table.
+3. Keep numeric inputs short while allowing their labels and explanations a
+   wider area. Readability takes precedence over matching label width to input.
+4. Keep an accessible compact empty waiting section on the dashboard. Show five
+   recent results initially, with an explicit action to reveal the remaining
+   loaded results and existing pagination.
+5. Retain old hashed assets in editable checkouts. Distribution builds clean
+   their output so releases do not collect earlier frontend versions.
+6. Stage beside the output directory so source-map paths match clean builds.
+   A real Vite regression compares the generated map bytes across both modes.
+
+### Verification scope
+
+Native coverage includes all Settings sections, four welcome slides, all 27
+guided-tour steps, and all six job types. Browser regressions use isolated data
+and fake providers. The results below separate native observations from
+automated coverage. Provider certification and changes to execution,
+authentication, schema, or HTTP payloads are outside this presentation pass.
+
+### Three-pass results
+
+1. Coverage: native Computer visited all six Settings sections, empty and
+   populated projects, the dashboard, workflow navigation, all six job forms,
+   prompts and repairs, launch options, template and folder dialogs, run
+   summaries, job logs, artifacts, four welcome slides, and 27 tour steps.
+   Saves and a successful launch used disposable data and a fake agent.
+2. Interaction: native checks covered menus, help placement and Escape,
+   disclosures, heading focus, dialog dismissal, log search and full screen,
+   and an already-open tab entering a lazy workspace after publication.
+   Isolated browser regressions covered dirty-form warnings, failed saves,
+   cleanup ownership and failures, authentication, loading, and error states.
+3. Responsive: native inspection repeated at 390, 760, 900, 1,050, 1,440, and
+   1,920 pixels and at 200% zoom. Automated checks assert header bounds,
+   menu height, artifact actions, compact fields, and 44-pixel touch targets.
+
+The checks found and corrected a 36-pixel touch menu row and differing
+source-map paths during staged builds. Updated browser assertions now check
+settings-heading focus and the clarified inherited labels. These checks passed
+with the final implementation.
+
+### Final checks
+
+| Command | Result |
+| --- | --- |
+| `make check` | Passed after the implementation commits. |
+| `uv run pytest tests -q` | 1,301 passed; one Windows junction test skipped on macOS. |
+| `make test` | Python 3.10, 3.11, 3.12, 3.13, and 3.14 each passed 1,301 tests with the same one skip. |
+| `npm --prefix frontend run build` | Passed; published the editable frontend. |
+| `npm --prefix frontend run test:build` | Four publication regressions passed, including a warm browser and real Vite source maps. |
+| `make test-frontend` | 180 authenticated browser tests and three optional-login tests passed. |
+| `uv run python scripts/check_doc_links.py README.md CONTRIBUTING.md docs/*.md` | 13 Markdown files validated. |
+| `uv run python scripts/check_workflow_examples.py docs/workflows.md` | 16 guide examples and six starter workflows validated. |
+| `uv run cog -r README.md` | Passed; generated help unchanged. |
+| `make build` | Wheel and source distribution built. |
+| `make check-dist` | Passed. |
+
+### Live publication and retained data
+
+The frontend was published while the existing owner app stayed on the same
+processes. Its entry page and 679 asset files matched disk. All 660 earlier
+asset files remained byte-for-byte unchanged. Native navigation through the
+updated live app succeeded, and a disposable warm tab loaded its previously
+unopened workflow workspace after publication without a reload error.
+
+Comparison of 29 database tables and retained file hashes preserved 25 runs,
+snapshots, attempts, events, artifacts, settings, resources, and worktrees,
+including the paused run. Navigation timestamps, supervisor heartbeats, and
+model-observation IDs and timestamps were excluded from that comparison;
+observed models and configuration values were compared. The owner's backlog
+remains unstaged, and all 17 protected owner documents remain unchanged.
+
+### Screenshot evidence and limits
+
+The delivered local evidence folder contains native before/after captures at
+390 pixels, Storage before/after captures, an empty project, repairs, and the
+warm tab after publication. Clean disposable browser captures include
+`storage-desktop.png`, `storage-mobile.png`, `agent-editor.png`, `job-log.png`,
+`run-summary.png`, and `artifacts-mobile.png`. Screenshots contain fixture data;
+owner run output and credentials are excluded.
+
+This verification covers native macOS Chrome and the isolated browser suite.
+The Python matrix ran on macOS; it does not establish Windows or Linux runtime
+certification. Installed provider accounts were not exercised. Existing Django
+SSE and Vite bundle-size warnings remain outside this presentation change.
