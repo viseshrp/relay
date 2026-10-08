@@ -6,10 +6,19 @@ export async function post(page: Page, path: string, data: object = {}) {
   return page.request.post(path, { data, headers: { "X-CSRFToken": token?.value ?? "" } });
 }
 
+export async function openSettings(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: /^(Help|Account menu for .+)$/ })).toBeVisible();
+  const account = page.getByRole("button", { name: /^Account menu for / });
+  if (await account.count()) {
+    await account.click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  } else await page.getByRole("tab", { name: "Settings", exact: true }).click();
+}
+
 export async function runStarter(page: Page, id: string, name: string, testInfo: TestInfo, freshOwner = false) {
   expect((await post(page, "/__test__/starter-project", { fresh_owner: freshOwner })).ok()).toBeTruthy();
   await page.route("**/api/runs?*status=succeeded*", (route) => route.fulfill({ json: { runs: [], next: null } }));
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   if (freshOwner) {
     await page.getByRole("textbox", { name: "Username" }).fill("owner");
     await page.getByLabel(/^Password/).fill("Relay-Test-Passphrase-2026!");
@@ -46,7 +55,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.", { exact: true })).toBeVisible();
   await expect(setup).toHaveCount(0);
   if (id === "ask-agent") await page.screenshot({ path: testInfo.outputPath("run-page.png") });
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   const checked = page.waitForResponse((response) => response.url().includes("/api/agents/check"));
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
   await expect(setup.getByText("Your first run completed. You can use this checklist again for another workflow.")).toBeVisible();

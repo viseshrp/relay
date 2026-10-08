@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from "./types";
+import type { ApiErrorBody, DashboardResponse, DashboardSection } from "./types";
 
 export class RelayApiError extends Error {
   readonly status: number;
@@ -61,4 +61,12 @@ export function errorMessage(error: unknown): string {
       : error.body.message;
   }
   return error instanceof Error ? error.message : "Relay could not complete the request.";
+}
+
+export function readDashboard(signal: AbortSignal, query: string, section?: DashboardSection, cursor?: string, limit = 10): Promise<DashboardResponse> {
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  if (query) parameters.set("query", query);
+  if (section) parameters.set("section", section);
+  if (cursor) parameters.set("cursor", cursor);
+  return api<DashboardResponse>(`/api/dashboard?${parameters}`, { signal });
 }

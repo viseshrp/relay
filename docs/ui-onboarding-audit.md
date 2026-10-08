@@ -177,11 +177,14 @@ browser tests never use the owner's running instance or agent credentials.
 3. Keep the existing optional Get started checklist for agent checks and
    templates. The carousel introduces the app; the tour explains settings;
    neither silently starts provider sessions.
-4. Keep owner colors and fonts. Use illustrations with example labels instead
-   of screenshots containing owner projects or provider output.
+4. Keep owner colors and fonts. Welcome images now use real screenshots from
+   disposable projects, with blue highlights measured from the controls.
+   `npm --prefix frontend run capture:welcome` regenerates these images.
+   Owner projects and provider output remain outside the image fixtures.
 5. Pin the two requested libraries through npm. Embla's two supporting
    packages and Driver.js use MIT, which the repository permits. No backend
-   dependency, API, workflow schema, migration, or execution rule changes.
+   dependency, workflow schema, migration, or execution rule changes. A later
+   additive dashboard read exposes saved project activity.
 6. Recover failed workspace loads through an explicit reload. This leaves the
    decision with the user and preserves browser workflow recovery drafts.
 
@@ -201,3 +204,35 @@ replay, reset, empty inventories, blocked storage, and failed chunk loading.
 The native audit is not a claim that every possible workflow, installed
 provider, or operating system was exercised. No live provider certification
 or Windows/Linux UI run was performed for this frontend change.
+
+## Dashboard and help placement follow-up
+
+- [x] Home shows saved work across registered projects and the Relay logo
+  returns there. Waiting cards open their exact request. Active and paused
+  runs, recent results, project search, pagination, and durations share the
+  existing status mapping. A missing remembered project falls back to an
+  available project on Home. `frontend/e2e/dashboard.spec.ts` covers navigation,
+  recovered drafts, answering requests, failed refreshes, and hidden tabs.
+- [x] Help no longer occupies a separate column beside wide fields. Labels
+  and help sit above text and select controls; switches and actions retain
+  their own adjacent help. `frontend/e2e/help-layout.spec.ts` checks alignment
+  at 320, 390, 760, and 1,440 pixels, tooltip containment, keyboard dismissal,
+  equal input alignment with different helper text, and unchanged settings
+  after help clicks.
+- [x] Early Escape or Skip closes the requested tour even before Driver has
+  finished highlighting its first element. Replaying welcome slides keeps a
+  dismissed tour dismissed. The replay regression covers this behavior.
+- [x] Welcome slides use real fixture screenshots in a desktop split and a
+  mobile stack. The capture validates rendered fonts and control bounds;
+  browser checks validate decoded images and contained blue highlights.
+- [x] Concurrent discovery requests use separate staging files for registry
+  refreshes. The shared temporary filename caused an intermittent startup
+  error in the no-login starter test. `tests/test_agent_domain.py` coordinates
+  both writers at publication and covers failed writes with and without a
+  previous cache. The registry behavior is described in `agents.md`.
+
+The username menu holds settings and help when signed in. Optional no-login
+access keeps its settings tab and Help button without the old header label.
+`tests/test_dashboard.py` covers additive, bounded reads, actionable counts,
+cursors, empty projects, authentication, and database errors. Behavior is
+specified in `web-ui.md` and `http-api.md`.

@@ -84,7 +84,7 @@ async function review(page: Page, key: string, text: string, truncated = false) 
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   expect((await post(page, "/api/workflows", {

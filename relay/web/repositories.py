@@ -98,6 +98,7 @@ from relay.execution.scheduler import (
 )
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
+    TERMINAL_RUN_STATUSES,
     AttemptStatus,
     AttemptStopReason,
     CleanupPolicy,
@@ -741,6 +742,26 @@ def _run_record(run: Run) -> dict[str, object]:
     }
 
 
+def _waiting_filter(prefix: str = "") -> Q:
+    """Keep attention counts tied to requests whose attempts can accept an answer."""
+    return Q(
+        **{
+            f"{prefix}status": InteractionStatus.PENDING.value,
+            f"{prefix}attempt__status": AttemptStatus.WAITING.value,
+        }
+    )
+
+
+def _dashboard_identifier(instance: models.Model, name: str) -> str | None:
+    value = getattr(instance, name)
+    if value is None:
+        return None
+    if isinstance(value, (uuid.UUID, int, str)) and not isinstance(value, bool):
+        return str(value)
+    message = f"Stored field {name} is not a record identifier."
+    raise PersistenceError(message)
+
+
 def _provider_failure_message(attempt: NodeAttempt) -> tuple[str | None, bool]:
     """Read a bounded tail of this attempt's public final message, never thoughts."""
     rows = list(
@@ -1095,6 +1116,178 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
+    def dashboard(
+        self, *, section: str | None, cursor: str | None, limit: int, query_text: str
+    ) -> dict[str, object]:
+        """Read project activity without probing Git, providers, or saved run content."""
+        sections = ("projects", "waiting", "active", "recent")
+        if section is not None and section not in sections:
+            message = "section must be projects, waiting, active, or recent."
+            raise ConfigError(message)
+        if cursor is not None and section is None:
+            message = "A dashboard cursor requires a section."
+            raise ConfigError(message)
+        if len(query_text) > 1024:
+            message = "Project search must not exceed 1024 characters."
+            raise ConfigError(message)
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            with transaction.atomic():
+                runs = Run.objects.select_related("project").annotate(
+                    read_waiting_count=models.Count(
+                        "interactions", filter=_waiting_filter("interactions__")
+                    ),
+                    dashboard_request_id=models.Subquery(
+                        HumanInteraction.objects.filter(
+                            _waiting_filter(), run_id=models.OuterRef("pk")
+                        )
+                        .order_by("created_at", "pk")
+                        .values("pk")[:1]
+                    ),
+                )
+                unfinished = runs.exclude(status__in=TERMINAL_RUN_STATUSES)
+                pending = HumanInteraction.objects.filter(_waiting_filter())
+                counts = {
+                    "projects": Project.objects.count(),
+                    "waiting": pending.values("run_id").distinct().count(),
+                    "unfinished": unfinished.count(),
+                    "paused": unfinished.filter(dispatch_paused=True).count(),
+                }
+                result: dict[str, object] = {"counts": counts}
+                for name in (section,) if section else sections:
+                    page = self._dashboard_page(
+                        name,
+                        cursor,
+                        bounded,
+                        query_text,
+                        runs,
+                        byte_budget=API_MAX_PAGE_BYTES // (1 if section else 4),
+                    )
+                    result[name] = page
+                return result
+        except DatabaseError:
+            message = "Relay could not read the dashboard."
+            raise PersistenceError(message) from None
+
+    def _dashboard_page(
+        self,
+        section: str,
+        cursor: str | None,
+        limit: int,
+        query_text: str,
+        runs: models.QuerySet,
+        *,
+        byte_budget: int,
+    ) -> dict[str, object]:
+        if section == "projects":
+            projects = Project.objects.annotate(
+                unfinished_count=models.Count(
+                    "runs",
+                    filter=~Q(runs__status__in=TERMINAL_RUN_STATUSES),
+                    distinct=True,
+                ),
+                waiting_count=models.Count(
+                    "runs",
+                    filter=_waiting_filter("runs__interactions__"),
+                    distinct=True,
+                ),
+                latest_run_id=models.Subquery(
+                    Run.objects.filter(project_id=models.OuterRef("pk"))
+                    .order_by("-created_at", "-pk")
+                    .values("pk")[:1]
+                ),
+            ).order_by("display_name", "pk")
+            if query_text:
+                projects = projects.filter(
+                    Q(display_name__icontains=query_text) | Q(canonical_path__icontains=query_text)
+                )
+            if cursor:
+                anchor = Project.objects.filter(pk=cursor).first()
+                if anchor is None:
+                    message = "The dashboard project cursor no longer exists."
+                    raise ConfigError(message)
+                title = _string(anchor, "display_name")
+                projects = projects.filter(
+                    Q(display_name__gt=title) | Q(display_name=title, pk__gt=anchor.pk)
+                )
+            rows = list(projects[: limit + 1])
+            latest = {
+                _identifier(run): _run_record(run)
+                for run in runs.filter(
+                    pk__in=[_dashboard_identifier(project, "latest_run_id") for project in rows]
+                )
+            }
+
+            def project_record(project: Project) -> dict[str, object]:
+                return {
+                    **asdict(_record(project)),
+                    "unfinished_count": _integer(project, "unfinished_count"),
+                    "waiting_count": _integer(project, "waiting_count"),
+                    "latest_run": latest.get(str(_dashboard_identifier(project, "latest_run_id"))),
+                }
+
+            records, more = _bounded_page(rows, limit, project_record, byte_budget=byte_budget)
+        else:
+            selected = runs
+            if section == "waiting":
+                selected = selected.filter(read_waiting_count__gt=0)
+            elif section == "active":
+                selected = selected.exclude(status__in=TERMINAL_RUN_STATUSES).filter(
+                    read_waiting_count=0
+                )
+            else:
+                selected = selected.filter(status__in=TERMINAL_RUN_STATUSES)
+            field = "ended_at" if section == "recent" else "created_at"
+            selected = selected.annotate(dashboard_order=Coalesce(field, "created_at"))
+            selected = selected.order_by("-dashboard_order", "-pk")
+            if cursor:
+                anchor = (
+                    runs.annotate(dashboard_order=Coalesce(field, "created_at"))
+                    .filter(pk=cursor)
+                    .first()
+                )
+                if anchor is None:
+                    message = "The dashboard run cursor no longer exists."
+                    raise ConfigError(message)
+                when = _datetime_field(anchor, "dashboard_order")
+                selected = selected.filter(
+                    Q(dashboard_order__lt=when) | Q(dashboard_order=when, pk__lt=anchor.pk)
+                )
+            run_rows = list(selected[: limit + 1])
+            requests: dict[str, HumanInteraction] = {}
+            if section == "waiting":
+                for request in (
+                    HumanInteraction.objects.filter(
+                        _waiting_filter(),
+                        pk__in=[
+                            _dashboard_identifier(run, "dashboard_request_id") for run in run_rows
+                        ],
+                    )
+                    .select_related("node_run")
+                    .order_by("created_at", "pk")
+                ):
+                    requests.setdefault(_foreign_key_text(request, "run"), request)
+
+            def run_record(run: Run) -> dict[str, object]:
+                request = requests.get(_identifier(run))
+                return {
+                    **_run_record(run),
+                    "project": asdict(_record(_related(run, "project", Project))),
+                    "request": {
+                        "id": _identifier(request),
+                        "kind": _string(request, "kind"),
+                        "scope_path": _string(_related(request, "node_run", NodeRun), "scope_path"),
+                    }
+                    if request
+                    else None,
+                }
+
+            records, more = _bounded_page(run_rows, limit, run_record, byte_budget=byte_budget)
+        return {
+            "items": records,
+            "next_cursor": str(records[-1]["id"]) if more and records else None,
+        }
+
     def previous_run_inputs(self, run_id: str) -> PreviousRunInputs:
         """Read launch input values without returning prompts or provider routes."""
         try:
@@ -1118,10 +1311,7 @@ class DjangoReadStore:
         """Read owner requests and new completion facts without event payloads."""
         try:
             with transaction.atomic():
-                pending = HumanInteraction.objects.filter(
-                    status=InteractionStatus.PENDING.value,
-                    attempt__status=AttemptStatus.WAITING.value,
-                )
+                pending = HumanInteraction.objects.filter(_waiting_filter())
                 waiting_runs = pending.values_list("run_id", flat=True).distinct()
                 latest = RunEvent.objects.order_by("-id").first()
                 cursor = _integer(latest, "id") if latest is not None else 0

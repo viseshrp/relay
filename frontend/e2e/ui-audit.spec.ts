@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { parse, stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { post, openSettings } from "./setup-helpers";
 
 async function document(page: Page, key = "workflow.yaml") {
   return (await page.request.get(`/api/workflows/${key}`)).json();
@@ -97,7 +97,7 @@ test("workflow history filters persist in the URL and Back restores run and job 
   await expect(page).not.toHaveURL(/workflow=/);
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Audit A", exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Audit A", exact: true })).toBeVisible();

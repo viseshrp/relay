@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { post } from "./setup-helpers";
+import { post, openSettings } from "./setup-helpers";
 import { stringify } from "yaml";
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -15,9 +15,9 @@ test("welcome navigation and keyboard controls introduce features, then a skippe
   await page.goto("/");
   const welcome = page.getByRole("dialog", { name: "Welcome to Relay", exact: true });
   await expect(welcome).toBeVisible();
-  await expect(welcome.getByRole("img", { name: /Open a project is highlighted/ })).toBeVisible();
+  await expect(welcome.getByRole("img", { name: /Repository folder is highlighted/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("welcome.png") });
-  const image = await welcome.getByRole("img", { name: /Open a project is highlighted/ }).boundingBox();
+  const image = await welcome.getByRole("img", { name: /Repository folder is highlighted/ }).boundingBox();
   if (!image) throw new Error("Expected a visible welcome illustration.");
   await page.mouse.move(image.x + image.width * 0.85, image.y + image.height / 2);
   await page.mouse.down();
@@ -35,9 +35,9 @@ test("welcome navigation and keyboard controls introduce features, then a skippe
   await page.screenshot({ path: testInfo.outputPath("guided-tour.png") });
   await tour.getByRole("button", { name: "Skip tour", exact: true }).click();
   await expect(tour).toBeHidden();
-  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: /^(Help|Account menu for owner)$/ })).toBeFocused();
   await page.reload();
-  await expect(page.getByRole("navigation", { name: "Workflow sidebar" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Relay home", exact: true })).toBeVisible();
   await expect(welcome).toHaveCount(0);
   await expect(tour).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Welcome to Relay", exact: true })).toHaveCount(0);
@@ -75,7 +75,7 @@ test("onboarding can replay separately and reset from Settings, with Escape reme
   await expect(page.locator(".relay-tour")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".relay-tour")).toBeHidden();
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Welcome and guided tour", exact: true }).click();
   await page.getByRole("button", { name: "Replay welcome slides", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Welcome to Relay", exact: true })).toBeVisible();
@@ -92,6 +92,7 @@ test("onboarding can replay separately and reset from Settings, with Escape reme
 test("no projects shows a usable home and still offers global settings and onboarding", async ({ page }, testInfo) => {
   await page.route("**/api/projects/current", (route) => route.fulfill({ status: 404, json: { code: "project_not_found", message: "No project is open.", context: {} } }));
   await page.route("**/api/projects", (route) => route.fulfill({ json: { projects: [] } }));
+  await page.route("**/api/dashboard?*", (route) => route.fulfill({ json: { counts: { projects: 0, waiting: 0, unfinished: 0, paused: 0 }, ...Object.fromEntries(["projects", "waiting", "active", "recent"].map((key) => [key, { items: [], next_cursor: null }])) } }));
   await page.goto("/");
   await page.getByRole("button", { name: "Skip introduction", exact: true }).click();
   await page.locator(".relay-tour").getByRole("button", { name: "Skip tour", exact: true }).click();
@@ -102,7 +103,7 @@ test("no projects shows a usable home and still offers global settings and onboa
   await home.getByRole("button", { name: "Open your first project", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Open a project", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
 });
 
@@ -123,7 +124,7 @@ test("touch-sized help works for disabled settings and closes with Escape withou
 
 test("long workflow names retain full-size aligned icons and settings never overlap their save controls", async ({ page }, testInfo) => {
   await page.addInitScript(() => { localStorage.setItem("relay.welcome-seen", "true"); localStorage.setItem("relay.tour-seen", "true"); localStorage.setItem("relay.setup-dismissed", "true"); });
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const name = "Automatic tab suspension: fresh build without size caps and independently verified results";
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
@@ -139,7 +140,7 @@ test("long workflow names retain full-size aligned icons and settings never over
   expect(icon?.x).toBe(shortIcon?.x);
   await long.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("workflow-sidebar.png") });
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   const retries = await page.getByRole("switch", { name: "Automatic recovery for new runs", exact: true }).locator("..", { has: page.locator("input") }).boundingBox();
   const limit = await page.getByRole("spinbutton", { name: "Maximum automatic retries", exact: true }).boundingBox();
   if (!retries || !limit) throw new Error("Expected recovery controls to have layout boxes.");
@@ -172,7 +173,7 @@ test("mobile welcome and tour remain usable and replay slides can start the tour
   expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(390);
   await tour.getByRole("button", { name: "Skip tour", exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Welcome slides", exact: true }).click();
   await welcome.getByRole("button", { name: /^Show slide 4/ }).click();
   await welcome.getByRole("button", { name: "Show guided tour", exact: true }).click();
@@ -205,7 +206,7 @@ test("blocked browser storage allows dismissal and explains why reset cannot per
   await page.goto("/");
   await page.getByRole("button", { name: "Skip introduction", exact: true }).click();
   await page.locator(".relay-tour").getByRole("button", { name: "Skip tour", exact: true }).click();
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   await page.getByRole("button", { name: "Welcome and guided tour", exact: true }).click();
   await page.getByRole("button", { name: "Reset onboarding", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This browser cannot save onboarding preferences");

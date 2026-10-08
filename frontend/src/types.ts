@@ -187,6 +187,28 @@ export interface RunSummary {
   waiting_count?: number;
 }
 
+export interface DashboardProject extends ProjectRecord {
+  unfinished_count: number;
+  waiting_count: number;
+  latest_run: RunSummary | null;
+}
+
+export interface DashboardRun extends RunSummary {
+  project: ProjectRecord;
+  request: { id: string; kind: string; scope_path: string } | null;
+}
+
+export interface DashboardPage<T> { items: T[]; next_cursor: string | null }
+export interface DashboardData {
+  counts: { projects: number; waiting: number; unfinished: number; paused: number };
+  projects: DashboardPage<DashboardProject>;
+  waiting: DashboardPage<DashboardRun>;
+  active: DashboardPage<DashboardRun>;
+  recent: DashboardPage<DashboardRun>;
+}
+export type DashboardSection = "projects" | "waiting" | "active" | "recent";
+export type DashboardResponse = Pick<DashboardData, "counts"> & Partial<Omit<DashboardData, "counts">>;
+
 export interface RunNode {
   id: string;
   scope_path: string;

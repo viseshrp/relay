@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
   const login = await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" });
   expect(login.status()).toBe(200);
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
   await expect(page.getByRole("region", { name: "Codex configuration" }).getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
 });

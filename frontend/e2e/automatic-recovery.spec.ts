@@ -11,7 +11,7 @@ test("enable recovery for a stopped report step and continue through the same pr
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   expect((await post(page, "/__test__/recovery-provider")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   expect((await post(page, "/api/workflows", { key: "automatic-recovery", holder, yaml: stringify({
@@ -53,7 +53,7 @@ test("workflow and agent recovery toggles survive save and reload", async ({ pag
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await page.getByText("Advanced workflow settings and YAML", { exact: true }).click();
   await page.getByRole("switch", { name: "Automatic recovery", exact: true }).check();
   await page.locator('.react-flow__node[data-id="work"]').click();

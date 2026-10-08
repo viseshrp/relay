@@ -1,5 +1,5 @@
-import { HelpField } from "./HelpTip";
-import { Alert, Button, Paper, Stack, TextField, Typography } from "@mui/material";
+import { HelpTextField } from "./HelpTip";
+import { Alert, Button, Paper, Stack, Typography } from "@mui/material";
 import { useState } from "react";
 import { CommandArgumentsEditor } from "./CommandArgumentsEditor";
 
@@ -10,11 +10,11 @@ export function SharedCommandsEditor({ value, onChange, disabled = false }: {
   return <Stack component="section" aria-label="Shared commands" spacing={2}>
     {error && <Alert severity="error">{error}</Alert>}
     {Object.entries(value).map(([name, argv], index) => <Paper component="section" aria-label={`Shared command ${index + 1}`} variant="outlined" key={index} sx={{ p: 2 }}><Stack spacing={1}>
-      <HelpField topic="commandName"><TextField size="small" label="Command name" value={name} disabled={disabled} helperText="Use a lowercase name such as test, build, or lint." onChange={(event) => {
+      <HelpTextField topic="commandName" label="Command name" size="small" value={name} disabled={disabled} helperText="Use a lowercase name such as test, build, or lint." onChange={(event) => {
         const next = event.target.value;
         if (next !== name && Object.hasOwn(value, next)) { setError("That command name is already in this list."); return; }
         setError(null); onChange(Object.fromEntries(Object.entries(value).map(([key, command]) => [key === name ? next : key, command])));
-      }} /></HelpField>
+      }} />
       <CommandArgumentsEditor value={argv} disabled={disabled} onChange={(command) => onChange({ ...value, [name]: command })} />
       <Button disabled={disabled} aria-label={`Remove shared command ${name}`} onClick={() => { setError(null); onChange(Object.fromEntries(Object.entries(value).filter(([key]) => key !== name))); }}>Remove command</Button>
     </Stack></Paper>)}

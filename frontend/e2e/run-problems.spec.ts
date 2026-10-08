@@ -15,7 +15,7 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const workflowKey = automatic ? "scheduled-review" : "limited-review";
@@ -106,7 +106,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const created = await page.request.post("/api/workflows", {
@@ -208,7 +208,7 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const key = native ? "handoff-native" : "handoff-acp";

@@ -1,15 +1,11 @@
-import { HelpField } from "./HelpTip";
-import {
-  Alert, Box, Button, FormControl, FormHelperText, InputLabel, MenuItem,
-  Select, Stack, Typography,
-} from "@mui/material";
+import { HelpSelectField } from "./HelpTip";
+import { Alert, Box, Button, MenuItem, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type {
-  AgentConfiguration as Configuration, AgentOptions, AgentRecord, ConfigurationSelector,
-} from "../types";
+  AgentConfiguration as Configuration, AgentOptions, AgentRecord, ConfigurationSelector } from "../types";
 
 interface AgentConfigurationProps {
   agent: AgentRecord;
@@ -74,29 +70,15 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
         ? "Effort is included in this exact model. Choose another model to change it."
       : selected?.description ?? (raw ? `Use ${selected?.name ?? raw} for this tool.`
         : inheritDefaults && raw === undefined ? "Use the saved defaults for this exact model." : `${defaultLabel} leaves this override unset.`);
-    const labelId = `${agent.id}-${field}-label`;
     return (
-      <HelpField topic={field === "effort" ? "effort" : "permissions"}><FormControl fullWidth size="small" error={!available && !loading && !error}>
-        <InputLabel id={labelId} shrink>{label}</InputLabel>
-        <Select
-          labelId={labelId}
-          label={label}
-          displayEmpty
-          notched
-          renderValue={(selectedValue) => selectedValue === "inherit" ? (inheritDefaults ? "Use project and global defaults" : defaultLabel)
+      <HelpSelectField topic={field === "effort" ? "effort" : "permissions"} label={label} fullWidth size="small" error={!available && !loading && !error} displayEmpty renderValue={(selectedValue) => selectedValue === "inherit" ? (inheritDefaults ? "Use project and global defaults" : defaultLabel)
             : selectedValue === "agent-default" ? "Agent’s default"
-            : choices.find((choice) => choice.value === selectedValue.slice(7))?.name ?? selectedValue.slice(7)}
-          value={value}
-          disabled={disabled || loading || (!supported && raw === undefined)}
-          onChange={(event) => onChange(field, event.target.value === "agent-default" ? null : event.target.value === "inherit" ? "" : event.target.value.slice(7))}
-        >
+            : choices.find((choice) => choice.value === selectedValue.slice(7))?.name ?? selectedValue.slice(7)} value={value} disabled={disabled || loading || (!supported && raw === undefined)} onChange={(event) => onChange(field, event.target.value === "agent-default" ? null : event.target.value === "inherit" ? "" : event.target.value.slice(7))} helperText={<> {message} </>}>
           <MenuItem value="inherit">{inheritDefaults ? "Use project and global defaults" : defaultLabel}</MenuItem>
           {(inheritDefaults || options[field] === null) && <MenuItem value="agent-default">Agent’s default</MenuItem>}
           {!available && <MenuItem value={value} disabled>{raw} (unavailable)</MenuItem>}
           {choices.map((choice) => <MenuItem key={choice.value} value={`choice:${choice.value}`}>{choice.name}</MenuItem>)}
-        </Select>
-        <FormHelperText>{message}</FormHelperText>
-      </FormControl></HelpField>
+        </HelpSelectField>
     );
   }
 

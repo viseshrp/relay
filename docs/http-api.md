@@ -40,6 +40,42 @@ cookie value in `X-CSRFToken`. A missing or expired token gets
 `403 csrf_failed`. For example, if the cookie is `relay_csrftoken=abc`, the
 request header is `X-CSRFToken: abc`.
 
+## Home dashboard
+
+`GET /api/dashboard` reads activity across every registered project. It uses
+saved database records and neither probes Git or providers nor changes runs.
+The normal owner-session requirement, optional no-login access, and public
+error envelopes apply.
+
+The response contains `counts` and four pages: `projects`, `waiting`, `active`,
+and `recent`. Each page has `items` and `next_cursor`, which is `null` at the
+end. Counts are global: registered `projects`, distinct `waiting` runs with
+pending requests on waiting attempts, nonterminal `unfinished` runs, and
+nonterminal `paused` runs with dispatch paused. Several requests on one run
+count as one waiting run. These use the same actionable-request rule as
+`GET /api/attention`.
+
+Project items extend the existing project record with `unfinished_count`,
+`waiting_count`, and `latest_run`, an existing run summary or `null`. Run
+items extend the existing run summary with `project` and `request`. A waiting
+item's request contains only `id`, `kind`, and `scope_path`, for opening its
+first actionable request. Other pages return `request: null`. Private request
+payloads, prompts, and provider output are omitted.
+
+Waiting lists actionable runs. Active lists nonterminal runs without an
+actionable request, including paused runs. Recent lists terminal runs ordered
+by completion time, falling back to creation time. Project names sort
+alphabetically; waiting and active runs sort newest first. Stable IDs break
+ties. A run cursor remains usable if that run leaves the requested list.
+
+Query options are `limit` (default 10, maximum 200), `section` (`projects`,
+`waiting`, `active`, or `recent`), and `cursor` (the preceding page's UUID).
+With a section, the response contains counts and only that page. A cursor
+requires a section. `query` filters project names and paths, up to 1,024
+characters; run lists and counts remain global. Initial page payloads share a
+1 MiB byte budget. Section-only pages have that full budget. Existing project,
+run, and attention endpoints keep their payloads unchanged.
+
 ## Projects and workflows
 
 | Method and path | Request | Success |

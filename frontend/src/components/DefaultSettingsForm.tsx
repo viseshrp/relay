@@ -1,6 +1,6 @@
 import { ActionIcon } from "./ActionIcon";
-import { HelpField, HelpLabel } from "./HelpTip";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, FormControl, FormControlLabel, FormHelperText, InputLabel, MenuItem, Select, Stack, Switch, TextField, Typography } from "@mui/material";
+import { HelpLabel, HelpControl, HelpTextField, HelpSelectField } from "./HelpTip";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, FormControl, FormControlLabel, InputLabel, MenuItem, Select, Stack, Switch, Typography } from "@mui/material";
 import { useId, useState } from "react";
 import type { AgentOptions, AgentRecord, OwnerSettings, ProjectDefaultOverrides, ProviderDefaults, WorkflowDefaults } from "../types";
 import { AgentConfiguration } from "./AgentConfiguration";
@@ -43,7 +43,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
     if (!onOverrides || !overrides) return null;
     const root = key === "agent_preferences" || key === "cleanup_policy";
     const selected = Object.hasOwn(root ? overrides : overrides.workflow_defaults ?? {}, key);
-    return <HelpField topic="override"><FormControlLabel control={<Switch size="small" checked={selected} disabled={disabled} onChange={(_event, checked) => {
+    return <HelpControl topic="override"><FormControlLabel control={<Switch size="small" checked={selected} disabled={disabled} onChange={(_event, checked) => {
       const next = { ...overrides, workflow_defaults: { ...overrides.workflow_defaults } };
       if (root) {
         if (checked) Object.assign(next, { [key]: settings[key] });
@@ -51,7 +51,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       } else if (checked) Object.assign(next.workflow_defaults, { [key]: defaults[key] });
       else delete next.workflow_defaults[key];
       onOverrides(next);
-    }} />} label={`Override ${overrideLabels[key]} for this project`} /></HelpField>;
+    }} />} label={`Override ${overrideLabels[key]} for this project`} /></HelpControl>;
   }
   function locked(key: keyof WorkflowDefaults | "agent_preferences" | "cleanup_policy") {
     return disabled || (projectMode && !Object.hasOwn(key === "agent_preferences" || key === "cleanup_policy" ? overrides : overrides.workflow_defaults ?? {}, key));
@@ -77,7 +77,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
         </FormControl>
       </Stack>
     </Box>
-    <Box>{inherit("model")}<HelpField topic="sharedModel" tour><TextField fullWidth label="Shared default model" value={defaults.model ?? ""} disabled={locked("model")} onChange={(event) => update("model", event.target.value || null)} helperText="Optional exact value. Used when the job, run, and workflow have no model. Leave blank to use the first preferred agent's model below." /></HelpField></Box>
+    <Box>{inherit("model")}<HelpTextField topic="sharedModel" tour label="Shared default model" fullWidth value={defaults.model ?? ""} disabled={locked("model")} onChange={(event) => update("model", event.target.value || null)} helperText="Optional exact value. Used when the job, run, and workflow have no model. Leave blank to use the first preferred agent's model below." /></Box>
     <Box data-tour="providers" className="settings-group"><Typography variant="h6"><HelpLabel topic="providers">Agent models and thinking</HelpLabel></Typography>
       <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>Thinking effort and permissions apply only when the exact model matches. Saved workflow choices take precedence. Unsupported choices stop preflight.</Typography>
       {inherit("providers")}
@@ -87,7 +87,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
         return <Accordion key={agent.id} disableGutters slotProps={{ transition: { unmountOnExit: true } }}><AccordionSummary expandIcon={<ActionIcon name="down" />}><Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: "100%", minWidth: 0, justifyContent: "space-between" }}><Typography>{agent.display_name}</Typography><Typography color="text.secondary" variant="body2" sx={{ overflowWrap: "anywhere", minWidth: 0 }}>{value.model ?? "No saved model"}</Typography></Stack></AccordionSummary>
           <AccordionDetails><Stack spacing={2}>
             <ModelPicker defaultLabel="No saved model" agents={[agent]} value={value.model ?? ""} project={project} disabled={locked("providers")} onChange={(model) => providerChange(agent.id, { model: model || null, effort: null, permission_mode: null })} />
-            <HelpField topic="model"><TextField label={`${agent.display_name} exact model`} value={value.model ?? ""} disabled={locked("providers")} onChange={(event) => providerChange(agent.id, { model: event.target.value || null, effort: null, permission_mode: null })} helperText="Model values preserve case. Changing the model clears its saved effort and permissions." /></HelpField>
+            <HelpTextField topic="model" label={`${agent.display_name} exact model`} value={value.model ?? ""} disabled={locked("providers")} onChange={(event) => providerChange(agent.id, { model: event.target.value || null, effort: null, permission_mode: null })} helperText="Model values preserve case. Changing the model clears its saved effort and permissions." />
             <AgentConfiguration agent={agent} model={value.model ?? ""} options={options} project={project} disabled={locked("providers")} labels={{ effort: "Thinking effort", permission_mode: "What the agent may do" }} defaultLabel="Agent’s default" onChange={(field, selected) => providerChange(agent.id, { ...value, [field]: selected || null })} />
             {value.permission_mode && <Alert severity="info">New jobs using this exact model inherit this permission choice unless the workflow sets its own. Review the agent's description before saving.</Alert>}
           </Stack></AccordionDetails></Accordion>;
@@ -104,18 +104,18 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       <EnvironmentEditor value={defaults.env} disabled={locked("env")} onChange={(env) => update("env", env)} />
     </Box>
     <Box><Typography variant="h6">Job defaults</Typography><Stack spacing={2} sx={{ mt: 2 }}>
-      <Box>{inherit("timeout")}<HelpField topic="timeout" tour><TextField fullWidth label="Job timeout" value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></HelpField></Box>
-      <Box data-tour="autoRetry">{inherit("auto_retry")}<HelpField topic="autoRetry"><FormControlLabel control={<Switch checked={defaults.auto_retry} disabled={locked("auto_retry")} onChange={(_event, checked) => update("auto_retry", checked)} />} label="Allow automatic retries for jobs" /></HelpField><Typography variant="body2" color="text.secondary">Requires an enabled recovery policy. Each job can opt out.</Typography></Box>
-      <Box>{inherit("recovery")}<HelpField topic="recovery" tour><FormControlLabel control={<Switch checked={defaults.recovery.enabled} disabled={locked("recovery")} onChange={(_event, checked) => update("recovery", { ...defaults.recovery, enabled: checked })} />} label="Automatic recovery for new runs" /></HelpField><Box sx={{ height: 16 }} />
-        <HelpField topic="retryLimit" tour><TextField fullWidth type="number" label="Maximum automatic retries" value={defaults.recovery.max_retries} disabled={locked("recovery")} onChange={(event) => update("recovery", { ...defaults.recovery, max_retries: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2 } }} helperText="One or two additional attempts per failed agent job. Models, permissions, and completed work stay captured." /></HelpField></Box>
-      <Box>{inherit("cleanup_policy")}<HelpField topic="cleanup" tour><FormControl fullWidth><InputLabel id={`${prefix}-cleanup`}>After a successful run</InputLabel><Select labelId={`${prefix}-cleanup`} label="After a successful run" value={settings.cleanup_policy} disabled={locked("cleanup_policy")} onChange={(event) => ownerUpdate("cleanup_policy", event.target.value === "merge_on_success" ? "merge_on_success" : event.target.value === "retain" ? "retain" : "clean_on_success")}><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem></Select><FormHelperText>{settings.cleanup_policy === "merge_on_success" ? "Fast-forwards the branch selected at launch. The checkout must be completely clean at launch and completion. Dirty, switched, or diverged branches fail and keep the run working copy." : "Reports, commits, and history remain available. Run workflow can override this choice."}</FormHelperText></FormControl></HelpField></Box>
+      <Box>{inherit("timeout")}<HelpTextField topic="timeout" tour label="Job timeout" fullWidth value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></Box>
+      <Box data-tour="autoRetry">{inherit("auto_retry")}<HelpControl topic="autoRetry"><FormControlLabel control={<Switch checked={defaults.auto_retry} disabled={locked("auto_retry")} onChange={(_event, checked) => update("auto_retry", checked)} />} label="Allow automatic retries for jobs" /></HelpControl><Typography variant="body2" color="text.secondary">Requires an enabled recovery policy. Each job can opt out.</Typography></Box>
+      <Box>{inherit("recovery")}<HelpControl topic="recovery" tour><FormControlLabel control={<Switch checked={defaults.recovery.enabled} disabled={locked("recovery")} onChange={(_event, checked) => update("recovery", { ...defaults.recovery, enabled: checked })} />} label="Automatic recovery for new runs" /></HelpControl><Box sx={{ height: 16 }} />
+        <HelpTextField topic="retryLimit" tour label="Maximum automatic retries" fullWidth type="number" value={defaults.recovery.max_retries} disabled={locked("recovery")} onChange={(event) => update("recovery", { ...defaults.recovery, max_retries: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2 } }} helperText="One or two additional attempts per failed agent job. Models, permissions, and completed work stay captured." /></Box>
+      <Box>{inherit("cleanup_policy")}<HelpSelectField topic="cleanup" tour label="After a successful run" fullWidth value={settings.cleanup_policy} disabled={locked("cleanup_policy")} onChange={(event) => ownerUpdate("cleanup_policy", event.target.value === "merge_on_success" ? "merge_on_success" : event.target.value === "retain" ? "retain" : "clean_on_success")} helperText={<> {settings.cleanup_policy === "merge_on_success" ? "Fast-forwards the branch selected at launch. The checkout must be completely clean at launch and completion. Dirty, switched, or diverged branches fail and keep the run working copy." : "Reports, commits, and history remain available. Run workflow can override this choice."} </>}><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem></HelpSelectField></Box>
     </Stack></Box>
-    <HelpField topic="repairs" tour><Accordion expanded={tourActive || repairOpen} onChange={(_event, expanded) => setRepairOpen(expanded)}><AccordionSummary expandIcon={<ActionIcon name="down" />}>Defaults for new repair rules</AccordionSummary><AccordionDetails><Stack spacing={2}>
+    <Box data-tour="repairs"><Typography variant="h6" sx={{ mb: 1 }}><HelpLabel topic="repairs">New repair rules</HelpLabel></Typography><Accordion expanded={tourActive || repairOpen} onChange={(_event, expanded) => setRepairOpen(expanded)}><AccordionSummary expandIcon={<ActionIcon name="down" />}>Defaults for new repair rules</AccordionSummary><AccordionDetails><Stack spacing={2}>
       <Typography variant="body2">Used when adding a repair rule in the editor. Saved repair rules keep their rounds and instructions.</Typography>
       {inherit("repairs")}
-      <HelpField topic="repairRounds" tour><TextField label="Maximum repair rounds" type="number" value={defaults.repairs.max_rounds} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, max_rounds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 100 } }} /></HelpField>
-      <HelpField topic="fixer" tour><TextField label="Fixer instructions" multiline minRows={3} value={defaults.repairs.fix_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, fix_instruction: event.target.value })} /></HelpField>
-      <HelpField topic="verifier" tour><TextField label="Verifier instructions" multiline minRows={3} value={defaults.repairs.verify_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, verify_instruction: event.target.value })} /></HelpField>
-    </Stack></AccordionDetails></Accordion></HelpField>
+      <HelpTextField topic="repairRounds" tour label="Maximum repair rounds" type="number" value={defaults.repairs.max_rounds} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, max_rounds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 100 } }} />
+      <HelpTextField topic="fixer" tour label="Fixer instructions" multiline minRows={3} value={defaults.repairs.fix_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, fix_instruction: event.target.value })} />
+      <HelpTextField topic="verifier" tour label="Verifier instructions" multiline minRows={3} value={defaults.repairs.verify_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, verify_instruction: event.target.value })} />
+    </Stack></AccordionDetails></Accordion></Box>
   </Stack>;
 }

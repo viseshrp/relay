@@ -18,6 +18,11 @@ const steps: { topic: HelpTopic; target?: string; section?: SettingsSection }[] 
 export function GuidedTour({ onDestination, onClose }: { onDestination: (destination: TourDestination) => void; onClose: () => void }) {
   useEffect(() => {
     let disposing = false;
+    let closed = false;
+    function finish(): void {
+      if (disposing || closed) return;
+      closed = true; onClose();
+    }
     rememberSeen(TOUR_SEEN);
     const definitions: DriveStep[] = steps.map(({ topic, target }) => ({
       element: `[data-tour="${target ?? topic}"]`, waitForElement: 5000,
@@ -36,8 +41,11 @@ export function GuidedTour({ onDestination, onClose }: { onDestination: (destina
       },
       onNextClick: () => move((tour.getActiveIndex() ?? 0) + 1),
       onPrevClick: () => move((tour.getActiveIndex() ?? 0) - 1),
-      onDoneClick: () => tour.destroy(),
-      onDestroyed: () => { if (!disposing) onClose(); },
+      onDoneClick: () => { tour.destroy(); finish(); },
+      // Driver can close before its highlight has finished initializing.
+      // Its onDestroyed hook only runs when an active element exists.
+      onDestroyStarted: () => { tour.destroy(); finish(); },
+      onDestroyed: finish,
     });
     function move(index: number): void {
       const step = steps[index];

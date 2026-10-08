@@ -1,5 +1,5 @@
-import { HelpField, HelpLabel } from "./HelpTip";
-import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
+import { HelpLabel, HelpSelectField } from "./HelpTip";
+import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
@@ -56,9 +56,9 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
       </Box>
       {usage.working_copies.truncated && <Alert severity="info">The disk scan reached its limit or could not read a folder. The size is a lower bound; symlinks are excluded.</Alert>}
       {usage.cleanup_blocked && <Alert severity="info">Finish or cancel active project runs before deleting retained data.</Alert>}
-      <HelpField topic="storage"><FormControl fullWidth><InputLabel id="storage-scope">Data to delete</InputLabel><Select labelId="storage-scope" label="Data to delete" value={scope} disabled={busy || usage.cleanup_blocked} onChange={(event) => { if (isScope(event.target.value)) setScope(event.target.value); }}>
+      <HelpSelectField topic="storage" label="Data to delete" fullWidth value={scope} disabled={busy || usage.cleanup_blocked} onChange={(event) => { if (isScope(event.target.value)) setScope(event.target.value); }}>
         <MenuItem value="" disabled>Choose data to delete</MenuItem>{Object.entries(scopes).map(([key, value]) => <MenuItem key={key} value={key}>{value.label}</MenuItem>)}
-      </Select></FormControl></HelpField>
+      </HelpSelectField>
       {scope && <Typography>{scopes[scope].description}</Typography>}
       <Button color="error" variant="outlined" disabled={!scope || usage.cleanup_blocked || busy} onClick={() => { setName(""); setOpen(true); }}>Review deletion</Button>
     </>}

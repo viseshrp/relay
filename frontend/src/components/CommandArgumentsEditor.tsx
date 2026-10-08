@@ -1,5 +1,5 @@
 import { ActionIcon } from "./ActionIcon";
-import { HelpField } from "./HelpTip";
+import { HelpTextField } from "./HelpTip";
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Stack, TextField } from "@mui/material";
 import { useState } from "react";
 
@@ -9,8 +9,8 @@ export function CommandArgumentsEditor({ value, onChange, disabled = false }: {
   const [error, setError] = useState<string | null>(null);
   return <Stack spacing={1}>
     {error && <Alert severity="error">{error}</Alert>}
-    <HelpField topic="program"><TextField size="small" label="Program" value={value[0] ?? ""} disabled={disabled} onChange={(event) => onChange([event.target.value, ...value.slice(1)])} /></HelpField>
-    <HelpField topic="arguments"><TextField size="small" label="Arguments (one per line)" multiline minRows={2} value={value.slice(1).join("\n")} disabled={disabled} onChange={(event) => onChange([value[0] ?? "", ...(event.target.value === "" ? [] : event.target.value.split("\n"))])} helperText="Each line is passed as one argument. Spaces are kept; shell syntax is not expanded." /></HelpField>
+    <HelpTextField topic="program" label="Program" size="small" value={value[0] ?? ""} disabled={disabled} onChange={(event) => onChange([event.target.value, ...value.slice(1)])} />
+    <HelpTextField topic="arguments" label="Arguments (one per line)" size="small" multiline minRows={2} value={value.slice(1).join("\n")} disabled={disabled} onChange={(event) => onChange([value[0] ?? "", ...(event.target.value === "" ? [] : event.target.value.split("\n"))])} helperText="Each line is passed as one argument. Spaces are kept; shell syntax is not expanded." />
     <Accordion><AccordionSummary expandIcon={<ActionIcon name="down" />}>Advanced command arguments</AccordionSummary><AccordionDetails><TextField key={JSON.stringify(value)} size="small" label="Argument vector as JSON" defaultValue={JSON.stringify(value)} disabled={disabled} helperText="Use JSON to preserve empty arguments or newlines inside an argument." onBlur={(event) => {
       try {
         const parsed: unknown = JSON.parse(event.target.value);

@@ -33,7 +33,7 @@ test("configure repairs, save and reload, then run fix and verification behind t
   const reset = await post(page, "/__test__/reset");
   expect(reset.ok()).toBeTruthy();
   const python = (await reset.json()).python;
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const initial = "from pathlib import Path; Path('REVIEW.md').write_text('Ready: No\\n')";
@@ -94,7 +94,7 @@ test("a new repair rule keeps provider defaults and saves independent role choic
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await page.getByRole("button", { name: "Work", exact: true }).click();
   await page.getByRole("button", { name: "Repairs", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Repairs for Work" });
@@ -139,7 +139,7 @@ test("exhausted repairs stop visibly at their source and keep every rejected rep
   const reset = await post(page, "/__test__/reset");
   expect(reset.ok()).toBeTruthy();
   const python = (await reset.json()).python;
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const report = (file: string) => ({ type: "command", writes: true, allow_no_commit: true,
@@ -180,7 +180,7 @@ test("paused repair roles show saved model overrides instead of workflow default
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const created = await post(page, "/api/workflows", { key: "repair-settings", holder, yaml: stringify({

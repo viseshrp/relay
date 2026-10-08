@@ -128,6 +128,27 @@ def attention(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def dashboard(request: HttpRequest) -> HttpResponse:
+    cursor = request.GET.get("cursor")
+    if cursor is not None:
+        cursor = canonical_uuid(cursor, resource="dashboard cursor")
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=10)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    return JsonResponse(
+        DjangoReadStore().dashboard(
+            section=request.GET.get("section"),
+            cursor=cursor,
+            limit=limit,
+            query_text=request.GET.get("query", ""),
+        )
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
     return JsonResponse(

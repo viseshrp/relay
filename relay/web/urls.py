@@ -14,6 +14,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/projects/defaults", settings.project_defaults, name="project-defaults"),
     path("api/projects/folders", pages.project_folders, name="project-folders"),
     path("api/projects", pages.projects, name="projects"),
+    path("api/dashboard", pages.dashboard, name="dashboard"),
     path("api/projects/current", pages.project_context, name="project-context"),
     path("api/projects/open", actions.open_project, name="project-open"),
     path("api/projects/relink", actions.relink_registered_project, name="project-relink"),

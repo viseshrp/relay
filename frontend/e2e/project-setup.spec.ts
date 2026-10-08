@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { post } from "./setup-helpers";
+import { post, openSettings } from "./setup-helpers";
 import type { AgentsResponse, ProjectRecord } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -52,11 +52,11 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   await expect(page.getByRole("button", { name: "Dismiss welcome", exact: true })).toHaveCount(0);
   expect(checks).toBe(0);
   await page.screenshot({ path: info.outputPath("empty-project-workspace.png"), fullPage: true });
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
   await expect(setup.getByText(empty.display_name, { exact: true })).toBeVisible();
   await setup.getByRole("button", { name: "Close checklist", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: /^(Help|Account menu for owner)$/ })).toBeFocused();
 });
 
 test("the checklist can close before a run and reopen from settings with keyboard focus restored", async ({ page }, info) => {
@@ -66,10 +66,10 @@ test("the checklist can close before a run and reopen from settings with keyboar
   await expect(setup).toBeVisible();
   await expect(setup.getByRole("button", { name: "Close checklist", exact: true })).toBeEnabled();
   await setup.getByRole("button", { name: "Close checklist", exact: true }).click();
-  const help = page.getByRole("button", { name: "Help", exact: true });
+  const help = page.getByRole("button", { name: /^(Help|Account menu for owner)$/ });
   await expect(help).toBeFocused();
   await expect(setup).toHaveCount(0);
-  await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  await openSettings(page);
   await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
   await help.click();
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
@@ -94,7 +94,7 @@ test("a failed connection check never traps the owner in setup", async ({ page }
   await expect(setup.getByRole("alert").filter({ hasText: "Agent checks are unavailable." })).toBeVisible();
   await setup.getByRole("button", { name: "Close checklist", exact: true }).click();
   await expect(setup).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Help", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: /^(Help|Account menu for owner)$/ })).toBeFocused();
   await expect(page.getByRole("navigation", { name: "Workflow sidebar", exact: true })).toBeVisible();
 });
 
@@ -122,7 +122,7 @@ test("closing setup before inventory arrives prevents a later connection probe",
   if (!releaseInventory) throw new Error("The inventory response could not be released.");
   releaseInventory();
   await (await responded).finished();
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   expect(checks).toBe(1);

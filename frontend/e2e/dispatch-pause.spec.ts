@@ -13,7 +13,7 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   expect((await post(page, "/__test__/feedback-provider")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const created = await post(page, "/api/workflows", { key: "pause-review", holder, yaml: stringify({
@@ -109,7 +109,7 @@ test("upcoming job choices are shared, failures retry before opening, and Resume
   })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   expect((await post(page, "/__test__/feedback-provider")).ok()).toBeTruthy();
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   expect((await post(page, "/api/workflows", { key: "pause-choices", holder, yaml: stringify({

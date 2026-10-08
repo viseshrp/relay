@@ -1,5 +1,5 @@
-import { HelpField } from "./HelpTip";
-import { Alert, Button, Stack, TextField, Typography } from "@mui/material";
+import { HelpTextField } from "./HelpTip";
+import { Alert, Button, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
@@ -45,8 +45,7 @@ export function PromptEditor({ workflowPath, reference, newReference, project, h
   }
   return <Stack spacing={1.5}>
     <Typography variant="subtitle2">Instructions for this agent</Typography>
-    <HelpField topic="instructions"><TextField label="What should the agent do?" multiline minRows={5} value={text} disabled={busy || disabled}
-      onChange={(event) => setText(event.target.value)} helperText="Describe the result you want and any limits. These instructions belong to the selected project." /></HelpField>
+    <HelpTextField topic="instructions" label="What should the agent do?" multiline minRows={5} value={text} disabled={busy || disabled} onChange={(event) => setText(event.target.value)} helperText="Describe the result you want and any limits. These instructions belong to the selected project." />
     {error && <Alert severity="error">{error}</Alert>}
     <Button variant="outlined" disabled={busy || disabled || !text.trim() || text === saved?.text || (reference !== null && saved === null)} onClick={() => void save()}>Save instructions</Button>
     {saved && text === saved.text && <Typography variant="caption" color="text.secondary">Instructions saved. Save the workflow to include them in the next run.</Typography>}

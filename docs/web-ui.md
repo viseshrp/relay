@@ -64,9 +64,10 @@ button. A failed sign-out request also shows its error and can be retried.
 ### Open without a login
 
 Start with `relay up --no-login` to skip both onboarding and sign-in. The app
-opens directly and shows **Login disabled** instead of an account name and
-Sign out button. Anyone who can reach this computer's loopback service can
-use its project, run, and cleanup controls. Browser actions still require the
+opens directly, with **Settings** and **Help** in the header. It shows no
+account name or Sign out action. Anyone who can reach this computer's
+loopback service can use its project, run, and cleanup controls. Browser
+actions still require the
 CSRF cookie and header; host checks and the loopback-only bind remain in place.
 
 To keep this choice for later starts, set `"login_required": false` in the
@@ -76,12 +77,39 @@ restores the existing owner login, or onboarding if no owner was created.
 Disabling login leaves stored passwords, sessions, projects, and runs intact.
 Actions started without a login are attributed to `local`.
 
+## Home and navigation
+
+Opening `/` or `?view=home` shows activity across all registered projects.
+The Relay logo opens this Home dashboard. Workflow recovery drafts are saved
+before leaving an editor, including when returning through browser history.
+If Home remembers a project that no longer exists, it selects the served
+project or another registered project for the workspace controls.
+Existing workflow, run, job, interaction, and settings links remain valid;
+`view=author` still redirects to `view=workflows`.
+
+Home puts **Waiting for you** first, with **Open request** links to the exact
+request. It also shows active and paused runs, recent results with status and
+duration, and searchable project cards with workflow and run links. Counts
+cover every project. Project search filters only the cards. Large lists offer
+**Show more**; the dashboard uses bounded reads from `GET /api/dashboard`.
+It refreshes every five seconds while visible and on focus. **Refresh** reads
+immediately. A failed refresh keeps the last results and displays a warning.
+
+With login required, the username menu contains **Settings**, help actions,
+and **Sign out**. Without login, Settings and Help remain in the header.
+Account ownership, authentication, CLI storage, and browser-local first-use
+preferences keep their existing behavior.
+
 ## Get started
 
 After sign-in, or immediately with login disabled, a new browser shows four
 welcome slides: projects, workflow editing, run inspection, and settings.
-Embla Carousel provides slide navigation and swipe support. The illustrations
-highlight the relevant controls and contain no project or provider content.
+Embla Carousel provides slide navigation and swipe support. Real screenshots
+from the isolated browser fixture highlight the relevant controls in blue.
+They contain example data, never owner projects or provider output. Screenshots
+and explanations sit beside each other on desktop and stack below 800 pixels.
+Regenerate the images and measured highlights with
+`npm --prefix frontend run capture:welcome`, then rebuild the frontend.
 Use **Next**, **Back**, numbered slide buttons, or the arrow keys. **Skip
 introduction**, Escape, or clicking outside closes the introduction.
 
@@ -95,7 +123,8 @@ It does not launch jobs, probe agent sessions, or save settings.
 
 Each introduction is marked seen when opened. Skipping, finishing, reloading,
 and switching projects do not repeat it. These choices are local to the
-browser and installation address. **Help** can replay either introduction.
+browser and installation address. The username menu, or **Help** without a
+login, can replay either introduction.
 **Settings > Welcome and guided tour** also provides replay buttons and
 **Reset onboarding**, which makes both appear on the next opening or reload.
 When browser storage is blocked, dismissal lasts for the current app session;
@@ -111,8 +140,11 @@ normal workspace layout, so changing repositories does not change the UI.
 Question-mark buttons beside settings and workflow controls explain their
 meaning, inheritance, and effects on future runs. Open a tooltip by clicking,
 hovering, or focusing its button; Escape or clicking elsewhere dismisses it.
-Help remains available beside disabled controls. Controls and their help have
-separate accessible names and keyboard targets.
+Help remains available beside disabled controls. Text and select controls have
+a label and help button directly above the field. Switch help stays beside its
+text; action help stays beside its button, including when rows wrap. Controls
+and their help have separate accessible names and keyboard targets. Tooltips
+use readable spacing and stay inside the viewport.
 
 Every project uses the same workflow and run workspace, including projects
 with no previous runs. After sign-in, or immediately with login disabled, a
@@ -120,12 +152,13 @@ small welcome prompt offers **Get started**. Opening the checklist or choosing
 **Dismiss welcome** hides this prompt across all projects in that browser,
 including after a reload. This choice does not change project settings.
 
-The checklist opens in a dialog from the welcome prompt or **Help › Get
+The checklist opens in a dialog from the welcome prompt or the help menu’s **Get
 started**, including on the settings page. It shows the selected project,
 all five supported agents, workflow choices, and first-run controls. Close it
 at any time with **Close checklist**, Escape, or a click outside the dialog;
-focus returns to **Help**. Opening the checklist starts a bounded agent
-connection check; switching projects with it closed does not probe agents.
+focus returns to the help or username menu button. Opening the checklist
+starts a bounded agent connection check; switching projects with it closed
+does not probe agents.
 Launching a workflow closes it and opens the run page.
 
 Agent cards show **Ready to connect**, **Sign in required**, **Check failed**,

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { post, runStarter } from "./setup-helpers";
+import { post, runStarter, openSettings } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -9,12 +9,12 @@ test.beforeEach(async ({ page }) => {
 test("setup completes a starter run without login", async ({ page }, testInfo) => {
   await page.request.get("/api/auth");
   await runStarter(page, "ask-agent", "Ask an agent", testInfo);
-  await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
+  await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
 });
 
 test("a fresh local app opens and runs a workflow without an owner login", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
+  await page.goto("/?view=workflows");
+  await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Password", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
@@ -43,7 +43,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   await expect(page.locator(".run-header").getByRole("heading", { name: /Local run #/ })).toBeVisible();
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Login disabled", { exact: true })).toBeVisible();
+  await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
   await expect(page.locator(".run-header").getByRole("heading", { name: /Local run #/ })).toBeVisible();
 });
 
@@ -55,10 +55,10 @@ test.describe("First-use introduction without login", () => {
     await page.getByRole("button", { name: "Skip introduction", exact: true }).click();
     await page.locator(".relay-tour").getByRole("button", { name: "Skip tour", exact: true }).click();
     await page.reload();
-    await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+    await expect(page.getByRole("main", { name: "Relay home", exact: true })).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Welcome to Relay", exact: true })).toHaveCount(0);
     await expect(page.locator(".relay-tour")).toHaveCount(0);
-    await page.getByRole("tab", { name: "Settings", exact: true }).click();
+    await openSettings(page);
     await page.getByRole("button", { name: "Server and account", exact: true }).click();
     await expect(page.getByText("Login is disabled. This browser uses local access without signing in.", { exact: true })).toBeVisible();
     expect((await (await page.request.get("/api/auth")).json()).owner_created).toBe(false);

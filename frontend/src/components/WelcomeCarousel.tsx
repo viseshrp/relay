@@ -31,7 +31,7 @@ export function WelcomeCarousel({ onClose, onShowTour }: { onClose: () => void; 
     sync(); embla.on("select", sync); embla.on("reInit", sync);
     return () => { embla.off("select", sync); embla.off("reInit", sync); };
   }, [embla]);
-  return <Dialog open onClose={(_event, reason) => { if (reason !== "escapeKeyDown") onClose(); }} fullWidth maxWidth="md" aria-labelledby="welcome-title" onKeyDown={(event) => {
+  return <Dialog open onClose={(_event, reason) => { if (reason !== "escapeKeyDown") onClose(); }} fullWidth maxWidth="lg" aria-labelledby="welcome-title" onKeyDown={(event) => {
     if (event.key === "ArrowRight") { event.preventDefault(); embla?.scrollNext(); }
     if (event.key === "ArrowLeft") { event.preventDefault(); embla?.scrollPrev(); }
   }}>
@@ -41,7 +41,7 @@ export function WelcomeCarousel({ onClose, onShowTour }: { onClose: () => void; 
         <div ref={viewport} className="welcome-viewport"><div className="welcome-track">
           {slides.map((slide, index) => <section key={slide.image} className="welcome-slide" role="group" aria-roledescription="slide" aria-label={`${index + 1} of ${slides.length}`} aria-hidden={selected !== index}>
             <OnboardingIllustration kind={slide.image} />
-            <Typography component="h2" variant="h5" sx={{ mt: 2 }}>{slide.title}</Typography><Typography sx={{ mt: 1 }}>{slide.text}</Typography>
+            <div className="welcome-slide-copy"><Typography variant="overline" color="primary">{String(index + 1).padStart(2, "0")} / {String(slides.length).padStart(2, "0")}</Typography><Typography component="h2" variant="h5">{slide.title}</Typography><Typography sx={{ mt: 2 }}>{slide.text}</Typography></div>
           </section>)}
         </div></div>
         <Stack direction="row" spacing={1} sx={{ mt: 2, justifyContent: "center" }}>{slides.map((slide, index) => <Button key={slide.image} size="small" aria-label={`Show slide ${index + 1}: ${slide.title}`} aria-current={selected === index ? "step" : undefined} onClick={() => embla?.scrollTo(index)}>{index + 1}</Button>)}</Stack>
