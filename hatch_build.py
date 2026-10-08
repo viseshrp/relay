@@ -36,7 +36,7 @@ class CustomBuildHook(BuildHookInterface):
             [npm, "ci"], cwd=frontend, check=True, shell=False
         )
         subprocess.run(  # noqa: S603
-            [npm, "run", "build"],
+            [npm, "run", "build:dist"],
             cwd=frontend,
             check=True,
             shell=False,

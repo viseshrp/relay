@@ -888,9 +888,11 @@ rows stack in narrow panels so download links remain accessible. Captured
 workflow source uses a monospace view. Only real nested scopes add graph
 completion junctions; the top-level scope adds none.
 
-If a workspace cannot load, Relay shows **Reload Relay** instead of a blank
-page. Reload is explicit so a failed load never silently discards editing
-state. Browser workflow recovery drafts remain available after reloading.
+Frontend builds publish new assets before replacing the entry page and keep
+older hashed chunks for open tabs. If a workspace still cannot load, Relay
+shows **Reload Relay** instead of a blank page. Reload is explicit so a failed
+load never silently discards editing state. Browser workflow recovery drafts
+remain available after reloading.
 
 Global defaults cover ordered agents, exact shared and per-agent models,
 thinking effort, agent permissions, job timeouts, retry participation,

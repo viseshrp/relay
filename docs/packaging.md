@@ -89,3 +89,17 @@ Install the wheel into a fresh virtual environment, remove Node from `PATH`,
 and run `relay up --no-browser`. A successful readiness response from
 `GET /api/auth` proves the installed Python package can serve its compiled
 assets without an end-user Node runtime.
+
+## Updating an editable frontend
+
+`npm --prefix frontend run build` checks types and builds into a temporary
+staging directory. It publishes assets first, then atomically replaces
+`index.html`. Earlier hashed assets remain available for open tabs that have
+not yet loaded every workspace. A failed asset copy leaves the previous entry
+page in place. This updates only compiled frontend files; the running server
+and durable state stay in place.
+
+Wheel builds use `npm run build:dist`, which cleans the asset output before
+building. Releases therefore contain one build, without older checkout chunks.
+`npm --prefix frontend run test:build` checks publication failure and a browser
+tab loading an earlier lazy chunk after publication.
