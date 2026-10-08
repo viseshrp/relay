@@ -432,3 +432,33 @@ This verification covers native macOS Chrome and the isolated browser suite.
 The Python matrix ran on macOS; it does not establish Windows or Linux runtime
 certification. Installed provider accounts were not exercised. Existing Django
 SSE and Vite bundle-size warnings remain outside this presentation change.
+
+## Header alignment follow-up
+
+Native Computer verified that the deployed header still used a separate
+Project label above the picker. The logo, project action, and tabs centered
+against that taller block, leaving the picker below their shared text line.
+Additional margins made the gaps between groups uneven.
+
+The picker now uses MUI's floating label and keeps project help beside the
+control. Desktop controls share a vertical center, with an 8-pixel gap within
+the project group and 16 pixels between groups. Narrow headers retain two rows
+and use smaller horizontal gaps so all three optional-login tabs fit at 390
+pixels. The project name, keyboard selection, navigation guards, and guided
+tour target keep their existing behavior.
+
+`control-layout.spec.ts` checks centers and gaps at 390, 760, 900, 1,050, 1,440,
+and 1,920 pixels, menu dismissal, help focus, and touch targets.
+`optional-login.spec.ts` checks that all three tabs fit at 390 and 1,440 pixels.
+Native inspection covered desktop and narrow layouts and help dismissal.
+Clean header captures are `header-local-390.png` and `header-local-1440.png` in
+the delivered evidence folder.
+
+The isolated layout, help, onboarding, and dashboard suites passed 42 tests;
+the optional-login suite passed four tests. TypeScript, `make check`, local
+documentation links, and workflow-example checks passed. This follow-up changes
+presentation only; the earlier Python and distribution gates were not repeated.
+The frontend build passed and native inspection confirmed the published layout.
+All 698 served asset files match disk, and 679 earlier files are unchanged.
+Retained state comparison passed across 29 database tables and file hashes;
+the owner app kept the same processes.

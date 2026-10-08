@@ -867,6 +867,10 @@ all capped by the available width. Related controls have an 8-pixel gap;
 fields use 16 pixels and sections use 24.
 
 The header uses one row where space permits and two rows below 1,050 pixels.
+The project picker uses a floating label, with help beside it. Project actions,
+navigation tabs, and the logo share a vertical center on desktop; the project
+group stays aligned on the second row on smaller screens. Related project
+controls have an 8-pixel gap, with 16 pixels between header groups.
 Sidebar positions and section anchors follow its measured height. Changing
 Settings sections brings the new heading below that header and focuses it.
 Project overrides distinguish the override switch, inherited state, and actual

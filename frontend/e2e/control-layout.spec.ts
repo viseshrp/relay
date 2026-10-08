@@ -209,8 +209,32 @@ for (const width of [390, 760, 900, 1050, 1440, 1920]) test(`header and settings
   const nav = page.getByRole("navigation", { name: "Settings sections" });
   const header = page.locator(".app-header");
   const box = await bounds(header);
-  expect(box.height).toBeLessThanOrEqual(width <= 1050 ? 140 : 90);
-  expect((await bounds(page.getByRole("combobox", { name: "Project", exact: true }))).height).toBeLessThanOrEqual(40);
+  expect(box.height).toBeLessThanOrEqual(width <= 1050 ? 116 : 65);
+  const picker = page.getByRole("combobox", { name: "Project", exact: true });
+  const pickerBox = await bounds(picker);
+  expect(pickerBox.height).toBeLessThanOrEqual(40);
+  const open = page.getByRole("button", { name: "Open another project", exact: true });
+  const help = page.getByRole("button", { name: "About Projects", exact: true });
+  const row = [pickerBox, await bounds(open), await bounds(help)];
+  if (width > 1050) row.push(await bounds(page.getByRole("link", { name: "Relay home", exact: true })), await bounds(page.getByRole("tab", { name: "Workflows", exact: true })));
+  for (const control of row) expect(Math.abs(control.y + control.height / 2 - pickerBox.y - pickerBox.height / 2)).toBeLessThanOrEqual(1);
+  const projectGroup = await bounds(header.locator(".project-context"));
+  if (width > 1050) {
+    const logo = await bounds(page.getByRole("link", { name: "Relay home", exact: true }));
+    const tabs = await bounds(page.getByRole("tablist"));
+    expect(projectGroup.x - logo.x - logo.width).toBeCloseTo(16, 0);
+    expect(tabs.x - projectGroup.x - projectGroup.width).toBeCloseTo(16, 0);
+  }
+  await help.focus();
+  await expect(page.getByRole("tooltip")).toContainText("local Git repository");
+  await help.press("Escape");
+  await expect(help).toBeFocused();
+  await expect(page.getByRole("tooltip")).toBeHidden();
+  await picker.click();
+  await containedMenu(page, width);
+  await page.keyboard.press("Escape");
+  await expect(picker).toBeFocused();
+  await header.screenshot({ path: info.outputPath(`header-${width}.png`), animations: "disabled" });
   await page.getByRole("button", { name: "Save global settings", exact: true }).scrollIntoViewIfNeeded();
   await nav.getByRole("button", { name: "Storage", exact: true }).click();
   const heading = page.getByRole("heading", { name: "Storage", exact: true });
@@ -309,6 +333,9 @@ test("touch controls retain 44px targets without stretching desktop fields", asy
     const box = await bounds(help);
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
+    const projectHelp = await bounds(touch.getByRole("button", { name: "About Projects", exact: true }));
+    expect(projectHelp.width).toBeGreaterThanOrEqual(44);
+    expect(projectHelp.height).toBeGreaterThanOrEqual(44);
     await expect(touch.getByRole("textbox", { name: "Shared default model", exact: true })).toBeVisible();
     const picker = touch.getByRole("combobox", { name: "Project", exact: true });
     await picker.click();

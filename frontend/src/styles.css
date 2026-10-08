@@ -78,7 +78,7 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   border-bottom: 1px solid #dce1ec;
 }
 
-.relay-home-link.MuiButton-root { font-size: 1.5rem; font-weight: 760; padding: 4px 0; margin-right: 16px; min-width: auto; }
+.relay-home-link.MuiButton-root { font-size: 1.5rem; font-weight: 760; padding: 4px 0; min-width: auto; }
 .dashboard { max-width: 1280px; margin-inline: auto; display: grid; gap: 20px; }
 .dashboard-heading, .dashboard-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .dashboard-heading { margin-block: 8px; }
@@ -311,14 +311,12 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 
 /* The run header is shared by the summary and each job's log page. */
 .app-content { padding: 20px 28px 40px !important; }
-.app-header .MuiToolbar-root { gap: 8px; flex-wrap: wrap; min-height: 64px; padding-block: 6px; }
-.app-header .project-context { margin: 0 14px 0 0; gap: 8px; flex-direction: row; align-items: center; }
-.project-context > .help-field { width: 200px; flex: 0 1 200px; }
-.project-context .help-field-heading { gap: 4px; }
-.project-context .help-field-heading > label { font-size: 12px; }
+.app-header .MuiToolbar-root { gap: 16px; flex-wrap: wrap; min-height: 64px; padding-block: 6px; }
+.app-header .project-context { gap: 8px; flex-direction: row; align-items: center; }
+.project-picker { display: flex; align-items: center; gap: 4px; flex: 0 1 226px; width: 226px; min-width: 0; }
+.project-picker > .MuiFormControl-root { flex: 1; min-width: 0; }
 .project-context .help-tip .MuiIconButton-root { width: 22px; height: 22px; padding: 3px; }
-.project-context .help-field { gap: 2px; }
-.project-context > button { font-size: 12px; }
+.project-context > button { font-size: 14px; }
 .status-icon { display: inline-flex; flex: 0 0 auto; align-items: center; vertical-align: middle; }
 .status-success { color: #238636; }
 .status-error { color: #cf3641; }
@@ -518,8 +516,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .server-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .data-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .environment-row > .MuiButton-root, .condition-branch > button { margin-top: 0; }
-  .app-header .project-context { flex-direction: row; align-items: flex-end; gap: 4px; }
-  .app-header .project-context > .help-field { width: 160px; flex-basis: 160px; }
+  .app-header .project-context { flex-direction: row; align-items: center; gap: 8px; }
+  .app-header .project-picker { width: 186px; flex-basis: 186px; }
   .app-header .project-context > button { flex: 1; min-width: 0; }
   .MuiDialogActions-root { flex-wrap: wrap; gap: 4px; }
 }
@@ -582,7 +580,6 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .app-header .project-context { grid-column: 1 / -1; grid-row: 2; order: 0; width: auto; margin: 0; padding-bottom: 4px; }
   .app-header .MuiTabs-root { min-width: 0; }
   .app-header .relay-home-link { margin-right: 0; }
-  .app-header .project-context > .help-field { flex: 0 1 200px; width: 200px; }
 }
 @media (max-width: 600px) {
   .field-grid { grid-template-columns: minmax(0, 1fr); }
@@ -590,9 +587,10 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .job-heading { grid-template-columns: minmax(0, 1fr); }
   .job-heading > .MuiStack-root, .job-heading > .MuiAlert-root { grid-column: 1; grid-row: auto; }
   .storage-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .app-header .project-context > .help-field { flex: 0 1 160px; width: 160px; }
+  .app-header .project-picker { flex: 0 0 186px; width: 186px; }
   .app-header .project-context > button { flex: 0 1 auto; }
-  .app-header .MuiTab-root { padding-inline: 8px; }
+  .app-header .MuiToolbar-root { column-gap: 8px; }
+  .app-header .MuiTab-root { padding-inline: 6px; }
 }
 
 .artifacts-section { container-type: inline-size; }
@@ -606,4 +604,4 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .artifacts-section td:not(:first-child):not(:last-child)::before { content: attr(data-label); display: block; font-size: 12px; color: #626979; }
 }
 
-@media (max-width: 600px) { .app-header .project-context > .help-field { min-width: 150px; flex-shrink: 0; } }
+@media (pointer: coarse) and (max-width: 600px) { .app-header .project-picker { flex-basis: 208px; width: 208px; } }

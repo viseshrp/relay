@@ -12,6 +12,24 @@ test("setup completes a starter run without login", async ({ page }, testInfo) =
   await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
 });
 
+test("all three header tabs fit beside the logo without login", async ({ page }, info) => {
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/?view=settings");
+    await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
+    const header = page.locator(".app-header");
+    const tabs = await header.getByRole("tablist").boundingBox();
+    if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
+    for (const name of ["Workflows", "Runs", "Settings"]) {
+      const tab = await header.getByRole("tab", { name, exact: true }).boundingBox();
+      if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
+      expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
+      expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+    }
+    await header.screenshot({ path: info.outputPath(`header-local-${width}.png`), animations: "disabled" });
+  }
+});
+
 test("a fresh local app opens and runs a workflow without an owner login", async ({ page }) => {
   await page.goto("/?view=workflows");
   await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);

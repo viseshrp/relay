@@ -1,14 +1,14 @@
 import {
   AppBar, Alert, Box, Button, CircularProgress, Container, Dialog,
-  DialogActions, DialogContent, DialogTitle, Divider, MenuItem, Menu,
-  Stack, Tab, Tabs, Toolbar, Typography } from "@mui/material";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+  DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputLabel, MenuItem, Menu,
+  Select, Stack, Tab, Tabs, Toolbar, Typography } from "@mui/material";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { WorkspaceBoundary } from "./components/WorkspaceBoundary";
 
 import { api, errorMessage } from "./api";
 import { useAttention } from "./attention";
 import { hasSeen, TOUR_SEEN, WELCOME_SEEN, resetOnboarding, type SettingsSection } from "./onboarding";
-import { HelpTextField, HelpSelectField } from "./components/HelpTip";
+import { HelpTextField, HelpTip } from "./components/HelpTip";
 import { WelcomeCarousel } from "./components/WelcomeCarousel";
 import { GuidedTour, type TourDestination } from "./components/GuidedTour";
 import { GettingStartedHome } from "./components/GettingStartedHome";
@@ -41,6 +41,7 @@ function readSetupDismissed(): boolean {
 }
 
 export function App() {
+  const projectPickerId = useId();
   const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeen(WELCOME_SEEN));
   const [tourRequested, setTourRequested] = useState(() => !hasSeen(TOUR_SEEN));
   const [tourSection, setTourSection] = useState<SettingsSection | null>(null);
@@ -386,10 +387,13 @@ export function App() {
   );
 
   function renderProjectContext() {
-    return <Stack data-tour="project" className="project-context" direction="row" spacing={1} sx={{ mr: 2, alignItems: "center" }}>
-      {projects.length > 0 && <HelpSelectField topic="project" label="Project" size="small" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, view: location.view === "home" ? "workflows" : location.view, workflow: null, run: null, interaction: null, job: null })}>
+    return <Stack data-tour="project" className="project-context" direction="row" spacing={1} useFlexGap>
+      {projects.length > 0 && <Box className="project-picker"><FormControl fullWidth size="small">
+        <InputLabel id={`${projectPickerId}-label`}>Project</InputLabel>
+        <Select id={projectPickerId} labelId={`${projectPickerId}-label`} label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, view: location.view === "home" ? "workflows" : location.view, workflow: null, run: null, interaction: null, job: null })}>
           {projects.map((project) => <MenuItem key={project.id} value={project.id}>{project.display_name}</MenuItem>)}
-        </HelpSelectField>}
+        </Select>
+      </FormControl><HelpTip topic="project" /></Box>}
       <Button onClick={() => setOpeningProject(true)}>{projects.length ? "Open another project" : "Open a project"}</Button>
     </Stack>;
   }
