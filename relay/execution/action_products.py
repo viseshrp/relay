@@ -136,7 +136,11 @@ def verify(directory: Path, manifest: Sequence[Mapping[str, Any]], kind: str, ow
         message = "Retained product ownership changed."
         raise PathSafetyError(message)
     marker = checked_path(directory, ".relay-owner.json")
-    if json.loads(marker.read_text()) != {"kind": kind, "owner": owner, "id": directory.name}:
+    if json.loads(marker.read_text(encoding="utf-8")) != {
+        "kind": kind,
+        "owner": owner,
+        "id": directory.name,
+    }:
         message = "Retained product ownership changed."
         raise PathSafetyError(message)
     for item in manifest:

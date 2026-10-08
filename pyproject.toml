@@ -273,6 +273,7 @@ authorized_licenses = [
     "isc license",
     "mit",
     "mit license",
+    "mit-0", # cffi's verified MIT No Attribution license on Linux.
     "python software foundation license",
     "psf-2.0", # SPDX name for the already-authorized Python Software Foundation license.
 ]

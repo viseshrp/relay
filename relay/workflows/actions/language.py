@@ -124,9 +124,9 @@ def _inspect_tree(
 @lru_cache(maxsize=1)
 def language_definitions() -> dict[str, Any]:
     """Pinned MIT definitions plus currently documented cache access modes."""
-    definitions = json.loads(Path(__file__).with_name("upstream-schema.json").read_text())[
-        "definitions"
-    ]
+    definitions = json.loads(
+        Path(__file__).with_name("upstream-schema.json").read_text(encoding="utf-8")
+    )["definitions"]
     definitions["cache-mode"] = {"string": {}, "allowed-values": sorted(CACHE_MODES)}
     definitions["local-conclusions"] = {"sequence": {"item-type": "local-conclusion"}}
     definitions["local-conclusion"] = {"allowed-values": ["success", "failure", "cancelled"]}

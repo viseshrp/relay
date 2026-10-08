@@ -1,5 +1,6 @@
 """Actions expression conformance using unmodified upstream fixtures."""
 
+from collections.abc import Iterator
 import json
 from pathlib import Path
 
@@ -9,10 +10,10 @@ from relay.errors import WorkflowValidationError
 from relay.workflows.actions.expressions import condition, evaluate, interpolate, parse
 
 
-def cases():
+def cases() -> Iterator[object]:
     root = Path(__file__).parent / "fixtures" / "actions" / "expressions"
     for path in sorted(root.glob("*.json")):
-        for group, rows in json.loads(path.read_text()).items():
+        for group, rows in json.loads(path.read_text(encoding="utf-8")).items():
             for index, row in enumerate(rows):
                 yield pytest.param(row, id=f"{path.stem}:{group}:{index}")
 
