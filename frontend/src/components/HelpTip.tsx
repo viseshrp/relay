@@ -1,5 +1,5 @@
 import { ClickAwayListener, FormControl, FormHelperText, IconButton, Select, TextField, Tooltip, type SelectProps, type TextFieldProps } from "@mui/material";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { Children, isValidElement, useId, useRef, useState, type ReactNode } from "react";
 import { help, type HelpTopic } from "../help";
 
 export function HelpTip({ topic }: { topic: HelpTopic }) {
@@ -19,21 +19,24 @@ export function HelpTip({ topic }: { topic: HelpTopic }) {
   </span></ClickAwayListener>;
 }
 
-export function HelpField({ topic, label, id, children, tour = false, grow = false, required = false }: { topic: HelpTopic; label: ReactNode; id: string; children: ReactNode; tour?: boolean; grow?: boolean; required?: boolean }) {
-  return <div className={`help-field${grow ? " help-field-grow" : ""}`} data-tour={tour ? topic : undefined}><div className="help-field-heading"><label htmlFor={id} id={`${id}-label`}>{label}{required && <span aria-hidden="true"> *</span>}</label><HelpTip topic={topic} /></div>{children}</div>;
+export function HelpField({ topic, label, id, children, tour = false, grow = false, required = false, compact = false }: { topic: HelpTopic; label: ReactNode; id: string; children: ReactNode; tour?: boolean; grow?: boolean; required?: boolean; compact?: boolean }) {
+  return <div className={`help-field${grow ? " help-field-grow" : ""}${compact ? " help-field-compact" : ""}`} data-tour={tour ? topic : undefined}><div className="help-field-heading"><label htmlFor={id} id={`${id}-label`}>{label}{required && <span aria-hidden="true"> *</span>}</label><HelpTip topic={topic} /></div>{children}</div>;
 }
 
-export function HelpTextField({ topic, tour, label, grow, ...props }: TextFieldProps & { topic: HelpTopic; tour?: boolean; label: ReactNode; grow?: boolean }) {
+export function HelpTextField({ topic, tour, label, grow, compact, ...props }: TextFieldProps & { topic: HelpTopic; tour?: boolean; label: ReactNode; grow?: boolean; compact?: boolean }) {
   const generated = useId();
   const id = props.id ?? generated;
-  return <HelpField topic={topic} tour={tour} label={label} id={id} grow={grow} required={props.required}><TextField fullWidth {...props} id={id} /></HelpField>;
+  return <HelpField topic={topic} tour={tour} label={label} id={id} grow={grow} required={props.required} compact={compact ?? props.type === "number"}><TextField fullWidth {...props} id={id} /></HelpField>;
 }
 
-export function HelpSelectField<Value>({ topic, tour, label, helperText, children, ...props }: SelectProps<Value> & { topic: HelpTopic; tour?: boolean; label: ReactNode; helperText?: ReactNode }) {
+export function HelpSelectField<Value>({ topic, tour, label, helperText, children, placeholder, compact = false, ...props }: SelectProps<Value> & { topic: HelpTopic; tour?: boolean; label: ReactNode; helperText?: ReactNode; placeholder?: ReactNode; compact?: boolean }) {
   const generated = useId();
   const id = props.id ?? generated;
-  return <HelpField topic={topic} tour={tour} label={label} id={id} required={props.required}><FormControl fullWidth disabled={props.disabled} error={props.error} required={props.required} size={props.size}>
-    <Select {...props} id={id} labelId={`${id}-label`} aria-describedby={helperText ? `${id}-help` : props["aria-describedby"]}>{children}</Select>{helperText && <FormHelperText id={`${id}-help`}>{helperText}</FormHelperText>}
+  const emptyChoice = Children.toArray(children).find((child) => isValidElement<{ value?: unknown }>(child) && child.props.value === "");
+  const emptyLabel = placeholder ?? (isValidElement<{ children?: ReactNode }>(emptyChoice) ? emptyChoice.props.children : undefined);
+  const empty = props.value === "" || (Array.isArray(props.value) && props.value.length === 0);
+  return <HelpField topic={topic} tour={tour} label={label} id={id} required={props.required} compact={compact}><FormControl fullWidth disabled={props.disabled} error={props.error} required={props.required} size={props.size}>
+    <Select {...props} displayEmpty renderValue={empty && emptyLabel !== undefined ? () => emptyLabel : props.renderValue} id={id} labelId={`${id}-label`} aria-describedby={helperText ? `${id}-help` : props["aria-describedby"]}>{children}</Select>{helperText && <FormHelperText id={`${id}-help`}>{helperText}</FormHelperText>}
   </FormControl></HelpField>;
 }
 

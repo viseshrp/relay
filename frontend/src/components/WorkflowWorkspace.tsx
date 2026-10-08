@@ -249,7 +249,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
     if (selectedNode === null) return;
     mutate((document, value) => {
       document.deleteIn(["nodes", selectedNode]);
-      document.deleteIn(["repairs", selectedNode]);
+      if (document.hasIn(["repairs", selectedNode])) document.deleteIn(["repairs", selectedNode]);
       for (const [id, node] of Object.entries(value.nodes)) {
         if (id !== selectedNode && node.needs?.includes(selectedNode)) {
           document.setIn(
@@ -279,7 +279,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         ...nodeDefaults(type),
         ...(needs && needs.length > 0 ? { needs } : {}),
       });
-      if (!["agent", "command"].includes(type)) document.deleteIn(["repairs", selectedNode]);
+      if (!["agent", "command"].includes(type) && document.hasIn(["repairs", selectedNode])) document.deleteIn(["repairs", selectedNode]);
     });
   }
 
@@ -452,11 +452,11 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
-          sx={{ alignItems: { md: "center" } }}
+          useFlexGap sx={{ alignItems: { md: "center" }, flexWrap: "wrap" }}
         >
-          <FormControl size="small" sx={{ minWidth: 230 }}>
-            <InputLabel id="workflow-picker">Workflow</InputLabel>
-            <Select labelId="workflow-picker" label="Workflow" value={inventory.some((item) => item.key === loadedKey) ? loadedKey ?? "" : ""} onChange={(event) => void loadWorkflow(event.target.value)} disabled={busy}>
+          <FormControl size="small" className="workflow-picker">
+            <InputLabel id="workflow-picker" shrink>Workflow</InputLabel>
+            <Select displayEmpty renderValue={!inventory.some((item) => item.key === loadedKey) ? () => "Choose a workflow" : undefined} labelId="workflow-picker" label="Workflow" value={inventory.some((item) => item.key === loadedKey) ? loadedKey ?? "" : ""} onChange={(event) => void loadWorkflow(event.target.value)} disabled={busy}>
               {inventory.map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}
             </Select>
           </FormControl>
@@ -548,7 +548,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
       {selectedNode && definition && (
         <Paper className="section-card" variant="outlined" role="region" aria-label="Stage settings">
           <Stack spacing={2}>
-            <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+            <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
               <Typography variant="h6" sx={{ flex: 1 }}>{stageLabel(selectedNode)}</Typography>
               <Button color="error" onClick={deleteNode}>Remove stage</Button>
               {["agent", "command"].includes(definition.type) && <Button variant="outlined" disabled={!leaseReady || promptDirty || !repairDefaults} onClick={openRepairs}>Repairs</Button>}
@@ -559,7 +559,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                     <MenuItem key={type} value={type}>{{ agent: "Agent work", command: "Run a command", human_wait: "Human review", condition: "Check a result", loop: "Repeat stages", subworkflow: "Run another workflow" }[type]}</MenuItem>
                   ))}
                 </HelpSelectField>
-              <HelpSelectField topic="dependencies" label="Start after" size="small" multiple value={definition.needs ?? []} onChange={(event) => setNodeField("needs", event.target.value)} renderValue={(items) => items.map(stageLabel).join(", ")}>
+              <HelpSelectField topic="dependencies" label="Start after" placeholder="No dependencies" size="small" multiple value={definition.needs ?? []} onChange={(event) => setNodeField("needs", event.target.value)} renderValue={(items) => items.map(stageLabel).join(", ")}>
                   {Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode).map((id) => <MenuItem key={id} value={id}>{stageLabel(id)}</MenuItem>)}
                 </HelpSelectField>
               {(definition.type === "agent" || definition.type === "command") && (
@@ -599,7 +599,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
                 });
               }} />}
               {definition.type === "human_wait" && (
-                <HelpTextField topic="humanReview" label="Review instructions and expected response" size="small" multiline minRows={4} value={typeof definition.prompt === "string" ? definition.prompt : ""} onChange={(event) => setNodeField("prompt", event.target.value)} />
+                <HelpTextField topic="humanReview" label="Review instructions and expected response" size="small" multiline minRows={4} maxRows={8} value={typeof definition.prompt === "string" ? definition.prompt : ""} onChange={(event) => setNodeField("prompt", event.target.value)} />
               )}
               {["condition", "loop"].includes(definition.type) && <ControlJobFields node={definition}
                 targets={Object.keys(parsed.value?.nodes ?? {}).filter((id) => id !== selectedNode)}
@@ -686,7 +686,7 @@ export function WorkflowWorkspace({ initialCreate = false, onRunLaunched, projec
         }} />
       <Dialog open={addingStage} onClose={() => setAddingStage(false)} fullWidth>
         <DialogTitle>Add a stage</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}><TextField label="Stage name" value={stageName} onChange={(event) => setStageName(event.target.value)} /><FormControl><InputLabel id="new-stage-action">Stage action</InputLabel><Select labelId="new-stage-action" label="Stage action" value={stageKind} onChange={(event) => setStageKind(event.target.value)}><MenuItem value="command">Run a command</MenuItem><MenuItem value="agent">Agent work</MenuItem><MenuItem value="human_wait">Ask for human review</MenuItem><MenuItem value="condition">Check a result</MenuItem><MenuItem value="loop">Repeat stages</MenuItem><MenuItem value="subworkflow">Run another workflow</MenuItem></Select></FormControl>
-          {stageKind === "subworkflow" && <FormControl><InputLabel id="new-stage-workflow">Workflow to run</InputLabel><Select labelId="new-stage-workflow" label="Workflow to run" value={stageWorkflow} onChange={(event) => setStageWorkflow(event.target.value)}>{inventory.filter((item) => item.key !== loadedKey).map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}</Select><Typography variant="caption">Create another workflow first if this list is empty.</Typography></FormControl>}<Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim() || (stageKind === "subworkflow" && !inventory.some((item) => item.key === stageWorkflow && item.key !== loadedKey))}>Add stage</Button></DialogActions>
+          {stageKind === "subworkflow" && <FormControl><InputLabel id="new-stage-workflow" shrink>Workflow to run</InputLabel><Select displayEmpty renderValue={stageWorkflow === "" ? () => "Choose a workflow" : undefined} labelId="new-stage-workflow" label="Workflow to run" value={stageWorkflow} onChange={(event) => setStageWorkflow(event.target.value)}>{inventory.filter((item) => item.key !== loadedKey).map((item) => <MenuItem key={item.key} value={item.key}>{item.name}</MenuItem>)}</Select><Typography variant="caption">Create another workflow first if this list is empty.</Typography></FormControl>}<Typography color="text.secondary">The new stage starts after the previous stage. You can change that order in its settings.</Typography></Stack></DialogContent><DialogActions><Button onClick={() => setAddingStage(false)}>Cancel</Button><Button variant="contained" onClick={addNode} disabled={!stageName.trim() || (stageKind === "subworkflow" && !inventory.some((item) => item.key === stageWorkflow && item.key !== loadedKey))}>Add stage</Button></DialogActions>
       </Dialog>
 
       <Dialog open={formattingYaml !== null} onClose={() => setFormattingYaml(null)}>

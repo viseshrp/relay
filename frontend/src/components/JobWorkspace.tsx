@@ -136,9 +136,9 @@ export function JobWorkspace({ runId, scope, liveEvents, canRetry, refreshing, o
         {lastError && <Box component="pre" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", m: 0 }}>{lastError}</Box>}
       </Alert>}
       <Typography sx={{ mt: 1 }}>{attempt?.agent_id ? `Runs on ${stageLabel(attempt.agent_id)} · ${attempt.model_value}` : job.node_type === "human_wait" ? "Human review" : stageLabel(job.node_type)} · {jobDuration(attempt?.started_at, attempt?.ended_at, now, attempt?.status ?? job.status)}</Typography>
-      <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-        <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="job-attempt">Attempt</InputLabel>
-          <Select labelId="job-attempt" label="Attempt" disabled={!attempts.length} value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 2, flexWrap: "wrap", alignItems: "center" }}>
+        <FormControl size="small" sx={{ minWidth: 190 }}><InputLabel id="job-attempt" shrink>Attempt</InputLabel>
+          <Select displayEmpty renderValue={!attempt ? () => "Not started" : undefined} labelId="job-attempt" label="Attempt" disabled={!attempts.length} value={attempt?.number ?? ""} onChange={(event) => setAttemptNumber(Number(event.target.value))}>
             {attempts.map((row) => <MenuItem key={row.number} value={row.number}>Attempt {row.number} · {row.stop_reason ? stageLabel(row.stop_reason) : statusLabel(row.status)}</MenuItem>)}
           </Select></FormControl>
         {canRetry && job.status === "failed" && <>

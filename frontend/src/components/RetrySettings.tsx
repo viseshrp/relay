@@ -138,7 +138,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
               {agent.display_name}{agent.installed ? "" : " (not installed)"}
             </MenuItem>)}
           </HelpSelectField>
-        <HelpSelectField topic="model" label="Model" fullWidth disabled={models?.agentId !== agentId || submitting} value={model}
+        <HelpSelectField topic="model" label="Model" placeholder="Choose a model" fullWidth disabled={models?.agentId !== agentId || submitting} value={model}
             onChange={(event) => changeModel(event.target.value)}>
             {model && !choices.some((choice) => choice.value === model) && <MenuItem value={model}>{model}</MenuItem>}
             {choices.map((choice) => <MenuItem key={choice.value} value={choice.value}>{choice.name}</MenuItem>)}
@@ -164,7 +164,7 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
             {configuration.permission_mode?.choices.map((choice, index) => <MenuItem key={choice.value} value={index + 2}>{choice.name}</MenuItem>)}
           </HelpSelectField>}
         {changed && <>
-          <HelpTextField topic="instructions" label="Handoff instructions" multiline minRows={4} value={handoff} disabled={submitting}
+          <HelpTextField topic="instructions" label="Handoff instructions" multiline minRows={4} maxRows={8} value={handoff} disabled={submitting}
             error={handoffTooLong}
             helperText={handoffTooLong ? `Use at most ${problem.handoff_prompt_max_bytes} UTF-8 bytes.`
               : "These instructions follow this step's original prompts. Edit them to tell the new model how to continue."}

@@ -9,12 +9,12 @@ export function CommandFields({ node, commands, onChange, disabled = false }: {
 }) {
   const shared = node.run && !Array.isArray(node.run) ? node.run.command : null;
   const argv = Array.isArray(node.run) ? node.run : [];
-  return <Stack spacing={1}>
+  return <Stack spacing={1} className="command-fields">
     <HelpSelectField topic="commands" label="Command source" fullWidth size="small" value={shared === null ? "custom" : "shared"} disabled={disabled} onChange={(event) => {
       onChange({ ...node, run: event.target.value === "shared" ? { command: "" } : [""] });
     }}><MenuItem value="custom">Program and arguments</MenuItem><MenuItem value="shared">Shared command from Settings</MenuItem></HelpSelectField>
     {shared !== null ? <>
-      <HelpSelectField topic="commands" label="Shared command" fullWidth size="small" value={shared} disabled={disabled} onChange={(event) => onChange({ ...node, run: { command: event.target.value } })}>
+      <HelpSelectField topic="commands" label="Shared command" placeholder="Choose a shared command" fullWidth size="small" value={shared} disabled={disabled} onChange={(event) => onChange({ ...node, run: { command: event.target.value } })}>
         {shared && !Object.hasOwn(commands, shared) && <MenuItem value={shared}>{shared} (not configured)</MenuItem>}
         {Object.keys(commands).map((name) => <MenuItem value={name} key={name}>{name}</MenuItem>)}
       </HelpSelectField>

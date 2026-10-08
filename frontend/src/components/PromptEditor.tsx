@@ -43,11 +43,11 @@ export function PromptEditor({ workflowPath, reference, newReference, project, h
       setSaved(value); onSaved(value.reference);
     } catch (caught) { setError(errorMessage(caught)); } finally { setBusy(false); }
   }
-  return <Stack spacing={1.5}>
+  return <Stack spacing={1.5} sx={{ maxWidth: 960 }}>
     <Typography variant="subtitle2">Instructions for this agent</Typography>
-    <HelpTextField topic="instructions" label="What should the agent do?" multiline minRows={5} value={text} disabled={busy || disabled} onChange={(event) => setText(event.target.value)} helperText="Describe the result you want and any limits. These instructions belong to the selected project." />
+    <HelpTextField topic="instructions" label="What should the agent do?" multiline minRows={5} maxRows={8} value={text} disabled={busy || disabled} onChange={(event) => setText(event.target.value)} helperText="Describe the result you want and any limits. These instructions belong to the selected project." />
     {error && <Alert severity="error">{error}</Alert>}
-    <Button variant="outlined" disabled={busy || disabled || !text.trim() || text === saved?.text || (reference !== null && saved === null)} onClick={() => void save()}>Save instructions</Button>
+    <Button sx={{ alignSelf: "flex-start" }} variant="outlined" disabled={busy || disabled || !text.trim() || text === saved?.text || (reference !== null && saved === null)} onClick={() => void save()}>Save instructions</Button>
     {saved && text === saved.text && <Typography variant="caption" color="text.secondary">Instructions saved. Save the workflow to include them in the next run.</Typography>}
   </Stack>;
 }

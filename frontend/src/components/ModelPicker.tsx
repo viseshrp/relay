@@ -29,7 +29,7 @@ export function ModelPicker({ agents, value, project, disabled = false, onChange
       {value && !models.has(value) && <MenuItem value={value}>{value}</MenuItem>}
       {Array.from(models, ([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
     </HelpSelectField>
-    <Button disabled={disabled || busy || agents.every((agent) => !agent.installed)} onClick={() => void load()}>{busy ? "Loading models…" : "Load available models"}</Button>
+    <Button sx={{ alignSelf: "flex-start" }} disabled={disabled || busy || agents.every((agent) => !agent.installed)} onClick={() => void load()}>{busy ? "Loading models…" : "Load available models"}</Button>
     {error && <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>{error}</Alert>}
   </Stack>;
 }

@@ -296,8 +296,8 @@ export function App() {
 
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
         {projectError && !openingProject && <Alert severity="error" sx={{ mb: 2 }}>{projectError}</Alert>}
-        {!setupDismissed && <Alert severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={
-          <Stack direction="row" spacing={1}>
+        {!setupDismissed && <Alert className="setup-banner" severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button onClick={openSetup} disabled={!projectReady || !selectedProject}>Get started</Button>
             <Button onClick={dismissSetup}>Dismiss welcome</Button>
           </Stack>

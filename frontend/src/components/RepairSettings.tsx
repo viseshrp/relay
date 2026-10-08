@@ -67,7 +67,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
         <HelpControl topic="writes"><FormControlLabel label="Allow file changes" control={<Switch checked={node.writes === true} disabled={settingsDisabled} onChange={(event) => setNode({ ...node, writes: event.target.checked })} />} /></HelpControl>
         <HelpControl topic="noCommit"><FormControlLabel label="Allow a completed check without a new commit" control={<Switch checked={node.allow_no_commit === true} disabled={settingsDisabled} onChange={(event) => setNode({ ...node, allow_no_commit: event.target.checked })} />} /></HelpControl>
         {node.type === "agent" && <>
-          <HelpSelectField topic="agentOrder" label="Agent tools" size="small" multiple value={node.agents ?? []} disabled={settingsDisabled} onChange={(event) => {
+          <HelpSelectField topic="agentOrder" label="Agent tools" placeholder="Workflow and owner preferences" size="small" multiple value={node.agents ?? []} disabled={settingsDisabled} onChange={(event) => {
             // MUI's autofill value "codex,claude" represents two tool IDs.
             const value = event.target.value;
             setNode({ ...node, agents: typeof value === "string" ? value.split(",") : value, agent_options: {} });
@@ -83,7 +83,7 @@ export function RepairSettings({ stage, sourceOutputs, rule, defaults, agents, c
             onSaved={(reference) => setNode({ ...node, prompts: [...(node.prompts ?? []).filter((prompt) => prompt.local !== reference), { local: reference }] })} />
         </>}
         {node.type === "command" && <CommandFields key={role} node={node} commands={commands} disabled={settingsDisabled} onChange={setNode} />}
-        <TextField label={role === "fix" ? "Fixer repair instructions" : "Verifier repair instructions"} multiline minRows={3} disabled={settingsDisabled}
+        <TextField label={role === "fix" ? "Fixer repair instructions" : "Verifier repair instructions"} multiline minRows={3} maxRows={8} disabled={settingsDisabled}
           value={role === "fix" ? rule.fix_instruction ?? defaults.fix_instruction : rule.verify_instruction ?? defaults.verify_instruction}
           onChange={(event) => onChange({ ...rule, [`${role}_instruction`]: event.target.value || undefined })}
           helperText="Appended separately to the frozen agent instructions. You can replace the default." />

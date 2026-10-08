@@ -5,6 +5,7 @@ import { jobDuration } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
 import type { DashboardData, DashboardPage, DashboardRun, DashboardSection, ProjectRecord } from "../types";
 import { useClock } from "../useClock";
+import { PathDisplay } from "./PathDisplay";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { GettingStartedHome } from "./GettingStartedHome";
 
@@ -109,7 +110,7 @@ export function HomeDashboard({ onOpenProject, onShowWelcome, onNavigate }: {
       <div className="dashboard-work-grid">{runList("active", "Active and paused runs", "No jobs are running or paused.")}{runList("recent", "Recent results", "Completed runs will appear here.")}</div>
       <section aria-label="Projects"><div className="dashboard-section-heading"><Typography component="h2" variant="h5">Your projects</Typography><TextField size="small" label="Find a project" value={query} onChange={(event) => setQuery(event.target.value)} slotProps={{ htmlInput: { maxLength: 1024 } }} /></div>
         <div className="dashboard-project-grid">{data.projects.items.map((project) => <Paper variant="outlined" component="article" aria-label={project.display_name} key={project.id} className="dashboard-project">
-          <Typography component="h3" variant="h6">{project.display_name}</Typography><Typography variant="body2" color="text.secondary" className="dashboard-project-path">{project.canonical_path}</Typography>
+          <Typography component="h3" variant="h6">{project.display_name}</Typography><PathDisplay path={project.canonical_path} label={project.display_name} />
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", my: 2 }}>{project.unfinished_count > 0 && <Chip size="small" label={`${project.unfinished_count} unfinished`} />}{project.waiting_count > 0 && <Chip size="small" color="warning" label={`${project.waiting_count} waiting`} />}</Stack>
           {project.latest_run ? <div className="dashboard-project-result"><StatusIcon status={project.latest_run.status} /><Typography variant="body2">{project.latest_run.title || stageLabel(project.latest_run.workflow_key)} #{project.latest_run.number}<br /><span className="dashboard-muted">{statusLabel(project.latest_run.status)} · {new Date(project.latest_run.created_at).toLocaleDateString()}</span></Typography></div> : <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>No runs yet</Typography>}
           <Stack direction="row" spacing={1}><Button variant="outlined" onClick={() => onNavigate(project, "workflows")}>Workflows</Button><Button onClick={() => onNavigate(project, "runs")}>Runs</Button></Stack>

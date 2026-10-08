@@ -236,3 +236,85 @@ access keeps its settings tab and Help button without the old header label.
 `tests/test_dashboard.py` covers additive, bounded reads, actionable counts,
 cursors, empty projects, authentication, and database errors. Behavior is
 specified in `web-ui.md` and `http-api.md`.
+
+## Control sizing and data hierarchy audit
+
+This audit used three native Computer passes: inspect the running app, exercise
+forms in a disposable installation, and revisit rebuilt screens. The running
+app checks covered Home, the project switcher, workflow sidebar and editor, run
+history, paused summary, command logs, and all six Settings sections. Editing
+checks covered expanded provider defaults, command and environment editors,
+repair dialogs, all six job types, launch options, and the folder picker. The
+onboarding check visited all four welcome slides and all 27 tour steps.
+
+### Findings and fixes
+
+| Status | Reproduction and defect | Change and regression coverage |
+| --- | --- | --- |
+| Fixed | Select a short project name. The header picker shrinks almost to its text and changes width between projects. | Give the picker a stable desktop width and a bounded mobile width. `control-layout.spec.ts` checks both the picker and long workflow names. |
+| Fixed | Open a long workflow or cleanup choice. The selected value expands the field height, and menu text can overflow on a narrow screen. | Keep selected values on one line; wrap menu options within the viewport. Check open menus, selected heights, and Escape focus return at 320 through 1,440 pixels. |
+| Fixed | Open defaults, a new agent job, run filters, or launch options. Empty selectors look like blank inputs with no explanation of inheritance. | Show the existing default choice or a named placeholder. Tests check models, repairs, dependencies, launch defaults, history filters, and empty Storage lists. |
+| Fixed | Open Server and account or recovery settings. Port, worker, timeout, and retry fields use the same large widths as prose fields. | Bound short controls to 144 pixels and preserve wider helper text. Keep normal desktop inputs under 40 pixels high. Touch targets remain larger. |
+| Fixed | Expand shared commands, instructions, or condition branches. Add, remove, and save actions stretch across their containing stack. | Size actions to their text and let action rows wrap. Command and instruction saving keep their existing behavior. |
+| Fixed | Open Storage. Labels, totals, sizes, and explanations have similar weight, and four metrics produce an orphaned row. | Use a two-column metric grid, a one-column mobile layout, muted labels and sizes, and stronger totals. Semantic label/value checks cover every metric. |
+| Fixed | Open Home, Get started, folder browsing, or Storage. Full absolute paths dominate the page. | Show the final two path components with a keyboard-accessible disclosure and copy action. Tests preserve exact Windows path bytes and cover clipboard failure. Editable paths stay complete. |
+| Fixed | Select a command job with many arguments. Its composite editor occupies one grid cell, leaving unused space while the textarea grows without limit. | Give composite editors a complete row and bound textareas to eight visible lines. Tests retain all 50 arguments and exact JSON/YAML values on narrow and wide screens. |
+| Fixed | Open a run summary with enough jobs to use the top of the graph. The workflow heading overlays its first job. | Reserve a separate graph header above the canvas. A completed twelve-job run checks the heading and node bounds. |
+| Fixed | Open saved repair roles. Agent, model, effort, and permissions are joined in a long sentence that hides the label/value distinction. | Give each role a heading and labeled rows. The paused-verifier regression checks exact saved values instead of workflow defaults. |
+| Fixed | Change a job to a human review or result check when the workflow has no repairs mapping. The editor crashes while deleting a nonexistent nested YAML key. Removing a job has the same defect. | Delete a repair entry only when it exists. The regression changes one job through all six types and then removes it, at mobile and desktop widths. |
+| Fixed | Search or scroll command logs, then open full screen. It renders the previous virtual line range at scroll position zero, leaving a large blank area. Returning can also lose the reading position. | Restore scrolling when the new viewport mounts. `actions-layout.spec.ts` checks visible search matches for commands and agents, exact scroll restoration in both directions, and unchanged downloads and live following. |
+| Fixed | Open a workspace at 320 pixels with its welcome banner visible. The two actions squeeze the message into a narrow column. | Move actions below the message on small screens and let them wrap. `control-layout.spec.ts` checks message width and action placement before testing the dropdown. |
+
+### Decisions
+
+1. Keep the existing font family and colors. Compact controls, bounded widths,
+   and stronger label/value hierarchy apply across the shared theme and forms.
+2. Preserve exact paths, model values, arguments, and environment values.
+   Truncation affects presentation; disclosures and editors keep the bytes.
+3. Keep multiline fields scrollable. A long command or prompt must not push
+   every subsequent setting hundreds of lines down the page.
+4. Keep cleanup confirmation and ownership checks unchanged. Empty cleanup
+   controls explain why they are unavailable rather than offering an empty
+   menu. Audit actions never remove retained owner data.
+5. Use separate rows for saved repair settings. These are captured values for
+   the run, not editable controls or a new settings hierarchy.
+6. Preserve log reading position when opening or closing full screen. Dialog
+   content mounts after its opening render, so scroll restoration follows the
+   viewport element rather than only the full-screen flag.
+
+### Coverage
+
+`frontend/e2e/control-layout.spec.ts` checks layout and behavior at 320, 390,
+760, 1,440, and 1,920 pixels. Existing browser specs exercise tooltips,
+settings persistence and conflicts, command defaults, repair rules, live log
+search and downloads, onboarding, run controls, and cleanup failure recovery.
+The welcome images are regenerated from the disposable app after the layout
+changes so their measured highlights match its controls.
+
+Native inspection uses the owner's app for read-only observations and the
+disposable app for edits. Automated checks use fake providers and isolated
+repositories. This pass does not certify installed providers or claim that
+every possible workflow and operating system was exercised.
+
+### Verification on 2026-10-08
+
+| Command | Result |
+| --- | --- |
+| `make check` | Passed. |
+| `uv run pytest tests -q` | 1,301 passed; one Windows junction test skipped on macOS. |
+| `npm --prefix frontend run build` | Passed. |
+| `npm --prefix frontend exec -- tsc --noEmit --noUnusedLocals -p frontend/tsconfig.json` | Passed. |
+| `make test-frontend` | 165 login-mode tests and three optional-login tests passed. |
+| `uv run python scripts/check_doc_links.py README.md CONTRIBUTING.md docs/*.md` | 13 Markdown files validated. |
+| `uv run python scripts/check_workflow_examples.py docs/workflows.md` | 16 guide examples and six starter workflows validated. |
+| `uv run cog -r README.md` | Passed; generated help unchanged. |
+| `make build` | Wheel and source distribution built. |
+| `make check-dist` | Passed. |
+
+The served index, entry assets, and lazy run-workspace asset matched the rebuilt
+files. The owner app stayed on the same processes. Comparison of 29 database
+tables and retained file hashes preserved runs, snapshots, attempts, events,
+artifacts, settings, resources, and worktrees. Only navigation timestamps,
+supervisor heartbeats, and successful model-observation IDs and timestamps were
+excluded; the observed models and configuration values were compared. All 17
+protected owner documents stayed unchanged and outside the commits.

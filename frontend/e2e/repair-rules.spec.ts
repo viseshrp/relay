@@ -214,8 +214,9 @@ test("paused repair roles show saved model overrides instead of workflow default
   const panel = page.getByRole("region", { name: "Repairs for Review", exact: true });
   await expect(panel.getByRole("heading", { name: "Review · Repairs paused", exact: true })).toBeVisible();
   const verifier = panel.getByRole("region", { name: "Repair settings for Verify", exact: true });
-  await expect(verifier).toContainText("Verify · m1");
-  await expect(verifier).toContainText("Claude · Effort override: high · Permission override: auto");
+  await expect(verifier.getByText("Verify", { exact: true })).toBeVisible();
+  await expect(verifier.locator("dt")).toHaveText(["Model", "Agent", "Thinking effort", "Permissions"]);
+  await expect(verifier.locator("dd")).toHaveText(["m1", "Claude", "high", "auto"]);
   await expect(verifier).not.toContainText("Codex");
   await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
   const after = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;

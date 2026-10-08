@@ -16,10 +16,10 @@ export function SharedCommandsEditor({ value, onChange, disabled = false }: {
         setError(null); onChange(Object.fromEntries(Object.entries(value).map(([key, command]) => [key === name ? next : key, command])));
       }} />
       <CommandArgumentsEditor value={argv} disabled={disabled} onChange={(command) => onChange({ ...value, [name]: command })} />
-      <Button disabled={disabled} aria-label={`Remove shared command ${name}`} onClick={() => { setError(null); onChange(Object.fromEntries(Object.entries(value).filter(([key]) => key !== name))); }}>Remove command</Button>
+      <Button sx={{ alignSelf: "flex-start" }} disabled={disabled} aria-label={`Remove shared command ${name}`} onClick={() => { setError(null); onChange(Object.fromEntries(Object.entries(value).filter(([key]) => key !== name))); }}>Remove command</Button>
     </Stack></Paper>)}
     {Object.keys(value).length === 0 && <Typography variant="body2" color="text.secondary">No shared commands saved.</Typography>}
-    <Button disabled={disabled} onClick={() => {
+    <Button sx={{ alignSelf: "flex-start" }} disabled={disabled} onClick={() => {
       let index = 1; while (Object.hasOwn(value, `command_${index}`)) index += 1;
       onChange({ ...value, [`command_${index}`]: [""] });
     }}>Add shared command</Button>

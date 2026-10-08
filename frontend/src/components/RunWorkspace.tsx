@@ -12,18 +12,13 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
-  FormControl,
   FormControlLabel,
-  InputLabel,
   List,
   ListItemButton,
   ListItemText,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   Switch,
-  TextField,
   Typography,
 } from "@mui/material";
 import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +28,6 @@ import type {
   ArtifactRecord,
   AgentsResponse,
   WorkflowDocumentResponse,
-  JsonValue,
   RunDetail,
   RunEvent,
   RunInteraction,
@@ -62,6 +56,7 @@ import { ActivityFeed } from "./ActivityFeed";
 import { RunArtifacts } from "./RunArtifacts";
 import { RunWorkflowFile } from "./RunWorkflowFile";
 import { RunHistory } from "./RunHistory";
+import { RepairRoleDetails } from "./RepairRoleDetails";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { runSummaryGraph } from "../run-graph";
 import { useClock } from "../useClock";
@@ -889,11 +884,11 @@ export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, 
 
               <Paper ref={stepProgress} variant="outlined" className="canvas-panel run-canvas" role="region" aria-label="Step progress" tabIndex={-1}>
                 <Box className="graph-heading"><Typography variant="h6">{detail.workflow_key}</Typography><Typography variant="body2" color="text.secondary">Started manually · {visibleStages.length} jobs</Typography></Box>
-                <FlowCanvas key={detail.id} runMode nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => {
+                <Box className="run-graph-viewport"><FlowCanvas key={detail.id} runMode nodes={graph.nodes} edges={graph.edges} selectedId={repairOwners.get(focusStage ?? "") ?? focusStage} onSelect={(id) => {
                   const members = graph.nodes.find((node) => node.id === id)?.data.members;
                   if (Array.isArray(members) && members.every((value): value is string => typeof value === "string")) setGraphJobs(members);
                   else if (detail.nodes.some((node) => node.scope_path === id)) showStep(id);
-                }} />
+                }} /></Box>
               </Paper>
               {(detail.nodes.some((node) => node.status === "failed") || detail.problem || detail.failure_summary) && <Paper variant="outlined" className="section-card" aria-label="Annotations">
                 <Typography variant="h6">Annotations</Typography>
@@ -947,21 +942,14 @@ export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, 
                     {Object.entries(settings.roles).map(([role, value]) => {
                       const child = roleNodes.get(role);
                       const current = child?.pending_settings ?? child?.retry_settings;
-                      const tools = value.agents?.length ? value.agents : Object.keys(value.agent_options ?? {});
-                      return <Box key={role} component="section" aria-label={`Repair settings for ${stageLabel(role)}`} sx={{ mt: 1 }}>
-                        <Typography variant="subtitle2">{stageLabel(role)} · {current?.model_value ?? value.model ?? (value.type === "agent" ? "Captured workflow model" : "Command")}</Typography>
-                        {value.type === "agent" && (current
-                          ? <Typography variant="body2">{stageLabel(current.agent_id)} · Effort override: {current.effort ?? "Provider default"} · Permission override: {current.permission_mode ?? "Provider default"}</Typography>
-                          : tools.length ? tools.map((tool) => <Typography key={tool} variant="body2">{stageLabel(tool)} · Effort override: {value.agent_options?.[tool]?.effort ?? "Provider default"} · Permission override: {value.agent_options?.[tool]?.permission_mode ?? "Provider default"} · Workflow defaults</Typography>)
-                            : <Typography variant="body2">Tool and settings follow the captured workflow.</Typography>)}
-                      </Box>;
+                      return <RepairRoleDetails key={role} role={role} saved={value} current={current} />;
                     })}
                     {settings.fix_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Fixer instructions: {settings.fix_instruction}</Typography>}
                     {settings.verify_instruction && <Typography variant="body2" sx={{ mt: 1 }}>Verifier instructions: {settings.verify_instruction}</Typography>}
-                    <Stack spacing={1} sx={{ mt: 1 }}>{children.map((node) => <Button key={node.id} onClick={() => showStep(node.scope_path)}>{stageLabel(node.scope_path)} · {statusLabel(node.status)}</Button>)}</Stack>
+                    <Stack spacing={1} sx={{ mt: 1, alignItems: "flex-start" }}>{children.map((node) => <Button key={node.id} onClick={() => showStep(node.scope_path)}>{stageLabel(node.scope_path)} · {statusLabel(node.status)}</Button>)}</Stack>
                   </Paper>;
                 })}
-                <Button href={`/?view=workflows&project=${encodeURIComponent(detail.project_id)}&workflow=${encodeURIComponent(detail.workflow_key)}`}>Edit repairs for future runs</Button>
+                <Button sx={{ alignSelf: "flex-start" }} href={`/?view=workflows&project=${encodeURIComponent(detail.project_id)}&workflow=${encodeURIComponent(detail.workflow_key)}`}>Edit repairs for future runs</Button>
               </Stack></AccordionDetails></Accordion>}
 
               <Paper variant="outlined" className="section-card">

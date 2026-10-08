@@ -70,8 +70,8 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
           <Button size="small" disabled={locked("agent_preferences")} aria-label={`Remove ${id} from default order`} onClick={() => ownerUpdate("agent_preferences", settings.agent_preferences.filter((value) => value !== id))}>Remove</Button>
         </Stack>)}
         {settings.agent_preferences.length === 0 && <Typography variant="body2">No global agent order. Workflows must choose their tools.</Typography>}
-        <FormControl size="small"><InputLabel id={`${prefix}-agent`}>Add an agent</InputLabel>
-          <Select labelId={`${prefix}-agent`} label="Add an agent" value="" disabled={locked("agent_preferences")} onChange={(event) => ownerUpdate("agent_preferences", [...settings.agent_preferences, event.target.value])}>
+        <FormControl size="small" sx={{ width: "100%", maxWidth: 320 }}><InputLabel id={`${prefix}-agent`} shrink>Add an agent</InputLabel>
+          <Select displayEmpty renderValue={() => "Choose an agent"} labelId={`${prefix}-agent`} label="Add an agent" value="" disabled={locked("agent_preferences")} onChange={(event) => ownerUpdate("agent_preferences", [...settings.agent_preferences, event.target.value])}>
             {agents.filter((agent) => !settings.agent_preferences.includes(agent.id)).map((agent) => <MenuItem key={agent.id} value={agent.id}>{agent.display_name}{agent.installed ? "" : " (not installed)"}</MenuItem>)}
           </Select>
         </FormControl>
@@ -104,7 +104,7 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       <EnvironmentEditor value={defaults.env} disabled={locked("env")} onChange={(env) => update("env", env)} />
     </Box>
     <Box><Typography variant="h6">Job defaults</Typography><Stack spacing={2} sx={{ mt: 2 }}>
-      <Box>{inherit("timeout")}<HelpTextField topic="timeout" tour label="Job timeout" fullWidth value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></Box>
+      <Box>{inherit("timeout")}<HelpTextField compact topic="timeout" tour label="Job timeout" fullWidth value={defaults.timeout ?? ""} disabled={locked("timeout")} onChange={(event) => update("timeout", event.target.value || null)} helperText="For agent and command jobs without a timeout. Use 30s, 15m, or 2h. Blank leaves the workflow and agent limits in place. Human approvals keep their declared deadline." /></Box>
       <Box data-tour="autoRetry">{inherit("auto_retry")}<HelpControl topic="autoRetry"><FormControlLabel control={<Switch checked={defaults.auto_retry} disabled={locked("auto_retry")} onChange={(_event, checked) => update("auto_retry", checked)} />} label="Allow automatic retries for jobs" /></HelpControl><Typography variant="body2" color="text.secondary">Requires an enabled recovery policy. Each job can opt out.</Typography></Box>
       <Box>{inherit("recovery")}<HelpControl topic="recovery" tour><FormControlLabel control={<Switch checked={defaults.recovery.enabled} disabled={locked("recovery")} onChange={(_event, checked) => update("recovery", { ...defaults.recovery, enabled: checked })} />} label="Automatic recovery for new runs" /></HelpControl><Box sx={{ height: 16 }} />
         <HelpTextField topic="retryLimit" tour label="Maximum automatic retries" fullWidth type="number" value={defaults.recovery.max_retries} disabled={locked("recovery")} onChange={(event) => update("recovery", { ...defaults.recovery, max_retries: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 2 } }} helperText="One or two additional attempts per failed agent job. Models, permissions, and completed work stay captured." /></Box>
@@ -114,8 +114,8 @@ export function DefaultSettingsForm({ settings, agents, onChange, project, disab
       <Typography variant="body2">Used when adding a repair rule in the editor. Saved repair rules keep their rounds and instructions.</Typography>
       {inherit("repairs")}
       <HelpTextField topic="repairRounds" tour label="Maximum repair rounds" type="number" value={defaults.repairs.max_rounds} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, max_rounds: Number(event.target.value) })} slotProps={{ htmlInput: { min: 1, max: 100 } }} />
-      <HelpTextField topic="fixer" tour label="Fixer instructions" multiline minRows={3} value={defaults.repairs.fix_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, fix_instruction: event.target.value })} />
-      <HelpTextField topic="verifier" tour label="Verifier instructions" multiline minRows={3} value={defaults.repairs.verify_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, verify_instruction: event.target.value })} />
+      <HelpTextField topic="fixer" tour label="Fixer instructions" multiline minRows={3} maxRows={8} value={defaults.repairs.fix_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, fix_instruction: event.target.value })} />
+      <HelpTextField topic="verifier" tour label="Verifier instructions" multiline minRows={3} maxRows={8} value={defaults.repairs.verify_instruction} disabled={locked("repairs")} onChange={(event) => update("repairs", { ...defaults.repairs, verify_instruction: event.target.value })} />
     </Stack></AccordionDetails></Accordion></Box>
   </Stack>;
 }

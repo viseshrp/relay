@@ -15,6 +15,11 @@ const scopes = {
 type Scope = keyof typeof scopes;
 function isScope(value: string): value is Scope { return Object.hasOwn(scopes, value); }
 function size(bytes: number): string { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`; }
+function count(value: number, singular: string): string { return `${value} ${singular}${value === 1 ? "" : "s"}`; }
+
+function StorageMetric({ label, value, detail, description }: { label: string; value: string; detail?: string; description: string }) {
+  return <Box className="storage-metric"><Typography component="dt">{label}</Typography><Box component="dd"><Typography className="storage-total">{value}</Typography>{detail && <Typography className="storage-size">{detail}</Typography>}<Typography variant="body2" color="text.secondary">{description}</Typography></Box></Box>;
+}
 
 export function StorageSettings({ project, requestProject }: { project: ProjectRecord; requestProject: string | null }) {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
@@ -48,11 +53,11 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
     {error && <Alert severity="error" action={!open ? <Button onClick={() => setRevision((value) => value + 1)}>Retry storage</Button> : undefined}>{error}</Alert>}
     {!usage && !error && <CircularProgress aria-label="Measuring project storage" />}
     {usage && <>
-      <Box className="field-grid">
-        <Box><Typography variant="subtitle2">Working copies</Typography><Typography>{usage.working_copies.directories} folders · {usage.working_copies.truncated ? "at least " : ""}{size(usage.working_copies.bytes)}</Typography><Typography variant="body2" color="text.secondary">{scopes.worktrees.description}</Typography></Box>
-        <Box><Typography variant="subtitle2">Saved reports and evidence</Typography><Typography>{usage.artifacts} files · {size(usage.artifact_bytes)}</Typography><Typography variant="body2" color="text.secondary">Reports and changes retained from job attempts.</Typography></Box>
-        <Box><Typography variant="subtitle2">Run history</Typography><Typography>{usage.runs} runs</Typography><Typography variant="body2" color="text.secondary">Stored in the shared Relay database. Disk pages cannot be assigned to individual projects.</Typography></Box>
-        <Box><Typography variant="subtitle2">Run references</Typography><Typography>{usage.branches} branches · {usage.attempt_refs} attempt refs</Typography><Typography variant="body2" color="text.secondary">Git objects share repository storage; their bytes cannot be counted separately.</Typography></Box>
+      <Box component="dl" className="storage-metrics">
+        <StorageMetric label="Working copies" value={count(usage.working_copies.directories, "folder")} detail={`${usage.working_copies.truncated ? "At least " : ""}${size(usage.working_copies.bytes)}`} description={scopes.worktrees.description} />
+        <StorageMetric label="Saved reports and evidence" value={count(usage.artifacts, "file")} detail={size(usage.artifact_bytes)} description="Reports and changes retained from job attempts." />
+        <StorageMetric label="Run history" value={count(usage.runs, "run")} description="Stored in the shared Relay database. Disk pages cannot be assigned to individual projects." />
+        <StorageMetric label="Run references" value={`${usage.branches} ${usage.branches === 1 ? "branch" : "branches"}`} detail={count(usage.attempt_refs, "attempt ref")} description="Git objects share repository storage; their bytes cannot be counted separately." />
       </Box>
       {usage.working_copies.truncated && <Alert severity="info">The disk scan reached its limit or could not read a folder. The size is a lower bound; symlinks are excluded.</Alert>}
       {usage.cleanup_blocked && <Alert severity="info">Finish or cancel active project runs before deleting retained data.</Alert>}
@@ -60,7 +65,7 @@ export function StorageSettings({ project, requestProject }: { project: ProjectR
         <MenuItem value="" disabled>Choose data to delete</MenuItem>{Object.entries(scopes).map(([key, value]) => <MenuItem key={key} value={key}>{value.label}</MenuItem>)}
       </HelpSelectField>
       {scope && <Typography>{scopes[scope].description}</Typography>}
-      <Button color="error" variant="outlined" disabled={!scope || usage.cleanup_blocked || busy} onClick={() => { setName(""); setOpen(true); }}>Review deletion</Button>
+      <Button sx={{ alignSelf: "flex-start" }} color="error" variant="outlined" disabled={!scope || usage.cleanup_blocked || busy} onClick={() => { setName(""); setOpen(true); }}>Review deletion</Button>
     </>}
     <TemporaryResourceCleanup key={`${project.id}:${revision}`} projectId={project.id} />
     <Dialog open={open} onClose={() => { if (!busy) setOpen(false); }} fullWidth aria-labelledby="storage-delete-title">

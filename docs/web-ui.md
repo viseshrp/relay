@@ -859,6 +859,15 @@ groups have visible chevrons, and narrow screens stack adjacent fields.
 Closed agent-settings groups do not initialize configuration probes. Open a
 group to load the choices for its selected model.
 
+Fields and buttons use compact desktop sizes. Numeric values, timeouts, and
+the loopback address have short controls; their explanations retain a wider
+line length. Actions use their content width. Touch devices keep larger tap
+targets. Command editors and condition branches occupy a complete form row;
+long instruction and argument fields scroll after eight lines without changing
+their text. Menus wrap long names within the screen. Closed selectors keep one
+line and show an explicit empty or inherited choice instead of a blank box.
+On small screens, the welcome banner's actions sit below its message.
+
 If a workspace cannot load, including an old tab requesting a replaced file
 after a rebuild, Relay shows **Reload Relay** instead of a blank page. Reload
 is explicit so a failed load never silently discards editing state. Browser
@@ -892,6 +901,13 @@ Changes to login, loopback address, port, and workers show a restart notice;
 startup flags still override saved choices. Notifications retain the existing
 browser-specific permission and preference. Storage shows installation paths
 and the selected project's sizes, counts, and confirmed cleanup controls.
+Installation folders use separate label and value columns. Long paths show
+their final two components; **Full path** reveals the exact value and
+**Copy path** copies it. Project cards, the setup checklist, and the folder
+browser use the same disclosure. Editable repository and file paths retain
+their complete values. Storage counts have distinct labels, totals, sizes,
+and explanations. An empty completed-run selector reads **No completed runs**
+and stays disabled.
 All cleanup actions live in Storage, including retries for temporary run
 resources. Run summaries, job logs, and advanced diagnostics have no cleanup
 controls. Failed cleanup keeps its confirmation open with the Relay error;

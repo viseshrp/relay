@@ -1,3 +1,4 @@
+import { PathDisplay } from "./PathDisplay";
 import { Alert, Button, List, ListItemButton, ListItemText, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -35,14 +36,14 @@ export function FolderPicker({ disabled, onSelect }: { disabled: boolean; onSele
     <Typography variant="body2" color="text.secondary">Choose a folder inside your home directory, or enter a repository path above.</Typography>
     {error && <Alert severity="error" action={<Button onClick={() => setRevision((value) => value + 1)}>Retry</Button>}>{error}</Alert>}
     {listing && <>
-      <Typography variant="body2" className="mono-wrap">{listing.path}</Typography>
-      <Stack direction="row" spacing={1}>
+      <PathDisplay path={listing.path} label="current folder" />
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
         <Button disabled={disabled || loading || !listing.parent} onClick={() => setPath(listing.parent)}>Up one folder</Button>
         <Button disabled={disabled || loading || path === null} onClick={() => setPath(null)}>Home folder</Button>
         <Button variant="outlined" disabled={disabled || loading || Boolean(error)} onClick={() => onSelect(listing.path)}>Use this folder</Button>
       </Stack>
       <List sx={{ maxHeight: 280, overflowY: "auto" }} aria-label="Folders">
-        {listing.folders.map((folder) => <ListItemButton key={folder.name} component="button" sx={{ width: "100%", textAlign: "left" }} disabled={disabled || loading} onClick={() => setPath(folder.path)}>
+        {listing.folders.map((folder) => <ListItemButton key={folder.name} component="button" sx={{ width: "100%", textAlign: "left", gap: 1, "& > svg": { flexShrink: 0 }, "& .MuiListItemText-root": { minWidth: 0, overflowWrap: "anywhere" } }} disabled={disabled || loading} onClick={() => setPath(folder.path)}>
           <ActionIcon name="folder" /><ListItemText primary={folder.name} secondary={folder.repository ? "Git repository" : undefined} />
         </ListItemButton>)}
       </List>

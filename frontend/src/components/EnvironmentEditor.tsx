@@ -15,11 +15,11 @@ export function EnvironmentEditor({ value, onChange, disabled = false }: {
     {error && <Alert severity="error">{error}</Alert>}
     {Object.entries(value).map(([name, content], index) => <Stack component="section" aria-label={`Environment variable ${index + 1}`} className="environment-row" key={index} direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "flex-start" }}>
       <HelpTextField topic="variableName" label="Variable name" fullWidth grow size="small" value={name} disabled={disabled} onChange={(event) => rename(name, event.target.value)}  />
-      <HelpTextField topic="variableValue" label="Value" fullWidth grow multiline minRows={1} size="small" value={content} disabled={disabled} onChange={(event) => onChange({ ...value, [name]: event.target.value })}  />
+      <HelpTextField topic="variableValue" label="Value" fullWidth grow multiline minRows={1} maxRows={4} size="small" value={content} disabled={disabled} onChange={(event) => onChange({ ...value, [name]: event.target.value })}  />
       <Button disabled={disabled} aria-label={`Remove environment variable ${name}`} onClick={() => { setError(null); onChange(Object.fromEntries(Object.entries(value).filter(([key]) => key !== name))); }}>Remove</Button>
     </Stack>)}
     {Object.keys(value).length === 0 && <Typography variant="body2" color="text.secondary">No environment variables declared here.</Typography>}
-    <Button disabled={disabled} onClick={() => {
+    <Button sx={{ alignSelf: "flex-start" }} disabled={disabled} onClick={() => {
       let index = 1; while (Object.hasOwn(value, `VARIABLE_${index}`)) index += 1;
       onChange({ ...value, [`VARIABLE_${index}`]: "" });
     }}>Add environment variable</Button>

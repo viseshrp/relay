@@ -69,11 +69,11 @@ export function TemporaryResourceCleanup({ projectId }: { projectId: string }) {
     {error && !open && <Alert severity="error" action={<Button disabled={loading || busy} onClick={() => void load()}>Reload completed runs</Button>}>{error}</Alert>}
     {loading && <CircularProgress size={24} aria-label="Loading completed runs" />}
     {!loading && !error && runs.length === 0 && <Typography>No completed runs are available for temporary cleanup in this project.</Typography>}
-    <HelpSelectField topic="temporaryCleanup" label="Completed run" fullWidth value={selectedId} disabled={loading || busy} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
-      <MenuItem value="">Choose a completed run</MenuItem>
+    <HelpSelectField topic="temporaryCleanup" label="Completed run" fullWidth value={selectedId} disabled={loading || busy || runs.length === 0} onChange={(event) => { setSelectedId(event.target.value); setNotice(null); setError(null); }}>
+      <MenuItem value="">{!loading && runs.length === 0 ? "No completed runs" : "Choose a completed run"}</MenuItem>
       {runs.map((run) => <MenuItem key={run.id} value={run.id}><Box component="span" sx={{ display: "flex", gap: 1, alignItems: "center" }}><StatusIcon status={run.status} />#{run.number} {run.title} · {statusLabel(run.status)}</Box></MenuItem>)}
     </HelpSelectField>
-    <Stack direction="row" spacing={1}>
+    <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
       <Button variant="outlined" disabled={!selected || loading || busy} onClick={() => { setError(null); setOpen(true); }}>Retry temporary resource cleanup</Button>
       <Button disabled={loading || busy} onClick={() => void load()}>Refresh completed runs</Button>
       {Object.values(cursors).some(Boolean) && <Button disabled={loading || busy} onClick={() => void load(cursors)}>Load older completed runs</Button>}
