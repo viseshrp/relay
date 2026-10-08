@@ -32,7 +32,8 @@ def test_agent_effort_inherits_or_explicitly_preserves_provider_defaults(
     defaults = validate_defaults({"providers": {"codex": {"model": "m1", "effort": "low"}}})
     project.write_workflow(
         "effort",
-        "jobs:\n  main:\n    runs-on: self-hosted\n    steps:\n"
+        "defaults: {run: {shell: bash}}\n"
+        + "jobs:\n  main:\n    runs-on: self-hosted\n    steps:\n"
         "      - id: check\n        uses: relay/agent@v1\n        with:\n"
         f"          agent: codex\n          model: m1\n          {declaration}\n",
     )
@@ -49,10 +50,11 @@ def test_agent_effort_inherits_or_explicitly_preserves_provider_defaults(
     assert any(row.get("text") == f"config: model=m1;effort={executed};mode=ask" for row in texts)
 
 
-def test_ordered_steps_share_edits_until_job_commit(project, tmp_path):
+def test_ordered_steps_share_edits_until_job_commit(project: RelayProject, tmp_path: Path) -> None:
     project.write_workflow(
         "jobs",
-        """name: Shared workspace
+        "defaults: {run: {shell: bash}}\n"
+        + """name: Shared workspace
 on: workflow_dispatch
 jobs:
   build:
@@ -81,10 +83,13 @@ jobs:
     assert git(project.repository, "rev-parse", "HEAD") == run.source_commit
 
 
-def test_failed_step_allows_failure_followup_and_tolerance(project, tmp_path):
+def test_failed_step_allows_failure_followup_and_tolerance(
+    project: RelayProject, tmp_path: Path
+) -> None:
     project.write_workflow(
         "failure",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   check:
     runs-on: self-hosted
@@ -113,10 +118,13 @@ jobs:
     assert Run.objects.get(pk=run_id).status == "failed"
 
 
-def test_reusable_workflow_and_serial_matrix_export_strings(project, tmp_path):
+def test_reusable_workflow_and_serial_matrix_export_strings(
+    project: RelayProject, tmp_path: Path
+) -> None:
     project.write_workflow(
         "called",
-        """on:
+        "defaults: {run: {shell: bash}}\n"
+        + """on:
   workflow_call:
     inputs:
       value: {type: string, required: true}
@@ -137,7 +145,8 @@ jobs:
     )
     project.write_workflow(
         "matrix",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   variants:
     strategy:
@@ -156,8 +165,8 @@ jobs:
 
 
 def test_secret_refs_freeze_without_bytes_and_logs_mask_split_values(
-    project, tmp_path, monkeypatch
-):
+    project: RelayProject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from relay.web.actions_bindings import put_binding
     from relay.web.models import RunEvent, RunSnapshot
 
@@ -171,7 +180,8 @@ def test_secret_refs_freeze_without_bytes_and_logs_mask_split_values(
     monkeypatch.setenv("RELAY_TEST_SECRET", "test-secret")
     project.write_workflow(
         "secrets",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   check:
     runs-on: self-hosted

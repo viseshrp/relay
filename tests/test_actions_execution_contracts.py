@@ -31,7 +31,8 @@ def test_human_answer_is_a_step_output_and_restart_does_not_repeat_edits(
 ) -> None:
     project.write_workflow(
         "wait",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
@@ -80,7 +81,8 @@ def test_environment_approval_precedes_secret_lookup_and_rejects_generic_answers
     monkeypatch.delenv("RELAY_GATED_TEST_KEY", raising=False)
     project.write_workflow(
         "gate",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     environment: prod
@@ -118,7 +120,8 @@ def test_reusable_secret_contract_and_environment_precedence(
         put_binding(scope, "KEY", "secret", source="environment", reference=variable)
     project.write_workflow(
         "callee",
-        """on:
+        "defaults: {run: {shell: bash}}\n"
+        + """on:
   workflow_call:
     secrets: {RENAMED: {required: true}}
 jobs:
@@ -134,7 +137,8 @@ jobs:
     )
     project.write_workflow(
         "caller",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   call:
     uses: ./.relay/workflows/callee.yaml
@@ -167,7 +171,8 @@ def test_reusable_call_does_not_implicitly_inherit_secrets(
     )
     project.write_workflow(
         "callee",
-        """on: workflow_call
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_call
 jobs:
   main:
     runs-on: self-hosted
@@ -176,7 +181,8 @@ jobs:
     )
     project.write_workflow(
         "caller",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs: {call: {uses: ./.relay/workflows/callee.yaml}}
 """,
     )
@@ -191,7 +197,8 @@ def test_failed_job_retains_bytes_and_next_job_uses_last_accepted_commit(
 ) -> None:
     project.write_workflow(
         "continuation",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   accepted:
     runs-on: self-hosted
@@ -223,7 +230,8 @@ def test_step_timeout_persists_and_failure_followup_runs(
 ) -> None:
     project.write_workflow(
         "timeout",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
@@ -265,7 +273,8 @@ def test_cache_filesystem_warnings_preserve_integrity_failures(
     monkeypatch.setattr("relay.web.actions_products.restore", fail_restore)
     project.write_workflow(
         "cache-fault",
-        "jobs:\n  seed:\n    runs-on: self-hosted\n    steps:\n"
+        "defaults: {run: {shell: bash}}\n"
+        + "jobs:\n  seed:\n    runs-on: self-hosted\n    steps:\n"
         "      - run: echo memo > memo.txt\n"
         "      - uses: relay/save-cache@v1\n        with: {key: local, path: memo.txt}\n"
         "  restored:\n    runs-on: self-hosted\n    cache-mode: read\n    steps:\n"
@@ -316,7 +325,7 @@ def test_workspace_continuation_resumes_after_a_crash_between_move_and_recreatio
 
     project.write_workflow(
         "journal",
-        "jobs:\n  accepted:\n    runs-on: self-hosted\n"
+        "defaults: {run: {shell: bash}}\n" + "jobs:\n  accepted:\n    runs-on: self-hosted\n"
         "    steps: [{run: echo accepted > accepted.txt}]\n"
         "  rejected:\n    runs-on: self-hosted\n"
         "    steps: [{run: 'echo rejected > rejected.txt; exit 1'}]\n",
@@ -379,7 +388,8 @@ runs:
     (action / "action.yml").write_text(source, encoding="utf-8")
     project.write_workflow(
         "composite",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
@@ -416,7 +426,8 @@ def test_bounded_agent_retry_preserves_rejected_report_and_frozen_prompt(
     fake_agents.install("codex")
     project.write_workflow(
         "repair",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
@@ -459,7 +470,8 @@ def test_job_cancellation_settles_run_and_allows_unrelated_jobs(
 
     project.write_workflow(
         "cancel-job",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   accepted:
     runs-on: self-hosted
@@ -502,7 +514,8 @@ def test_expired_human_step_exposes_failure_to_followup(
 ) -> None:
     project.write_workflow(
         "expire-step",
-        """on: workflow_dispatch
+        "defaults: {run: {shell: bash}}\n"
+        + """on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
@@ -534,7 +547,8 @@ def test_successful_job_commits_once_after_edits_and_keeps_reports_unstaged(
 
     project.write_workflow(
         "automatic-checkpoint",
-        """jobs:
+        "defaults: {run: {shell: bash}}\n"
+        + """jobs:
   main:
     runs-on: self-hosted
     steps:
@@ -568,7 +582,8 @@ def test_environment_url_resolves_after_steps_and_omits_secrets(
     WorkflowEnvironment.objects.create(project_id=project.project_id, name="preview")
     project.write_workflow(
         "environment-link",
-        """jobs:
+        "defaults: {run: {shell: bash}}\n"
+        + """jobs:
   deploy:
     runs-on: self-hosted
     environment:

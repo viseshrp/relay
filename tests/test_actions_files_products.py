@@ -1,6 +1,8 @@
 """File interfaces, masking, and retained products against isolated storage."""
 
+import os
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -9,13 +11,37 @@ from relay.execution.action_commands import ActionRuntime, CommandLog
 from relay.execution.action_files import (
     consume,
     declared_subjects,
+    file_text,
     key_values,
     read_state,
+    shell_script,
     step_files,
 )
 from relay.execution.action_products import cache_mode, capture, checked_path, restore, verify
 from relay.execution.masking import Redactor
 from relay.workflows.actions.patterns import matches, select_paths
+
+
+def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.write_text("", encoding="utf-8")
+    source = (
+        '[System.IO.File]::WriteAllText($env:GITHUB_OUTPUT, "value=ready`n", '
+        "[System.Text.UTF8Encoding]::new($false))"
+        if os.name == "nt"
+        else 'printf "value=ready\\n" > "$GITHUB_OUTPUT"'
+    )
+    arguments = shell_script(tmp_path, source, None)
+    assert Path(arguments[0]).stem.lower() in ({"pwsh"} if os.name == "nt" else {"bash", "sh"})
+    subprocess.run(  # noqa: S603 - owned test script with the platform's default interpreter
+        arguments,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        check=True,
+        capture_output=True,
+        timeout=15,
+        shell=False,
+    )
+    assert key_values(file_text(output)) == {"value": "ready"}
 
 
 def test_multiline_file_values_preserve_crlf_and_empty_values() -> None:
