@@ -205,6 +205,9 @@ Adapter commands remain argument vectors. Registry package text such as
 split, shell-expand, or execute it until a later explicit browser installation
 confirmation. A stale validated registry cache may support discovery when a
 refresh fails, but Relay displays its age and warning.
+Concurrent refreshes publish complete cache files independently. A cache write
+failure leaves the previous validated cache available and reports a Relay
+discovery error when no usable cache remains.
 
 Agent and command processes inherit the full Relay worker environment. Relay
 overrides temporary storage for an attempt and supplies
