@@ -83,6 +83,7 @@ def build_snapshot(
         "ruamel.yaml": _package_version("ruamel.yaml"),
     }
     actions = bool(workflow.root.definition.actions)
+    semantics_revision = "relay-v1"
     if actions:
         from .actions.compiler import sources_hashes
         from .actions.language import DIALECT, UPSTREAM
@@ -94,6 +95,7 @@ def build_snapshot(
             )
         )
         runtime_versions["actions-language"] = UPSTREAM
+        semantics_revision = DIALECT
     return SnapshotBundle(
         workflow_yaml=workflow.root.text,
         subworkflows=subworkflows,
@@ -106,7 +108,7 @@ def build_snapshot(
         runtime_versions=runtime_versions,
         hashes=hashes,
         launch_defaults=dict(launch_defaults or {}),
-        semantics_revision=DIALECT if actions else "relay-v1",
+        semantics_revision=semantics_revision,
         resolved_definition=(
             workflow.root.definition.model_dump(mode="json", by_alias=True) if actions else {}
         ),

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from hashlib import sha256
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -91,6 +92,11 @@ def import_template(bundle: Mapping[str, Any]) -> str:
         root = Path(temporary)
         for name, value in sources.items():
             path = checked_path(root, name)
+            canonical = os.path.realpath(path)
+            if not canonical.startswith(os.path.realpath(root) + os.sep):
+                message = "Template sources must stay within the validation workspace."
+                raise WorkflowValidationError(message)
+            path = Path(canonical)
             path.parent.mkdir(parents=True, exist_ok=True)
             raw, mode = source_bytes(value)
             path.write_bytes(raw)
