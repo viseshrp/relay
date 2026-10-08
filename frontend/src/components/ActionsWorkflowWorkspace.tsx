@@ -61,13 +61,14 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     if (!key) return;
     const abort = new AbortController(); setLease(false); setError(""); setSearch("");
     const endpoint = projectPath(`/api/workflows/${encoded(key)}`, props.requestProject);
+    const leaseEndpoint = projectPath(`/api/workflows/${encoded(key)}/lease`, props.requestProject);
     void api<WorkflowDocumentResponse>(endpoint, { signal: abort.signal }).then(async result => {
       if (abort.signal.aborted) return;
       setText(result.draft?.yaml || result.yaml); setSaved(result.yaml); setBase(result.base_hash); setDraft(result.draft);
-      const acquired = await api<{ acquired?: boolean }>(`${endpoint}/lease`, { method: "POST", body: JSON.stringify({ holder: holder.current }) });
+      const acquired = await api<{ acquired?: boolean }>(leaseEndpoint, { method: "POST", body: JSON.stringify({ holder: holder.current }) });
       if (!abort.signal.aborted) { setLease(acquired.acquired !== false); props.onWorkflowLoaded(key); }
     }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); });
-    const renew = window.setInterval(() => { void api(`${endpoint}/lease`, { method: "POST", body: JSON.stringify({ holder: holder.current }) }).catch(e => { setLease(false); setError(errorMessage(e)); }); }, 30000);
+    const renew = window.setInterval(() => { void api(leaseEndpoint, { method: "POST", body: JSON.stringify({ holder: holder.current }) }).catch(e => { setLease(false); setError(errorMessage(e)); }); }, 30000);
     return () => { abort.abort(); window.clearInterval(renew); };
   }, [key, props.requestProject]);
   const flush = useCallback(async () => {

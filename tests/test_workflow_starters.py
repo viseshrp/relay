@@ -156,7 +156,7 @@ def test_fix_tests_starter_uses_real_verdicts_and_a_bounded_repair_budget(
     monkeypatch.setenv("STARTER_TEST_COUNTER", str(counter))
     monkeypatch.setenv("STARTER_TEST_PASSES_ON", str(passes_on))
     fake_agents.install("codex", mode="configuration")
-    fake_agents.allow_commands(Path(sys.executable).name)
+    fake_agents.allow_commands(sys.executable)
     fake_executable(
         fake_agents.directory,
         "python",

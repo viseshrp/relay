@@ -8,6 +8,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
+from relay.execution.timing import duration_seconds
 from relay.workflows.loader import load_workflow_text
 
 
@@ -21,6 +22,8 @@ def preview(text: str) -> dict[str, Any]:
         raw = node.model_dump(mode="json", by_alias=True, exclude_none=True)
         if raw.get("if") or raw.get("outputs") or raw.get("repair_rule") or raw.get("env"):
             issues.append(f"{key}: expressions, typed reports, or repairs need owner review.")
+        if raw.get("writes") or raw.get("allow_no_commit") or raw.get("permission_profile"):
+            issues.append(f"{key}: Git write and permission policies need owner review.")
         step: dict[str, Any] = {"id": key}
         if node.type == "command":
             run = raw["run"]
@@ -39,7 +42,7 @@ def preview(text: str) -> dict[str, Any]:
                     "with": {
                         "agents": json.dumps(raw["agents"] or definition.agents),
                         **(
-                            {"model": raw["model"] or definition.model}
+                            {"model": raw.get("model") or definition.model}
                             if raw.get("model") or definition.model
                             else {}
                         ),
@@ -54,14 +57,19 @@ def preview(text: str) -> dict[str, Any]:
                 issues.append(f"{key}: review provider effort and operational defaults.")
         elif node.type == "human_wait":
             step.update({"uses": "relay/human-wait@v1", "with": {"prompt": raw["prompt"]}})
+            if node.deadline:
+                seconds = duration_seconds(node.deadline)
+                if seconds is not None:
+                    step["with"]["timeout-minutes"] = seconds / 60
             if raw.get("on_timeout"):
                 issues.append(f"{key}: timeout branching needs an explicit followup job.")
         else:
             issues.append(f"{key}: {node.type} requires a manual control-flow conversion.")
             continue
+        seconds = duration_seconds(node.timeout)
         jobs[key] = {
             "runs-on": "self-hosted",
-            **({"timeout-minutes": raw["timeout"] / 60} if raw.get("timeout") else {}),
+            **({"timeout-minutes": seconds / 60} if seconds is not None else {}),
             **({"needs": raw["needs"]} if raw["needs"] else {}),
             "steps": [step],
         }

@@ -196,6 +196,8 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     def storage_project(request: HttpRequest) -> JsonResponse:
         del request
         isolated = create_project(root / f"storage-{uuid4().hex}")
+        (isolated.relay_root / "workflows/workflow.yaml").unlink()
+        isolated.commit("Keep the disposable storage project empty")
         return JsonResponse({"project_id": isolated.project_id})
 
     @api_errors

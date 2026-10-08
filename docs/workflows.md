@@ -17,6 +17,8 @@ Historical `version: 1` / `nodes` snapshots retain their original interpreter.
 New saves and launches require `jobs`. The browser offers a conversion preview
 for old files; review its issues before saving the draft. An old source is
 never rewritten automatically.
+The preview converts legacy durations to minutes and retains human-wait
+deadlines. Git write and permission policies require explicit owner review.
 
 ## Jobs and ordered steps
 

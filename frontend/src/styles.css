@@ -587,10 +587,13 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .job-heading { grid-template-columns: minmax(0, 1fr); }
   .job-heading > .MuiStack-root, .job-heading > .MuiAlert-root { grid-column: 1; grid-row: auto; }
   .storage-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .app-header .project-picker { flex: 0 0 180px; width: 180px; }
-  .app-header .project-context > button { flex: 0 1 auto; padding-inline: 8px; }
+  .app-header .project-picker { flex: 0 1 180px; width: 180px; min-width: 176px; }
+  .app-header .project-context > button { flex: 0 1 auto; padding-inline: 4px; }
   .app-header .MuiToolbar-root { column-gap: 8px; }
   .app-header .MuiTab-root { padding-inline: 6px; }
+}
+@media (min-width: 390px) and (max-width: 600px) {
+  .app-header .project-context > button { flex: 0 0 auto; white-space: nowrap; }
 }
 
 .artifacts-section { container-type: inline-size; }

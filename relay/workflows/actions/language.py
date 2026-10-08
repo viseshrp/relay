@@ -630,7 +630,9 @@ def load(text: str, *, source: Path | None = None) -> ActionsDocument:
         _validate_contracts(value)
     except WorkflowValidationError as error:
         field = str(error.context.get("field", "workflow"))
-        location = locations.get(field) or locations.get("workflow." + field)
+        location = (
+            locations.get(field) or locations.get("workflow." + field) or locations.get("workflow")
+        )
         if location:
             error.context.update({"line": str(location[0]), "column": str(location[1])})
         raise

@@ -14,6 +14,7 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   const created = await post(page, "/__test__/storage-project");
   expect(created.ok()).toBeTruthy();
   const { project_id: emptyId }: { project_id: string } = await created.json();
+  expect((await (await page.request.get(`/api/workflows?project=${emptyId}`)).json()).workflows).toEqual([]);
   const { projects }: { projects: ProjectRecord[] } = await (await page.request.get("/api/projects")).json();
   const empty = projects.find((project) => project.id === emptyId);
   if (!empty) throw new Error("The disposable project was not registered.");
@@ -48,6 +49,7 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   await expect(page.getByRole("button", { name: "Dismiss welcome", exact: true })).toHaveCount(0);
   await page.reload();
   await expect(sidebar).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No workflows yet", exact: true })).toBeVisible();
   await expect(setup).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Dismiss welcome", exact: true })).toHaveCount(0);
   expect(checks).toBe(0);
@@ -126,4 +128,30 @@ test("closing setup before inventory arrives prevents a later connection probe",
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   expect(checks).toBe(1);
+});
+
+test("editing another project acquires and renews its lease before autosaving", async ({ page }) => {
+  const holder = "cross-project-editor";
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("relay.editor-holder", value);
+    const interval = window.setInterval.bind(window);
+    window.setInterval = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => interval(handler, delay === 30000 ? 1000 : delay, ...args)) as typeof window.setInterval;
+  }, holder);
+  const { project_id: projectId }: { project_id: string } = await (await post(page, "/__test__/storage-project")).json();
+  const source = "name: Cross project\njobs: {main: {runs-on: self-hosted, steps: [{run: echo original}]}}\n";
+  const created = await post(page, `/api/workflows?project=${projectId}`, { key: "cross-project", holder, yaml: source });
+  expect(created.status(), await created.text()).toBe(201);
+  const leases: number[] = [];
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname === "/api/workflows/cross-project.yaml/lease" && url.searchParams.get("project") === projectId && response.request().method() === "POST") leases.push(response.status());
+  });
+  await page.goto(`/?view=workflows&project=${projectId}&workflow=cross-project.yaml`);
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Script", exact: true }).fill("echo edited");
+  await expect.poll(async () => (await (await page.request.get(`/api/workflows/cross-project.yaml?project=${projectId}`)).json()).draft?.yaml).toContain("echo edited");
+  await expect.poll(() => leases.length).toBeGreaterThanOrEqual(2);
+  expect(leases.every((status) => status === 200)).toBeTruthy();
+  expect((await (await page.request.get(`/api/workflows/cross-project.yaml?project=${projectId}`)).json()).yaml).toBe(source);
+  await expect(page.getByRole("alert").filter({ hasText: /HTTP 405|Editing unavailable|lease is unavailable/ })).toHaveCount(0);
 });
