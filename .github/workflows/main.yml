@@ -133,6 +133,14 @@ jobs:
       - name: Run browser tests against the isolated Relay server
         run: make test-frontend
 
+      - name: Retain failed browser traces
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-failure-traces
+          path: frontend/test-results/
+          retention-days: 7
+
   publish-to-testpypi:
     if: github.ref == 'refs/heads/main'
     needs: [ quality, tests, browser-tests ]

@@ -620,6 +620,36 @@ def matrix_manifest(run_id: str, scope: str) -> list[dict[str, Any]]:
     )
 
 
+def settled_step_result(node_run_id: str) -> None:
+    """Reconcile expression status even when admission expires before execution."""
+    from relay.execution.action_files import atomic_state, read_state
+
+    node = NodeRun.objects.get(pk=node_run_id)
+    frozen = cast(dict[str, Any], node.frozen_def)
+    path = job_state_path(scope_node_id(str(node.run_id), frozen["state_scope"]))
+    state = read_state(path)
+    scope = cast(str, node.scope_path)
+    conclusion = (
+        cast(str, node.conclusion)
+        or {
+            "succeeded": "success",
+            "failed": "failure",
+            "canceled": "cancelled",
+            "skipped": "skipped",
+        }[cast(str, node.status)]
+    )
+    if "id" in frozen["step"]:
+        previous = state["steps"].get(scope, {})
+        state["steps"][scope] = {
+            "outputs": previous.get("outputs", cast(dict, node.outputs)),
+            "outcome": cast(str, node.outcome) or conclusion,
+            "conclusion": conclusion,
+        }
+    else:
+        state.setdefault("anonymous_statuses", {})[scope] = conclusion
+    atomic_state(path, state)
+
+
 def record_skipped(node_run_id: str) -> None:
     NodeRun.objects.filter(pk=node_run_id, status="skipped").update(
         outcome="skipped", conclusion="skipped"

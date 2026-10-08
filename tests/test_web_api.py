@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
-import os
 from pathlib import Path
 
 from django.contrib.auth.models import User
@@ -1540,7 +1539,7 @@ def test_actions_job_logs_expose_step_activity_names_and_frozen_agent_instructio
 ) -> None:
     # Provider discovery remains restricted to fake_agents.directory; scripts
     # also need the installed operating-system shell.
-    monkeypatch.setenv("PATH", os.pathsep.join((os.environ["PATH"], os.defpath)))
+    fake_agents.allow_commands("bash", "sh", "pwsh")
     fake_agents.install("codex", mode="configuration")
     served.write(".relay/prompts/owner.md", "Captured instructions\n")
     served.write_workflow(
@@ -2073,7 +2072,8 @@ def test_named_artifact_download_verifies_bytes_and_project_access(
   main:
     runs-on: self-hosted
     steps:
-      - run: echo retained > evidence.txt
+      - shell: python
+        run: from pathlib import Path; Path('evidence.txt').write_bytes(b'retained\\n')
       - uses: relay/upload-artifact@v1
         with: {name: evidence, path: evidence.txt}
 """,

@@ -201,8 +201,9 @@ jobs:
 `timeout-minutes` must be greater than zero and at most 360, including resolved
 expressions. Jobs default to 360 minutes. Persisted deadlines bound descendants
 and survive suspension, restart, and retry. A step cannot extend its job's
-deadline. A timed-out step records failure; eligible follow-ups can run within
-the remaining job deadline.
+deadline. A timed-out step records failure, including when its deadline
+expires before execution starts. Eligible follow-ups can run within the
+remaining job deadline. `continue-on-error` applies to this failure too.
 
 ## Agent nodes
 

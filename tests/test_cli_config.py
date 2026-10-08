@@ -23,6 +23,7 @@ from relay.constants import (
     EXIT_UP_CONFIG,
 )
 from relay.errors import ConfigError, PermissionFlowError, WorktreeError
+from relay.projects.identity import canonical_path
 from relay.web import static_view, supervisor
 from tests.support import FakeAgents, InlineEngine, RelayProject, init_repository
 
@@ -256,12 +257,12 @@ def test_up_json_retains_the_previous_startup_lines(
 def test_human_project_list_and_relink(project: RelayProject, tmp_path: Path) -> None:
     result = invoke("project", "list", json_output=False)
     assert result.exit_code == 0
-    assert result.output == f"Projects\n  repo — {project.repository}\n"
+    assert result.output == f"Projects\n  repo — {canonical_path(project.repository)}\n"
     moved = tmp_path / "moved"
     project.repository.rename(moved)
     result = invoke("project", "relink", str(project.repository), str(moved), json_output=False)
     assert result.exit_code == 0
-    assert result.output == f"Relinked moved to {moved}.\n"
+    assert result.output == f"Relinked moved to {canonical_path(moved)}.\n"
 
 
 def test_human_project_list_is_clear_when_empty() -> None:

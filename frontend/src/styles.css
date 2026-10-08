@@ -587,8 +587,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .job-heading { grid-template-columns: minmax(0, 1fr); }
   .job-heading > .MuiStack-root, .job-heading > .MuiAlert-root { grid-column: 1; grid-row: auto; }
   .storage-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .app-header .project-picker { flex: 0 0 186px; width: 186px; }
-  .app-header .project-context > button { flex: 0 1 auto; }
+  .app-header .project-picker { flex: 0 0 180px; width: 180px; }
+  .app-header .project-context > button { flex: 0 1 auto; padding-inline: 8px; }
   .app-header .MuiToolbar-root { column-gap: 8px; }
   .app-header .MuiTab-root { padding-inline: 6px; }
 }

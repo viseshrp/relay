@@ -3,6 +3,7 @@
 from datetime import timedelta
 import json
 from pathlib import Path
+import time
 
 from django.utils import timezone
 import pytest
@@ -225,22 +226,38 @@ jobs:
     assert not (Path(run.worktree_path) / "rejected.txt").exists()
 
 
+@pytest.mark.parametrize("expired_before_execution", [False, True])
+@pytest.mark.parametrize("continued", [False, True])
 def test_step_timeout_persists_and_failure_followup_runs(
-    project: RelayProject, tmp_path: Path
+    project: RelayProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expired_before_execution: bool,
+    continued: bool,
 ) -> None:
+    from relay.execution import runner
+
+    if expired_before_execution:
+        original = runner.attempt_deadline
+
+        def expired_deadline(timeout: str | None, inherited: float | None) -> float | None:
+            return time.monotonic() - 1 if timeout == "60ms" else original(timeout, inherited)
+
+        monkeypatch.setattr(runner, "attempt_deadline", expired_deadline)
     project.write_workflow(
         "timeout",
         "defaults: {run: {shell: bash}}\n"
-        + """on: workflow_dispatch
+        + f"""on: workflow_dispatch
 jobs:
   main:
     runs-on: self-hosted
     steps:
       - id: slow
         timeout-minutes: 0.001
+        continue-on-error: {str(continued).lower()}
         shell: python
         run: import time; time.sleep(2)
-      - if: failure()
+      - if: steps.slow.outcome == 'failure' && (failure() || steps.slow.conclusion == 'success')
         run: echo cleanup
 """,
     )
@@ -251,7 +268,10 @@ jobs:
         node_run__run_id=run_id, node_run__scope_path="root.main.slow"
     )
     assert attempt.stop_reason == "timeout" and attempt.deadline_at is not None
+    assert attempt.node_run.outcome == "failure"
+    assert attempt.node_run.conclusion == ("success" if continued else "failure")
     assert NodeRun.objects.get(run_id=run_id, scope_path="root.main.step_2").status == "succeeded"
+    assert Run.objects.get(pk=run_id).status == ("succeeded" if continued else "failed")
 
 
 @pytest.mark.parametrize("integrity_failure", [False, True])

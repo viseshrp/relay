@@ -10,6 +10,8 @@ agents can defer commits until that boundary.
 Raw outcomes and effective conclusions are stored separately. Failed steps
 admit explicit failure follow-ups; failed jobs do not cancel unrelated jobs.
 `continue-on-error` affects conclusions while retaining rejected evidence.
+Step conditions reconcile with recorded results, including failures before
+the executor starts. A timed-out step still honors `continue-on-error`.
 Historical snapshots keep their captured interpreter and the legacy node
 contracts described below where they differ.
 

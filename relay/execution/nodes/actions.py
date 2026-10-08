@@ -281,6 +281,8 @@ def _children(
         records[key] = record
         if record.status not in {"succeeded", "failed", "skipped", "canceled"}:
             return OutcomeKind.WAITING, {}
+        if isinstance(node, ActionsStepNode):
+            _repository().settled_step_result(record.node_run_id)
         if record.status in {"failed", "canceled"}:
             failures = True
             if (
@@ -709,8 +711,6 @@ class ActionsStepExecutor:
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, ActionsStepNode)
         stopped = _stop(context)
-        if stopped:
-            return stopped
         if context.resources is None:
             message = "The step has no owned private resources."
             raise NodeExecutionError(message)
@@ -775,7 +775,7 @@ class ActionsStepExecutor:
         command_context = replace(context, runtime=proxy)
         try:
             try:
-                outcome = self.perform(
+                outcome = stopped or self.perform(
                     command_context, node, values, environment, paths, state_path
                 )
             except RelayError as error:
@@ -805,6 +805,8 @@ class ActionsStepExecutor:
             raise NodeExecutionError(message)
         if outcome.outputs:
             state.setdefault("reports", {})[context.attempt.scope_path] = dict(outcome.outputs)
+        if outcome.kind is OutcomeKind.SUCCEEDED:
+            outcome = _stop(context) or outcome
         raw = (
             "success"
             if outcome.kind is OutcomeKind.SUCCEEDED

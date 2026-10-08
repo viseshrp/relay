@@ -108,7 +108,7 @@ def test_initial_setup_bytes_are_explained_without_exempting_owner_edits(
     repository = init_repository(tmp_path / "repo")
     root = initialize_project(repository).relay_root
     starter = root / "workflows/workflow.yaml"
-    starter.write_bytes(starter.read_bytes().replace(b"\n", line_ending))
+    starter.write_bytes(starter.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", line_ending))
     (root / "workflows/check.yaml").write_text(COMMAND, encoding="utf-8")
     preview = inspect_launch_cleanliness(root, "check")
     assert preview.clean

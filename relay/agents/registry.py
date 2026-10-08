@@ -5,8 +5,10 @@ from __future__ import annotations
 from contextlib import suppress
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import tempfile
+import time
 from typing import NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -169,6 +171,19 @@ def _read_cache(path: Path, now: datetime) -> tuple[object, datetime] | None:
     return payload.get("document"), fetched_at
 
 
+def _replace_cache(temporary: Path, path: Path) -> None:
+    """Bound Windows sharing conflicts while retaining an atomic cache publication."""
+    for attempt in range(6):
+        try:
+            temporary.replace(path)
+        except PermissionError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) not in {5, 32} or attempt == 5:
+                raise
+            time.sleep(0.01 * 2**attempt)
+        else:
+            return
+
+
 def _write_cache(path: Path, document: object, fetched_at: datetime) -> None:
     encoded = json.dumps(
         {"fetched_at": fetched_at.isoformat(), "document": document},
@@ -183,7 +198,7 @@ def _write_cache(path: Path, document: object, fetched_at: datetime) -> None:
         ) as stream:
             temporary = Path(stream.name)
             stream.write(encoded)
-        temporary.replace(path)
+        _replace_cache(temporary, path)
     except OSError:
         message = "Relay could not save the ACP registry cache."
         raise AgentDiscoveryError(message) from None

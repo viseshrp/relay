@@ -179,6 +179,7 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
 for (const width of [390, 760, 900, 1050, 1440, 1920]) test(`header and settings navigation stay compact at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: 1000 });
   await page.goto("/?view=settings");
+  await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Settings sections" });
   const header = page.locator(".app-header");
   const box = await bounds(header);

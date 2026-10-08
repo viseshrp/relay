@@ -394,11 +394,16 @@ def _execute_attempt(
         if context.timed_out() and claim.node_type not in {
             NodeType.HUMAN_WAIT.value,
             NodeType.ACTIONS_JOB.value,
+            NodeType.ACTIONS_STEP.value,
         }:
             outcome = _timeout_failure()
         else:
             outcome = executor.execute(context)
-            if outcome.kind is OutcomeKind.SUCCEEDED and context.timed_out():
+            if (
+                outcome.kind is OutcomeKind.SUCCEEDED
+                and context.timed_out()
+                and claim.node_type != NodeType.ACTIONS_STEP.value
+            ):
                 outcome = _timeout_failure()
     except RelayError as error:
         outcome = _failure(error)
