@@ -93,7 +93,8 @@ assets without an end-user Node runtime.
 ## Updating an editable frontend
 
 `npm --prefix frontend run build` checks types and builds into a temporary
-staging directory. It publishes assets first, then atomically replaces
+staging directory beside the served asset directory, preserving relative
+source-map paths. It publishes assets first, then atomically replaces
 `index.html`. Earlier hashed assets remain available for open tabs that have
 not yet loaded every workspace. A failed asset copy leaves the previous entry
 page in place. This updates only compiled frontend files; the running server

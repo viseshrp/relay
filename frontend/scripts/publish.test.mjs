@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { publishBuild } from "./publish.mjs";
+import { createStagingDirectory, publishBuild } from "./publish.mjs";
 
 test("publishing retains chunks for open tabs and replaces the entry page", async () => {
   const root = await mkdtemp(join(tmpdir(), "relay-publish-test-"));
@@ -72,4 +72,26 @@ test("an open browser tab can load its earlier lazy chunk after publication", as
     await new Promise((resolve) => server.close(resolve));
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("staged Vite builds keep the clean build's relative source-map paths", async () => {
+  const { build } = await import("vite");
+  const root = await mkdtemp(join(tmpdir(), "relay-source-map-test-"));
+  try {
+    const source = join(root, "frontend"), served = join(root, "relay/static");
+    await mkdir(source);
+    await mkdir(join(root, "relay"));
+    await writeFile(join(source, "index.html"), '<script type="module" src="/main.js"></script>');
+    await writeFile(join(source, "main.js"), 'console.log("source-map fixture");');
+    const compile = (outDir) => build({ configFile: false, root: source, logLevel: "silent", build: { outDir, sourcemap: true } });
+    await compile(served);
+    const names = (await readdir(join(served, "assets"))).filter((name) => name.endsWith(".map"));
+    assert.ok(names.length > 0);
+    const before = await Promise.all(names.map((name) => readFile(join(served, "assets", name), "utf8")));
+    const staging = await createStagingDirectory(served);
+    await compile(staging);
+    await publishBuild(staging, served);
+    for (const [index, name] of names.entries()) assert.equal(await readFile(join(served, "assets", name), "utf8"), before[index]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

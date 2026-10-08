@@ -1,6 +1,11 @@
-import { copyFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+
+/** Keep source-map paths at the same depth as the served build. */
+export async function createStagingDirectory(target) {
+  return mkdtemp(join(dirname(target), ".frontend-build-"));
+}
 
 /** Copy into the destination directory before replacing a served file. */
 async function replaceFile(source, target) {
