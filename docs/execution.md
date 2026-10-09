@@ -304,6 +304,12 @@ characters split across reads. Process exit drains the remaining bytes,
 including output from canceled or timed-out commands. Child programs must
 flush their own buffers for immediate output.
 
+On Windows, the owned launcher resolves the target against the attempt's
+inherited `PATH` and working directory before starting its absolute path.
+This preserves workflow-selected tools instead of allowing the launcher's
+application directory to take priority. Arguments stay separate, and the
+target starts only after the launcher joins its kill-on-close Job Object.
+
 Agent and command nodes extract every declared output before success. Files
 used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
 Relay copies them to central evidence storage with their SHA-256 hashes. An

@@ -18,13 +18,17 @@ test("all three header tabs fit beside the logo without login", async ({ page },
     await page.goto("/?view=settings");
     await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
     const header = page.locator(".app-header");
-    const tabs = await header.getByRole("tablist").boundingBox();
-    if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
-    for (const name of ["Workflows", "Runs", "Settings"]) {
-      const tab = await header.getByRole("tab", { name, exact: true }).boundingBox();
-      if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
-      expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
-      expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+    for (const fallbackFont of [false, true]) {
+      if (fallbackFont) await page.addStyleTag({ content: ".app-header .MuiButtonBase-root { font-family: Arial, sans-serif; letter-spacing: 0.08em; }" });
+      const tabs = await header.getByRole("tablist").boundingBox();
+      if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
+      for (const name of ["Workflows", "Runs", "Settings"]) {
+        const tab = await header.getByRole("tab", { name, exact: true }).boundingBox();
+        if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
+        expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
+        expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+        expect(tab.width).toBeGreaterThanOrEqual(44);
+      }
     }
     await header.screenshot({ path: info.outputPath(`header-local-${width}.png`), animations: "disabled" });
   }
