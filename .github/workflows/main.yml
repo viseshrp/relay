@@ -156,6 +156,8 @@ jobs:
       name: test-pypi
     permissions:
       contents: read
+    env:
+      TEST_PYPI_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
@@ -182,10 +184,23 @@ jobs:
       - name: Check dist
         run: make check-dist
 
+      - name: Retain verified distributions
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: verified-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish to TestPyPI
+        if: env.TEST_PYPI_TOKEN != ''
         run: make publish-test
-        env:
-          TEST_PYPI_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
+
+      - name: Report unconfigured TestPyPI publication
+        if: env.TEST_PYPI_TOKEN == ''
+        run: |
+          echo "::notice::TestPyPI upload skipped: TEST_PYPI_TOKEN is not configured."
+          echo "Verified distributions are retained; TestPyPI upload was skipped because TEST_PYPI_TOKEN is not configured." >> "$GITHUB_STEP_SUMMARY"
 
   create-draft-release:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
