@@ -98,6 +98,12 @@ overrides, save and reload, model-dependent choices, failures and retries, and
 the configuration received by the executing worker. The browser-test CI job
 runs on Linux and gates package publication alongside Python and quality checks.
 
+The daily hook updater uses the repository's `GITHUB_TOKEN` and opens a review
+pull request containing only `.pre-commit-config.yaml`. Repository Actions
+settings must allow workflows to create pull requests. Approve workflow runs
+when GitHub requests it for a bot-created pull request, then merge only after
+its checks pass. The updater does not require a personal access token.
+
 To test a scratch frontend build without replacing a running app's assets, set
 `RELAY_TEST_ASSETS_ROOT` to that build directory when invoking Playwright. Only
 the isolated browser-test server reads this variable; production serving keeps

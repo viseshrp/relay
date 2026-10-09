@@ -22,7 +22,6 @@ jobs:
           fetch-depth: 0  # Required for hatch-vcs to generate full version
           fetch-tags: true
           ref: main
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
       - name: Cache pre-commit hooks
         uses: actions/cache@v6.1.0
@@ -42,30 +41,26 @@ jobs:
       - name: Show updated hooks (if any)
         run: git diff .pre-commit-config.yaml || true
 
-      - name: Commit changes
-        run: |
-          git add .pre-commit-config.yaml
-          git commit -m "chore(pre-commit): Update pre-commit hooks" || echo "No changes to commit"
-
       - name: Ensure labels exist
         run: |
           gh label create dependencies --description "Dependency updates" --color FFCD00 --force
           gh label create chore --description "Chores and maintenance" --color 00CED1 --force
           gh label create automerge --description "automerge" --color 3E0651 --force
         env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Create Pull Request for Updated Hooks
         uses: peter-evans/create-pull-request@v8.1.1
         with:
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          token: ${{ github.token }}
           base: main
           branch: chore/pre-commit-update
+          add-paths: .pre-commit-config.yaml
           title: "chore(pre-commit): Update pre-commit hooks"
           commit-message: "chore(pre-commit): Update pre-commit hooks"
           body: |
             # Update pre-commit hooks
 
             - This PR updates the versions of pre-commit hooks to their latest releases.
-          labels: dependencies, chore, automerge
+          labels: dependencies, chore
           delete-branch: true
