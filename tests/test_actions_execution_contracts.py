@@ -311,31 +311,6 @@ def test_cache_filesystem_warnings_preserve_integrity_failures(
     )
 
 
-def test_canceling_a_retained_loop_settles_its_attemptless_iteration_marker(
-    project: RelayProject, tmp_path: Path
-) -> None:
-    from relay.execution.cancellation import request_cancellation
-
-    project.write_workflow(
-        "historical-loop",
-        "version: 1\nname: Retained loop\nnodes:\n  repeat:\n    type: loop\n"
-        "    max_iterations: 2\n    exhausted: done\n    body:\n"
-        "      wait: {type: human_wait, prompt: Continue?}\n"
-        "  done: {type: command, run: [git, status]}\n",
-    )
-    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
-    run_id = engine.launch(project, "historical-loop")
-    engine.drain(run_id)
-    assert Run.objects.get(pk=run_id).status == "paused_wait"
-    request_cancellation(engine.store, run_id, "retained-loop-cancel")
-    engine.store.resolve_human_wait_controls()
-    engine.drain(run_id)
-    assert Run.objects.get(pk=run_id).status == "canceled"
-    assert set(NodeRun.objects.filter(run_id=run_id).values_list("status", flat=True)) == {
-        "canceled"
-    }
-
-
 def test_workspace_continuation_resumes_after_a_crash_between_move_and_recreation(
     project: RelayProject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

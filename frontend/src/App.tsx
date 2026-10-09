@@ -6,6 +6,7 @@ import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from 
 import { WorkspaceBoundary } from "./components/WorkspaceBoundary";
 
 import { api, errorMessage } from "./api";
+import { useFrontendUpdate } from "./frontend-update";
 import { useAttention } from "./attention";
 import { hasSeen, TOUR_SEEN, WELCOME_SEEN, resetOnboarding, type SettingsSection } from "./onboarding";
 import { HelpTextField, HelpTip } from "./components/HelpTip";
@@ -41,6 +42,8 @@ function readSetupDismissed(): boolean {
 }
 
 export function App() {
+  const updatedFrontend = useFrontendUpdate();
+  const [reloading, setReloading] = useState(false);
   const projectPickerId = useId();
   const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeen(WELCOME_SEEN));
   const [tourRequested, setTourRequested] = useState(() => !hasSeen(TOUR_SEEN));
@@ -100,6 +103,11 @@ export function App() {
     try { await beforeLeave.current?.(); navigate(patch); }
     catch (caught) { setProjectError(errorMessage(caught)); }
   }, [navigate]);
+  const reloadSafely = useCallback(async () => {
+    setReloading(true);
+    try { await beforeLeave.current?.(); window.location.reload(); }
+    catch (caught) { setProjectError(errorMessage(caught)); setReloading(false); }
+  }, []);
   const showWelcome = useCallback(async () => {
     try { await beforeLeave.current?.(); setWelcomeOpen(true); }
     catch (caught) { setProjectError(errorMessage(caught)); }
@@ -305,6 +313,7 @@ export function App() {
       </AppBar>
       <Container maxWidth={false} className="app-content">
 
+        {updatedFrontend && <Alert severity="info" sx={{ mb: 2 }} action={<Button disabled={reloading} onClick={() => void reloadSafely()}>Reload Relay</Button>}>Relay was updated. Reload to use the current version.</Alert>}
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
         {projectError && !openingProject && <Alert severity="error" sx={{ mb: 2 }}>{projectError}</Alert>}
         {!setupDismissed && <Alert className="setup-banner" severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={

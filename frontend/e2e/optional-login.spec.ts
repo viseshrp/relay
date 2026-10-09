@@ -23,7 +23,11 @@ test("all three header tabs fit beside the logo without login", async ({ page },
       const tabs = await header.getByRole("tablist").boundingBox();
       if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
       for (const name of ["Workflows", "Runs", "Settings"]) {
-        const tab = await header.getByRole("tab", { name, exact: true }).boundingBox();
+        const control = header.getByRole("tab", { name, exact: true });
+        await expect(control).toBeEnabled();
+        await expect(control).toHaveCSS("opacity", "1");
+        await expect(control).toHaveCSS("color", name === "Settings" ? "rgb(35, 61, 150)" : "rgb(49, 86, 211)");
+        const tab = await control.boundingBox();
         if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
         expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
         expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);

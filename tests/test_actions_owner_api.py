@@ -40,21 +40,10 @@ def owner(project: RelayProject, monkeypatch: pytest.MonkeyPatch) -> Client:
     return client
 
 
-def test_language_manifest_conversion_and_method_boundaries(owner: Client) -> None:
+def test_language_manifest_validation_and_method_boundaries(owner: Client) -> None:
     manifest = owner.get("/api/workflow-language").json()
     assert manifest["job_execution"] == "serial" and manifest["limits"]["matrix_variants"] == 256
-    converted = post(
-        owner,
-        "/api/workflow-language/convert",
-        {
-            "yaml": "version: 1\nname: Legacy\n"
-            "nodes: {check: {type: command, run: [git, status], timeout: 3m}}"
-        },
-    )
-    assert converted.status_code == 200 and converted.json()["complete"]
-    assert post(
-        owner, "/api/workflow-language/validate", {"yaml": converted.json()["yaml"]}
-    ).json()["valid"]
+    assert post(owner, "/api/workflow-language/validate", {"yaml": BASE}).json()["valid"]
     for url in (
         "/api/workflow-library",
         "/api/workflow-bindings",
@@ -63,7 +52,6 @@ def test_language_manifest_conversion_and_method_boundaries(owner: Client) -> No
     ):
         assert owner.delete(url).status_code == 405
         assert Client().get(url).status_code == 401
-    assert owner.get("/api/workflow-language/convert").status_code == 405
 
 
 def test_library_import_export_captures_project_prompts_and_transitive_actions(

@@ -50,7 +50,6 @@ accept the Actions jobs/steps dialect. Historical snapshots remain readable.
 | --- | --- |
 | `GET /api/workflow-language` | Pinned language revision, supported fields, and limits |
 | `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
-| `POST /api/workflow-language/convert` | `{yaml}`; preview returns YAML and manual-conversion issues without saving |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
 | `POST /api/attempts/<id>/environment` | Approve the exact waiting environment attempt |

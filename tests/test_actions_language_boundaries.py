@@ -162,7 +162,7 @@ def test_yaml_resource_bounds_and_syntax_diagnostics() -> None:
         ("#" * 1048577, "1 MiB"),
         ("jobs: [", "Invalid YAML"),
         ("{1: value}", "keys must be strings"),
-        ("version: 1\nnodes: {}", "conversion preview"),
+        ("version: 1\nnodes: {}", "jobs mapping"),
         ("a: " + "[" * 52 + "value" + "]" * 52, "depth limit"),
         ("a: &a [value]\nb: [" + ", ".join(["*a"] * 101) + "]", "alias limit"),
         ("a: [" + ", ".join(["value"] * 10001) + "]", "node or depth"),

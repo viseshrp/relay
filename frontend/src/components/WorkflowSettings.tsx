@@ -14,11 +14,12 @@ export function WorkflowSettings({ open, projectId, yaml, onClose, onEnvironment
   const [config, setConfig] = useState<Environment>({ name: "", approval_required: false, wait_minutes: 0, branches: [], url: "" });
   const [bundle, setBundle] = useState(""); const [templateName, setTemplateName] = useState(""); const [description, setDescription] = useState("");
   const endpoint = (path: string) => projectPath(path, projectId);
-  async function refresh() {
-    const [saved, configured, library] = await Promise.all([api<{ bindings: Binding[] }>(endpoint("/api/workflow-bindings")), api<{ environments: Environment[] }>(endpoint("/api/workflow-environments")), api<{ templates: Template[] }>("/api/workflow-library")]);
+  async function refresh(signal?: AbortSignal) {
+    const [saved, configured, library] = await Promise.all([api<{ bindings: Binding[] }>(endpoint("/api/workflow-bindings"), { signal }), api<{ environments: Environment[] }>(endpoint("/api/workflow-environments"), { signal }), api<{ templates: Template[] }>("/api/workflow-library", { signal })]);
+    if (signal?.aborted) return;
     setBindings(saved.bindings); setEnvironments(configured.environments); setTemplates(library.templates); onEnvironments(configured.environments.map(item => item.name));
   }
-  useEffect(() => { if (open) { setValue(""); setError(""); void refresh().catch(e => setError(errorMessage(e))); } }, [open, projectId]);
+  useEffect(() => { if (!open) return; const abort = new AbortController(); setValue(""); setError(""); setBindings([]); setEnvironments([]); setTemplates([]); void refresh(abort.signal).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); }); return () => abort.abort(); }, [open, projectId]);
   async function mutate(path: string, body: unknown) {
     setBusy(true); setError("");
     try { await api(endpoint(path), { method: "POST", body: JSON.stringify(body) }); setValue(""); await refresh(); }

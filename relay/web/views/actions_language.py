@@ -83,15 +83,6 @@ def validate(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()]})
 
 
-@api_errors
-@owner_required
-@require_POST
-def convert(request: HttpRequest) -> JsonResponse:
-    from relay.workflows.actions.conversion import preview
-
-    return JsonResponse(preview(required_text(json_body(request), "yaml")))
-
-
 def _scope(request: HttpRequest, body: dict[str, Any]) -> str:
     _, project = current_project(request)
     name = str(body.get("scope", "project"))

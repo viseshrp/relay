@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { editActions, moveActionStep, parseActions } from "../src/actions-workflow";
+import { editActions, editorYaml, moveActionStep, parseActions } from "../src/actions-workflow";
 
 const source = `# Workflow comment
 name: Source preservation
@@ -42,4 +42,14 @@ test("adding and removing a step preserves unrelated source and rejects invalid 
   expect(removed).toContain("# Workflow comment");
   expect(removed).toContain("*ordered # Alias comment");
   expect(() => moveActionStep(source, "original", -1, 0)).toThrow("Select a valid ordered step");
+});
+
+
+test("current JSON workflow displays as block YAML", () => {
+  const value = { name: "Current source", jobs: { work: { "runs-on": "self-hosted", steps: [{ run: "echo hello\\necho world" }] } } };
+  const display = editorYaml(JSON.stringify(value));
+  expect(display).toMatch(/^name: Current source\n/);
+  expect(parseActions(display).document.toJS()).toEqual(value);
+  expect(editorYaml(source)).toBe(source);
+  for (const invalid of ['{"jobs": {}, "jobs": {}}', '{"jobs":', '[1, 2]']) expect(editorYaml(invalid)).toBe(invalid);
 });

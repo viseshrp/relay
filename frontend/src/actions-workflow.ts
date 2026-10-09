@@ -25,14 +25,27 @@ export interface ActionWorkflow {
   defaults?: unknown; concurrency?: unknown; "cache-mode"?: string;
 }
 
+export { readableWorkflowYaml as editorYaml } from "./source-format";
+
+function editorSafeDefinitions(value: Record<string, unknown>): boolean {
+  return Object.values(value).every(item => {
+    if (!isRecord(item)) return false;
+    if (item.name != null && typeof item.name !== "string") return false;
+    if (item.needs != null && !(typeof item.needs === "string") && !(Array.isArray(item.needs) && item.needs.every(name => typeof name === "string"))) return false;
+    if (item.steps != null && !(Array.isArray(item.steps) && item.steps.every(step => isRecord(step) && ["name", "id", "uses"].every(field => step[field] == null || typeof step[field] === "string")))) return false;
+    return true;
+  });
+}
+
 export function parseActions(text: string) {
   const document = parseDocument(text, { keepSourceTokens: true, prettyErrors: true, uniqueKeys: true });
   const errors = document.errors.map(error => error.message);
   let value: ActionWorkflow | null = null;
+  if (errors.length) return { document, value, errors };
   try {
     const raw: unknown = document.toJS({ maxAliasCount: 100 });
-    if (isRecord(raw) && isRecord(raw.jobs)) value = raw as unknown as ActionWorkflow;
-    else if (!errors.length) errors.push("Use a jobs mapping. Legacy sources need a conversion preview.");
+    if (isRecord(raw) && (raw.name == null || typeof raw.name === "string") && isRecord(raw.jobs) && editorSafeDefinitions(raw.jobs)) value = raw as unknown as ActionWorkflow;
+    else if (!errors.length) errors.push("Use a jobs mapping with ordered steps.");
   } catch (error) { errors.push(String(error)); }
   return { document, value, errors };
 }

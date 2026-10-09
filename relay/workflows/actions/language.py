@@ -621,7 +621,7 @@ def load(text: str, *, source: Path | None = None) -> ActionsDocument:
         message = "workflow"
         raise _issue(
             message,
-            "Legacy Relay sources require an explicit conversion preview.",
+            "Workflow sources require a jobs mapping with ordered steps.",
             unsupported=True,
         )
     _unsupported(record, "workflow")

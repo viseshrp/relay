@@ -13,12 +13,10 @@ sources without starting processes or retrieving credentials. See
 [language compatibility](workflow-language-compatibility.md) for provenance,
 limits, and the implementation map.
 
-Historical `version: 1` / `nodes` snapshots retain their original interpreter.
-New saves and launches require `jobs`. The browser offers a conversion preview
-for old files; review its issues before saving the draft. An old source is
-never rewritten automatically.
-The preview converts legacy durations to minutes and retains human-wait
-deadlines. Git write and permission policies require explicit owner review.
+Saved workflow sources and new launches require `jobs` and ordered `steps`.
+The previous `version: 1` / `nodes` authoring format is unsupported. Replace old
+files with current sources; Relay does not provide a conversion-preview flow.
+Captured run snapshots remain available in run history.
 
 ## Jobs and ordered steps
 

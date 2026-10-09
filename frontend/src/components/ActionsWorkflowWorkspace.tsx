@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import { editorHolder } from "../editor-session";
-import { actionsGraph, editActions, moveActionStep, launchView, parseActions, type ActionStep } from "../actions-workflow";
+import { actionsGraph, editorYaml, editActions, moveActionStep, launchView, parseActions, type ActionStep } from "../actions-workflow";
 import type { AgentRecord, AgentsResponse, ProjectSettingsResponse, ProviderDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import type { WorkflowWorkspaceProps } from "./WorkflowWorkspace";
 import { FlowCanvas } from "./FlowCanvas";
@@ -25,16 +25,18 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [notice, setNotice] = useState("");
   const [agents, setAgents] = useState<AgentRecord[]>([]); const [defaultModel, setDefaultModel] = useState("");
   const [providerDefaults, setProviderDefaults] = useState<Record<string, ProviderDefaults>>({});
+  const [loadedDocument, setLoadedDocument] = useState("");
+  const [leaseError, setLeaseError] = useState("");
   const [lease, setLease] = useState(false); const [error, setError] = useState("");
   const [jobId, setJobId] = useState(""); const [search, setSearch] = useState(""); const [focusRequest, setFocusRequest] = useState(0); const [index, setIndex] = useState(0);
   const [create, setCreate] = useState(Boolean(props.initialCreate));
   const [launch, setLaunch] = useState(props.initialLaunch);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]); const [valid, setValid] = useState(false);
-  const [conversion, setConversion] = useState<{ yaml: string; issues: string[]; complete: boolean } | null>(null);
   const [triggerRows, setTriggerRows] = useState<Trigger[]>([]); const [activation, setActivation] = useState<string | null>(null);
   const [authorize, setAuthorize] = useState(false);
   const [settings, setSettings] = useState(false); const [environments, setEnvironments] = useState<string[]>([]);
   const holder = useRef(editorHolder()); const writes = useRef(Promise.resolve());
+  const currentDocument = useRef("");
   const parsed = useMemo(() => parseActions(text), [text]); const graph = useMemo(() => actionsGraph(parsed.value), [parsed.value]);
   const job = parsed.value?.jobs[jobId]; const step = job?.steps?.[index];
   const matchingJobs = Object.entries(parsed.value?.jobs || {}).filter(([id, item]) => `${id} ${item.name || ""}`.toLowerCase().includes(search.toLowerCase()));
@@ -49,59 +51,80 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     return () => abort.abort();
   }, [props.requestProject]);
   const path = (suffix: string) => projectPath(`/api/workflows/${encoded(key)}${suffix}`, props.requestProject);
-  const refresh = useCallback(async () => {
-    const result = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", props.requestProject));
+  currentDocument.current = path("");
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const result = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", props.requestProject), { signal });
+    if (signal?.aborted) return;
     setInventory(result.workflows);
     if (!key && result.workflows.length) setKey((result.workflows.find(item => item.key === "workflow.yaml") || result.workflows[0]).key);
   }, [props.requestProject, key]);
-  useEffect(() => { void refresh().catch(e => setError(errorMessage(e))); }, [refresh]);
+  useEffect(() => { const abort = new AbortController(); void refresh(abort.signal).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); }); return () => abort.abort(); }, [refresh]);
   useEffect(() => { if (props.initialWorkflow) setKey(props.initialWorkflow); }, [props.initialWorkflow]);
   useEffect(() => { if (props.initialLaunch) setLaunch(true); }, [props.initialLaunch]);
   useEffect(() => {
     if (!key) return;
-    const abort = new AbortController(); setLease(false); setError(""); setSearch("");
+    const abort = new AbortController();
+    let renew: number | undefined;
+    setLease(false); setLeaseError(""); setError(""); setSearch(""); setNotice("");
+    setText(""); setSaved(""); setDraft(null); setLoadedDocument("");
     const endpoint = projectPath(`/api/workflows/${encoded(key)}`, props.requestProject);
     const leaseEndpoint = projectPath(`/api/workflows/${encoded(key)}/lease`, props.requestProject);
+    async function acquire() {
+      try {
+        await api(leaseEndpoint, { method: "POST", signal: abort.signal, body: JSON.stringify({ holder: holder.current }) });
+        if (!abort.signal.aborted) { setLease(true); setLeaseError(""); }
+      } catch (e) { if (!abort.signal.aborted) { setLease(false); setLeaseError(errorMessage(e)); } }
+    }
     void api<WorkflowDocumentResponse>(endpoint, { signal: abort.signal }).then(async result => {
       if (abort.signal.aborted) return;
-      setText(result.draft?.yaml || result.yaml); setSaved(result.yaml); setBase(result.base_hash); setDraft(result.draft);
-      const acquired = await api<{ acquired?: boolean }>(leaseEndpoint, { method: "POST", body: JSON.stringify({ holder: holder.current }) });
-      if (!abort.signal.aborted) { setLease(acquired.acquired !== false); props.onWorkflowLoaded(key); }
+      setText(editorYaml(result.draft?.yaml ?? result.yaml)); setSaved(editorYaml(result.yaml)); setBase(result.base_hash); setDraft(result.draft); setLoadedDocument(endpoint);
+      await acquire();
+      if (!abort.signal.aborted) { props.onWorkflowLoaded(key); renew = window.setInterval(() => { void acquire(); }, 30000); }
     }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); });
-    const renew = window.setInterval(() => { void api(leaseEndpoint, { method: "POST", body: JSON.stringify({ holder: holder.current }) }).catch(e => { setLease(false); setError(errorMessage(e)); }); }, 30000);
     return () => { abort.abort(); window.clearInterval(renew); };
   }, [key, props.requestProject]);
   const flush = useCallback(async () => {
-    if (!key || text === (draft?.yaml || saved)) return;
+    if (!key || loadedDocument !== projectPath(`/api/workflows/${encoded(key)}`, props.requestProject) || text === (draft ? editorYaml(draft.yaml) : saved)) return;
     if (!lease) throw new Error("The editing lease is unavailable. Your draft remains in this editor.");
     writes.current = writes.current.catch(() => undefined).then(async () => {
       const result = await api<{ draft: WorkflowDraft }>(projectPath(`/api/workflows/${encoded(key)}/draft`, props.requestProject), { method: "POST", body: JSON.stringify({ yaml: text, base_hash: base, holder: holder.current }) });
-      setDraft(result.draft);
+      if (currentDocument.current === loadedDocument) setDraft(result.draft);
     });
     await writes.current;
-  }, [key, text, saved, draft, lease, base, props.requestProject]);
+  }, [key, text, saved, draft, lease, base, props.requestProject, loadedDocument]);
   useLayoutEffect(() => { props.onNavigationReady(flush); return () => props.onNavigationReady(null); }, [flush, props.onNavigationReady]);
-  useEffect(() => { const timer = window.setTimeout(() => { void flush().catch(e => setError(errorMessage(e))); }, 600); return () => window.clearTimeout(timer); }, [flush]);
+  useEffect(() => { const timer = window.setTimeout(() => { void flush().catch(e => { if (currentDocument.current === loadedDocument) setError(errorMessage(e)); }); }, 600); return () => window.clearTimeout(timer); }, [flush]);
   useEffect(() => {
-    setValid(false); if (!text) return;
+    setValid(false); setDiagnostics([]); if (!text || loadedDocument !== path("")) return;
     const abort = new AbortController(); const timer = window.setTimeout(() => {
       void api<{ valid: boolean; diagnostics: Diagnostic[] }>(projectPath("/api/workflow-language/validate", props.requestProject), { method: "POST", signal: abort.signal, body: JSON.stringify({ yaml: text, source: key }) }).then(result => { if (!abort.signal.aborted) { setValid(result.valid); setDiagnostics(result.diagnostics); } }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); });
     }, 300);
     return () => { abort.abort(); window.clearTimeout(timer); };
-  }, [text, key, props.requestProject]);
+  }, [text, key, props.requestProject, loadedDocument]);
   useEffect(() => { setJobId(current => parsed.value?.jobs[current] ? current : Object.keys(parsed.value?.jobs || {})[0] || ""); }, [parsed.value]);
   useEffect(() => { setIndex(0); }, [jobId]);
-  useEffect(() => { void api<{ triggers: Trigger[] }>(projectPath("/api/workflow-triggers", props.requestProject)).then(result => setTriggerRows(result.triggers)).catch(e => setError(errorMessage(e))); }, [props.requestProject]);
+  useEffect(() => { const abort = new AbortController(); setTriggerRows([]); void api<{ triggers: Trigger[] }>(projectPath("/api/workflow-triggers", props.requestProject), { signal: abort.signal }).then(result => { if (!abort.signal.aborted) setTriggerRows(result.triggers); }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); }); return () => abort.abort(); }, [props.requestProject]);
   async function save() {
+    const target = path("");
     try { await flush(); await api(path("/save"), { method: "POST", body: JSON.stringify({ yaml: text, base_hash: base, holder: holder.current }) });
-      const result = await api<WorkflowDocumentResponse>(path("")); setSaved(result.yaml); setBase(result.base_hash); setDraft(null); setError(""); setNotice("Workflow saved and validated.");
-    } catch (e) { setError(errorMessage(e)); }
+      const result = await api<WorkflowDocumentResponse>(target); if (currentDocument.current !== target) return; setSaved(editorYaml(result.yaml)); setBase(result.base_hash); setDraft(null); setError(""); setNotice("Workflow saved and validated.");
+    } catch (e) { if (currentDocument.current === target) setError(errorMessage(e)); }
   }
-  useEffect(() => { void api<{ environments: Array<{ name: string }> }>(projectPath("/api/workflow-environments", props.requestProject)).then(result => setEnvironments(result.environments.map(item => item.name))).catch(e => setError(errorMessage(e))); }, [props.requestProject]);
+  async function restoreSaved() {
+    const target = path("");
+    setText(saved);
+    try { await api(path("/draft"), { method: "POST", body: JSON.stringify({ yaml: saved, base_hash: base, holder: holder.current }) }); if (currentDocument.current === target) setDraft(null); }
+    catch (e) { if (currentDocument.current === target) setError(errorMessage(e)); }
+  }
+  useEffect(() => { const abort = new AbortController(); setEnvironments([]); void api<{ environments: Array<{ name: string }> }>(projectPath("/api/workflow-environments", props.requestProject), { signal: abort.signal }).then(result => { if (!abort.signal.aborted) setEnvironments(result.environments.map(item => item.name)); }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); }); return () => abort.abort(); }, [props.requestProject]);
   function change(parts: Array<string | number>, value: unknown) { try { setText(editActions(text, parts, value)); } catch (e) { setError(errorMessage(e)); } }
   const editStep = (field: keyof ActionStep, value: unknown) => change(["jobs", jobId, "steps", index, field], value === "" ? undefined : value);
   function jsonField(label: string, parts: Array<string | number>, value: unknown) {
-    return <TextField key={parts.join(".") + JSON.stringify(value)} label={label} multiline minRows={2} defaultValue={JSON.stringify(value ?? {}, null, 2)} onBlur={event => { try { change(parts, JSON.parse(event.target.value)); } catch (e) { setError(errorMessage(e)); } }} helperText="JSON values; YAML comments and unrelated fields are preserved." />;
+    return <TextField key={parts.join(".") + JSON.stringify(value)} label={label} multiline minRows={2} defaultValue={JSON.stringify(value ?? {}, null, 2)} onBlur={event => { try {
+      if (!event.target.value.trim()) { if (value !== undefined) change(parts, undefined); return; }
+      const next: unknown = JSON.parse(event.target.value);
+      if (JSON.stringify(next) !== JSON.stringify(value ?? {})) change(parts, next);
+    } catch (e) { setError(errorMessage(e)); } }} helperText="JSON values; YAML comments and unrelated fields are preserved." />;
   }
   async function toggleTrigger(event: string, enabled: boolean) {
     try { const result = await api<{ triggers: Trigger[] }>(projectPath("/api/workflow-triggers", props.requestProject), { method: "POST", body: JSON.stringify({ key, event, enabled, allow_writers: enabled }) }); setTriggerRows(result.triggers); setActivation(null); setAuthorize(false); } catch (e) { setError(errorMessage(e)); }
@@ -115,13 +138,12 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     {lease && valid && <Typography>Ready to edit</Typography>}
     {notice && <Alert severity="success">{notice}</Alert>}
     {!key && <Typography variant="h6">No workflows yet</Typography>}
-    {error && <Alert severity="error">{error}</Alert>}{draft && <Alert severity="info">Recovered draft loaded. Saving publishes the validated source.<Button onClick={() => { setText(saved); void api(path("/draft"), { method: "POST", body: JSON.stringify({ yaml: saved, base_hash: base, holder: holder.current }) }).then(() => setDraft(null)).catch(e => setError(errorMessage(e))); }}>Restore saved source</Button></Alert>}
+    {leaseError && <Alert severity="error">{leaseError}</Alert>}{error && <Alert severity="error">{error}</Alert>}{draft && <Alert severity="info">Recovered draft loaded. Saving publishes the validated source.<Button disabled={!lease} onClick={() => void restoreSaved()}>Restore saved source</Button></Alert>}
     {diagnostics.map((item, i) => <Alert severity="error" key={i}>{item.context?.line ? `Line ${item.context.line}: ` : ""}{item.message}</Alert>)}
-    {!parsed.value && text && <Button onClick={() => { void api<typeof conversion>(projectPath("/api/workflow-language/convert", props.requestProject), { method: "POST", body: JSON.stringify({ yaml: text }) }).then(setConversion).catch(e => setError(errorMessage(e))); }}>Preview legacy conversion</Button>}
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "minmax(0, 1fr) minmax(0, 1fr)" }, gap: 2 }}>
-      <Paper sx={{ p: 2 }}><Stack spacing={2}><Typography variant="h6">Jobs and ordered steps</Typography><FlowCanvas key={key} focusRequest={focusRequest} selectedId={jobId} initialFocusId={Object.keys(parsed.value?.jobs || {})[0]} followSelection nodes={graph.nodes} edges={graph.edges} onSelect={setJobId} />
-        <Stack component="nav" aria-label="Workflow job navigation"><TextField label="Find a job" value={search} onChange={e => setSearch(e.target.value)} />{matchingJobs.map(([id, item]) => <Button key={id} aria-pressed={jobId === id} onClick={() => { setJobId(id); setFocusRequest(value => value + 1); }}>{item.name || id.replace(/_/g, " ").replace(/^./, letter => letter.toUpperCase())}</Button>)}{!matchingJobs.length && search && <Typography>No jobs match. Try another name.</Typography>}</Stack>
-        <Button onClick={() => { let number = 1; while (parsed.value?.jobs[`job_${number}`]) number++; const id = `job_${number}`; change(["jobs", id], { "runs-on": "self-hosted", steps: [{ run: "echo Ready" }] }); setJobId(id); }}>Add job</Button>
+      <Paper sx={{ p: 2 }}><Stack spacing={2}><Typography variant="h6">Jobs and ordered steps</Typography><FlowCanvas key={key} focusRequest={focusRequest} selectedId={jobId || undefined} initialFocusId={graph.nodes[0]?.id} followSelection nodes={graph.nodes} edges={graph.edges} onSelect={setJobId} />
+        <Stack component="nav" aria-label="Workflow job navigation"><TextField disabled={!parsed.value} label="Find a job" value={search} onChange={e => setSearch(e.target.value)} />{matchingJobs.map(([id, item]) => <Button key={id} aria-pressed={jobId === id} onClick={() => { setJobId(id); setFocusRequest(value => value + 1); }}>{item.name || id.replace(/_/g, " ").replace(/^./, letter => letter.toUpperCase())}</Button>)}{!matchingJobs.length && search && <Typography>No jobs match. Try another name.</Typography>}</Stack>
+        <Button disabled={!parsed.value} onClick={() => { let number = 1; while (parsed.value?.jobs[`job_${number}`]) number++; const id = `job_${number}`; change(["jobs", id], { "runs-on": "self-hosted", steps: [{ run: "echo Ready" }] }); setJobId(id); }}>Add job</Button>
         {job && <><Button onClick={() => change(["jobs", jobId], undefined)}>Remove job</Button><TextField label="Job name" value={job.name || ""} onChange={e => change(["jobs", jobId, "name"], e.target.value)} /><TextField label="Needs (comma separated)" value={typeof job.needs === "string" ? job.needs : (job.needs || []).join(", ")} onChange={e => change(["jobs", jobId, "needs"], e.target.value.split(",").map(x => x.trim()).filter(Boolean))} />
           <TextField label="Job timeout (minutes)" value={job["timeout-minutes"] ?? ""} onChange={e => change(["jobs", jobId, "timeout-minutes"], e.target.value ? Number(e.target.value) : undefined)} /><FormControlLabel control={<Checkbox checked={job["continue-on-error"] === true} onChange={e => change(["jobs", jobId, "continue-on-error"], e.target.checked)} />} label="Continue after this job fails" /><TextField select label="Cache mode" value={job["cache-mode"] || "write"} onChange={e => change(["jobs", jobId, "cache-mode"], e.target.value)}>{["write", "read", "write-only", "none"].map(mode => <MenuItem value={mode} key={mode}>{mode}</MenuItem>)}</TextField><TextField label="Job condition" value={job.if || ""} onChange={e => change(["jobs", jobId, "if"], e.target.value || undefined)} />
           <TextField label="Reusable workflow" value={job.uses || ""} onChange={e => { if (e.target.value) { change(["jobs", jobId], { ...job, uses: e.target.value, steps: undefined, "runs-on": undefined }); } else change(["jobs", jobId, "uses"], undefined); }} />
@@ -140,7 +162,6 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     </Box>
     <CreateWorkflowDialog holder={holder.current} open={create} requestProject={props.requestProject} onClose={() => setCreate(false)} onCreated={async newKey => { setCreate(false); setKey(newKey); await refresh(); }} />
     <LaunchPanel open={launch} workflowKey={key} workflow={launchView(parsed.value, environments)} project={props.project} requestProject={props.requestProject} modelOptions={[]} blockedReason={!valid ? "Fix validation errors." : text !== saved ? "Save this workflow before running." : null} saveError={error || null} onSave={() => void save()} onClose={() => { setLaunch(false); props.onLaunchClosed(); }} onExited={() => undefined} onRunLaunched={props.onRunLaunched} previousRun={null} />
-    <Dialog open={Boolean(conversion)} onClose={() => setConversion(null)} fullWidth maxWidth="md"><DialogTitle>Legacy conversion preview</DialogTitle><DialogContent><Stack spacing={1}>{conversion?.issues.map(issue => <Alert key={issue} severity="warning">{issue}</Alert>)}<Typography>Review this draft before saving. The saved source remains unchanged.</Typography><Box component="pre" sx={{ whiteSpace: "pre-wrap" }}>{conversion?.yaml}</Box></Stack></DialogContent><DialogActions><Button onClick={() => setConversion(null)}>Close</Button><Button onClick={() => { if (conversion) setText(conversion.yaml); setConversion(null); }}>Use preview as draft</Button></DialogActions></Dialog>
     <Dialog open={Boolean(activation)} onClose={() => { setActivation(null); setAuthorize(false); }}><DialogTitle>Activate {activation}</DialogTitle><DialogContent><FormControlLabel control={<Checkbox checked={authorize} onChange={e => setAuthorize(e.target.checked)} />} label="Allow this trigger to launch writing jobs automatically on this computer." /></DialogContent><DialogActions><Button onClick={() => setActivation(null)}>Cancel</Button><Button disabled={!authorize || text !== saved} onClick={() => { if (activation) void toggleTrigger(activation, true); }}>Activate trigger</Button></DialogActions></Dialog>
   </Stack>;
 }

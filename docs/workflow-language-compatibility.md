@@ -80,15 +80,15 @@ an accepted upstream key as proof that Relay can execute it.
 Paths without a prefix above are in `relay/workflows/actions/`,
 `relay/execution/`, or `relay/web/` as named in the repository code map.
 Focused Python contracts live in `tests/test_actions_*.py`; browser contracts
-live in `frontend/e2e/` and `frontend/scripts/`. Historical parser/execution
-regressions remain separate from the new public save/launch contract.
+live in `frontend/e2e/` and `frontend/scripts/`. Tests cover the current public
+save/launch contract and durable execution.
 
 ## Product decisions
 
 The public schema is replaced without a version opt-in because Relay is
 unreleased. Historical launch snapshots retain a legacy semantics revision and
-frozen definition. Source conversion is a preview with explicit unsupported
-issues, not a background migration.
+frozen definition. Old editable sources and drafts may be replaced or
+discarded. The browser does not offer a legacy conversion flow.
 
 Jobs and all nested/matrix work run serially. Agent edits and tests share the
 primary worktree. Code changes require a clean descendant commit at job end;

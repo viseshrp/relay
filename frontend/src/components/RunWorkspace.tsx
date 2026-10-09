@@ -685,8 +685,8 @@ export function RunWorkspace({ selectedWorkflow, onSelectWorkflow, selectedRun, 
       const parsed = parseWorkflow(document.yaml);
       if (parsed.value === null) throw new Error(`Fix the saved workflow's YAML before running it again. ${parsed.errors.join(" ")}`);
       const actions = parseActions(document.yaml);
+      if (!actions.value) throw new Error(`Fix the saved workflow before starting a new run. ${actions.errors.join(" ")}`);
       const environments = await api<{ environments: Array<{ name: string }> }>(projectPath("/api/workflow-environments", source.project_id), { signal: controller.signal });
-      if (!actions.value) throw new Error("Convert this saved workflow to jobs and ordered steps before starting a new run.");
       if (controller.signal.aborted) return;
       setRunAgain({ source, workflow: launchView(actions.value, environments.environments.map(item => item.name))!, open: true,
         models: Array.from(new Set(agents?.agents.flatMap((agent) => agent.models.map((model) => model.value)) ?? [])).sort() });

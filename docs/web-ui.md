@@ -217,10 +217,16 @@ or Run. Pure validation never executes a command or probes an agent.
 Drafts autosave after editing and before navigation. A renewed editing lease and
 saved-file hash protect publication. A recovered draft can be inspected or
 replaced with the saved source. Saving validates and publishes only that
-workflow. A legacy source offers **Preview legacy conversion**, with warnings
-for rules that require manual conversion. Reading it never rewrites its bytes;
-new launches require the current dialect. Historical run snapshots remain
-inspectable with their original semantics.
+workflow. Saved sources and drafts use the current jobs-and-steps format.
+Historical run snapshots remain inspectable.
+
+JSON-formatted current workflow sources appear as block YAML in the editor and
+captured workflow viewer. Unchanged form fields do not create recovery drafts.
+Canceled requests cannot report errors in a different workflow or project.
+When the served frontend changes, an informational banner offers **Reload Relay**.
+Reload follows the normal navigation checks before opening the current version.
+Enabled tabs, sidebar navigation, and icon actions use the action color; gray
+controls indicate unavailable actions.
 
 **Variables, secrets, environments and library** opens project and installation
 bindings, environment policies, and owner templates. Secret forms accept an
