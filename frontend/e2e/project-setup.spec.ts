@@ -74,8 +74,11 @@ test("the checklist can close before a run and reopen from settings with keyboar
   await openSettings(page);
   await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
   await help.click();
+  const checked = page.waitForResponse("**/api/agents/check");
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
   await expect(setup).toBeVisible();
+  const response = await checked;
+  expect(response.ok(), await response.text()).toBeTruthy();
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   await page.screenshot({ path: info.outputPath("optional-checklist.png"), animations: "disabled" });
   await page.keyboard.press("Escape");
@@ -125,7 +128,10 @@ test("closing setup before inventory arrives prevents a later connection probe",
   releaseInventory();
   await (await responded).finished();
   await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
+  const checked = page.waitForResponse("**/api/agents/check");
   await page.getByRole("menuitem", { name: "Get started", exact: true }).click();
+  const response = await checked;
+  expect(response.ok(), await response.text()).toBeTruthy();
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   expect(checks).toBe(1);
 });
