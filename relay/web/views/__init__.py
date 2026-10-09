@@ -17,7 +17,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpRequest, JsonResponse
 from django.http.response import HttpResponseBase
 
-from relay.constants import DATABASE_INTEGER_MAX
+from relay.constants import API_MAX_PAGE_BYTES, DATABASE_INTEGER_MAX
 from relay.errors import ConfigError, ProjectDiscoveryError, RelayError
 from relay.projects.discovery import discover_relay_root
 from relay.projects.identity import canonical_path
@@ -83,13 +83,17 @@ def api_errors(
     return wrapped
 
 
-def json_body(request: HttpRequest) -> dict[str, object]:
+def json_body(request: HttpRequest, *, max_bytes: int = API_MAX_PAGE_BYTES) -> dict[str, object]:
     """Decode one JSON object without coercing field values."""
     if request.content_type != "application/json":
         message = "This endpoint requires an application/json request body."
         raise ConfigError(message)
     try:
-        value = json.loads(request.body)
+        raw = request.read(max_bytes + 1) if max_bytes > API_MAX_PAGE_BYTES else request.body
+        if len(raw) > max_bytes:
+            message = "The request body exceeds Relay's byte limit."
+            raise ConfigError(message)
+        value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
         message = "The request body is not valid JSON."
         raise ConfigError(message) from None

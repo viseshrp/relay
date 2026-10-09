@@ -171,6 +171,7 @@ class Run(RelayModel):
     recovery_policy: models.JSONField = models.JSONField(default=dict)
     dispatch_paused: models.BooleanField = models.BooleanField(default=False)
     repair_groups: models.JSONField = models.JSONField(default=dict)
+    actions_state: models.JSONField = models.JSONField(default=dict)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
@@ -202,6 +203,8 @@ class RunSnapshot(RelayModel):
     runtime_versions: models.JSONField = models.JSONField(default=dict)
     hashes: models.JSONField = models.JSONField(default=dict)
     launch_defaults: models.JSONField = models.JSONField(default=dict)
+    semantics_revision: models.CharField = models.CharField(max_length=64, default="relay-v1")
+    resolved_definition: models.JSONField = models.JSONField(default=dict)
     created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 
 
@@ -226,6 +229,11 @@ class NodeRun(RelayModel):
     writes: models.BooleanField = models.BooleanField(default=False)
     selected_branch: models.TextField = models.TextField(null=True, blank=True)
     loop_index: models.PositiveIntegerField = models.PositiveIntegerField(null=True, blank=True)
+    outcome: models.CharField = models.CharField(max_length=16, blank=True)
+    conclusion: models.CharField = models.CharField(max_length=16, blank=True)
+    job_id: models.TextField = models.TextField(blank=True)
+    step_id: models.TextField = models.TextField(blank=True)
+    matrix_index: models.PositiveIntegerField = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
@@ -280,6 +288,165 @@ class NodeAttempt(RelayModel):
         ]
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=("status", "heartbeat_at"), name="relay_attempt_heartbeat_idx")
+        ]
+
+
+class ActionsJobLease(RelayModel):
+    """One installation-wide job owner, including durable nested waits."""
+
+    id: models.PositiveSmallIntegerField = models.PositiveSmallIntegerField(
+        primary_key=True, default=1
+    )
+    node: models.ForeignKey = models.ForeignKey(NodeRun, on_delete=models.SET_NULL, null=True)
+
+
+class ActionsJobState(RelayModel):
+    """Public job progress points at private, marked runtime state files."""
+
+    node: models.OneToOneField = models.OneToOneField(
+        NodeRun, on_delete=models.CASCADE, primary_key=True
+    )
+    resource: models.JSONField = models.JSONField(default=dict)
+    accepted_head: models.CharField = models.CharField(max_length=40, blank=True)
+    matrix_manifest: models.JSONField = models.JSONField(default=list)
+    updated_at: models.DateTimeField = models.DateTimeField(auto_now=True)
+
+
+class WorkflowBinding(RelayModel):
+    """Variables and write-only secret references; credential bytes live elsewhere."""
+
+    scope: models.TextField = models.TextField()
+    name: models.TextField = models.TextField()
+    kind: models.CharField = models.CharField(max_length=16)
+    value: models.TextField = models.TextField(blank=True)
+    source: models.CharField = models.CharField(max_length=16, blank=True)
+    reference: models.TextField = models.TextField(blank=True)
+    revision: models.UUIDField = models.UUIDField(default=uuid.uuid4)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("scope", "name", "kind"), name="relay_binding_identity")
+        ]
+
+
+class WorkflowEnvironment(RelayModel):
+    """Local environment settings and attempt-specific deployment gates."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    name: models.TextField = models.TextField()
+    approval_required: models.BooleanField = models.BooleanField(default=False)
+    wait_minutes: models.PositiveIntegerField = models.PositiveIntegerField(default=0)
+    branches: models.JSONField = models.JSONField(default=list)
+    url: models.TextField = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("project", "name"), name="relay_environment_identity")
+        ]
+
+
+class ActionsArtifact(RelayModel):
+    """Immutable named artifact manifests; expiry applies only to optional bytes."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run: models.ForeignKey = models.ForeignKey(Run, on_delete=models.CASCADE)
+    attempt: models.ForeignKey = models.ForeignKey(NodeAttempt, on_delete=models.CASCADE)
+    name: models.TextField = models.TextField()
+    manifest: models.JSONField = models.JSONField(default=dict)
+    directory: models.TextField = models.TextField()
+    digest: models.CharField = models.CharField(max_length=64)
+    bytes: models.PositiveBigIntegerField = models.PositiveBigIntegerField(default=0)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+    expires_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
+    required: models.BooleanField = models.BooleanField(default=False)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("run", "name"), name="relay_actions_artifact_identity")
+        ]
+
+
+class ActionsCache(RelayModel):
+    """Disposable, immutable project-scoped cache entries."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    key: models.TextField = models.TextField()
+    version: models.CharField = models.CharField(max_length=64)
+    namespace: models.TextField = models.TextField()
+    manifest: models.JSONField = models.JSONField(default=dict)
+    directory: models.TextField = models.TextField()
+    bytes: models.PositiveBigIntegerField = models.PositiveBigIntegerField()
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+    accessed_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("project", "key", "version", "namespace"),
+                name="relay_actions_cache_identity",
+            )
+        ]
+
+
+class WorkflowTrigger(RelayModel):
+    """An explicit owner activation of one frozen workflow event."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    workflow_key: models.TextField = models.TextField()
+    event: models.TextField = models.TextField()
+    enabled: models.BooleanField = models.BooleanField(default=False)
+    allow_writers: models.BooleanField = models.BooleanField(default=False)
+    source_hash: models.CharField = models.CharField(max_length=64)
+    config: models.JSONField = models.JSONField(default=dict)
+    cursor: models.JSONField = models.JSONField(default=dict)
+    activated_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("project", "workflow_key", "event"), name="relay_trigger_identity"
+            )
+        ]
+
+
+class TriggerDelivery(RelayModel):
+    """A deduplicated event occurrence with an auditable admission result."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    trigger: models.ForeignKey = models.ForeignKey(WorkflowTrigger, on_delete=models.CASCADE)
+    occurrence: models.TextField = models.TextField()
+    payload: models.JSONField = models.JSONField(default=dict)
+    state: models.CharField = models.CharField(max_length=16, default="pending")
+    run: models.OneToOneField = models.OneToOneField(Run, on_delete=models.SET_NULL, null=True)
+    reason: models.TextField = models.TextField(blank=True)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("trigger", "occurrence"), name="relay_trigger_occurrence"
+            )
+        ]
+
+
+class ActionsQueue(RelayModel):
+    """Durable FIFO concurrency admission, independent of Huey delivery."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run: models.ForeignKey = models.ForeignKey(Run, on_delete=models.CASCADE)
+    scope: models.TextField = models.TextField(default="workflow")
+    group: models.TextField = models.TextField()
+    mode: models.CharField = models.CharField(max_length=16, default="single")
+    cancel_in_progress: models.BooleanField = models.BooleanField(default=False)
+    state: models.CharField = models.CharField(max_length=16, default="pending")
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(fields=("run", "scope"), name="relay_queue_identity")
         ]
 
 

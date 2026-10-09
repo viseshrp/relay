@@ -34,8 +34,10 @@ To open the local app without a password, use `relay up --no-login`.
 - macOS, Linux, or Windows
 - At least one supported coding agent with its own credentials for agent nodes
 
-End users do not need Node.js. Contributors who build the browser application
-need a Node version supported by Vite; see [CONTRIBUTING.md](CONTRIBUTING.md).
+The installed browser application runs without Node.js. Local JavaScript
+actions require an installed Node 20 or 24 runtime matching their metadata.
+Contributors who build the browser application need a Node version supported
+by Vite; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Installation
 
@@ -168,9 +170,13 @@ Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
 eligible agent failures up to twice with the same model and settings, retained
 reports, and a separate repair instruction. It stops on unsafe failures or an
 exhausted budget.
-Configure [stage repair rules](docs/workflows.md#stage-repair-rules) to run a
-selected fixer and verifier after a rejected verdict. The map keeps the main
-stages; the Repairs panel shows each round, its settings, and retained reports.
+Workflows use the [Actions jobs and steps dialect](docs/workflows.md), with
+serial matrices, local reusable workflows and actions, scoped secrets,
+environment approvals, caches, artifacts, and opt-in local triggers. Each job
+shares one workspace across its ordered steps and commits accepted changes at
+its boundary. Bounded repair steps inspect retained reports before continuing.
+See the [language compatibility record](docs/workflow-language-compatibility.md)
+for the source comparison, feature coverage, and supported limits.
 Confirmed provider usage resets can resume a failed stage automatically while
 preserving its captured model, effort, and prompts. Unsupported or missing reset
 information remains visible for the owner. See
@@ -200,9 +206,11 @@ artifacts, and worktrees use operating-system-specific user directories.
 
 Relay binds to loopback, emits no product telemetry, and stores owner-visible
 run history until explicit deletion. Agent and command processes inherit the
-worker environment. Relay does not mask environment values or manage agent
-credentials, so prompts, output, logs, and commands may contain sensitive
-data.
+worker environment. Declared workflow secrets and `add-mask` values are
+redacted from public run output. Arbitrary inherited variables and retained
+files are not automatically redacted. Provider authentication remains with
+the installed agents. See
+[variables and secrets](docs/workflows.md#variables-secrets-and-environments).
 
 Relay rejects staged changes and unrelated edits before launch. Validated
 workflow sources and supported generated documents follow the

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { stringify } from "yaml";
-import { openSettings, post } from "./setup-helpers";
+import { openSettings, historicalPost as post, currentWorkflow } from "./setup-helpers";
 import type { DashboardData } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -23,7 +23,8 @@ test("Home recovers when its remembered project no longer exists", async ({ page
 });
 
 test("Home shows real project results and logo navigation keeps workspace drafts", async ({ page }, info) => {
-  const created = await post(page, "/api/workflows", { key: "dashboard-check", holder: "dashboard-test", yaml: stringify({ version: 1, name: "Dashboard check", nodes: { check: { type: "command", run: ["git", "status"] } } }) });
+  await page.addInitScript(() => sessionStorage.setItem("relay.editor-holder", "dashboard-test"));
+  const created = await post(page, "/api/workflows", { key: "dashboard-check", holder: "dashboard-test", yaml: stringify(currentWorkflow({ version: 1, name: "Dashboard check", nodes: { check: { type: "command", run: ["git", "status"] } } })) });
   expect(created.ok(), await created.text()).toBeTruthy();
   const launch = await post(page, "/api/runs", { workflow_key: "dashboard-check", inputs: {} });
   expect(launch.ok(), await launch.text()).toBeTruthy();
@@ -42,18 +43,21 @@ test("Home shows real project results and logo navigation keeps workspace drafts
   await page.getByRole("link", { name: "Relay home", exact: true }).click();
   await expect(home).toBeVisible();
   await page.getByRole("tab", { name: "Workflows", exact: true }).click();
-  await page.getByRole("navigation", { name: "Workflow sidebar", exact: true }).getByRole("button", { name: "Dashboard check", exact: true }).click();
-  await page.getByRole("button", { name: "Advanced workflow settings and YAML", exact: true }).click();
+  await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
+  await page.getByRole("option", { name: "Dashboard check", exact: true }).click();
   const yaml = page.getByLabel("Workflow YAML editor", { exact: true }).locator(".cm-content");
-  const changed = stringify({ version: 1, name: "Remember this draft", nodes: { check: { type: "command", run: ["git", "status"] } } });
+  const changed = stringify(currentWorkflow({ version: 1, name: "Remember this draft", nodes: { check: { type: "command", run: ["git", "status"] } } }));
   await expect(page.getByRole("region", { name: "Workflow header" })).toContainText("Dashboard check");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
-  await yaml.fill(changed);
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await yaml.click();
+  await yaml.press("ControlOrMeta+a");
+  await page.keyboard.insertText(changed);
+  await expect(page.getByRole("region", { name: "Workflow header" })).toContainText("Remember this draft");
   await page.getByRole("link", { name: "Relay home", exact: true }).click();
   await expect(home).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("region", { name: "Workflow header" })).toContainText("Remember this draft");
-  await page.getByRole("button", { name: "Advanced workflow settings and YAML", exact: true }).click();
   await expect(yaml).toContainText("Remember this draft");
   await openSettings(page);
   await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();

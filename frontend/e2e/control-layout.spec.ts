@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { parse, stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { post, currentWorkflow } from "./setup-helpers";
 import type { SettingsResponse, StorageUsage } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -62,7 +62,7 @@ for (const width of [320, 390, 760, 1440]) test(`Storage distinguishes data and 
 
 test("long dropdown names stay within the screen and selected labels stay compact", async ({ page }, info) => {
   const title = "Publish an independently verified feature with integration checks and a retained review report";
-  expect((await post(page, "/api/workflows", { key: "long-control", holder: "layout-test", yaml: stringify({ version: 1, name: title, nodes: { check: { type: "command", run: ["git", "status"] } } }) })).ok()).toBeTruthy();
+  expect((await post(page, "/api/workflows", { key: "long-control", holder: "layout-test", yaml: stringify(currentWorkflow({ version: 1, name: title, nodes: { check: { type: "command", run: ["git", "status"] } } })) })).ok()).toBeTruthy();
   for (const width of [320, 760, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=long-control.yaml");
@@ -88,53 +88,41 @@ test("long dropdown names stay within the screen and selected labels stay compac
   }
 });
 
-test("composite stage forms use the row and long command arguments remain exact", async ({ page }, info) => {
+test("action input forms preserve long command arguments and fit narrow screens", async ({ page }, info) => {
   const argv = ["git", ...Array.from({ length: 50 }, (_, index) => `argument ${index}`)];
-  const source = stringify({ version: 1, name: "Command layout", nodes: { check: { type: "command", run: argv } } });
+  const source = stringify(currentWorkflow({ name: "Command layout", nodes: { check: { type: "command", run: argv } } }));
   expect((await post(page, "/api/workflows", { key: "command-layout", holder: "layout-test", yaml: source })).ok()).toBeTruthy();
   for (const width of [390, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=command-layout.yaml");
-    await page.getByRole("button", { name: "Check", exact: true }).click();
-    const stage = page.getByRole("region", { name: "Stage settings", exact: true });
-    await expect(stage.getByRole("combobox", { name: "Start after", exact: true })).toHaveText("No dependencies");
-    const argumentsField = stage.getByRole("textbox", { name: "Arguments (one per line)", exact: true });
-    await expect(argumentsField).toHaveValue(argv.slice(1).join("\n"));
-    const area = await bounds(argumentsField);
-    expect(area.height).toBeLessThan(210);
-    if (width >= 1440) expect(area.width).toBeGreaterThan(600);
-    await stage.getByRole("button", { name: "Advanced command arguments", exact: true }).click();
-    await expect(stage.getByRole("textbox", { name: "Argument vector as JSON", exact: true })).toHaveValue(JSON.stringify(argv));
-    expect(parse((await (await page.request.get("/api/workflows/command-layout")).json()).yaml).nodes.check.run).toEqual(argv);
-    await page.screenshot({ path: info.outputPath(`command-${width}.png`), fullPage: true, animations: "disabled" });
+    const inputs = page.getByLabel("Action inputs", { exact: true });
+    await expect(inputs).toHaveValue(JSON.stringify({ argv: JSON.stringify(argv) }, null, 2));
+    const area = await bounds(inputs);
+    expect(area.x + area.width).toBeLessThanOrEqual(width);
+    expect(JSON.parse(parse((await (await page.request.get("/api/workflows/command-layout")).json()).yaml).jobs.check.steps[0].with.argv)).toEqual(argv);
+    await page.screenshot({ path: info.outputPath(`command-${width}.png`), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   }
 });
 
-test("empty model and repair choices explain inheritance without changing YAML", async ({ page }) => {
+test("agent defaults and launch inheritance leave saved YAML unchanged", async ({ page }) => {
   await page.goto("/?view=workflows&workflow=workflow.yaml");
-  await page.getByRole("button", { name: "Work", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Use workflow model");
-  await page.getByRole("button", { name: "Repairs", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Repairs for Work", exact: true });
-  await expect(dialog.getByRole("combobox", { name: "Agent tools", exact: true })).toHaveText("Workflow and owner preferences");
-  await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Use workflow model");
-  expect((await bounds(dialog.getByRole("spinbutton", { name: "Maximum repair rounds", exact: true }))).width).toBeLessThanOrEqual(144);
-  expect((await bounds(dialog.getByRole("combobox", { name: "Review report format", exact: true }))).width).toBeLessThanOrEqual(320);
-  expect((await bounds(dialog.getByRole("textbox", { name: "Review report file", exact: true }))).width).toBeLessThanOrEqual(480);
-  expect((await bounds(dialog.getByRole("textbox", { name: "Fixer repair instructions", exact: true }))).width).toBeLessThanOrEqual(640);
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  const original = (await (await page.request.get("/api/workflows/workflow.yaml")).json()).yaml;
+  await expect(page.getByLabel("Exact model override", { exact: true })).toHaveValue("m1");
+  await expect(page.getByLabel("Effort", { exact: true })).toContainText("Provider default");
+  await expect(page.getByLabel("Permission mode", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Run workflow", exact: true }).click();
   const launch = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await launch.getByRole("button", { name: "Advanced options", exact: true }).click();
   await expect(launch.getByRole("combobox", { name: "After a successful run", exact: true })).toHaveText("Use project and global defaults");
-  await expect(launch.getByRole("combobox", { name: "Start from job", exact: true })).toHaveText("Start at the beginning");
+  await expect(launch.getByRole("combobox", { name: "Start from job", exact: true })).toHaveCount(0);
+  expect((await (await page.request.get("/api/workflows/workflow.yaml")).json()).yaml).toBe(original);
 });
 
 test("run graph headings stay above jobs and empty history filters remain readable", async ({ page }, info) => {
   const nodes = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`job_${index}`, { type: "command", run: ["git", "status"], ...(index ? { needs: [`job_${index - 1}`] } : {}) }]));
-  expect((await post(page, "/api/workflows", { key: "graph-layout", holder: "layout-test", yaml: stringify({ version: 1, name: "Graph layout", nodes }) })).ok()).toBeTruthy();
+  expect((await post(page, "/api/workflows", { key: "graph-layout", holder: "layout-test", yaml: stringify(currentWorkflow({ version: 1, name: "Graph layout", nodes })) })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const launched = await post(page, "/api/runs", { workflow_key: "graph-layout", inputs: {} });
   expect(launched.ok(), await launched.text()).toBeTruthy();
@@ -170,42 +158,28 @@ test("full paths retain exact bytes and copy failures keep a selectable fallback
   await expect(folders.locator(".path-details code").filter({ hasText: path })).toHaveText(path);
 });
 
-test("all six stage forms remain contained on narrow and wide screens", async ({ page }, info) => {
-  const forms = [
-    ["Agent work", "Exact model override"], ["Run a command", "Program"],
-    ["Human review", "Review instructions and expected response"],
-    ["Check a result", "Expression"], ["Repeat stages", "Maximum iterations"],
-    ["Run another workflow", "Workflow key"],
-  ] as const;
+test("script, command, agent, human, loop and reusable forms remain contained", async ({ page }, info) => {
+  const references = ["", "relay/command@v1", "relay/agent@v1", "relay/human-wait@v1", "relay/loop@v1"];
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=workflow.yaml");
-    await page.getByRole("button", { name: "Work", exact: true }).click();
-    const stage = page.getByRole("region", { name: "Stage settings", exact: true });
-    for (const [kind, label] of forms) {
-      await stage.getByRole("combobox", { name: "What this stage does", exact: true }).click();
-      await containedMenu(page, width);
-      await page.getByRole("option", { name: kind, exact: true }).click();
-      const field = stage.getByRole(kind === "Repeat stages" ? "spinbutton" : "textbox", { name: label, exact: true });
-      await expect(field).toBeVisible();
-      expect((await bounds(field)).height).toBeLessThan(210);
-      if (kind === "Check a result") {
-        await stage.getByRole("button", { name: "Add result branch", exact: true }).click();
-        await expect(stage.getByRole("textbox", { name: "Result value", exact: true })).toHaveCount(2);
-        await expect(stage.getByRole("textbox", { name: "Result value", exact: true }).last()).toHaveValue("result_2");
-      }
+    for (const reference of references) {
+      await page.getByLabel("Action reference", { exact: true }).fill(reference);
+      await expect(page.getByLabel(reference ? "Action inputs" : "Script", { exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-      await page.screenshot({ path: info.outputPath(`stage-${kind}-${width}.png`), fullPage: true, animations: "disabled" });
     }
-    await stage.getByRole("button", { name: "Remove stage", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Stage settings", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Your workflow is empty. Add a command, agent task, or review step to begin.", { exact: true })).toBeVisible();
+    await page.getByLabel("Reusable workflow", { exact: true }).fill("./.relay/workflows/child.yaml");
+    await expect(page.getByLabel("Reusable inputs", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: info.outputPath(`forms-${width}.png`), fullPage: true });
+    await page.getByRole("button", { name: "Restore saved source", exact: true }).click();
   }
 });
 
 for (const width of [390, 760, 900, 1050, 1440, 1920]) test(`header and settings navigation stay compact at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: 1000 });
   await page.goto("/?view=settings");
+  await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Settings sections" });
   const header = page.locator(".app-header");
   const box = await bounds(header);
@@ -297,7 +271,7 @@ test("artifact downloads and captured source remain readable at every layout wid
     await page.screenshot({ path: info.outputPath(`artifacts-${width}.png`), fullPage: true, animations: "disabled" });
     await page.getByRole("button", { name: "Workflow file", exact: true }).click();
     const source = page.getByRole("dialog", { name: "Workflow file", exact: true }).getByLabel("Captured workflow YAML", { exact: true });
-    await expect(source).toContainText("version");
+    await expect(source).toContainText("jobs:");
     expect(await source.evaluate((element) => getComputedStyle(element).fontFamily)).toContain("mono");
     await page.keyboard.press("Escape");
   }

@@ -425,7 +425,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .settings-content .MuiAccordionDetails-root { padding-top: 16px; }
 .settings-save { position: static; flex-wrap: wrap; gap: 8px; margin-top: 28px !important; }
 .help-tip { display: inline-flex; flex: 0 0 auto; align-items: center; }
-.help-tip .MuiIconButton-root { color: #526078; width: 28px; height: 28px; padding: 6px; }
+.help-tip .MuiIconButton-root { width: 28px; height: 28px; padding: 6px; }
+.help-tip .MuiIconButton-root:not(.Mui-disabled) { color: #3156d3; }
 .help-field { display: grid; gap: 6px; min-width: 0; align-content: start; }
 .help-field-grow { flex: 1 1 220px; }
 .help-field-heading, .help-label, .help-control { display: flex; gap: 4px; align-items: center; min-width: 0; }
@@ -587,10 +588,14 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
   .job-heading { grid-template-columns: minmax(0, 1fr); }
   .job-heading > .MuiStack-root, .job-heading > .MuiAlert-root { grid-column: 1; grid-row: auto; }
   .storage-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .app-header .project-picker { flex: 0 0 186px; width: 186px; }
-  .app-header .project-context > button { flex: 0 1 auto; }
-  .app-header .MuiToolbar-root { column-gap: 8px; }
-  .app-header .MuiTab-root { padding-inline: 6px; }
+  .app-header .project-picker { flex: 0 1 180px; width: 180px; min-width: 176px; }
+  .app-header .project-context > button { flex: 0 1 auto; padding-inline: 4px; }
+  .app-header .MuiToolbar-root { column-gap: 4px; padding-inline: 8px; }
+  .app-header .MuiToolbar-root > button:last-of-type { min-width: 44px; padding-inline: 4px; }
+  .app-header .MuiTab-root { min-width: 44px; padding-inline: 6px; }
+}
+@media (min-width: 390px) and (max-width: 600px) {
+  .app-header .project-context > button { flex: 0 0 auto; white-space: nowrap; }
 }
 
 .artifacts-section { container-type: inline-size; }

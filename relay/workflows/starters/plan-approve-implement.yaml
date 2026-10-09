@@ -1,23 +1,26 @@
-version: 1
 name: Plan, approve, implement
-agents: [codex, claude, copilot, cursor, antigravity]
-inputs:
-  task:
-    type: string
-    description: What change should the agent plan and implement?
-    default: Add a short explanation of the main code folder to the README.
-    required: true
-nodes:
-  plan:
-    type: agent
-    prompts: [{local: prompts/plan.md}]
-  approve:
-    type: human_wait
-    needs: [plan]
-    prompt: Read the plan in the Plan job's conversation. Approve implementation?
-  implement:
-    type: agent
-    needs: [approve]
-    prompts: [{local: prompts/implement.md}]
-    writes: true
-    allow_no_commit: true
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What change should the agent plan and implement?
+        required: true
+        default: Add a short explanation of the main code folder to the README.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/plan.md
+        prompt: ${{ inputs.task }}
+    - uses: relay/human-wait@v1
+      with:
+        prompt: Review the plan, then approve implementation.
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/implement.md
+        prompt: ${{ inputs.task }}

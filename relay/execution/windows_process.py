@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import shutil
 import subprocess
 import sys
 from typing import ClassVar
@@ -111,7 +112,15 @@ def run_owned_command(arguments: list[str]) -> int:
     # Keep the job handle open until ExitProcess; closing it here would also
     # terminate this launcher before its target's exit code can be returned.
     try:
-        return subprocess.call(arguments, shell=False)  # noqa: S603
+        # CreateProcess searches the launcher's application directory before
+        # PATH. Resolve here, after inheriting the attempt's environment and
+        # working directory, so a workflow-selected executable takes priority.
+        executable = shutil.which(arguments[0])
+        if executable is None:
+            return EXIT_RELAY_ERROR
+        return subprocess.call(  # noqa: S603
+            [os.path.abspath(executable), *arguments[1:]], shell=False
+        )
     except (OSError, KeyboardInterrupt):
         return EXIT_RELAY_ERROR
 

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 import platform
+from typing import cast
 
 from relay import __version__
 
@@ -29,6 +30,8 @@ class SnapshotBundle:
     runtime_versions: dict[str, str]
     hashes: dict[str, str]
     launch_defaults: dict[str, object] = field(default_factory=dict)
+    semantics_revision: str = "relay-v1"
+    resolved_definition: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -79,6 +82,20 @@ def build_snapshot(
         "pydantic": _package_version("pydantic"),
         "ruamel.yaml": _package_version("ruamel.yaml"),
     }
+    actions = bool(workflow.root.definition.actions)
+    semantics_revision = "relay-v1"
+    if actions:
+        from .actions.compiler import sources_hashes
+        from .actions.language import DIALECT, UPSTREAM
+        from .schema import ActionsJobNode
+
+        hashes.update(
+            sources_hashes(
+                cast(ActionsJobNode, next(iter(workflow.root.definition.nodes.values()))).sources
+            )
+        )
+        runtime_versions["actions-language"] = UPSTREAM
+        semantics_revision = DIALECT
     return SnapshotBundle(
         workflow_yaml=workflow.root.text,
         subworkflows=subworkflows,
@@ -91,6 +108,10 @@ def build_snapshot(
         runtime_versions=runtime_versions,
         hashes=hashes,
         launch_defaults=dict(launch_defaults or {}),
+        semantics_revision=semantics_revision,
+        resolved_definition=(
+            workflow.root.definition.model_dump(mode="json", by_alias=True) if actions else {}
+        ),
     )
 
 

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from relay.errors import WorkflowValidationError
-
-from .schema import NODE_ID_PATTERN
 
 ROOT_SCOPE = "root"
 
@@ -23,7 +22,7 @@ class ScopeSegment:
 
 
 def _validate_node_id(node_id: str) -> None:
-    if NODE_ID_PATTERN.fullmatch(node_id) is None:
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", node_id) is None:
         message = f"Scope node id {node_id!r} is invalid."
         raise WorkflowValidationError(message)
 

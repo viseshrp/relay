@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 import { runActions } from "../src/components/RunActions";
-import { post } from "./setup-helpers";
+import { historicalPost as post, currentWorkflow } from "./setup-helpers";
 
 async function launch(page: Page, key: string, value: object, inputs: object = {}): Promise<string> {
   const created = await post(page, "/api/workflows", { key, holder: `actions-${key}`, yaml: stringify({ version: 1, name: key, ...value }) });
@@ -61,9 +61,10 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   const id = await launch(page, "repeat-actions", definition, { task: "Previous task", approved: false, count: 0 });
   await settled(page, id, "succeeded");
   const before = (await (await page.request.get(`/api/runs/${id}`)).json()).run;
+  expect((await post(page, "/api/workflows/repeat-actions.yaml/lease", { holder: "actions-repeat-actions" })).ok()).toBeTruthy();
   const document = await page.request.get("/api/workflows/repeat-actions.yaml");
   const saved = await post(page, "/api/workflows/repeat-actions.yaml/save", { holder: "actions-repeat-actions", base_hash: (await document.json()).base_hash,
-    yaml: stringify({ version: 1, name: "Updated source", ...definition, nodes: { updated: { type: "command", run: ["git", "status", "--short"] } } }) });
+    yaml: stringify(currentWorkflow({ version: 1, name: "Updated source", ...definition, nodes: { updated: { type: "command", run: ["git", "status", "--short"] } } })) });
   expect(saved.ok(), await saved.text()).toBeTruthy();
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   await page.goto(`/?view=runs&run=${id}`);
@@ -91,7 +92,7 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   expect(next).not.toBe(id);
   await settled(page, next, "succeeded");
   const after = (await (await page.request.get(`/api/runs/${next}`)).json()).run;
-  expect(after.nodes.map((job: { node_id: string }) => job.node_id)).toEqual(["updated"]);
+  expect(after.nodes.filter((job: { parent_scope: string | null }) => job.parent_scope === null).map((job: { node_id: string }) => job.node_id)).toEqual(["updated"]);
   expect(after.snapshot).not.toEqual(before.snapshot);
   expect((await (await page.request.get(`/api/runs/${id}`)).json()).run.snapshot).toEqual(before.snapshot);
 });

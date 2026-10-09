@@ -18,13 +18,21 @@ test("all three header tabs fit beside the logo without login", async ({ page },
     await page.goto("/?view=settings");
     await expect(page.getByRole("heading", { name: "Global defaults", exact: true })).toBeVisible();
     const header = page.locator(".app-header");
-    const tabs = await header.getByRole("tablist").boundingBox();
-    if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
-    for (const name of ["Workflows", "Runs", "Settings"]) {
-      const tab = await header.getByRole("tab", { name, exact: true }).boundingBox();
-      if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
-      expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
-      expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+    for (const fallbackFont of [false, true]) {
+      if (fallbackFont) await page.addStyleTag({ content: ".app-header .MuiButtonBase-root { font-family: Arial, sans-serif; letter-spacing: 0.08em; }" });
+      const tabs = await header.getByRole("tablist").boundingBox();
+      if (!tabs) throw new Error("The navigation tabs must have visible bounds.");
+      for (const name of ["Workflows", "Runs", "Settings"]) {
+        const control = header.getByRole("tab", { name, exact: true });
+        await expect(control).toBeEnabled();
+        await expect(control).toHaveCSS("opacity", "1");
+        await expect(control).toHaveCSS("color", name === "Settings" ? "rgb(35, 61, 150)" : "rgb(49, 86, 211)");
+        const tab = await control.boundingBox();
+        if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
+        expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
+        expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+        expect(tab.width).toBeGreaterThanOrEqual(44);
+      }
     }
     await header.screenshot({ path: info.outputPath(`header-local-${width}.png`), animations: "disabled" });
   }
@@ -35,7 +43,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
   await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Password", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   expect(await (await page.request.get("/api/auth")).json()).toMatchObject({
     owner_created: false, authenticated: true, username: "local", login_required: false,
   });
@@ -47,7 +55,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
     headers,
     data: {
       key: "local-run", holder: "local-browser",
-      yaml: "version: 1\nname: Local run\nnodes:\n  work: {type: command, run: [git, status]}\n",
+      yaml: "name: Local run\njobs: {work: {runs-on: self-hosted, steps: [{run: git status}]}}\n",
     },
   });
   expect(workflow.ok(), await workflow.text()).toBeTruthy();

@@ -1,9 +1,24 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { parse } from "yaml";
 
 export async function post(page: Page, path: string, data: object = {}) {
   const token = (await page.context().cookies()).find((cookie) => cookie.name === "relay_csrftoken");
   return page.request.post(path, { data, headers: { "X-CSRFToken": token?.value ?? "" } });
+}
+
+// Historical fixtures exercise monitoring and recovery of retained v1 snapshots.
+// Current authoring and launch tests use post() and the public jobs/steps API.
+export async function historicalPost(page: Page, path: string, data: object = {}) {
+  const body = data as Record<string, unknown>;
+  let target = path;
+  if (path.split("?")[0] === "/api/workflows" && typeof body.yaml === "string" && parse(body.yaml)?.version === 1) {
+    target = path.replace("/api/workflows", "/__test__/historical-workflows");
+  } else if (path.split("?")[0] === "/api/runs" && typeof body.workflow_key === "string") {
+    const source = await page.request.get(`/api/workflows/${body.workflow_key}${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`);
+    if (source.ok() && parse((await source.json()).yaml)?.version === 1) target = path.replace("/api/runs", "/__test__/historical-runs");
+  }
+  return post(page, target, data);
 }
 
 export async function openSettings(page: Page): Promise<void> {
@@ -25,7 +40,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
     await page.getByRole("button", { name: "Create password", exact: true }).click();
   }
   await page.getByRole("button", { name: "Get started", exact: true }).click();
-  const setup = page.getByRole("region", { name: "Get started", exact: true });
+  const setup = page.getByRole("dialog", { name: "Get started", exact: true });
   await expect(setup.getByRole("article", { name: "Codex", exact: true })).toContainText("Ready to connect");
   await expect(setup.getByRole("article", { name: "Claude Code", exact: true })).toContainText("Not installed");
   await setup.getByRole("button", { name: "Start from a template", exact: true }).click();
@@ -62,4 +77,28 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
   await checked;
   await setup.getByRole("button", { name: "Close checklist", exact: true }).click();
   await expect(setup).toHaveCount(0);
+}
+
+// Current editor fixtures use jobs/steps. The convenience shape below keeps
+// argv and dispatch-input test data readable; historical fixtures use a
+// separate, explicitly named helper above.
+export function currentWorkflow(value: Record<string, any>) {
+  const definitions: Record<string, any> = {};
+  for (const [name, item] of Object.entries<any>(value.inputs || {})) definitions[name] = {
+    type: item.type === "enum" ? "choice" : item.type === "integer" ? "number" : item.type,
+    ...(item.type === "enum" ? { options: item.constraints.values.map(String) } : {}),
+    ...(item.description ? { description: item.description } : {}),
+    ...(item.required ? { required: true } : {}),
+    ...(item.default !== undefined ? { default: item.type === "enum" ? String(item.default) : item.default } : {}),
+  };
+  const jobs: Record<string, any> = {};
+  for (const [id, node] of Object.entries<any>(value.nodes || {})) {
+    let step: Record<string, any>;
+    if (node.type === "command") step = { uses: "relay/command@v1", with: Array.isArray(node.run) ? { argv: JSON.stringify(node.run) } : { command: node.run.command } };
+    else if (node.type === "agent") step = { uses: "relay/agent@v1", with: { agent: node.agents?.[0] || value.agents?.[0] || "codex", model: node.model || value.model || "m1" } };
+    else if (node.type === "human_wait") step = { uses: "relay/human-wait@v1", with: { prompt: node.prompt } };
+    else throw new Error("Use explicit Actions source for this fixture's control flow.");
+    jobs[id] = { "runs-on": "self-hosted", ...(node.needs?.length ? { needs: node.needs } : {}), ...(node.env ? { env: node.env } : {}), steps: [step] };
+  }
+  return { name: value.name, on: { workflow_dispatch: { inputs: definitions } }, ...(value.env ? { env: value.env } : {}), jobs };
 }

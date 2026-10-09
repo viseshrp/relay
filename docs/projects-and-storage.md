@@ -17,10 +17,10 @@ worktree root:
     └── workflow.yaml
 ```
 
-`workflow.yaml` contains the schema version, a name, and an empty node map.
-`prompt.md` is empty. Relay does not copy workflow steps, prompt text, or other
-templates. A second `relay init` leaves the directory unchanged and exits with
-status 2. Running outside Git exits with status 3.
+`workflow.yaml` contains a named manual workflow with one local job and an
+editable `echo Ready` step. `prompt.md` is empty. Relay does not copy prompt
+text or other templates. A second `relay init` leaves the directory unchanged
+and exits with status 2. Running outside Git exits with status 3.
 `relay up` creates this blank surface when no project is found, so the first
 start needs no separate initialization command. It preserves an existing
 project and uses the nearest `.relay` directory as before.
@@ -232,9 +232,12 @@ append handlers stay attached, so active processes can continue logging after
 cleanup. The same Windows CI run verified that an open append handler writes
 to the cleared file after cleanup on Python 3.10 through 3.14.
 
-Agent and command processes inherit the worker environment. Relay has no secret
-vault or output masking, so the database, artifact directory, and logs may
-contain sensitive prompts, responses, command output, and tool results.
+Agent and command processes inherit the worker environment. Declared workflow
+secrets resolve through explicit environment or native-store references and
+are masked in public run output. Secret values do not enter binding rows or
+launch snapshots. Arbitrary inherited variables and retained files are not
+automatically redacted. See
+[variables and secrets](workflows.md#variables-secrets-and-environments).
 
 See the [README](../README.md) for installation and the local-only product
 boundary.
@@ -321,8 +324,9 @@ parent workflow's variables. These defaults do not configure agent processes.
 
 Launch snapshots capture resolved arguments and variables, including child
 jobs and repair roles. Later settings edits affect future runs. Variable
-values are stored in local settings and captured run data; Relay does not mask
-them in command output. Names must be nonempty and contain neither `=` nor a
+values are stored in local settings and captured run data. Ordinary variables
+do not automatically register output masks; use a declared secret binding
+for sensitive values. Names must be nonempty and contain neither `=` nor a
 NUL character. Values must be strings without NUL characters.
 
 For example, this global file sets Codex first, keeps successful working

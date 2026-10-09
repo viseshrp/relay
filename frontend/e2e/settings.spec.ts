@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { parse } from "yaml";
 import { post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
@@ -31,13 +32,13 @@ test("global models and thinking defaults save, survive reload, and launch with 
   await panel.getByRole("button", { name: /^Codex/ }).click();
   await expect(configuration.getByRole("combobox", { name: "Thinking effort", exact: true })).toHaveText("Low");
   await page.screenshot({ path: info.outputPath("settings-global.png"), fullPage: true, animations: "disabled" });
-  const created = await post(page, "/api/workflows", { key: "global-agent", holder: "global-agent", yaml: "version: 1\nname: Global agent\nnodes:\n  work: {type: agent}\n" });
+  const created = await post(page, "/api/workflows", { key: "global-agent", holder: "global-agent", yaml: "name: Global agent\njobs:\n  work:\n    runs-on: self-hosted\n    steps:\n      - id: agent\n        uses: relay/agent@v1\n        with: {agent: codex}\n" });
   expect(created.ok(), await created.text()).toBeTruthy();
   const launch = await post(page, "/api/runs", { workflow_key: "global-agent", inputs: {} });
   expect(launch.ok(), await launch.text()).toBeTruthy();
   const { run_id: id } = await launch.json();
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
-  await page.goto(`/?view=runs&run=${id}&job=root.work`);
+  await page.goto(`/?view=runs&run=${id}&job=root.work.agent`);
   await expect(page.getByRole("region", { name: "Job log", exact: true })).toContainText("m1");
   const detail = await (await page.request.get(`/api/runs/${id}`)).json();
   expect(detail.run.cleanup_policy).toBe("retain");
@@ -193,7 +194,7 @@ test("agent discovery failure leaves independent global settings editable", asyn
 test("a job can keep the agent's own defaults despite saved global effort", async ({ page }) => {
   const current = await (await page.request.get("/api/settings")).json();
   expect((await post(page, "/api/settings", { revision: current.revision, settings: { workflow_defaults: { providers: { codex: { model: "m1", effort: "low" } } } } })).ok()).toBeTruthy();
-  await page.goto("/?view=workflows&workflow=workflow");
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
   const effort = page.getByRole("region", { name: "Codex configuration", exact: true }).getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toHaveText("Use project and global defaults");
@@ -204,7 +205,7 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
   if (await confirmation.isVisible()) await confirmation.click();
   await expect(page.getByText("Workflow saved and validated.", { exact: true })).toBeVisible();
   const saved = await (await page.request.get("/api/workflows/workflow")).json();
-  expect(saved.yaml).toContain("effort: null");
+  expect(parse(saved.yaml).jobs.work.steps[0].with.effort).toBeNull();
   await page.reload();
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
   await expect(effort).toHaveText("Agent’s default");

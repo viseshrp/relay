@@ -41,10 +41,26 @@ from tests.support import (
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
 
 
+def test_library_import_accepts_bounded_large_bundles_without_raising_other_api_limits(
+    owner: Client,
+) -> None:
+    bundle = {
+        "metadata": {"name": "Large local template"},
+        "yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n",
+        "sources": {f".relay/prompts/part-{index}.md": "x" * 600_000 for index in range(2)},
+    }
+    imported = post(owner, "/api/workflow-library", bundle)
+    assert imported.status_code == 201, imported.json()
+    assert owner.get("/api/workflow-library", {"id": imported.json()["id"]}).json() == bundle
+    assert post(owner, "/api/settings", bundle).status_code == 400
+    bundle["sources"] = {f".relay/prompts/part-{index}.md": "x" for index in range(101)}
+    assert post(owner, "/api/workflow-library", bundle).status_code == 422
+
+
 def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
     owner: Client, served: RelayProject, tmp_path: Path
 ) -> None:
-    text = "version: 1\nname: Check\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    text = "name: Check\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     served.write_workflow("nested/check", text)
     served.write("REVIEW.md", "Owner review\n")
     served.write("loose code.py", "Owner code\n")
@@ -680,7 +696,7 @@ def test_disabled_login_still_rejects_untrusted_hosts(client: Client) -> None:
 @override_settings(RELAY_LOGIN_REQUIRED=False)
 def test_disabled_login_records_the_local_launcher(served: RelayProject) -> None:
     served.write_workflow(
-        "local", "version: 1\nname: Local\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "local", "name: Local\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     )
     served.commit("Save the local command workflow")
     client = Client(enforce_csrf_checks=True)
@@ -859,8 +875,9 @@ def test_previous_inputs_launch_through_fresh_source_capture(
 ) -> None:
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     source = (
-        "version: 1\nname: Previous\ninputs:\n  task: {type: string, default: Original}\n"
-        "nodes:\n  check: {type: command, run: [git, status]}\n"
+        "name: Previous\non: {workflow_dispatch: {inputs: {task: "
+        "{type: string, default: Original}}}}\n"
+        "jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     )
     served.write_workflow("repeat", source)
     previous = engine.launch(served, "repeat", inputs={"task": "Owner choice"})
@@ -949,7 +966,7 @@ def test_invalid_workflow_save_fields_are_rejected(
 def test_saving_a_workflow_updates_the_durable_yaml(
     owner: Client, served: RelayProject, workflow_base: str
 ) -> None:
-    updated = "version: 1\nname: Edited\nnodes: {}\n"
+    updated = "name: Edited\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     response = post(
         owner,
         "/api/workflows/workflow/save",
@@ -976,7 +993,7 @@ def test_http_launch_records_the_authenticated_launcher(
     owner: Client, served: RelayProject
 ) -> None:
     served.write_workflow(
-        "check", "version: 1\nname: Check\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "check", "name: Check\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     )
     response = post(owner, "/api/runs", {"workflow_key": "check", "inputs": {}})
     assert response.status_code == 201
@@ -1513,6 +1530,80 @@ def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
     assert response["outputs"] == {}
 
 
+def test_actions_job_logs_expose_step_activity_names_and_frozen_agent_instructions(
+    owner: Client,
+    served: RelayProject,
+    engine: InlineEngine,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Provider discovery remains restricted to fake_agents.directory; scripts
+    # also need the installed operating-system shell.
+    fake_agents.allow_commands("bash", "sh", "pwsh")
+    fake_agents.install("codex", mode="configuration")
+    served.write(".relay/prompts/owner.md", "Captured instructions\n")
+    served.write_workflow(
+        "step-logs",
+        """on: workflow_dispatch
+jobs:
+  check:
+    name: Named job
+    runs-on: self-hosted
+    steps:
+      - id: script
+        name: Named script
+        run: echo Visible output
+      - id: command
+        uses: relay/command@v1
+        with: {argv: '["git", "status", "--short"]'}
+      - id: agent
+        name: Named agent
+        uses: relay/agent@v1
+        with:
+          agent: codex
+          model: m1
+          prompt-files: prompts/owner.md
+          prompt: Captured inline prompt
+      - id: review
+        name: Named review
+        uses: relay/human-wait@v1
+        with: {prompt: Review the result}
+""",
+    )
+    run_id = engine.launch(served, "step-logs")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "paused_wait", list(
+        RunEvent.objects.filter(run_id=run_id, type="attempt.ended").values_list(
+            "payload", flat=True
+        )
+    )
+    served.write(".relay/prompts/owner.md", "Changed after launch\n")
+    for step, activity_type, display_name in (
+        ("script", "command", "Named script"),
+        ("command", "command", "command"),
+        ("agent", "agent", "Named agent"),
+        ("review", "human_wait", "Named review"),
+    ):
+        response = owner.get(f"/api/runs/{run_id}/job?job=root.check.{step}")
+        assert response.status_code == 200, response.json()
+        job = response.json()["job"]
+        assert job["node_type"] == "actions_step"
+        assert job["activity_type"] == activity_type
+        assert job["display_name"] == display_name
+    agent = owner.get(f"/api/runs/{run_id}/job?job=root.check.agent").json()["job"]
+    assert agent["prompt"] == "Captured inline prompt"
+    assert agent["instructions"] == [
+        {
+            "reference": {"local": "prompts/owner.md"},
+            "text": "Captured instructions\n",
+            "truncated": False,
+        }
+    ]
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.check").json()["job"]
+    assert job["activity_type"] == "actions_job"
+    assert job["display_name"] == "Named job"
+
+
 def test_failed_job_settings_match_the_existing_run_record(
     owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
 ) -> None:
@@ -1868,3 +1959,140 @@ def test_captured_workflow_is_immutable_and_bounded(
     assert bounded["sha256"] == sha256(snapshot.workflow_yaml.encode()).hexdigest()
     assert owner.get("/api/runs/not-a-uuid/workflow").status_code == 404
     assert Client().get(f"/api/runs/{run_id}/workflow").status_code == 401
+
+
+@pytest.mark.parametrize("login_required", [True, False])
+def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
+    owner: Client, served: RelayProject, login_required: bool
+) -> None:
+    del served
+    strict = Client(enforce_csrf_checks=True)
+    if login_required:
+        strict.force_login(User.objects.get(username="owner"))
+    with override_settings(RELAY_LOGIN_REQUIRED=login_required):
+        strict.get("/api/auth")
+        body = {"yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"}
+        assert (
+            strict.post(
+                "/api/workflow-language/validate",
+                data=json.dumps(body),
+                content_type="application/json",
+            ).status_code
+            == 403
+        )
+        token = strict.cookies["relay_csrftoken"].value
+        response = strict.post(
+            "/api/workflow-language/validate",
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        assert response.status_code == 200
+        assert response.json()["valid"]
+        anonymous = Client()
+        assert anonymous.get("/api/workflow-bindings").status_code == (
+            401 if login_required else 200
+        )
+
+
+def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
+    owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    def unexpected_process(*args: object, **kwargs: object) -> None:
+        message = "Pure validation spawned a process."
+        raise AssertionError(message)
+
+    owner.get("/api/projects/current")
+    monkeypatch.setattr(subprocess, "Popen", unexpected_process)
+    good = "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"
+    assert post(owner, "/api/workflow-language/validate", {"yaml": good}).json()["valid"]
+    legacy = "version: 1\nname: Old\nnodes: {}\n"
+    served.write(".relay/workflows/old.yaml", legacy)
+    response = post(owner, "/api/workflow-language/validate", {"yaml": legacy})
+    assert response.status_code == 200 and not response.json()["valid"]
+    assert post(owner, "/api/runs", {"workflow_key": "old", "inputs": {}}).status_code == 422
+    assert not Run.objects.exists()
+
+
+def test_secret_api_is_write_only_and_revision_refs_are_frozen(
+    owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from relay.web.actions_bindings import freeze_bindings
+    from relay.web.models import WorkflowBinding
+
+    calls: list[tuple[str, str, str | None]] = []
+    monkeypatch.setattr(
+        "relay.web.actions_bindings.credential",
+        lambda operation, reference, value=None: calls.append((operation, reference, value)),
+    )
+    body = {
+        "scope": "project",
+        "name": "KEY",
+        "kind": "secret",
+        "source": "credential-store",
+        "value": "private-native-value",
+    }
+    response = post(owner, "/api/workflow-bindings", body)
+    assert response.status_code == 200
+    assert "private-native-value" not in response.content.decode()
+    frozen = freeze_bindings(served.project_id)
+    first = WorkflowBinding.objects.get(kind="secret").reference
+    assert calls[0] == ("set", first, "private-native-value")
+    body["value"] = "replacement-private-value"
+    assert post(owner, "/api/workflow-bindings", body).status_code == 200
+    assert WorkflowBinding.objects.get(kind="secret").reference != first
+    assert frozen["secret_refs"]["KEY"]["reference"] == first
+    assert "private" not in json.dumps(frozen)
+    listing = owner.get("/api/workflow-bindings").json()
+    assert listing["bindings"][0]["value"] == ""
+    assert (
+        post(
+            owner,
+            "/api/workflow-bindings",
+            {**body, "source": "environment", "reference": "KEY_ENV"},
+        ).status_code
+        == 400
+    )
+
+
+def test_named_artifact_download_verifies_bytes_and_project_access(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from relay.execution.nodes import node_executors
+    from relay.web.models import ActionsArtifact
+
+    served.write_workflow(
+        "products",
+        """jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+      - shell: python
+        run: from pathlib import Path; Path('evidence.txt').write_bytes(b'retained\\n')
+      - uses: relay/upload-artifact@v1
+        with: {name: evidence, path: evidence.txt}
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(served, "products")
+    engine.drain(run_id)
+    artifact = ActionsArtifact.objects.get(run_id=run_id)
+    response = owner.get(f"/api/workflow-artifacts/{artifact.pk}/download")
+    assert response.status_code == 200
+    with ZipFile(BytesIO(b"".join(response.streaming_content))) as archive:
+        assert archive.read("evidence.txt") == b"retained\n"
+    response.close()
+    other = create_project(tmp_path / "other-product-project")
+    assert (
+        owner.get(
+            f"/api/workflow-artifacts/{artifact.pk}/download?project={other.project_id}"
+        ).status_code
+        == 400
+    )
+    (Path(artifact.directory) / "evidence.txt").write_text("tampered")
+    assert owner.get(f"/api/workflow-artifacts/{artifact.pk}/download").status_code == 500

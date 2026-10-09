@@ -314,7 +314,7 @@ def test_supervisor_initializes_a_new_repository_without_changing_git(
         RelayConfig(), open_browser=True, on_ready=supervisor_boundary.stop_when_ready
     )
     assert {
-        str(path.relative_to(project.relay_root)): path.read_text(encoding="utf-8")
+        path.relative_to(project.relay_root).as_posix(): path.read_text(encoding="utf-8")
         for path in project.relay_root.rglob("*")
         if path.is_file()
     } == dict(INITIAL_PROJECT_FILES)

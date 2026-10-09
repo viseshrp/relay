@@ -127,6 +127,8 @@ def _wait(
                 message = "The command attempt lost its durable worker ownership."
                 raise PersistenceError(message, context={"node": context.attempt.scope_path})
             heartbeat_due = now + ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
+        if context.registered_cleanup:
+            continue
         control = context.runtime.claim_next_control(
             context.attempt.attempt_id,
             context.attempt.worker_id,

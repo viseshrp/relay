@@ -193,78 +193,57 @@ in **Settings > Storage**.
 card shows its purpose, job graph preview, required agent, and input types.
 Selection copies sources into `.relay/workflows/` and `.relay/prompts/` without
 overwriting owner files. The editor and launch use those copies. A blank
-workflow still accepts a name and opens with an empty canvas.
+workflow accepts a name and opens with one safe echo job.
 
 ## Author workflows
 
-Choose a saved workflow from the menu, or use **New workflow** to create one
-in the selected project. **Add stage** asks for a name and an action. Commands,
-agent work, and human reviews have ordinary form fields. The new stage starts
-after the previous one; **Start after** changes its dependencies. An empty
-workflow explains how to add the first stage.
+Choose a saved workflow or **Create workflow**. New sources use `jobs` and
+ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
+six-starter gallery copies selected sources without overwriting owner files.
 
-The stage list stays readable beside the canvas. Use **Find a stage** to
-filter it by name, then choose a stage to center it at a readable scale and
-open its settings below. Keyboard selection also brings the canvas into view
-and moves focus there. Choose the same stage again to restore its view after
-panning or zooming. **Fit View** provides an overview; the list lets you return
-to an individual stage without finding its small label in that overview.
+**Add job** adds a local job. Select its graph node to edit its name,
+dependencies, condition, timeout, environment, matrix, outputs, concurrency,
+cache mode, and failure tolerance. **Ordered step** selects a step. Steps can
+be added, moved, or removed. Scripts expose shell and working-directory fields;
+action steps expose their local action reference and input mapping. Agent steps
+provide an exact model override, prompt files, runtime prompt, and the selected
+provider's current effort choices. Permission modes are owner settings.
 
-Loading another workflow clears the search and starts the canvas at its first
-stage, with fresh positions and zoom. Navigation does not edit the workflow
-or its instructions. Unsaved agent instructions must be saved before choosing
-another stage.
+The CodeMirror YAML editor remains visible. Form edits and YAML edits share one
+CST document. Comments and unrelated fields survive edits; editing an alias
+detaches that occurrence. Server validation reports invalid fields before Save
+or Run. Pure validation never executes a command or probes an agent.
 
-Advanced workflow settings expose the YAML editor and workflow key. `review`
-and `review.yaml` both refer
-to `review.yaml`, and nested keys use `/`. Empty segments, backslashes, `.`,
-and `..` are rejected. The canvas and CodeMirror edit one eemeli `yaml`
-document. Typing valid YAML redraws the graph. Adding, deleting, or configuring
-a canvas node rewrites that same document instead of maintaining a second graph
-model.
+Drafts autosave after editing and before navigation. A renewed editing lease and
+saved-file hash protect publication. A recovered draft can be inspected or
+replaced with the saved source. Saving validates and publishes only that
+workflow. Saved sources and drafts use the current jobs-and-steps format.
+Historical run snapshots remain inspectable.
 
-The stage panel covers all six node types. Dependencies are selected by stage
-name. Commands have a Program field and one argument per line. For example,
-program `git` with arguments `status\n--short` saves
-`run: [git, status, --short]`; a line `a b` stays one argument. Relay does not
-invoke a shell. An optional advanced field accepts an explicit JSON argument
-array. Invalid JSON stays in that field and is not applied.
+JSON-formatted current workflow sources appear as block YAML in the editor and
+captured workflow viewer. Unchanged form fields do not create recovery drafts.
+Canceled requests cannot report errors in a different workflow or project.
+When the served frontend changes, an informational banner offers **Reload Relay**.
+Reload follows the normal navigation checks before opening the current version.
+Enabled tabs, sidebar navigation, and icon actions use the action color; gray
+controls indicate unavailable actions.
 
-Agent instructions can be written and saved in the stage panel. They live in
-the selected project's `.relay/prompts` folder. Saving checks the loaded file
-hash and requires the workflow's editing lease. Unsaved instructions block
-stage and project changes, workflow saving, and launch until they are saved.
-Use the model menu to select an advertised exact value; **Load available
-models** refreshes installed tools. A model read never grants permissions or
-changes provider defaults. The exact-value field remains available for a
-provider value already known to the owner.
+**Variables, secrets, environments and library** opens project and installation
+bindings, environment policies, and owner templates. Secret forms accept an
+explicit process-environment reference or native credential-store write. Saved
+secret values are never returned. Environment policies control approval, wait
+timers, allowed branches, and optional links. Library import/export preserves
+metadata and local sources; selecting a template publishes a project copy.
 
-Workflow reads warn about `exists` report outputs in root, loop, and child
-workflows. **Retain the report** explains file-retaining selectors and verdict
-checks. Warnings never rewrite outputs or answer a human review.
+Declared automatic events expose **Activate** buttons. Activation requires a
+saved source and explicit authorization for automatic writing jobs. The server
+freezes the activation revision and blocks changed sources until reactivation.
+Queue state, named artifacts, summaries, and annotations appear in run products.
+Environment approval uses its own attempt-specific control; a generic human
+answer cannot bypass it. Job failure tolerance retains the raw outcome beside
+the effective conclusion.
 
-Agent nodes show the effective tools from node, workflow, and owner preferences.
-The Agent tools field adds node preferences in selection order. Each tool has
-an Effort dropdown for the selected exact model and a Permission mode dropdown.
-Both start at **Provider default**, leaving the override absent from YAML and
-provider requests. Choosing a value saves it under the node's per-tool
-`agent_options`; choosing Provider default removes it.
-
-Choices come from a fresh disposable tool session after model selection. While
-loading, the dropdowns are disabled. A failed read shows an error and Retry.
-Changing the node's model override resets effort and loads its new choices.
-Unsupported saved values stay visible for correction and fail launch preflight.
-A tool without a separate selector offers only Provider default. Native
-Antigravity effort is included in the exact model slug; choose another exact
-model to change it. See [Coding agents](agents.md#effort-and-permission-modes).
-
-Canvas changes use canonical YAML formatting. Explicit Save compares the
-canonical text with the editor text and asks before normalizing collection
-style or spacing. For example, `nodes: {}` stays a valid compact empty mapping,
-while structurally edited mappings use block formatting. Comments and scalar
-values remain part of the parsed document. The dialog warns about formatting
-changes because round-trip libraries cannot preserve every presentation choice
-after structural canvas edits.
+See [Workflow language](workflows.md) for exact YAML keys and limits.
 
 ## Drafts, leases, and conflicts
 
@@ -326,13 +305,14 @@ files and reports until restored. The preview uses saved sources. After
 **Save**, the panel checks them again. A later file change can still block the
 server's launch check and appears as an error in the panel.
 
-**Advanced options** explains **Override model for this run**, **After a
-successful run**, and **Start from job**. Cached models are suggestions; Relay
+**Advanced options** explains **Override model for this run** and **After a
+successful run**. Historical workflows can also expose **Start from job**.
+Cached models are suggestions; Relay
 sends the exact entered value. Working copies can be deleted on success or
 kept; saved reports and commits remain available. Start points list only jobs
 declared in `entrypoints`. The server validates their required inputs and
-artifact evidence. **Automatic recovery** is a workflow setting in
-**Advanced workflow settings and YAML** and requires saving the workflow.
+artifact evidence. Current jobs start through their ordered steps. Configure
+bounded agent recovery through the action inputs and save the workflow.
 
 The server repeats validation, clean-Git, artifact, and exact-model preflight
 before it creates a run.
@@ -694,21 +674,11 @@ confirmed schedule. Automatic recovery never answers a declared human wait.
 
 ## Stage repairs
 
-Select an agent or command stage in the editor and open **Repairs**. Opening
-this dialog does not edit the workflow. New rules start disabled. **Done**
-applies the settings to the YAML document; **Cancel**, Escape, and the
-backdrop leave the document unchanged. Enable
-automatic repairs, choose the verdict output and accepted value, and set the
-number of fix-and-verify rounds. Configure the **Fixer** and **Verifier** with
-their own tools, exact models, effort, permissions, and instructions. Agent
-settings start at the provider defaults. Report fields choose the retained
-file and selector without requiring YAML edits.
-
-Save unsaved prompt text before changing settings or closing the dialog. **Done**
-returns to the workflow editor; **Save** validates and persists the policy.
-Deleting a stage or choosing an action that cannot use repairs removes its
-rule. Agent and command stages require the configured result output. See
-[Stage repair rules](workflows.md#stage-repair-rules) for defaults and bounds.
+Current workflows express bounded repair work with `relay/loop@v1` and a local
+reusable workflow. Agent recovery settings live in the agent action's inputs.
+Retained legacy runs expose their captured repair rounds and policies. See
+[Stage repair rules](workflows.md#stage-repair-rules) for the current action
+contract and historical compatibility.
 
 The run map and stage list show the main stages. **Repairing** and **Repairs
 stopped** identify a source stage whose repair work is active or failed. Open
@@ -946,16 +916,11 @@ project/global defaults to apply. Job effort and permission menus offer
 option. Existing YAML editing, leases, prompts, and launch validation remain
 the source of workflow edits.
 
-Command job forms, including fixer and verifier roles, offer **Command source**:
-**Program and arguments** or **Shared command from Settings**. Shared commands
-show their saved arguments. A missing name remains visible as **not configured**
-and blocks launch. **Use inherited environment variables** and variable rows
-edit the job's `inherit_env` and `env` in the same YAML document.
-**Advanced workflow settings and YAML** has workflow variable rows and
-**Use project and global environment variables**. YAML edits populate these
-controls, and form edits update YAML. Arguments keep their literal boundaries;
-no shell syntax is expanded. Settings changes affect future launches; existing
-runs retain their resolved arguments and variables.
+Current argv steps use `relay/command@v1` with `argv` or a saved command name
+in `with.command`. Scripts use `run`, `shell`, and `working-directory`. Workflow,
+job, and step `env` mappings follow Actions precedence over frozen owner defaults.
+Owner command changes affect future launches; existing runs retain resolved
+arguments. Historical forms and run snapshots use their captured v1 rules.
 
 An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested

@@ -29,6 +29,7 @@ export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMo
     {[attention, other].filter((group) => group.length > 0).map((group) => <Box key={group === attention ? "attention" : "jobs"}>
       {attention.length > 0 && <Typography variant="subtitle2" sx={{ px: 2, pt: 1 }}>{group === attention ? "Waiting and failed jobs" : "Other jobs"}</Typography>}
       <List disablePadding>{group.map(({ node, depth, context }) => {
+        const label = node.node_type.startsWith("actions_") && node.display_name ? node.display_name : stageLabel(node.scope_path);
         const settings = pendingChoices && node.pending_settings;
         const loaded = settings ? pendingChoices?.[choiceKey(settings)] : undefined;
         return <ListItem key={node.scope_path} disablePadding sx={{ flexWrap: "wrap" }} secondaryAction={settings && <IconButton
@@ -36,10 +37,10 @@ export function JobList({ nodes, selected, repairOwners, hasMore, onSelect, onMo
           onClick={() => { if (loaded?.ready) onEdit?.(settings, loaded.ready); }}>
           <SvgIcon><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.96 1.96 3.75 3.75 2.13-1.79z" /></SvgIcon>
         </IconButton>}>
-          <ListItemButton selected={node.scope_path === selected} data-job-scope={node.scope_path} aria-label={`${stageLabel(node.scope_path)} ${statusLabel(node.status)}`}
+          <ListItemButton selected={node.scope_path === selected} data-job-scope={node.scope_path} aria-label={`${label} ${statusLabel(node.status)}`}
             onClick={() => onSelect(node.scope_path)} sx={{ pl: 1 + Math.min(depth, 2), pr: settings ? 6 : 2 }}>
             <span aria-hidden="true"><StatusIcon status={node.status} /></span>
-            <ListItemText title={`${stageLabel(node.scope_path)}${context ? ` · ${context}` : ""}`} primary={stageLabel(node.scope_path)} secondary={<span className="sr-only">{statusLabel(node.status)} {context}</span>} />
+            <ListItemText title={`${label}${context ? ` · ${context}` : ""}`} primary={label} secondary={<span className="sr-only">{statusLabel(node.status)} {context}{node.matrix_index !== null && node.matrix_index !== undefined ? ` · variant ${node.matrix_index + 1}` : ""}</span>} />
             <Typography variant="caption" color="text.secondary" className="sidebar-job-duration" title={statusLabel(node.status)}>{node.started_at ? jobDuration(node.started_at, node.ended_at, now) : ""}</Typography>
           </ListItemButton>
           {settings && !loaded && <Typography variant="caption" role="status" sx={{ px: 2 }}>Loading {stageLabel(node.scope_path)} settings…</Typography>}

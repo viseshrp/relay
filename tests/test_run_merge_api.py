@@ -23,8 +23,9 @@ def test_global_project_and_launch_merge_choices_are_captured_and_reported(
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     served.write_workflow(
         "merge",
-        "version: 1\nname: Merge\nnodes:\n  write:\n    type: command\n    writes: true\n"
-        "    run: [git, commit, --allow-empty, -q, -m, result]\n",
+        "name: Merge\njobs:\n  write:\n    runs-on: self-hosted\n    steps:\n"
+        "      - uses: relay/command@v1\n"
+        '        with: {argv: \'["git", "commit", "--allow-empty", "-q", "-m", "result"]\'}\n',
     )
     settings = owner.get("/api/settings").json()
     response = post(
@@ -68,6 +69,9 @@ def test_strict_preflight_uses_selected_or_inherited_policy(
     owner: Client,
     served: RelayProject,
 ) -> None:
+    served.write_workflow(
+        "workflow", "jobs: {main: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    )
     served.write("REVIEW.md", "owner report\n")
     normal = owner.get("/api/workflows/workflow/preflight").json()
     strict = owner.get("/api/workflows/workflow/preflight?cleanup_policy=merge_on_success").json()

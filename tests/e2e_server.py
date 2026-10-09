@@ -15,6 +15,7 @@ import shutil
 import sys
 import tempfile
 from threading import Event, Thread
+import time
 from types import SimpleNamespace
 from typing import TypeVar
 from uuid import uuid4
@@ -23,8 +24,10 @@ import pytest
 
 ThreadResult = TypeVar("ThreadResult")
 WORKFLOW = (
-    "version: 1\nname: Configuration\nmodel: m1\nagents: [codex, claude]\n"
-    "nodes:\n  work: {type: agent}\n"
+    "name: Configuration\non: workflow_dispatch\njobs:\n"
+    "  work:\n    runs-on: self-hosted\n    steps:\n"
+    "      - id: agent\n        uses: relay/agent@v1\n"
+    '        with: {agents: \'["codex","claude"]\', model: m1}\n'
 )
 
 
@@ -91,7 +94,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         patch.setattr(static_view, "_STATIC_ASSETS", static_view._asset_catalog())
     providers = FakeAgents(root / "agents", root / "provider-transcript.jsonl", patch)
     providers.directory.mkdir()
+    interpreter_directories = {
+        str(Path(executable).parent)
+        for name in ("bash", "sh", "pwsh", "powershell", "cmd")
+        if (executable := shutil.which(name)) is not None
+    }
     providers.isolate_path()
+    patch.setenv("PATH", os.pathsep.join([os.environ["PATH"], *sorted(interpreter_directories)]))
     providers.install("codex", mode="configuration")
     providers.install("claude", mode="configuration")
     providers.install("antigravity", mode="configuration")
@@ -121,6 +130,17 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @require_POST
     def reset(request: HttpRequest) -> JsonResponse:
         del request
+        from relay.execution.cancellation import request_cancellation
+
+        for run_id in Run.objects.filter(
+            status__in=("running", "paused_wait", "pending", "canceling")
+        )[:100].values_list("pk", flat=True):
+            request_cancellation(engine.store, str(run_id), "browser-fixture-reset")
+        deadline = time.monotonic() + 10
+        while Run.objects.filter(status="canceling").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if Run.objects.filter(status="canceling").exists():
+            return JsonResponse({"message": "The preceding fixture has not stopped."}, status=503)
         # The feedback scenario replaces Codex and the shared ACP mode.
         # Restore its configuration so later tests get the normal capabilities.
         shutil.rmtree(providers.directory)
@@ -176,6 +196,8 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     def storage_project(request: HttpRequest) -> JsonResponse:
         del request
         isolated = create_project(root / f"storage-{uuid4().hex}")
+        (isolated.relay_root / "workflows/workflow.yaml").unlink()
+        isolated.commit("Keep the disposable storage project empty")
         return JsonResponse({"project_id": isolated.project_id})
 
     @api_errors
@@ -229,6 +251,58 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.write("REVIEW.md", "Ready: Yes\nRead this report before approving.\n")
         project.commit("Add browser-test review material")
         return JsonResponse({"ok": True})
+
+    @api_errors
+    @owner_required
+    @require_POST
+    def historical_workflow(request: HttpRequest) -> JsonResponse:
+        """Seed old source only to exercise retained-run monitoring contracts."""
+        from relay.workflows.editor import _atomic_create
+        from relay.workflows.loader import load_workflow_text, resolve_workflow_path
+
+        body = json_body(request)
+        key, source = body.get("key"), body.get("yaml")
+        if not isinstance(key, str) or not isinstance(source, str):
+            message = "A historical fixture requires a key and YAML source."
+            raise ConfigError(message)
+        relay_root, _project = actions.current_project(request)
+        loaded = load_workflow_text(source)
+        if loaded.definition.actions:
+            message = "Use the public API for current workflow fixtures."
+            raise ConfigError(message)
+        path = resolve_workflow_path(relay_root / "workflows", key)
+        _atomic_create(path, source)
+        return JsonResponse({"key": path.name, "yaml": source}, status=201)
+
+    @api_errors
+    @owner_required
+    @require_POST
+    def historical_run(request: HttpRequest) -> JsonResponse:
+        """Capture a legacy snapshot through its internal compatibility service."""
+        from relay.execution.launch import LaunchRequest, launch_workflow
+        from relay.owner_settings import effective_config
+        from relay.web.settings_repository import DjangoSettingsStore
+
+        body = json_body(request)
+        relay_root, selected = actions.current_project(request)
+        config = effective_config(DjangoSettingsStore(), selected.id)
+        result = launch_workflow(
+            engine.store,
+            relay_root,
+            selected.id,
+            LaunchRequest(
+                workflow_key=body["workflow_key"],
+                inputs=body.get("inputs", {}),
+                model=body.get("model"),
+                cleanup_policy=body.get("cleanup_policy", config.cleanup_policy),
+                entry_point=body.get("entry_point"),
+                owner_agents=config.agent_preferences,
+                launcher="owner",
+                defaults=config.workflow_defaults,
+            ),
+            engine.tokens.append,
+        )
+        return JsonResponse({"run_id": result.run_id}, status=201)
 
     @owner_required
     @require_POST
@@ -289,6 +363,8 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/resource-remnant", resource_remnant))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
+    urlpatterns.insert(0, path("__test__/historical-workflows", historical_workflow))
+    urlpatterns.insert(0, path("__test__/historical-runs", historical_run))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))

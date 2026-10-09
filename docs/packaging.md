@@ -2,7 +2,8 @@
 
 Relay publishes one Python source distribution and one wheel. The wheel
 contains the compiled browser application, so an installed `relay up` never
-needs Node.js or npm.
+needs Node.js or npm to serve it. Opt-in local JavaScript actions require
+their declared installed Node 20 or 24 runtime.
 
 ## Locked build tools
 
@@ -32,7 +33,7 @@ these argument vectors with `shell=False` from `frontend/`:
 
 ```text
 [resolved npm executable, "ci"]
-[resolved npm executable, "run", "build"]
+[resolved npm executable, "run", "build:dist"]
 ```
 
 The hook fails if the build does not create both `index.html` and an asset

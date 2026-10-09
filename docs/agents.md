@@ -7,9 +7,10 @@ create a vendor account, or store provider credentials.
 
 ## Exact-model routing
 
-A workflow `model` is an exact, case-sensitive value advertised by the selected
-agent. It is not a Relay alias. Before a run is created, Relay probes each
-candidate agent, reads its model values, sets the requested value, and requires
+An agent action's `with.model` is an exact, case-sensitive value advertised by
+the selected agent. It is not a Relay alias. Before a run is created, Relay
+probes each candidate agent, reads its model values, sets the requested value,
+and requires
 the complete returned configuration to name the same current value. Distinct
 override combinations use fresh disposable sessions so an earlier selection
 cannot change a later probe's provider defaults. A cached observation may
@@ -28,10 +29,11 @@ node route. Relay does not fall back to a different model. The node's fresh ACP
 session repeats the selection proof. If a later `config_option_update` reports
 a different value, Relay cancels and fails that attempt.
 
-An explicit `permission_profile` must be supported by the candidate agent at
-launch preflight. Relay reports permission and route failures together before
-running any node. Registry installation metadata is advisory; a registry fetch
-failure does not prevent installed agents from proving their routes.
+Current workflow YAML has no permission field. Owner provider settings select
+permission modes; retained legacy snapshots can contain `permission_profile`.
+Relay reports permission and route failures together before running a step.
+Registry installation metadata is advisory; a registry fetch failure does not
+prevent installed agents from proving their routes.
 
 ## Effort and permission modes
 
@@ -44,11 +46,12 @@ preserved. Model selection can change the effort menu, as described by the
 [ACP configuration contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
 
 Both controls initially show **Provider default**. Reading the choices does
-not write an override. An explicit selection is stored under that node's
-`agent_options.<agent-id>.effort` or `.permission_mode`. Returning to Provider
-default removes that key. A tool that advertises no separate selector shows
-only Provider default. The editor resets effort when its model override changes
-and retains the tool's permission-mode override for fresh validation.
+not write an override. The workflow editor stores an explicit effort as the
+agent action's `with.effort`; permissions remain in owner provider settings.
+Retained legacy snapshots keep their `agent_options.<agent-id>` overrides.
+Returning to Provider default removes the corresponding override. A tool that
+advertises no separate selector shows only Provider default. Changing a step's
+model resets its effort; saved owner permissions require fresh validation.
 
 ACP launch probes and workers apply permission mode before effort, require the
 complete response to confirm the requested values, and keep exact-model proof
@@ -232,12 +235,14 @@ downloaded review instructions belong below the attempt's temporary directory,
 while `PLAN_CRITIQUE.md` stays in the repository root. The Git cleanliness check
 still rejects an uncommitted `.skills/review.md` file in the checkout.
 
-Relay
-has no secret vault, environment allowlist, or masking layer. Prompts, model
-output, tool details, stderr, permission answers, Git diffs, and artifacts can
-contain sensitive data and remain in local Relay storage until the owner
-deletes the run. Provider authentication data stays in the provider's own CLI
-or operating-system credential store. Relay emits no product telemetry.
+Relay masks declared workflow secrets and `add-mask` values in public run
+output. Agent prose does not register workflow commands or masks. Arbitrary
+inherited variables, Git diffs, and retained files are not automatically
+redacted and can contain sensitive data until the owner deletes the run.
+Provider authentication data stays in the provider's own CLI or
+operating-system credential store. Workflow secret references use the
+separate [binding contract](workflows.md#variables-secrets-and-environments).
+Relay emits no product telemetry.
 
 ## Antigravity differences
 
