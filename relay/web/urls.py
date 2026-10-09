@@ -34,6 +34,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflows/<path:key>/draft/discard", actions.discard_workflow_draft),
     path("api/workflows/<path:key>/save", actions.save_workflow, name="workflow-save"),
     path("api/workflows/<path:key>/commit", actions.publish_workflow_sources),
+    path("api/workflows/<path:key>/manage", actions.manage_workflow),
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
     path("api/workflows/<path:key>/lease/release", actions.release_workflow_lease),
     path("api/workflows/<path:key>/prompt", actions.workflow_prompt, name="workflow-prompt"),

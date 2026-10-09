@@ -601,7 +601,8 @@ def _read_document(text: str) -> tuple[Mapping[str, Any], dict[str, tuple[int, i
             hint = "Keep one workflow document in each file."
         message = f"Invalid YAML document: {reason}. {hint}"
         raise WorkflowValidationError(message, context=context) from None
-    return _mapping(document, "workflow"), locations
+    _mapping(document, "workflow")
+    return cast(Mapping[str, Any], document), locations
 
 
 def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:

@@ -462,6 +462,42 @@ def discard_workflow_draft(request: HttpRequest, key: str) -> HttpResponse:
 @api_errors
 @owner_required
 @require_POST
+def manage_workflow(request: HttpRequest, key: str) -> HttpResponse:
+    from relay.workflows.management import manage_workflow_document
+
+    relay_root, project = current_project(request)
+    key = "/".join(workflow_key_parts(key))
+    body = json_body(request)
+    store = DjangoWorkflowStore()
+    store.require_lease(project.id, key, _lease_holder(body))
+    action = required_text(body, "action")
+    if action in {"disable", "enable"}:
+        read_workflow_document(store, relay_root, project.id, key)
+        store.set_disabled(project.id, key, action == "disable")
+        return JsonResponse({"key": key, "disabled": action == "disable"})
+    if action == "delete" and body.get("confirmed") is not True:
+        message = (
+            "Confirm deletion of this saved workflow. Run history and prompt files are retained."
+        )
+        raise ConfigError(message)
+    result = manage_workflow_document(
+        store,
+        relay_root,
+        project.id,
+        key,
+        action,
+        _base_hash(body),
+        new_key=optional_text(body, "new_key"),
+        name=optional_text(body, "name"),
+    )
+    if action == "rename" and result and result != key:
+        store.move_editor_state(project.id, key, result)
+    return JsonResponse({"key": result})
+
+
+@api_errors
+@owner_required
+@require_POST
 def create_workflow(request: HttpRequest) -> HttpResponse:
     relay_root, project = current_project(request)
     body = json_body(request)
@@ -543,6 +579,7 @@ def workflows_collection(request: HttpRequest) -> HttpResponseBase:
 def launch_run(request: HttpRequest) -> HttpResponse:
     relay_root, project = current_project(request)
     body = json_body(request)
+    DjangoWorkflowStore().require_enabled(project.id, required_text(body, "workflow_key"))
     expected = body.get("project_id")
     if expected is not None and expected != project.id:
         message = "The workflow is bound to a different project than the one selected for this run."

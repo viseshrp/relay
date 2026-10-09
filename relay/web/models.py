@@ -88,6 +88,21 @@ class ProjectRelink(RelayModel):
     at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 
 
+class WorkflowControl(RelayModel):
+    """Owner-controlled launch availability, independent of workflow files and runs."""
+
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    workflow_key: models.TextField = models.TextField()
+    disabled: models.BooleanField = models.BooleanField(default=False)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("project", "workflow_key"), name="relay_unique_workflow_control"
+            )
+        ]
+
+
 class WorkflowDraft(RelayModel):
     """Latest recovery YAML for one tracked workflow."""
 

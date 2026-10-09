@@ -178,6 +178,14 @@ close the checklist and add its jobs in the editor before running it.
 
 ## Choose a project and workflow
 
+The editor and run history share a workflow sidebar with file names and the
+latest run status. **Manage workflow** offers rename, duplicate, disable,
+enable, and confirmed deletion. These actions require the current editing
+lease. Rename and delete refuse files referenced by another workflow.
+Deletion retains run history and shared prompts. Disabling a workflow blocks
+manual runs and disables its automatic triggers; enabling it leaves those
+triggers off until explicitly activated again.
+
 The project bar stays visible above both views. Choose a registered project,
 or use **Open another project** and enter its local Git repository path. Relay
 can initialize a blank `.relay` surface there. Each browser keeps its own

@@ -12,13 +12,15 @@ import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
 import { LaunchPanel } from "./LaunchPanel";
 import { WorkflowSettings } from "./WorkflowSettings";
 import { AgentConfiguration } from "./AgentConfiguration";
+import { WorkflowManagement } from "./WorkflowManagement";
+import { WorkflowSidebar, type WorkflowEntry } from "./WorkflowSidebar";
 
 type Diagnostic = { message: string; context?: { field?: string; line?: string; column?: string } };
 type Trigger = { workflow_key: string; event: string; enabled: boolean };
 const encoded = (key: string) => key.split("/").map(encodeURIComponent).join("/");
 
 export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
-  const [inventory, setInventory] = useState<Array<{ key: string; name: string }>>([]);
+  const [inventory, setInventory] = useState<WorkflowEntry[]>([]);
   const [key, setKey] = useState(props.initialWorkflow || "");
   const [text, setText] = useState(""); const [saved, setSaved] = useState("");
   const [base, setBase] = useState(""); const [draft, setDraft] = useState<WorkflowDraft | null>(null);
@@ -57,7 +59,7 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const path = (suffix: string) => projectPath(`/api/workflows/${encoded(key)}${suffix}`, props.requestProject);
   currentDocument.current = path("");
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const result = await api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", props.requestProject), { signal });
+    const result = await api<{ workflows: WorkflowEntry[] }>(projectPath("/api/workflows", props.requestProject), { signal });
     if (signal?.aborted) return;
     setInventory(result.workflows);
     if (!key && result.workflows.length) setKey((result.workflows.find(item => item.key === "workflow.yaml") || result.workflows[0]).key);
@@ -148,9 +150,14 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     try { const result = await api<{ triggers: Trigger[] }>(projectPath("/api/workflow-triggers", props.requestProject), { method: "POST", body: JSON.stringify({ key, event, enabled, allow_writers: enabled }) }); setTriggerRows(result.triggers); setActivation(null); setAuthorize(false); } catch (e) { setError(errorMessage(e)); }
   }
   const events = parsed.value?.on && typeof parsed.value.on === "object" && !Array.isArray(parsed.value.on) ? Object.keys(parsed.value.on) : typeof parsed.value?.on === "string" ? [parsed.value.on] : [];
-  return <Stack spacing={2}>
+  const disabled = inventory.find(item => item.key === key)?.disabled === true;
+  return <Box className="actions-layout">
+    <WorkflowSidebar workflows={inventory} selected={key} project={props.project.id} editor onCreate={() => setCreate(true)} onSelect={next => { if (!next) { window.location.assign(`/?view=runs&project=${encodeURIComponent(props.project.id)}`); return; } void flush().then(() => setKey(next)).catch(e => setError(errorMessage(e))); }} />
+    <Stack spacing={2} className="actions-main">
     <Stack component="section" aria-label="Workflow header" direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}><Typography variant="h5" sx={{ flex: "1 1 100%", overflowWrap: "anywhere" }}>{parsed.value?.name || inventory.find(item => item.key === key)?.name || "Choose a workflow"}</Typography><TextField select label="Workflow" value={key} onChange={async event => { try { await flush(); setKey(event.target.value); } catch(e) { setError(errorMessage(e)); } }} sx={{ minWidth: 220 }}>{inventory.map(item => <MenuItem key={item.key} value={item.key}>{item.name || item.key}</MenuItem>)}</TextField>
-      <Button onClick={() => setCreate(true)}>Create workflow</Button><Button onClick={() => void save()} disabled={!lease || !valid || text === saved}>Save</Button><Button variant="contained" onClick={() => setLaunch(true)} disabled={!savedParsed.value}>Run workflow</Button></Stack>
+      <Button onClick={() => setCreate(true)}>Create workflow</Button><Button onClick={() => void save()} disabled={!lease || !valid || text === saved}>Save</Button>{!disabled && <Button variant="contained" onClick={() => setLaunch(true)} disabled={!savedParsed.value}>Run workflow</Button>}
+      <WorkflowManagement workflowKey={key} name={parsed.value?.name || key} baseHash={base} holder={holder.current} project={props.requestProject} disabled={disabled} onChanged={async next => { const result = await api<{ workflows: WorkflowEntry[] }>(projectPath("/api/workflows", props.requestProject)); setInventory(result.workflows); setKey(next ?? result.workflows[0]?.key ?? ""); if (next === key) setNotice("Workflow availability updated."); }} /></Stack>
+    {disabled && <Alert severity="info">This workflow is disabled. Enable it to run again.</Alert>}
     <Button onClick={() => setSettings(true)}>Variables, secrets, environments and library</Button>
     <WorkflowSettings open={settings} projectId={props.requestProject || props.project.id} yaml={text} onClose={() => setSettings(false)} onEnvironments={setEnvironments} />
     {lease && valid && <Typography>Ready to edit</Typography>}
@@ -181,5 +188,5 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     <CreateWorkflowDialog holder={holder.current} open={create} requestProject={props.requestProject} onClose={() => setCreate(false)} onCreated={async newKey => { setCreate(false); setKey(newKey); await refresh(); }} />
     <LaunchPanel open={launch} workflowKey={key} workflow={launchView(savedParsed.value, environments)} project={props.project} requestProject={props.requestProject} modelOptions={[]} blockedReason={!savedParsed.value ? "Choose a valid saved workflow." : null} saveError={null} draftNotice={text !== saved ? "Your unsaved draft is not included. This runs the saved workflow." : null} onClose={() => { setLaunch(false); props.onLaunchClosed(); }} onExited={() => undefined} onRunLaunched={props.onRunLaunched} previousRun={null} />
     <Dialog open={Boolean(activation)} onClose={() => { setActivation(null); setAuthorize(false); }}><DialogTitle>Activate {activation}</DialogTitle><DialogContent><FormControlLabel control={<Checkbox checked={authorize} onChange={e => setAuthorize(e.target.checked)} />} label="Allow this trigger to launch writing jobs automatically on this computer." /></DialogContent><DialogActions><Button onClick={() => setActivation(null)}>Cancel</Button><Button disabled={!authorize || text !== saved} onClick={() => { if (activation) void toggleTrigger(activation, true); }}>Activate trigger</Button></DialogActions></Dialog>
-  </Stack>;
+  </Stack></Box>;
 }

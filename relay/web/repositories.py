@@ -171,6 +171,7 @@ from .models import (
     RunLock,
     RunSnapshot,
     UsageRetry,
+    WorkflowControl,
     WorkflowDraft,
 )
 
@@ -605,6 +606,57 @@ def _foreign_key_text(instance: models.Model, name: str) -> str:
 
 class DjangoWorkflowStore:
     """Recovery drafts and renewable editor leases for project YAML files."""
+
+    def require_enabled(self, project_id: str, workflow_key: str) -> None:
+        key = "/".join(workflow_key_parts(workflow_key))
+        if WorkflowControl.objects.filter(
+            project_id=project_id, workflow_key=key, disabled=True
+        ).exists():
+            message = "This workflow is disabled."
+            raise PermissionFlowError(
+                message, next_action="Enable it from the workflow menu before running."
+            )
+
+    def workflow_metadata(self, project_id: str) -> dict[str, dict[str, object]]:
+        rows: dict[str, dict[str, object]] = {
+            str(row["workflow_key"]): {"disabled": bool(row["disabled"])}
+            for row in WorkflowControl.objects.filter(project_id=project_id).values(
+                "workflow_key", "disabled"
+            )
+        }
+        latest = (
+            Run.objects.filter(project_id=project_id)
+            .values("workflow_key")
+            .annotate(latest=Max("number"))
+        )
+        for run in (
+            Run.objects.filter(project_id=project_id, number__in=[row["latest"] for row in latest])
+            .order_by("-number")
+            .values("id", "workflow_key", "status")
+        ):
+            key = "/".join(workflow_key_parts(str(run["workflow_key"])))
+            record = rows.setdefault(key, {"disabled": False})
+            if "last_run" not in record:
+                record.update(last_run=str(run["id"]), last_status=str(run["status"]))
+        return rows
+
+    def set_disabled(self, project_id: str, workflow_key: str, disabled: bool) -> None:
+        WorkflowControl.objects.update_or_create(
+            project_id=project_id, workflow_key=workflow_key, defaults={"disabled": disabled}
+        )
+        if disabled:
+            from .models import WorkflowTrigger
+
+            WorkflowTrigger.objects.filter(project_id=project_id, workflow_key=workflow_key).update(
+                enabled=False
+            )
+
+    def move_editor_state(self, project_id: str, old_key: str, new_key: str) -> None:
+        with transaction.atomic():
+            for model in (WorkflowDraft, EditorLease, WorkflowControl):
+                model.objects.filter(project_id=project_id, workflow_key=old_key).update(
+                    workflow_key=new_key
+                )
 
     def get_draft(self, project_id: str, workflow_key: str) -> dict[str, object] | None:
         try:
@@ -2277,6 +2329,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         next_action="Start Relay again, then relaunch the workflow.",
                     )
                 project = _project_by_id(project_id)
+                DjangoWorkflowStore().require_enabled(project_id, request.workflow_key)
                 number = _integer(project, "next_run_number")
                 Project.objects.filter(pk=project.pk).update(next_run_number=number + 1)
                 run_transition = transition_run(None, "launch")

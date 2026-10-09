@@ -1,5 +1,12 @@
 # HTTP API
 
+`POST /api/workflows/<key>/manage` requires the editing `holder` and accepts
+`action`: `rename`, `duplicate`, `disable`, `enable`, or `delete`. File changes
+also require `base_hash`; rename and duplicate take `new_key` and an optional
+display `name`. Delete requires `confirmed: true`. History and shared prompts
+are retained. Workflow inventory includes `disabled`, `last_run`, and
+`last_status` when present. Disabled workflows cannot be launched.
+
 Relay exposes this API only through `relay up` on a loopback address. The
 browser uses ordinary Django session cookies. It does not send bearer tokens,
 and the API is not a remote-service contract.

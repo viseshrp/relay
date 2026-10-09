@@ -197,8 +197,15 @@ def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
 @require_GET
 def workflows(request: HttpRequest) -> HttpResponse:
     relay_root, project = current_project(request)
+    metadata = DjangoWorkflowStore().workflow_metadata(project.id)
     return JsonResponse(
-        {"workflows": list_workflow_documents(relay_root), "project": asdict(project)}
+        {
+            "workflows": [
+                {**item, **metadata.get(item["key"], {})}
+                for item in list_workflow_documents(relay_root)
+            ],
+            "project": asdict(project),
+        }
     )
 
 

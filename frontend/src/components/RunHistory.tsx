@@ -6,6 +6,7 @@ import { projectPath, stageLabel, statusLabel } from "../navigation";
 import type { ProjectRecord, RunSummary } from "../types";
 import { useClock } from "../useClock";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
+import { WorkflowSidebar, type WorkflowEntry } from "./WorkflowSidebar";
 
 interface HistoryFilters { workflow: string; status: string; branch: string; query: string }
 export function RunHistory({ project, runs, waitingRuns, more, refreshing, onMore, onSelect, onRefresh, onRunWorkflow, onEditWorkflow, filters, onFilters }: {
@@ -13,25 +14,18 @@ export function RunHistory({ project, runs, waitingRuns, more, refreshing, onMor
   onMore: () => void; onSelect: (id: string) => void; onRefresh: () => void; onRunWorkflow: (key: string) => void;
   onEditWorkflow: (key: string) => void; filters: HistoryFilters; onFilters: (filters: HistoryFilters) => void;
 }) {
-  const [workflows, setWorkflows] = useState<Array<{ key: string; name: string }>>([]);
+  const [workflows, setWorkflows] = useState<WorkflowEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const now = useClock(runs.some((run) => !run.ended_at && run.started_at !== null));
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ workflows: Array<{ key: string; name: string }> }>(projectPath("/api/workflows", project.id), { signal: controller.signal })
+    void api<{ workflows: WorkflowEntry[] }>(projectPath("/api/workflows", project.id), { signal: controller.signal })
       .then((response) => setWorkflows(response.workflows)).catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); });
     return () => controller.abort();
   }, [project.id]);
   const current = workflows.find((workflow) => workflow.key === filters.workflow);
   return <Box className="actions-layout">
-    <Box component="nav" aria-label="Workflow sidebar" className="actions-sidebar">
-      <Typography component="h2" variant="h6" sx={{ p: 2 }}>Actions</Typography>
-      <Button fullWidth variant="outlined" onClick={() => onEditWorkflow("")}>New workflow</Button>
-      <List>
-        <ListItemButton selected={!filters.workflow} onClick={() => onFilters({ ...filters, workflow: "" })}><ActionIcon name="workflow" /><ListItemText primary="All workflows" /></ListItemButton>
-        {workflows.map((workflow) => <ListItemButton key={workflow.key} selected={filters.workflow === workflow.key} onClick={() => onFilters({ ...filters, workflow: workflow.key })}><ActionIcon name="workflow" /><ListItemText primary={workflow.name} /></ListItemButton>)}
-      </List>
-    </Box>
+    <WorkflowSidebar workflows={workflows} selected={filters.workflow} project={project.id} onSelect={workflow => onFilters({ ...filters, workflow })} onCreate={() => onEditWorkflow("")} />
     <Stack spacing={2} className="actions-main">
       <Stack direction="row" spacing={2} className="history-heading"><Typography component="h1" variant="h5" sx={{ flex: 1 }}>{current?.name ?? "All workflows"}</Typography>
         <Button disabled={refreshing} onClick={onRefresh} startIcon={<ActionIcon name="refresh" />}>Refresh</Button>
@@ -46,7 +40,7 @@ export function RunHistory({ project, runs, waitingRuns, more, refreshing, onMor
           </Select></FormControl>
           <TextField size="small" label="Branch" value={filters.branch} onChange={(event) => onFilters({ ...filters, branch: event.target.value })} />
         </Stack>
-        {current && <Stack direction="row" className="run-workflow-banner"><Typography variant="body2" sx={{ flex: 1 }}>{current.key}</Typography><Button variant="outlined" endIcon={<ActionIcon name="down" />} onClick={() => onRunWorkflow(current.key)}>Run workflow</Button></Stack>}
+        {current && <Stack direction="row" className="run-workflow-banner"><Typography variant="body2" sx={{ flex: 1 }}>{current.key}</Typography>{!current.disabled && <Button variant="outlined" endIcon={<ActionIcon name="down" />} onClick={() => onRunWorkflow(current.key)}>Run workflow</Button>}</Stack>}
         <List disablePadding>
           {runs.map((run) => <ListItemButton key={run.id} onClick={() => onSelect(run.id)} className="run-history-row" aria-label={`${run.title || stageLabel(run.workflow_key)} #${run.number} · ${statusLabel(run.status)}`}>
             <StatusIcon status={run.status} size={22} />

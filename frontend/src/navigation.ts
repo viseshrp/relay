@@ -49,6 +49,12 @@ export function projectPath(path: string, projectId?: string | null): string {
   return `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(projectId)}`;
 }
 
+export function viewHref(view: LocationState["view"], project: string | null, values: Record<string, string> = {}): string {
+  const query = new URLSearchParams({ view, ...values });
+  if (project) query.set("project", project);
+  return `/?${query}`;
+}
+
 export function stageLabel(scope: string): string {
   // root.human_walkthrough -> Human walkthrough; root.build#2.check -> Check (iteration 2).
   const parts = scope.split(".");
