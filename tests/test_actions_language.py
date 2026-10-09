@@ -13,7 +13,7 @@ def test_boolean_expression_cannot_silently_clear_an_explicit_agent_effort() -> 
     from relay.workflows.actions.compiler import bind_agent
 
     step = load(
-        "jobs: {work: {runs-on: self-hosted, steps: [{uses: relay/agent@v1, "
+        "jobs: {work: {steps: [{uses: relay/agent@v1, "
         "with: {agent: codex, model: m1, effort: '${{ true }}'}}]}}"
     ).value["jobs"]["work"]["steps"][0]
     with pytest.raises(WorkflowValidationError, match="exact provider value or null"):
@@ -23,10 +23,7 @@ def test_boolean_expression_cannot_silently_clear_an_explicit_agent_effort() -> 
 @pytest.mark.parametrize("addition", ["permissions: read-all", "container: alpine", "services: {}"])
 def test_platform_only_job_features_are_rejected(addition):
     with pytest.raises(WorkflowValidationError):
-        load(
-            f"jobs:\n  test:\n    runs-on: self-hosted\n    {addition}\n"
-            "    steps: [{run: echo ready}]\n"
-        )
+        load(f"jobs:\n  test:\n    {addition}\n    steps: [{{run: echo ready}}]\n")
 
 
 @pytest.mark.parametrize(
@@ -35,7 +32,7 @@ def test_platform_only_job_features_are_rejected(addition):
         "jobs: {}\njobs: {}",
         "jobs: !custom {}",
         "jobs: &a {test: *a}",
-        "jobs: {test: {<<: {runs-on: self-hosted}}}",
+        "jobs: {test: {<<: {name: Check}}}",
     ],
 )
 def test_duplicate_keys_tags_cycles_and_merges_are_rejected(source):
@@ -45,10 +42,9 @@ def test_duplicate_keys_tags_cycles_and_merges_are_rejected(source):
 
 def test_field_contexts_are_checked_without_evaluating_or_fetching_secrets():
     with pytest.raises(WorkflowValidationError):
-        load("jobs: {test: {runs-on: self-hosted, if: '${{ secrets.KEY }}', steps: [{run: echo}]}}")
+        load("jobs: {test: {if: '${{ secrets.KEY }}', steps: [{run: echo}]}}")
     value = load(
-        "jobs: {test: {runs-on: self-hosted, env: {permissions: yes}, "
-        "steps: [{run: 'echo ${{ secrets.KEY }}'}]}}"
+        "jobs: {test: {env: {permissions: yes}, steps: [{run: 'echo ${{ secrets.KEY }}'}]}}"
     )
     assert value.value["jobs"]["test"]["env"]["permissions"] == "yes"
 
@@ -109,9 +105,7 @@ def test_source_hashes_capture_executable_mode_as_well_as_bytes() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "field", ["name: 5", "description: false", "author: []", "branding: {color: black}"]
-)
+@pytest.mark.parametrize("field", ["name: 5", "description: false"])
 def test_action_metadata_rejects_invalid_field_types(field: str) -> None:
     from relay.workflows.actions.metadata import load_action
 
@@ -134,8 +128,6 @@ def test_local_action_missing_required_input_is_rejected_before_launch(project) 
     project.write(".relay/actions/required/main.js", "throw Error('never execute');")
     with pytest.raises(WorkflowValidationError, match="missing required"):
         capture_sources(
-            load(
-                "jobs: {main: {runs-on: self-hosted, steps: [{uses: ./.relay/actions/required}]}}"
-            ),
+            load("jobs: {main: {steps: [{uses: ./.relay/actions/required}]}}"),
             project.repository,
         )

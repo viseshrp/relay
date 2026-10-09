@@ -30,9 +30,9 @@ test("bounded repair loops save, reload and execute frozen local workflows", asy
   await page.request.get("/api/auth");
   expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
-  const child = stringify({ on: { workflow_call: {} }, jobs: { repair: { "runs-on": "self-hosted", steps: [{ run: "echo fixed > fixed.txt" }, { run: "test -f fixed.txt" }] } } });
+  const child = stringify({ on: { workflow_call: {} }, jobs: { repair: { steps: [{ run: "echo fixed > fixed.txt" }, { run: "test -f fixed.txt" }] } } });
   expect((await post(page, "/api/workflows", { key: "repair-child", holder: "repair-test", yaml: child })).ok()).toBeTruthy();
-  const source = stringify({ name: "Bounded repair loop", jobs: { review: { "runs-on": "self-hosted", steps: [{ uses: "relay/loop@v1", with: { workflow: "./.relay/workflows/repair-child.yaml", "max-iterations": 1 } }] } } });
+  const source = stringify({ name: "Bounded repair loop", jobs: { review: { steps: [{ uses: "relay/loop@v1", with: { workflow: "./.relay/workflows/repair-child.yaml", "max-iterations": 1 } }] } } });
   expect((await post(page, "/api/workflows", { key: "native-repairs", holder: "repair-test", yaml: source })).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=native-repairs.yaml");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();

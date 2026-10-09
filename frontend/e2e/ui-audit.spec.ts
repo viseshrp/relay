@@ -113,7 +113,7 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
 test("a named script step opens its terminal output", async ({ page }) => {
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const response = await post(page, "/api/workflows", { key: "script-log", holder, yaml: stringify({
-    name: "Script log", on: "workflow_dispatch", jobs: { check: { "runs-on": "self-hosted", steps: [
+    name: "Script log", on: "workflow_dispatch", jobs: { check: { steps: [
       { id: "script", name: "Visible command", run: "echo Captured terminal output" },
     ] } },
   }) });
@@ -172,7 +172,7 @@ test("the project dialog browses isolated directories and selects a repository",
 for (const type of ["condition", "loop", "subworkflow"] as const) {
   test(`Add a job saves and runs a ${type} workflow`, async ({ page }) => {
     const childKey = `audit-child-${type}`;
-    const childYaml = stringify({ on: { workflow_call: {} }, jobs: { check: { "runs-on": "self-hosted", steps: [{ run: "git status --short" }] } } });
+    const childYaml = stringify({ on: { workflow_call: {} }, jobs: { check: { steps: [{ run: "git status --short" }] } } });
     if (type !== "condition") expect((await post(page, "/api/workflows", { key: childKey, holder: "audit-create", yaml: childYaml })).ok()).toBeTruthy();
     const key = `audit-add-${type}`;
     await create(page, key, `Create ${type}`, { base: { type: "command", run: ["git", "status"] } });

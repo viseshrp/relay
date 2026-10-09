@@ -22,7 +22,7 @@ def test_dispatch_is_opt_in_bounded_and_deduplicated(project: RelayProject, tmp_
     project.write_workflow(
         "dispatch",
         """on: {repository_dispatch: {types: [build]}}
-jobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}
+jobs: {main: {steps: [{run: echo ready}]}}
 """,
     )
     repository_dispatch(project.project_id, "build", {}, "before-activation")
@@ -52,7 +52,7 @@ def test_activation_freezes_transitive_sources_and_blocks_changed_calls(
 ) -> None:
     project.write_workflow(
         "callee",
-        "on: workflow_call\njobs: {main: {runs-on: self-hosted, steps: [{run: echo first}]}}\n",
+        "on: workflow_call\njobs: {main: {steps: [{run: echo first}]}}\n",
     )
     project.write_workflow(
         "caller", "on: repository_dispatch\njobs: {call: {uses: ./.relay/workflows/callee.yaml}}\n"
@@ -61,7 +61,7 @@ def test_activation_freezes_transitive_sources_and_blocks_changed_calls(
     repository_dispatch(project.project_id, "event", {}, "identity")
     project.write_workflow(
         "callee",
-        "on: workflow_call\njobs: {main: {runs-on: self-hosted, steps: [{run: echo changed}]}}\n",
+        "on: workflow_call\njobs: {main: {steps: [{run: echo changed}]}}\n",
     )
     launch_delivery(TriggerDelivery.objects.get())
     assert TriggerDelivery.objects.get().state == "blocked"
@@ -73,8 +73,7 @@ def test_schedule_downtime_coalesces_latest_and_reconciliation_is_idempotent(
 ) -> None:
     project.write_workflow(
         "scheduled",
-        "on: {schedule: [{cron: '*/5 * * * *'}]}\n"
-        "jobs: {main: {runs-on: self-hosted, steps: [{run: echo scheduled}]}}\n",
+        "on: {schedule: [{cron: '*/5 * * * *'}]}\njobs: {main: {steps: [{run: echo scheduled}]}}\n",
     )
     activate(project.project_id, project.relay_root, "scheduled", "schedule", True, True)
     trigger = WorkflowTrigger.objects.get()
@@ -94,8 +93,7 @@ def test_completed_run_cursor_pages_equal_timestamps_without_losing_deliveries(
 
     project.write_workflow(
         "completed",
-        "on: {workflow_run: {workflows: [Upstream], types: [completed]}}\n"
-        "jobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}\n",
+        "on: {workflow_run: {workflows: [Upstream]}}\njobs: {main: {steps: [{run: echo ready}]}}\n",
     )
     activate(project.project_id, project.relay_root, "completed", "workflow_run", True, True)
     ended = timezone.now()
@@ -141,7 +139,6 @@ def test_queue_reservation_does_not_hold_global_job_lease(
 concurrency: {group: local, queue: max}
 jobs:
   main:
-    runs-on: self-hosted
     steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]
 """,
     )
@@ -165,8 +162,7 @@ def test_nested_self_blocking_concurrency_is_rejected_without_deadlock(
 ) -> None:
     project.write_workflow(
         "callee",
-        "on: workflow_call\nconcurrency: shared\n"
-        "jobs: {main: {runs-on: self-hosted, steps: [{run: echo called}]}}\n",
+        "on: workflow_call\nconcurrency: shared\njobs: {main: {steps: [{run: echo called}]}}\n",
     )
     project.write_workflow(
         "caller",
@@ -186,7 +182,7 @@ def test_owner_library_preserves_comments_metadata_and_default_branch(
     bundle = {
         "metadata": {"name": "Owner template", "description": "Local", "categories": ["review"]},
         "yaml": "# owner comment\non: {push: {branches: ['$default-branch']}}\n"
-        "jobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}\n",
+        "jobs: {main: {steps: [{run: echo ready}]}}\n",
         "sources": {".relay/prompts/custom.md": "Owner prompt\n"},
     }
     identity = import_template(bundle)

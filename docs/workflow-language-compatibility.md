@@ -1,9 +1,9 @@
-# Workflow language compatibility
+# Local workflow language audit
 
-Relay implements a local subset of GitHub Actions YAML. It adopts the jobs,
-steps, expression, input, matrix, output, reuse, and command-file contracts
-where they fit a single-owner application. Execution uses local coding agents
-and a serial cumulative Git workspace. This is a Relay execution dialect.
+Relay owns a declarative YAML language for local coding-agent workflows.
+GitHub Actions supplies familiar jobs, steps, and expression syntax. A field
+belongs in Relay only when it describes useful behavior on this computer;
+upstream support alone is insufficient.
 
 ## Primary sources and review passes
 
@@ -26,18 +26,63 @@ The comparison used three passes through GitHub's own documentation:
    and tests. Resolve product differences explicitly, then map each accepted
    addition to implementation and validation.
 
-The pinned grammar and expression fixture source is GitHub's MIT-licensed
+The original grammar and expression fixture source is GitHub's MIT-licensed
 [actions/languageservices revision](https://github.com/actions/languageservices/tree/4043eda158e16579cc5fb1b0b07a4bce2a76f0b5).
-Its license and provenance accompany `relay/workflows/actions/upstream-schema.json`
+Its license and provenance accompany `relay/workflows/actions/schema.json`
 and `tests/fixtures/actions/expressions`. The browser parser uses the matching
 exact `@actions/expressions` package version, `0.3.61`. The Python interpreter
 and browser oracle consume the upstream expression fixtures independently.
 Local additions such as `case`, `cache-mode`, time zones, queue policy, and
 completion-conclusion filters have separate contracts and regression checks.
 
-GitHub documentation describes a broader hosted platform. The pinned grammar
-is supplemented by Relay's explicit support manifest, rather than treating
-an accepted upstream key as proof that Relay can execute it.
+Relay's curated `schema.json` is authoritative for validation and the support
+manifest. Only definitions reachable from its local workflow root are shipped.
+Unsupported hosted grammar is excluded from supported syntax.
+
+## Local review and removals
+
+The local-language review made three separate passes:
+
+1. Inventory every accepted workflow, trigger, job, step, and action-metadata
+   property, including the schema definitions reachable through alternatives.
+2. Trace each property through compilation, dispatch, runtime, persistence,
+   and the loopback API. Find ignored fields, fixed values, and synthetic
+   GitHub data. Check the documented upstream meaning again.
+3. Reconcile authoring, defaults, starters, local action capture, examples,
+   manifests, and regression tests against the resulting local contract.
+
+| Removed syntax | Local reason |
+| --- | --- |
+| `jobs.*.runs-on`, runner groups, labels and images | Jobs execute on this computer; no runner pool exists. |
+| `strategy.max-parallel` and its expression property | The local admission lease serializes jobs and variants. |
+| `on.workflow_run.types` | The adapter observes completed runs; use conclusion filters. |
+| `environment.deployment` | No GitHub deployment record is created; the flag was ignored. |
+| Step `background`, `parallel`, `wait`, `wait-all`, `cancel` | There is no matching serial step executor; these variants could validate. |
+| `permissions`, token scopes and OIDC | Provider permissions are owner settings; no GitHub token is issued. |
+| `container`, `services`, `snapshot`, `cancel-timeout-minutes` | There is no container, hosted image, or matching cancellation adapter. |
+| GitHub issue/PR/check/release/deployment events | They have no local observation or delivery adapter. |
+| Action `branding` and `author` | Marketplace presentation and unused metadata had no local consumer. |
+| JavaScript output `value`, `post-if` without `post` | These fields were ignored; composites use output values, JavaScript writes files. |
+| OCI artifact subjects | Registry digests were recorded without retaining or verifying content. |
+| `github` and `runner` expression roots | Actual local facts use `relay` and `host`. |
+| Token/API/owner placeholders, host tool cache/debug/environment | Empty strings and fixed platform labels describe no local configuration. |
+| `GITHUB_*` and `RUNNER_*` generated command variables | Local scripts use `RELAY_*` and `RELAY_HOST_*`; no alias is provided. |
+| Choice `options` on other input types, callable expression defaults, matrix policy without a matrix | They were ignored or could not resolve as declared. |
+| Arbitrary trigger properties and unsupported nested action steps | All triggers and step containers use the same strict local contract. |
+
+No conversion or backwards compatibility layer is added. Old editable sources
+and drafts can be rewritten. Run history and captured source bytes are retained.
+
+Retained fields have local uses: names/descriptions explain work; inputs,
+expressions, environment variables and outputs pass data; `needs` and conditions
+control order; matrices repeat local work; shell/workdir defaults and timeouts
+control local processes; failure tolerance and cleanup hooks control recovery;
+local reuse freezes sources; variables, secrets and environments control owner
+bindings and approval; concurrency queues control supersession/FIFO admission;
+schedules, local refs, loopback dispatch and completion triggers automate local
+work; artifacts, summaries, annotations and caches retain or reuse results.
+Their runtime subjects are listed below. A matrix `os` axis is user data and
+cannot select another host.
 
 ## Accepted feature map
 
@@ -69,7 +114,7 @@ an accepted upstream key as proof that Relay can execute it.
 | OUTPUT/ENV/PATH/STATE files | `action_files.py` | UTF-8, multiline, protected names and consume-once |
 | String public outputs and typed private reports | `nodes/actions.py`, `actions_repository.py` | UTF-16 budgets and secret-bearing export rejection |
 | Named hashed artifacts, downloads and optional expiry | `action_products.py`, `actions_products.py` | Integrity, same-project access and required evidence |
-| File/OCI artifact subjects and cumulative LIST | `action_files.py` | Digests, subject bounds and conflicts |
+| Local file artifact subjects and cumulative LIST | `action_files.py` | Digests, subject bounds and conflicts |
 | Immutable project caches, modes, prefix match and LRU | `action_products.py`, `actions_products.py` | Capability intersection and owned restore paths |
 | Summaries, annotations, groups, debug and log commands | `action_commands.py`, `ActionsRunProducts.tsx` | Masking, stop-commands and agent prose isolation |
 | Typed manual choice/environment launch inputs | `language.py`, `LaunchPanel.tsx` | Type/default/unknown input checks |

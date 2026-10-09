@@ -11,7 +11,7 @@ export interface ActionStep {
   "continue-on-error"?: boolean | string; "timeout-minutes"?: number | string;
 }
 export interface ActionJob {
-  name?: string; "runs-on"?: string; needs?: string | string[];
+  name?: string; needs?: string | string[];
   steps?: ActionStep[]; uses?: string; with?: Record<string, unknown>;
   env?: Record<string, unknown>; outputs?: Record<string, unknown>;
   strategy?: Record<string, unknown>; environment?: string | Record<string, unknown>;
@@ -53,7 +53,7 @@ export function parseActions(text: string) {
 export function expressionDiagnostic(source: string): string | null {
   try {
     const tokens = new Lexer(source).lex().tokens;
-    new Parser(tokens, ["github", "inputs", "vars", "env", "secrets", "needs", "steps", "jobs", "job", "runner", "matrix", "strategy"], [{ name: "hashFiles", minArgs: 1, maxArgs: 255 }, { name: "case", minArgs: 3, maxArgs: 255 }]).parse();
+    new Parser(tokens, ["relay", "inputs", "vars", "env", "secrets", "needs", "steps", "jobs", "job", "host", "matrix", "strategy"], [{ name: "hashFiles", minArgs: 1, maxArgs: 255 }, { name: "case", minArgs: 3, maxArgs: 255 }]).parse();
     return null;
   } catch (error) { return String(error); }
 }

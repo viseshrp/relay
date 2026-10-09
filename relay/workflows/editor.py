@@ -155,7 +155,7 @@ def create_workflow_document(
         # JSON quotes preserve a name such as "Review: API" as one YAML scalar.
         else (
             f"name: {json.dumps(name)}\non: workflow_dispatch\njobs:\n"
-            "  check:\n    runs-on: self-hosted\n    steps:\n      - run: echo Ready\n"
+            "  check:\n    steps:\n      - run: echo Ready\n"
         )
     )
     from .actions.language import load

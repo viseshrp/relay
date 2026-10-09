@@ -17,7 +17,7 @@ def workflow(
 ) -> tuple[str, InlineEngine]:
     from io import StringIO
 
-    value = {"jobs": {"main": {"runs-on": "self-hosted", "steps": steps}}}
+    value = {"jobs": {"main": {"steps": steps}}}
     stream = StringIO()
     YAML().dump(value, stream)
     project.write_workflow("builtins", stream.getvalue())
@@ -167,7 +167,7 @@ def test_loop_terminates_on_declared_output_or_exhausts_its_bound(
 ) -> None:
     project.write_workflow(
         "child",
-        "jobs: {main: {runs-on: self-hosted, outputs: {answer: yes}, "
+        "jobs: {main: {outputs: {answer: yes}, "
         "steps: [{uses: relay/validate-input@v1, with: {value: ready, type: string}}]}}\n"
         "on: {workflow_call: {outputs: {answer: {value: '${{ jobs.main.outputs.answer }}'}}}}\n",
     )

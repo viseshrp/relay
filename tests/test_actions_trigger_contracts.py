@@ -27,10 +27,7 @@ from relay.web.models import (
 )
 from tests.support import InlineEngine, RelayProject, git
 
-BASE = (
-    "jobs: {main: {runs-on: self-hosted, "
-    "steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}\n"
-)
+BASE = "jobs: {main: {steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}\n"
 
 
 def test_push_observes_new_changed_and_deleted_refs_with_path_filters(
@@ -113,7 +110,7 @@ def test_uncertain_launch_reconciliation_never_replays_a_delivery(
         run_id = engine.launch(project, "automatic")
         snapshot = RunSnapshot.objects.get(run_id=run_id)
         defaults = dict(snapshot.launch_defaults)
-        defaults["actions_context"]["github"]["delivery_id"] = str(delivery.pk)
+        defaults["actions_context"]["relay"]["delivery_id"] = str(delivery.pk)
         snapshot.launch_defaults = defaults
         snapshot.save(update_fields=["launch_defaults"])
     reconcile()

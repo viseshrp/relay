@@ -74,7 +74,7 @@ test("shared command and variable settings validate, reload, replace project map
 test("command action inputs and scoped environment values save and execute", async ({ page }, info) => {
   const current = await (await page.request.get("/api/settings")).json();
   expect((await post(page, "/api/settings", { revision: current.revision, settings: { workflow_defaults: { commands: { test: ["git", "var", "GIT_AUTHOR_IDENT"] }, env: { GIT_AUTHOR_NAME: "Global Author" } } } })).ok()).toBeTruthy();
-  const yaml = stringify({ name: "Shared command", env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { argv: '["git","status"]' } }] } } });
+  const yaml = stringify({ name: "Shared command", env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { argv: '["git","status"]' } }] } } });
   expect((await post(page, "/api/workflows", { key: "shared-command", holder: "create-command", yaml })).ok()).toBeTruthy();
   await page.route("**/api/agents*", route => route.fulfill({ status: 503, json: { code: "agent_discovery_error", message: "Agent discovery unavailable.", context: {} } }));
   await page.goto("/?view=workflows&workflow=shared-command");
@@ -97,7 +97,7 @@ test("command action inputs and scoped environment values save and execute", asy
 });
 
 test("YAML edits populate action inputs and an unresolved command fails before launch", async ({ page }) => {
-  const document = { name: "Portable command", env: { WORKFLOW_VAR: "workflow" }, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { command: "missing" }, env: { JOB_VAR: "job" } }] } } };
+  const document = { name: "Portable command", env: { WORKFLOW_VAR: "workflow" }, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { command: "missing" }, env: { JOB_VAR: "job" } }] } } };
   expect((await post(page, "/api/workflows", { key: "portable-command", holder: "create-portable", yaml: stringify(document) })).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=portable-command");
   const inputs = page.getByLabel("Action inputs", { exact: true });
@@ -106,7 +106,7 @@ test("YAML edits populate action inputs and an unresolved command fails before l
   expect(invalid.status()).toBe(422);
   const editor = page.locator(".cm-content");
   await editor.click(); await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText(stringify({ ...document, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { argv: '["git","log","--oneline"]' }, env: { JOB_VAR: "changed" } }] } } }));
+  await page.keyboard.insertText(stringify({ ...document, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { argv: '["git","log","--oneline"]' }, env: { JOB_VAR: "changed" } }] } } }));
   await expect(inputs).toHaveValue(JSON.stringify({ argv: '["git","log","--oneline"]' }, null, 2));
   await expect(page.getByLabel("Step environment variables", { exact: true })).toHaveValue(JSON.stringify({ JOB_VAR: "changed" }, null, 2));
   await saveWorkflow(page);

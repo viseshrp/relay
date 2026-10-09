@@ -25,7 +25,7 @@ import pytest
 ThreadResult = TypeVar("ThreadResult")
 WORKFLOW = (
     "name: Configuration\non: workflow_dispatch\njobs:\n"
-    "  work:\n    runs-on: self-hosted\n    steps:\n"
+    "  work:\n    steps:\n"
     "      - id: agent\n        uses: relay/agent@v1\n"
     '        with: {agents: \'["codex","claude"]\', model: m1}\n'
 )

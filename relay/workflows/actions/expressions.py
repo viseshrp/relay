@@ -23,13 +23,13 @@ MAX_DEPTH = 50
 MAX_RESULT = 1_048_576
 CONTEXTS = frozenset(
     {
-        "github",
+        "relay",
         "env",
         "vars",
         "job",
         "jobs",
         "steps",
-        "runner",
+        "host",
         "secrets",
         "strategy",
         "matrix",
@@ -53,6 +53,71 @@ FUNCTIONS = {
     "cancelled": (0, 0),
 }
 STATUS_FUNCTIONS = frozenset({"always", "success", "failure", "cancelled"})
+CONTEXT_PROPERTIES = {
+    "relay": frozenset(
+        {
+            "actor",
+            "repository",
+            "workspace",
+            "workflow",
+            "workflow_ref",
+            "run_id",
+            "run_number",
+            "attempt_number",
+            "sha",
+            "ref",
+            "ref_name",
+            "ref_type",
+            "event_name",
+            "event",
+            "job",
+            "action",
+            "action_path",
+            "scheduled_at",
+            "delivery_id",
+            "chain",
+        }
+    ),
+    "host": frozenset({"os", "arch", "name", "temp"}),
+    "strategy": frozenset({"fail-fast", "job-index", "job-total"}),
+    "job": frozenset({"status"}),
+}
+LAUNCH_RELAY_PROPERTIES = frozenset(
+    {
+        "actor",
+        "repository",
+        "workflow",
+        "workflow_ref",
+        "sha",
+        "ref",
+        "ref_name",
+        "ref_type",
+        "event_name",
+        "event",
+        "scheduled_at",
+        "delivery_id",
+        "chain",
+    }
+)
+
+
+def check_launch_context(tree: Tree) -> None:
+    """Reject attempt-only facts while resolving a name or route before launch."""
+    if not tree:
+        return
+    if (
+        tree[0] == "index"
+        and tree[1] == ("context", "relay")
+        and tree[2][0] == "literal"
+        and str(tree[2][1]).lower() not in LAUNCH_RELAY_PROPERTIES
+    ):
+        message = f"relay.{tree[2][1]} is not available before launch."
+        raise _error(message)
+    for child in tree[2] if tree[0] == "call" else tree[1:]:
+        if isinstance(child, tuple):
+            check_launch_context(child)
+
+
 Tree: TypeAlias = tuple[Any, ...]
 _ABSENT = object()
 _BUDGET: ContextVar[list[int] | None] = ContextVar("actions_expression_budget", default=None)
@@ -61,6 +126,15 @@ _BUDGET: ContextVar[list[int] | None] = ContextVar("actions_expression_budget", 
 def _error(message: str, position: int | None = None) -> WorkflowValidationError:
     context = {"column": position + 1} if position is not None else {}
     return WorkflowValidationError(message, context=context)
+
+
+def _check_property(context: Tree, key: Tree) -> None:
+    if context[0] != "context" or key[0] != "literal":
+        return
+    properties = CONTEXT_PROPERTIES.get(str(context[1]))
+    if properties is not None and str(key[1]).lower() not in properties:
+        message = f"Unrecognized {context[1]} property: {key[1]}."
+        raise _error(message)
 
 
 def upper(value: str) -> str:
@@ -352,6 +426,7 @@ class Parser:
                 key = self.expression(0, depth + 1)
             if kind == "[":
                 self.take("]")
+            _check_property(left, key)
             left = ("index", left, key)
         levels = {"||": 1, "&&": 2, "==": 3, "!=": 3, "<": 4, "<=": 4, ">": 4, ">=": 4}
         while levels.get(self.tokens[self.index].kind, 0) > precedence:

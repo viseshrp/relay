@@ -7,7 +7,6 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import shutil
 import tempfile
@@ -57,10 +56,10 @@ def read_state(path: Path) -> dict[str, Any]:
 def step_files(directory: Path) -> dict[str, Path]:
     result = {}
     for name in FILE_NAMES:
-        path = directory / f"github-{name.lower()}"
+        path = directory / f"relay-{name.lower()}"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)
-        result[f"GITHUB_{name}"] = path
+        result[f"RELAY_{name}"] = path
     return result
 
 
@@ -134,27 +133,27 @@ def declared_subjects(
         reference = line.strip()
         if not reference or reference.startswith("#"):
             continue
-        match = re.fullmatch(r"(?:oci://)?(.+)@(sha256|sha384|sha512):([0-9a-f]+)", reference)
-        if match:
-            name, algorithm, digest = match.groups()
-            if len(digest) != {"sha256": 64, "sha384": 96, "sha512": 128}[algorithm]:
-                message = "An OCI artifact digest is incomplete."
-                raise NodeExecutionError(message)
-            subject = {"name": name, "digest": f"{algorithm}:{digest}", "kind": "oci"}
-        else:
-            from relay.execution.action_products import checked_path
+        if (
+            reference.startswith("oci://")
+            or "@sha256:" in reference
+            or "@sha384:" in reference
+            or "@sha512:" in reference
+        ):
+            message = "Declare a local artifact file; OCI registry subjects are unsupported."
+            raise NodeExecutionError(message)
+        from relay.execution.action_products import checked_path
 
-            path = checked_path(workspace, reference.removeprefix("file://"))
-            if path.is_symlink() or not path.is_file():
-                message = "A declared artifact must be a regular workspace file."
-                raise PathSafetyError(message)
-            digest = sha256()
-            with path.open("rb") as stream:
-                while chunk := stream.read(65_536):
-                    digest.update(chunk)
-            name = path.name
-            subject = {"name": name, "digest": f"sha256:{digest.hexdigest()}", "kind": "file"}
-            retained[f"subject:{name}"] = path.relative_to(workspace).as_posix()
+        path = checked_path(workspace, reference.removeprefix("file://"))
+        if path.is_symlink() or not path.is_file():
+            message = "A declared artifact must be a regular workspace file."
+            raise PathSafetyError(message)
+        digest = sha256()
+        with path.open("rb") as stream:
+            while chunk := stream.read(65_536):
+                digest.update(chunk)
+        name = path.name
+        subject = {"name": name, "digest": f"sha256:{digest.hexdigest()}", "kind": "file"}
+        retained[f"subject:{name}"] = path.relative_to(workspace).as_posix()
         if name in subjects and subjects[name] != subject:
             message = "Conflicting workflow artifact declarations."
             raise NodeExecutionError(message)
@@ -171,7 +170,7 @@ def consume(
     """Apply file changes once; the caller atomically persists the returned state."""
     if attempt_id in state["consumed"]:
         return {}, {}, ""
-    outputs = key_values(file_text(paths["GITHUB_OUTPUT"]))
+    outputs = key_values(file_text(paths["RELAY_OUTPUT"]))
     if (
         sum(
             len(name.encode("utf-16-le")) + len(value.encode("utf-16-le"))
@@ -181,24 +180,24 @@ def consume(
     ):
         message = "Step outputs exceed the job's 1 MiB output limit."
         raise NodeExecutionError(message)
-    environment = key_values(file_text(paths["GITHUB_ENV"]))
+    environment = key_values(file_text(paths["RELAY_ENV"]))
     for name, value in environment.items():
-        if name.upper().startswith(("GITHUB_", "RUNNER_")) or name.upper() == "NODE_OPTIONS":
+        if name.upper().startswith("RELAY_") or name.upper() == "NODE_OPTIONS":
             message = "An Actions file attempted to replace a protected variable."
             raise NodeExecutionError(message)
         if "=" in name or "\x00" in value:
             message = "An Actions environment value is invalid."
             raise NodeExecutionError(message)
     state["env"].update(environment)
-    for value in file_text(paths["GITHUB_PATH"]).splitlines():
+    for value in file_text(paths["RELAY_PATH"]).splitlines():
         if value:
             state["path"] = [value, *[item for item in state["path"] if item != value]]
     subjects, retained = declared_subjects(
-        file_text(paths["GITHUB_ARTIFACTS"]), workspace, state["subjects"]
+        file_text(paths["RELAY_ARTIFACTS"]), workspace, state["subjects"]
     )
     state["subjects"] = subjects
     state["consumed"].append(attempt_id)
-    return outputs, retained, file_text(paths["GITHUB_STEP_SUMMARY"])
+    return outputs, retained, file_text(paths["RELAY_STEP_SUMMARY"])
 
 
 def shell_script(directory: Path, source: str, shell: str | None) -> list[str]:

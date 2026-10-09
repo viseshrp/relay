@@ -1,6 +1,6 @@
-"""Actions YAML validation using the pinned upstream language definitions.
+"""Relay's local workflow language, inspired by Actions jobs and expressions.
 
-Relay's support decisions supplement that grammar. Validating never launches a
+Only Relay-owned schema definitions are accepted. Validation never launches a
 process, looks up a credential, or changes workflow sources.
 """
 
@@ -25,7 +25,7 @@ from relay.paths import safe_resolve
 
 from . import expressions
 
-DIALECT = "github-actions-local-1"
+DIALECT = "relay-local-1"
 UPSTREAM = "4043eda158e16579cc5fb1b0b07a4bce2a76f0b5"
 MAX_YAML_BYTES = 1_048_576
 MAX_YAML_NODES = 10_000
@@ -123,19 +123,10 @@ def _inspect_tree(
 
 @lru_cache(maxsize=1)
 def language_definitions() -> dict[str, Any]:
-    """Pinned MIT definitions plus currently documented cache access modes."""
-    definitions = json.loads(
-        Path(__file__).with_name("upstream-schema.json").read_text(encoding="utf-8")
-    )["definitions"]
-    definitions["cache-mode"] = {"string": {}, "allowed-values": sorted(CACHE_MODES)}
-    definitions["local-conclusions"] = {"sequence": {"item-type": "local-conclusion"}}
-    definitions["local-conclusion"] = {"allowed-values": ["success", "failure", "cancelled"]}
-    definitions["workflow-run-mapping"]["mapping"]["properties"]["conclusions"] = (
-        "local-conclusions"
-    )
-    for name in ("workflow-root", "workflow-root-strict", "job-factory", "workflow-job"):
-        definitions[name]["mapping"]["properties"]["cache-mode"] = "cache-mode"
-    return definitions
+    """The same curated schema is authoritative for validation and discovery."""
+    return json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))[
+        "definitions"
+    ]
 
 
 def _mapping(value: object, path: str) -> dict[str, Any]:
@@ -157,7 +148,11 @@ def _expression_check(value: str, name: str, contexts: Sequence[str], path: str)
             if not contexts:
                 raise _issue(path, "Expressions are not available in this field.")
             try:
-                expressions.parse(text, contexts=fields, functions=(*_PURE_FUNCTIONS, *functions))
+                tree = expressions.parse(
+                    text, contexts=fields, functions=(*_PURE_FUNCTIONS, *functions)
+                )
+                if name == "run-name":
+                    expressions.check_launch_context(tree)
             except WorkflowValidationError as error:
                 raise _issue(path, error.message) from None
     return found
@@ -218,6 +213,9 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         definition = cast(dict[str, Any], base["mapping"])
         properties = cast(dict[str, Any], definition.get("properties", {}))
         result = {}
+        if "loose-key-type" not in definition:
+            for key in record.keys() - properties.keys():
+                raise _issue(f"{path}.{key}", "Unknown workflow field.")
         for key, descriptor in properties.items():
             if isinstance(descriptor, Mapping) and descriptor.get("required") and key not in record:
                 message = f"{path}.{key}"
@@ -263,34 +261,6 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
     if "null" in base and value is not None:
         raise _issue(path, "Expected null.")
     return value
-
-
-def _unsupported(value: object, path: str) -> None:
-    if isinstance(value, Mapping):
-        blocked = {
-            "permissions",
-            "container",
-            "services",
-            "snapshot",
-            "background",
-            "wait",
-            "wait-all",
-            "cancel",
-            "parallel",
-            "cancel-timeout-minutes",
-        }
-        for key, item in value.items():
-            field = f"{path}.{key}"
-            if key in blocked and (
-                path == "workflow" or re.fullmatch(r"workflow\.jobs\.[^.]+", path)
-            ):
-                raise _issue(
-                    field, "Unsupported in Relay's local serial runtime.", unsupported=True
-                )
-            _unsupported(item, field)
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            _unsupported(item, f"{path}[{index}]")
 
 
 def _validate_filters(event: str, config: Mapping[str, Any]) -> None:
@@ -381,29 +351,59 @@ def resolve_inputs(
     return resolved
 
 
+def validate_steps(steps: object, path: str) -> None:
+    """Every ordered-step container uses the same local execution contract."""
+    if not isinstance(steps, list) or not steps:
+        message = path
+        raise _issue(message, "A job must contain ordered steps.")
+    ids = set()
+    for index, raw_step in enumerate(steps):
+        step = _mapping(raw_step, f"{path}[{index}]")
+        step_id = step.get("id")
+        if step_id is not None:
+            if IDENTIFIER.fullmatch(str(step_id)) is None or step_id in ids:
+                message = f"{path}[{index}].id"
+                raise _issue(message, "Invalid or duplicate step id.")
+            ids.add(step_id)
+        reference = step.get("uses")
+        if (
+            reference is not None
+            and reference not in BUILTINS
+            and (not str(reference).startswith("./.relay/actions/") or "${{" in str(reference))
+        ):
+            message = f"{path}[{index}].uses"
+            raise _issue(
+                message,
+                "Only frozen local and versioned relay actions are supported.",
+                unsupported=True,
+            )
+        _validate_timeout(step.get("timeout-minutes"), f"{path}[{index}]")
+        if reference in BUILTINS:
+            from .builtins import validate_inputs
+
+            validate_inputs(reference, _mapping(step.get("with", {}), f"{path}[{index}].with"))
+        elif "with" in step:
+            _mapping(step["with"], f"{path}[{index}].with")
+
+
 def _validate_contracts(workflow: dict[str, Any]) -> None:
     triggers = events(workflow)
     for event, raw in triggers.items():
         if event not in EVENTS:
             message = f"on.{event}"
-            raise _issue(message, "This GitHub event has no local Relay adapter.", unsupported=True)
+            raise _issue(message, "This event has no local Relay adapter.", unsupported=True)
         if isinstance(raw, Mapping):
             _validate_filters(event, raw)
+            for field in ("workflows",):
+                if isinstance(raw.get(field), str):
+                    raw[field] = [raw[field]]
         if event == "schedule":
             from relay.execution.triggers import validate_schedule
 
+            if not isinstance(raw, list) or not raw:
+                raise _issue("on.schedule", "Declare at least one local cron schedule.")
             for item in raw:
                 validate_schedule(item)
-        if event == "workflow_run" and isinstance(raw, Mapping):
-            types = raw.get("types", ["completed"])
-            types = [types] if isinstance(types, str) else types
-            if any(item != "completed" for item in types):
-                message = "on.workflow_run.types"
-                raise _issue(
-                    message,
-                    "Only completed local runs are supported.",
-                    unsupported=True,
-                )
     for event in ("workflow_dispatch", "workflow_call"):
         declared = input_definitions(workflow, event)
         if event == "workflow_dispatch" and len(declared) > 25:
@@ -417,6 +417,9 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
             if item.get("type") == "choice" and not item.get("options"):
                 message = f"on.{event}.inputs.{name}"
                 raise _issue(message, "Choice inputs require options.")
+            if "options" in item and item.get("type") != "choice":
+                message = f"on.{event}.inputs.{name}.options"
+                raise _issue(message, "Only choice inputs have options.")
             if "default" in item:
                 resolve_inputs(
                     {"on": {event: {"inputs": {name: item}}}}, {name: item["default"]}, event=event
@@ -430,12 +433,16 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
             message = f"jobs.{job_id}"
             raise _issue(message, "Invalid job identifier.")
         job = _mapping(raw, f"jobs.{job_id}")
+        for scope, label in ((workflow, "workflow"), (job, f"jobs.{job_id}")):
+            if "env" in scope:
+                _mapping(scope["env"], f"{label}.env")
         needs = job.get("needs", [])
         needs = [needs] if isinstance(needs, str) else needs
         if len(needs) != len(set(needs)) or any(item not in jobs for item in needs):
             message = f"jobs.{job_id}.needs"
             raise _issue(message, "Unknown or duplicate job dependency.")
         if "uses" in job:
+            _mapping(job.get("with", {}), f"jobs.{job_id}.with")
             reference = str(job["uses"])
             if not reference.startswith("./.relay/workflows/") or "${{" in reference:
                 message = f"jobs.{job_id}.uses"
@@ -445,62 +452,10 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
                     unsupported=True,
                 )
         else:
-            runner = job.get("runs-on")
-            if isinstance(runner, str) and "${{" not in runner and runner != "self-hosted":
-                message = f"jobs.{job_id}.runs-on"
-                raise _issue(
-                    message,
-                    "Use self-hosted for Relay's local runner.",
-                    unsupported=True,
-                )
-            if isinstance(runner, (list, Mapping)):
-                message = f"jobs.{job_id}.runs-on"
-                raise _issue(
-                    message,
-                    "Runner images and label pools are unsupported.",
-                    unsupported=True,
-                )
-            steps = job.get("steps")
-            if not isinstance(steps, list) or not steps:
-                message = f"jobs.{job_id}.steps"
-                raise _issue(message, "A job must contain ordered steps.")
-            ids = set()
-            for index, raw_step in enumerate(steps):
-                step = _mapping(raw_step, f"jobs.{job_id}.steps[{index}]")
-                step_id = step.get("id")
-                if step_id is not None:
-                    if IDENTIFIER.fullmatch(str(step_id)) is None or step_id in ids:
-                        message = f"jobs.{job_id}.steps[{index}].id"
-                        raise _issue(message, "Invalid or duplicate step id.")
-                    ids.add(step_id)
-                reference = step.get("uses")
-                if (
-                    reference is not None
-                    and reference not in BUILTINS
-                    and (not str(reference).startswith("./") or "${{" in str(reference))
-                ):
-                    message = f"jobs.{job_id}.steps[{index}].uses"
-                    raise _issue(
-                        message,
-                        "Only frozen local and versioned relay actions are supported.",
-                        unsupported=True,
-                    )
-                _validate_timeout(step.get("timeout-minutes"), f"jobs.{job_id}.steps[{index}]")
-                if reference in BUILTINS:
-                    from .builtins import validate_inputs
-
-                    validate_inputs(reference, step.get("with", {}))
+            validate_steps(job.get("steps"), f"jobs.{job_id}.steps")
         _validate_timeout(job.get("timeout-minutes"), f"jobs.{job_id}")
         strategy = job.get("strategy", {})
         if isinstance(strategy, Mapping):
-            maximum = strategy.get("max-parallel", 1)
-            if not isinstance(maximum, str) and maximum != 1:
-                message = f"jobs.{job_id}.strategy.max-parallel"
-                raise _issue(
-                    message,
-                    "Relay executes one job at a time.",
-                    unsupported=True,
-                )
             matrix = strategy.get("matrix")
             if isinstance(matrix, Mapping):
                 expand_matrix(matrix)
@@ -519,10 +474,10 @@ def _validate_timeout(value: object, path: str) -> None:
     if (
         value is not None
         and not isinstance(value, str)
-        and (isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0)
+        and (isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 360)
     ):
         message = f"{path}.timeout-minutes"
-        raise _issue(message, "Timeout must be positive.")
+        raise _issue(message, "Timeout must be positive and at most 360 minutes.")
 
 
 def topological_jobs(jobs: Mapping[str, Any]) -> tuple[str, ...]:
@@ -624,7 +579,6 @@ def load(text: str, *, source: Path | None = None) -> ActionsDocument:
             "Workflow sources require a jobs mapping with ordered steps.",
             unsupported=True,
         )
-    _unsupported(record, "workflow")
     try:
         value = cast(dict[str, Any], _validate_type("workflow-root", record, "workflow"))
         _validate_contracts(value)
@@ -780,6 +734,10 @@ def support_manifest() -> dict[str, Any]:
         },
         "events": sorted(EVENTS),
         "cache_modes": sorted(CACHE_MODES),
+        "contexts": sorted(expressions.CONTEXTS),
+        "context_properties": {
+            key: sorted(value) for key, value in expressions.CONTEXT_PROPERTIES.items()
+        },
         "limits": {
             "yaml_bytes": MAX_YAML_BYTES,
             "yaml_nodes": MAX_YAML_NODES,
@@ -796,6 +754,13 @@ def support_manifest() -> dict[str, Any]:
             "container",
             "services",
             "hosted-runners",
+            "runs-on",
+            "max-parallel",
+            "environment.deployment",
+            "workflow_run.types",
+            "action.branding",
+            "action.author",
+            "oci-artifact-subjects",
             "remote-actions",
             "parallel",
             "background",

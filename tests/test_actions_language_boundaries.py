@@ -14,55 +14,57 @@ from relay.workflows.actions.language import (
 )
 from tests.support import RelayProject
 
-BASE = "jobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}\n"
+BASE = "jobs: {main: {steps: [{run: echo ready}]}}\n"
 
 
 @pytest.mark.parametrize(
     "source,reason",
     [
         ("jobs: {}", "at least one"),
-        ("jobs: {bad.id: {runs-on: self-hosted, steps: [{run: echo}]}}", "identifier"),
+        ("jobs: {bad.id: {steps: [{run: echo}]}}", "identifier"),
         (
-            "jobs: {main: {runs-on: self-hosted, needs: missing, steps: [{run: echo}]}}",
+            "jobs: {main: {needs: missing, steps: [{run: echo}]}}",
             "dependency",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, needs: [main, main], steps: [{run: echo}]}}",
+            "jobs: {main: {needs: [main, main], steps: [{run: echo}]}}",
             "dependency",
         ),
-        ("jobs: {main: {runs-on: self-hosted, needs: main, steps: [{run: echo}]}}", "cycle"),
-        ("jobs: {main: {runs-on: ubuntu-latest, steps: [{run: echo}]}}", "self-hosted"),
-        ("jobs: {main: {runs-on: [self-hosted], steps: [{run: echo}]}}", "label pools"),
-        ("jobs: {main: {runs-on: self-hosted, steps: []}}", "ordered steps"),
-        ("jobs: {main: {runs-on: self-hosted, steps: [{id: bad.id, run: echo}]}}", "step id"),
+        ("jobs: {main: {needs: main, steps: [{run: echo}]}}", "cycle"),
+        ("jobs: {main: {runs-on: ubuntu-latest, steps: [{run: echo}]}}", "Unknown workflow field"),
+        ("jobs: {main: {runs-on: [self-hosted], steps: [{run: echo}]}}", "Unknown workflow field"),
+        ("jobs: {main: {steps: []}}", "ordered steps"),
+        ("jobs: {main: {steps: [{id: bad.id, run: echo}]}}", "step id"),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{id: a, run: echo}, {id: a, run: echo}]}}",
+            "jobs: {main: {steps: [{id: a, run: echo}, {id: a, run: echo}]}}",
             "step id",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{uses: actions/checkout@v4}]}}",
+            "jobs: {main: {steps: [{uses: actions/checkout@v4}]}}",
             "frozen local",
         ),
         ("jobs: {main: {uses: owner/repo/workflow.yml@main}}", "static local"),
         (
-            "jobs: {main: {runs-on: self-hosted, timeout-minutes: 0, steps: [{run: echo}]}}",
+            "jobs: {main: {timeout-minutes: 0, steps: [{run: echo}]}}",
             "positive",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{run: echo, timeout-minutes: -1}]}}",
+            "jobs: {main: {steps: [{run: echo, timeout-minutes: -1}]}}",
             "positive",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, strategy: {max-parallel: 2}, "
-            "steps: [{run: echo}]}}",
-            "one job",
+            "jobs: {main: {strategy: {max-parallel: 2}, steps: [{run: echo}]}}",
+            "Unknown workflow field",
         ),
         (
             "concurrency: {group: same, queue: max, cancel-in-progress: true}\n" + BASE,
             "cannot cancel",
         ),
-        ("on: pull_request\n" + BASE, "local Relay adapter"),
-        ("on: {workflow_run: {workflows: [Upstream], types: [requested]}}\n" + BASE, "completed"),
+        ("on: pull_request\n" + BASE, "Expected one of"),
+        (
+            "on: {workflow_run: {workflows: [Upstream], types: [requested]}}\n" + BASE,
+            "Unknown workflow field",
+        ),
         ("on: {push: {branches: [main], branches-ignore: [other]}}\n" + BASE, "mutually exclusive"),
         ("on: {push: {paths: ['!private/**']}}\n" + BASE, "positive pattern"),
         ("on: {workflow_dispatch: {inputs: {mode: {type: choice}}}}\n" + BASE, "require options"),
@@ -73,18 +75,18 @@ BASE = "jobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}\n"
         ),
         ("defaults: {run: {shell: '${{ secrets.SHELL }}'}}\n" + BASE, "Expressions"),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{run: echo, unknown: true}]}}",
+            "jobs: {main: {steps: [{run: echo, unknown: true}]}}",
             "Unknown workflow field",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{run: echo, continue-on-error: yes}]}}",
+            "jobs: {main: {steps: [{run: echo, continue-on-error: yes}]}}",
             "boolean",
         ),
         (
-            "jobs: {main: {runs-on: self-hosted, steps: [{run: echo, timeout-minutes: .inf}]}}",
+            "jobs: {main: {steps: [{run: echo, timeout-minutes: .inf}]}}",
             "finite number",
         ),
-        ("jobs: {main: {runs-on: self-hosted, steps: [{run: [echo]}]}}", "scalar string"),
+        ("jobs: {main: {steps: [{run: [echo]}]}}", "scalar string"),
     ],
 )
 def test_invalid_public_workflows_report_the_field_and_reason(source: str, reason: str) -> None:
@@ -191,10 +193,13 @@ def test_frozen_local_references_require_callable_utf8_sources(project: RelayPro
     )
     with pytest.raises(WorkflowValidationError, match="cycle"):
         capture_sources(caller, project.repository)
-    for reference in ("./missing", "./.relay/actions/missing"):
-        with pytest.raises(WorkflowValidationError, match="directory is missing"):
+    for reference, reason in (
+        ("./missing", "frozen local"),
+        ("./.relay/actions/missing", "directory is missing"),
+    ):
+        with pytest.raises(WorkflowValidationError, match=reason):
             capture_sources(
-                load(f"jobs: {{a: {{runs-on: self-hosted, steps: [{{uses: {reference}}}]}}}}"),
+                load(f"jobs: {{a: {{steps: [{{uses: {reference}}}]}}}}"),
                 project.repository,
             )
 
@@ -254,7 +259,7 @@ def test_local_action_scripts_and_binary_assets_are_frozen_before_launch(
     project.write(".relay/actions/task/post.js", "post bytes\n")
     binary = project.relay_root / "actions/task/asset.bin"
     binary.write_bytes(b"\x00\xff\r\n")
-    caller = load("jobs: {main: {runs-on: self-hosted, steps: [{uses: ./.relay/actions/task}]}}")
+    caller = load("jobs: {main: {steps: [{uses: ./.relay/actions/task}]}}")
     sources = capture_sources(caller, project.repository)
     assert source_bytes(sources[".relay/actions/task/asset.bin"])[0] == b"\x00\xff\r\n"
     assert sources[".relay/actions/task/main.js"] == "main bytes\n"

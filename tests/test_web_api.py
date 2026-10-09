@@ -46,7 +46,7 @@ def test_library_import_accepts_bounded_large_bundles_without_raising_other_api_
 ) -> None:
     bundle = {
         "metadata": {"name": "Large local template"},
-        "yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n",
+        "yaml": "jobs: {main: {steps: [{run: echo Ready}]}}\n",
         "sources": {f".relay/prompts/part-{index}.md": "x" * 600_000 for index in range(2)},
     }
     imported = post(owner, "/api/workflow-library", bundle)
@@ -60,7 +60,7 @@ def test_library_import_accepts_bounded_large_bundles_without_raising_other_api_
 def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
     owner: Client, served: RelayProject, tmp_path: Path
 ) -> None:
-    text = "name: Check\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    text = "name: Check\njobs: {check: {steps: [{run: echo Ready}]}}\n"
     served.write_workflow("nested/check", text)
     served.write("REVIEW.md", "Owner review\n")
     served.write("loose code.py", "Owner code\n")
@@ -695,9 +695,7 @@ def test_disabled_login_still_rejects_untrusted_hosts(client: Client) -> None:
 
 @override_settings(RELAY_LOGIN_REQUIRED=False)
 def test_disabled_login_records_the_local_launcher(served: RelayProject) -> None:
-    served.write_workflow(
-        "local", "name: Local\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
-    )
+    served.write_workflow("local", "name: Local\njobs: {a: {steps: [{run: echo Ready}]}}\n")
     served.commit("Save the local command workflow")
     client = Client(enforce_csrf_checks=True)
     client.get("/api/auth")
@@ -877,7 +875,7 @@ def test_previous_inputs_launch_through_fresh_source_capture(
     source = (
         "name: Previous\non: {workflow_dispatch: {inputs: {task: "
         "{type: string, default: Original}}}}\n"
-        "jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+        "jobs: {check: {steps: [{run: echo Ready}]}}\n"
     )
     served.write_workflow("repeat", source)
     previous = engine.launch(served, "repeat", inputs={"task": "Owner choice"})
@@ -966,7 +964,7 @@ def test_invalid_workflow_save_fields_are_rejected(
 def test_saving_a_workflow_updates_the_durable_yaml(
     owner: Client, served: RelayProject, workflow_base: str
 ) -> None:
-    updated = "name: Edited\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    updated = "name: Edited\njobs: {check: {steps: [{run: echo Ready}]}}\n"
     response = post(
         owner,
         "/api/workflows/workflow/save",
@@ -992,9 +990,7 @@ def test_launch_rejects_invalid_cleanup_policies(
 def test_http_launch_records_the_authenticated_launcher(
     owner: Client, served: RelayProject
 ) -> None:
-    served.write_workflow(
-        "check", "name: Check\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
-    )
+    served.write_workflow("check", "name: Check\njobs: {a: {steps: [{run: echo Ready}]}}\n")
     response = post(owner, "/api/runs", {"workflow_key": "check", "inputs": {}})
     assert response.status_code == 201
     assert Run.objects.get(pk=response.json()["run_id"]).launcher == "owner"
@@ -1548,7 +1544,6 @@ def test_actions_job_logs_expose_step_activity_names_and_frozen_agent_instructio
 jobs:
   check:
     name: Named job
-    runs-on: self-hosted
     steps:
       - id: script
         name: Named script
@@ -1971,7 +1966,7 @@ def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
         strict.force_login(User.objects.get(username="owner"))
     with override_settings(RELAY_LOGIN_REQUIRED=login_required):
         strict.get("/api/auth")
-        body = {"yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"}
+        body = {"yaml": "jobs: {main: {steps: [{run: echo safe}]}}"}
         assert (
             strict.post(
                 "/api/workflow-language/validate",
@@ -2006,7 +2001,7 @@ def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
 
     owner.get("/api/projects/current")
     monkeypatch.setattr(subprocess, "Popen", unexpected_process)
-    good = "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"
+    good = "jobs: {main: {steps: [{run: echo safe}]}}"
     assert post(owner, "/api/workflow-language/validate", {"yaml": good}).json()["valid"]
     legacy = "version: 1\nname: Old\nnodes: {}\n"
     served.write(".relay/workflows/old.yaml", legacy)
@@ -2070,7 +2065,6 @@ def test_named_artifact_download_verifies_bytes_and_project_access(
         "products",
         """jobs:
   main:
-    runs-on: self-hosted
     steps:
       - shell: python
         run: from pathlib import Path; Path('evidence.txt').write_bytes(b'retained\\n')

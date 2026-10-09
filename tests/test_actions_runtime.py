@@ -11,6 +11,80 @@ from relay.workflows.defaults import validate_defaults
 from tests.support import FakeAgents, InlineEngine, RelayProject, git
 
 
+def test_local_contexts_and_command_files_expose_real_host_and_run_facts(
+    project: RelayProject, tmp_path: Path
+) -> None:
+    project.write_workflow(
+        "local-facts",
+        """on:
+  workflow_dispatch:
+    inputs:
+      enabled: {type: boolean, default: true}
+defaults: {run: {shell: python}}
+jobs:
+  check:
+    steps:
+      - id: facts
+        env:
+          RUN_FACTS: ${{ toJSON(relay) }}
+          HOST_FACTS: ${{ toJSON(host) }}
+        run: |
+          import json, os
+          from pathlib import Path
+          run = json.loads(os.environ['RUN_FACTS'])
+          host = json.loads(os.environ['HOST_FACTS'])
+          assert run['run_id'] == os.environ['RELAY_RUN_ID']
+          assert run['sha'] == os.environ['RELAY_SHA']
+          assert run['event']['inputs']['enabled'] is True
+          assert run['attempt_number'] == 1
+          assert host['os'] == os.environ['RELAY_HOST_OS']
+          assert Path(host['temp']).is_dir()
+          assert set(host) == {'os', 'arch', 'name', 'temp'}
+          assert not {'token', 'api_url', 'server_url', 'repository_owner'} & run.keys()
+          Path(os.environ['RELAY_OUTPUT']).write_text('value=local\\n')
+    outputs: {value: '${{ steps.facts.outputs.value }}'}
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "local-facts")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.check").outputs == {"value": "local"}
+
+
+def test_matrix_fail_fast_expression_false_continues_local_variants(
+    project: RelayProject, tmp_path: Path
+) -> None:
+    project.write_workflow(
+        "matrix-policy",
+        """defaults: {run: {shell: python}}
+jobs:
+  check:
+    strategy:
+      fail-fast: ${{ false }}
+      matrix: {target: [fail, pass]}
+    steps:
+      - env:
+          TARGET: ${{ matrix.target }}
+          INDEX: ${{ strategy.job-index }}
+          TOTAL: ${{ strategy.job-total }}
+        run: |
+          import os, sys
+          assert os.environ['TOTAL'] == '2'
+          assert os.environ['INDEX'] == ('0' if os.environ['TARGET'] == 'fail' else '1')
+          sys.exit(1 if os.environ['TARGET'] == 'fail' else 0)
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "matrix-policy")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "failed"
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.check.variant_1").status == "failed"
+    assert (
+        NodeRun.objects.get(run_id=run_id, scope_path="root.check.variant_2").status == "succeeded"
+    )
+
+
 @pytest.mark.parametrize(
     ("declaration", "effort", "executed"),
     [
@@ -32,8 +106,7 @@ def test_agent_effort_inherits_or_explicitly_preserves_provider_defaults(
     defaults = validate_defaults({"providers": {"codex": {"model": "m1", "effort": "low"}}})
     project.write_workflow(
         "effort",
-        "defaults: {run: {shell: bash}}\n"
-        + "jobs:\n  main:\n    runs-on: self-hosted\n    steps:\n"
+        "defaults: {run: {shell: bash}}\n" + "jobs:\n  main:\n    steps:\n"
         "      - id: check\n        uses: relay/agent@v1\n        with:\n"
         f"          agent: codex\n          model: m1\n          {declaration}\n",
     )
@@ -58,18 +131,16 @@ def test_ordered_steps_share_edits_until_job_commit(project: RelayProject, tmp_p
 on: workflow_dispatch
 jobs:
   build:
-    runs-on: self-hosted
     steps:
       - run: echo accepted > result.txt
       - run: test "$(cat result.txt)" = accepted
       - run: git add result.txt && git commit -m result
       - id: answer
-        run: echo "value=42" >> "$GITHUB_OUTPUT"
+        run: echo "value=42" >> "$RELAY_OUTPUT"
     outputs:
       value: ${{ steps.answer.outputs.value }}
   followup:
     needs: build
-    runs-on: self-hosted
     steps:
       - run: test "$(cat result.txt)" = accepted
 """,
@@ -92,7 +163,6 @@ def test_failed_step_allows_failure_followup_and_tolerance(
         + """on: workflow_dispatch
 jobs:
   check:
-    runs-on: self-hosted
     steps:
       - id: tolerated
         continue-on-error: true
@@ -104,7 +174,6 @@ jobs:
   audit:
     needs: check
     if: failure()
-    runs-on: self-hosted
     steps:
       - run: echo audit
 """,
@@ -133,14 +202,13 @@ def test_reusable_workflow_and_serial_matrix_export_strings(
         value: ${{ jobs.echo.outputs.answer }}
 jobs:
   echo:
-    runs-on: self-hosted
     outputs:
       answer: ${{ steps.answer.outputs.answer }}
     steps:
       - id: answer
         env:
           VALUE: ${{ inputs.value }}
-        run: echo "answer=$VALUE" >> "$GITHUB_OUTPUT"
+        run: echo "answer=$VALUE" >> "$RELAY_OUTPUT"
 """,
     )
     project.write_workflow(
@@ -184,12 +252,11 @@ def test_secret_refs_freeze_without_bytes_and_logs_mask_split_values(
         + """on: workflow_dispatch
 jobs:
   check:
-    runs-on: self-hosted
     env:
       KEY: ${{ secrets.KEY }}
     steps:
       - id: output
-        run: echo "$KEY"; echo "value=$KEY" >> "$GITHUB_OUTPUT"
+        run: echo "$KEY"; echo "value=$KEY" >> "$RELAY_OUTPUT"
     outputs:
       value: ${{ steps.output.outputs.value }}
 """,

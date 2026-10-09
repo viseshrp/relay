@@ -6,11 +6,11 @@ Jobs run serially on this computer in one cumulative run worktree. Agents,
 owner decisions, reports, artifacts, and caches use local `relay/...@v1`
 actions. These files require Relay to execute.
 
-The grammar comes from a pinned MIT-licensed GitHub language-services revision.
-Relay rejects unknown fields and unsupported platform features.
+Relay owns the accepted schema, derived from MIT-licensed GitHub syntax.
+Only fields with local behavior are accepted; unknown fields are rejected.
 `GET /api/workflow-language` returns the support manifest. Validation reads
 sources without starting processes or retrieving credentials. See
-[language compatibility](workflow-language-compatibility.md) for provenance,
+[local language audit](workflow-language-compatibility.md) for provenance,
 limits, and the implementation map.
 
 Saved workflow sources and new launches require `jobs` and ordered `steps`.
@@ -33,7 +33,6 @@ defaults:
 jobs:
   main:
     name: Repository checks
-    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - id: inspect
@@ -44,12 +43,13 @@ jobs:
         with: {argv: '["git", "diff", "--check"]'}
 ```
 
-The root accepts `name`, `run-name`, `on`, `env`, `defaults`, `concurrency`,
-`cache-mode`, and `jobs`. A job accepts `name`, `needs`, `if`, `runs-on`,
-`env`, `defaults`, `environment`, `timeout-minutes`, `continue-on-error`,
-`strategy`, `concurrency`, `cache-mode`, and either `steps` or reusable
-workflow `uses` with `with` and `secrets`. `runs-on` accepts `self-hosted`,
-including its one-element list form; it does not select another machine.
+The root accepts `name`, `description`, `run-name`, `on`, `env`, `defaults`,
+`concurrency`, `cache-mode`, and `jobs`. A job accepts `name`, `needs`, `if`,
+`strategy`, `env`, `defaults`, `outputs`, `environment`, `concurrency`,
+`cache-mode`, `timeout-minutes`, `continue-on-error`, and `steps`; a reusable
+job uses `uses`, `with`, and `secrets` instead of steps. Every job runs on this
+computer. There is no runner selection or parallelism field. Removed fields
+are rejected, including `runs-on`, `max-parallel`, and environment `deployment`.
 
 Steps accept `id`, `name`, `if`, `env`, `timeout-minutes`,
 `continue-on-error`, and either `run` with `shell` and `working-directory`,
@@ -67,7 +67,7 @@ jobs continue from the last accepted head. The source checkout is never reset
 or checked out. See [Git and evidence](git-and-artifacts.md#actions-job-boundaries).
 
 An installation-wide durable lease admits one Actions job, including its
-matrix and nested children, at a time. `strategy.max-parallel` must be `1`.
+matrix and nested children, at a time.
 Containers, services, background processes, remote actions, hosted runners,
 and YAML `permissions` are unsupported. Provider permissions remain owner
 administration settings.
@@ -91,7 +91,6 @@ or Windows Job Objects and performs bounded shutdown on cancellation/timeout.
 ```yaml
 jobs:
   check:
-    runs-on: self-hosted
     steps:
       - uses: relay/command@v1
         with: {argv: '["python", "-m", "pytest"]'}
@@ -115,8 +114,8 @@ isolated run job and does not authorize staging unrelated owner changes.
 `on.workflow_dispatch.inputs` declares `type`, `description`, `required`, and
 `default`. Types are `string`, `boolean`, `number`, `choice` with `options`,
 and `environment`. The browser provides typed controls and configured
-environment choices. `inputs` preserves JSON types; `github.event.inputs`
-exposes strings. Unknown supplied names and invalid defaults fail validation.
+environment choices. `inputs` and the manual event payload preserve JSON
+types. Unknown supplied names and invalid defaults fail validation.
 Dispatch declarations are limited to 25 inputs.
 
 `on.workflow_call.inputs` supports `string`, `boolean`, and `number`.
@@ -135,7 +134,6 @@ on:
       target: {type: choice, options: [docs, tests], default: docs}
 jobs:
   show:
-    runs-on: self-hosted
     steps:
       - env: {TASK: '${{ inputs.task }}'}
         run: echo "$TASK"
@@ -162,7 +160,7 @@ Contexts are checked per field:
 
 | Context | Contents |
 | --- | --- |
-| `github` | Local event, repository, ref/SHA, workflow and run identity; no GitHub token or remote API |
+| `relay` | Local event, repository, ref/SHA, workflow and run identity; no GitHub token or remote API |
 | `inputs` | Typed manual/reusable inputs |
 | `vars` | Frozen installation, project, and approved environment variables |
 | `env` | Workflow, job, and current step environment |
@@ -171,7 +169,7 @@ Contexts are checked per field:
 | `steps` | Completed named steps' string outputs, raw outcome, and conclusion |
 | `jobs` | Reusable workflow output evaluation |
 | `matrix`, `strategy` | Current serial variant, index, total, and strategy |
-| `job`, `runner` | Local status, OS, architecture, and private resource paths |
+| `job`, `host` | Local status, OS, architecture, and private resource paths |
 
 `if` defaults to `success()`. Failed steps skip later ordinary steps;
 `failure()` or `always()` admits follow-up steps. Failed jobs do not stop
@@ -186,7 +184,6 @@ failure does not accept its failed workspace as a new checkpoint.
 ```yaml
 jobs:
   check:
-    runs-on: self-hosted
     steps:
       - id: test
         continue-on-error: true
@@ -221,7 +218,6 @@ on:
       task: {type: string, required: true}
 jobs:
   review:
-    runs-on: self-hosted
     steps:
       - id: inspect
         uses: relay/agent@v1
@@ -237,7 +233,7 @@ jobs:
 ```
 
 Routes, exact model/effort values, and prompt references must resolve from
-launch-static inputs, variables, local `github` context, and static matrix
+launch-static inputs, variables, local `relay` context, and static matrix
 values. Runtime outputs, secrets, and dynamic matrices cannot choose a route.
 Omitting `with.effort` inherits saved settings for the exact model. Explicit
 `effort: null` or an empty string preserves the provider's own default and
@@ -290,7 +286,6 @@ resume another attempt.
 ```yaml
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - id: approval
         uses: relay/human-wait@v1
@@ -309,8 +304,8 @@ export `on.workflow_call.outputs.NAME.value` from their jobs. Limits are 1 MiB
 per step/job and 50 MiB across job exports per run, measured in UTF-16.
 Secret-bearing job exports are skipped with a warning.
 
-Scripts receive private `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`,
-`GITHUB_STATE`, `GITHUB_STEP_SUMMARY`, and `GITHUB_ARTIFACTS` paths. Each file
+Scripts receive private `RELAY_OUTPUT`, `RELAY_ENV`, `RELAY_PATH`,
+`RELAY_STATE`, `RELAY_STEP_SUMMARY`, and `RELAY_ARTIFACTS` paths. Each file
 is consumed once and limited to 1 MiB. UTF-8, a UTF-8 BOM, LF, and CRLF are
 accepted. Key/value files support `name=value` and multiline
 `name<<DELIMITER` records. NULs, malformed records, and linked files fail.
@@ -319,7 +314,6 @@ accepted. Key/value files support `name=value` and multiline
 ```yaml
 jobs:
   main:
-    runs-on: self-hosted
     outputs:
       answer: ${{ steps.capture.outputs.answer }}
     steps:
@@ -328,18 +322,18 @@ jobs:
         run: |
           import os
           from pathlib import Path
-          Path(os.environ['GITHUB_OUTPUT']).write_text('answer=ready\n')
-          Path(os.environ['GITHUB_ENV']).write_text('NEXT_VALUE=ready\n')
-          Path(os.environ['GITHUB_STEP_SUMMARY']).write_text('# Checked\n')
+          Path(os.environ['RELAY_OUTPUT']).write_text('answer=ready\n')
+          Path(os.environ['RELAY_ENV']).write_text('NEXT_VALUE=ready\n')
+          Path(os.environ['RELAY_STEP_SUMMARY']).write_text('# Checked\n')
       - shell: python
         run: |
           import os
           assert os.environ['NEXT_VALUE'] == 'ready'
 ```
 
-`GITHUB_ENV` changes subsequent steps and cannot replace `GITHUB_*`,
-`RUNNER_*`, or `NODE_OPTIONS`. `GITHUB_PATH` prepends later search paths.
-`GITHUB_STATE` supplies `STATE_*` only to the registering JavaScript action's
+`RELAY_ENV` changes subsequent steps and cannot replace `RELAY_*`
+or `NODE_OPTIONS`. `RELAY_PATH` prepends later search paths.
+`RELAY_STATE` supplies `STATE_*` only to the registering JavaScript action's
 post hook. File state stays local to its owning job.
 
 Command/JavaScript logs recognize `::warning::`, `::error::`, `::notice::`,
@@ -372,12 +366,11 @@ and 1 GiB. Linked paths, `.git`, and traversal are rejected. Cache restoration
 also rejects `.relay`. Optional product expiry is separate from required
 execution evidence and never deletes report or Git preservation.
 
-`GITHUB_ARTIFACTS` declares newline-separated file subjects (`path` or
-`file://path`) or OCI subjects with full SHA-256/384/512 digests, optionally
-prefixed by `oci://`. Comments and blank lines are ignored. A job permits 500
-subjects; conflicting digests fail. File subjects become verified required
-evidence. `GITHUB_ARTIFACTS_LIST` contains earlier subjects' JSON metadata.
-Relay neither creates GitHub attestations nor uploads OCI data.
+`RELAY_ARTIFACTS` declares newline-separated local file subjects (`path` or
+`file://path`). Comments and blank lines are ignored. A job permits 500 unique
+subjects; each file is hashed and retained as evidence. OCI registry digests
+are rejected because Relay cannot verify or retain their remote content.
+`RELAY_ARTIFACTS_LIST` contains earlier subjects' JSON metadata.
 
 Cache actions accept `key` and newline-separated `path` patterns.
 `relay/restore-cache@v1` and `relay/cache@v1` also accept ordered
@@ -399,16 +392,13 @@ object such as `fromJSON(needs.prepare.outputs.matrix)`. Expansion is limited
 to 256 variants and frozen before the first variant. Restart reuses that
 manifest. `strategy.fail-fast` defaults to true; an effective failed variant
 skips remaining pending variants. Set false to continue them.
-`strategy.max-parallel` must be `1`.
 
 <!-- relay-example: valid serial-matrix -->
 ```yaml
 jobs:
   check:
     name: Check ${{ matrix.target }}
-    runs-on: self-hosted
     strategy:
-      max-parallel: 1
       fail-fast: false
       matrix:
         target: [docs, tests]
@@ -446,11 +436,12 @@ Owner edits cannot change the executing snapshot. Credentials remain
 references rather than captured credential values.
 
 Steps can use `./.relay/actions/NAME` with `action.yml` or `action.yaml`.
-Metadata accepts `name`, `description`, `author`, `inputs`, `outputs`, `runs`,
-and `branding`. Missing required or unknown supplied inputs fail. Composite
+Metadata accepts `name`, `description`, `inputs`, `outputs`, and `runs`.
+Marketplace `branding` and unused `author` fields are rejected. Missing required
+or unknown supplied inputs fail. Composite
 metadata uses `runs.using: composite`, ordered steps, and expression outputs.
 Composite `run` steps require `shell`. Files are frozen in private storage;
-`github.action_path` and `GITHUB_ACTION_PATH` identify that directory.
+`relay.action_path` and `RELAY_ACTION_PATH` identify that directory.
 
 JavaScript metadata uses `runs.using: node20` or `node24`, local `main`, and
 optional `post` and `post-if`. The exact installed Node major is required;
@@ -470,7 +461,7 @@ Workflow settings manage installation, project, and environment bindings.
 Project values override installation values; approved environment values
 override project values. Each scope permits 100 variables and 100 secrets,
 with values limited to 48 KiB. Names are case-insensitive identifiers and
-cannot start with `GITHUB_` or `RUNNER_`.
+cannot start with `RELAY_`.
 
 Variables freeze by value. Secrets freeze source, reference, and revision and
 resolve from either process environment variables or the explicit native
@@ -527,7 +518,6 @@ on:
       timezone: America/New_York
 jobs:
   check:
-    runs-on: self-hosted
     steps: [{run: echo Scheduled check}]
 ```
 
@@ -562,7 +552,6 @@ but cannot be saved or launched. Server validation and leases remain
 ```yaml
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - &check
         run: echo Ready
@@ -573,7 +562,7 @@ jobs:
 ```yaml
 jobs:
   main:
-    <<: {runs-on: self-hosted}
+    <<: {name: Check}
     steps: [{run: echo Ready}]
 ```
 
@@ -581,7 +570,6 @@ jobs:
 ```yaml
 jobs:
   main:
-    runs-on: self-hosted
     steps: [{uses: actions/checkout@v4}]
 ```
 

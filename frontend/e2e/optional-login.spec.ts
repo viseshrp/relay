@@ -55,7 +55,7 @@ test("a fresh local app opens and runs a workflow without an owner login", async
     headers,
     data: {
       key: "local-run", holder: "local-browser",
-      yaml: "name: Local run\njobs: {work: {runs-on: self-hosted, steps: [{run: git status}]}}\n",
+      yaml: "name: Local run\njobs: {work: {steps: [{run: git status}]}}\n",
     },
   });
   expect(workflow.ok(), await workflow.text()).toBeTruthy();

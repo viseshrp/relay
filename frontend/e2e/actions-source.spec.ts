@@ -5,7 +5,6 @@ const source = `# Workflow comment
 name: Source preservation
 jobs:
   original:
-    runs-on: self-hosted
     steps: &ordered
       # First step comment
       - id: first
@@ -14,7 +13,6 @@ jobs:
       - id: second
         run: echo second
   caller:
-    runs-on: self-hosted
     steps: *ordered # Alias comment
 `;
 
@@ -46,7 +44,7 @@ test("adding and removing a step preserves unrelated source and rejects invalid 
 
 
 test("current JSON workflow displays as block YAML", () => {
-  const value = { name: "Current source", jobs: { work: { "runs-on": "self-hosted", steps: [{ run: "echo hello\\necho world" }] } } };
+  const value = { name: "Current source", jobs: { work: { steps: [{ run: "echo hello\\necho world" }] } } };
   const display = editorYaml(JSON.stringify(value));
   expect(display).toMatch(/^name: Current source\n/);
   expect(parseActions(display).document.toJS()).toEqual(value);

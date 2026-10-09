@@ -36,10 +36,9 @@ def test_human_answer_is_a_step_output_and_restart_does_not_repeat_edits(
         + """on: workflow_dispatch
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - id: first
-        run: echo 'value=once' >> "$GITHUB_OUTPUT"
+        run: echo 'value=once' >> "$RELAY_OUTPUT"
       - id: approval
         uses: relay/human-wait@v1
         with:
@@ -87,7 +86,6 @@ def test_environment_approval_precedes_secret_lookup_and_rejects_generic_answers
 jobs:
   main:
     environment: prod
-    runs-on: self-hosted
     env: {KEY: '${{ secrets.KEY }}'}
     steps:
       - run: test "$KEY" = gated
@@ -127,7 +125,6 @@ def test_reusable_secret_contract_and_environment_precedence(
     secrets: {RENAMED: {required: true}}
 jobs:
   main:
-    runs-on: self-hosted
     environment: prod
     env:
       RENAMED: ${{ secrets.RENAMED }}
@@ -176,7 +173,6 @@ def test_reusable_call_does_not_implicitly_inherit_secrets(
         + """on: workflow_call
 jobs:
   main:
-    runs-on: self-hosted
     steps: [{run: "test '${{ secrets.HIDDEN }}' = ''"}]
 """,
     )
@@ -202,15 +198,12 @@ def test_failed_job_retains_bytes_and_next_job_uses_last_accepted_commit(
         + """on: workflow_dispatch
 jobs:
   accepted:
-    runs-on: self-hosted
     steps:
       - run: echo accepted > accepted.txt; git add accepted.txt; git commit -m accepted
   rejected:
-    runs-on: self-hosted
     steps:
       - run: echo rejected > rejected.txt; exit 1
   followup:
-    runs-on: self-hosted
     steps:
       - run: test -f accepted.txt && test ! -f rejected.txt
 """,
@@ -250,7 +243,6 @@ def test_step_timeout_persists_and_failure_followup_runs(
         + f"""on: workflow_dispatch
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - id: slow
         timeout-minutes: 0.001
@@ -293,11 +285,10 @@ def test_cache_filesystem_warnings_preserve_integrity_failures(
     monkeypatch.setattr("relay.web.actions_products.restore", fail_restore)
     project.write_workflow(
         "cache-fault",
-        "defaults: {run: {shell: bash}}\n"
-        + "jobs:\n  seed:\n    runs-on: self-hosted\n    steps:\n"
+        "defaults: {run: {shell: bash}}\n" + "jobs:\n  seed:\n    steps:\n"
         "      - run: echo memo > memo.txt\n"
         "      - uses: relay/save-cache@v1\n        with: {key: local, path: memo.txt}\n"
-        "  restored:\n    runs-on: self-hosted\n    cache-mode: read\n    steps:\n"
+        "  restored:\n    cache-mode: read\n    steps:\n"
         "      - id: cache\n        uses: relay/restore-cache@v1\n"
         "        with: {key: local, path: memo.txt}\n"
         "      - run: test '${{ steps.cache.outputs.cache-hit }}' = false\n",
@@ -320,9 +311,9 @@ def test_workspace_continuation_resumes_after_a_crash_between_move_and_recreatio
 
     project.write_workflow(
         "journal",
-        "defaults: {run: {shell: bash}}\n" + "jobs:\n  accepted:\n    runs-on: self-hosted\n"
+        "defaults: {run: {shell: bash}}\n" + "jobs:\n  accepted:\n"
         "    steps: [{run: echo accepted > accepted.txt}]\n"
-        "  rejected:\n    runs-on: self-hosted\n"
+        "  rejected:\n"
         "    steps: [{run: 'echo rejected > rejected.txt; exit 1'}]\n",
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
@@ -377,7 +368,7 @@ runs:
       env: {VALUE: '${{ inputs.value }}'}
       run: |
         import os
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+        with open(os.environ['RELAY_OUTPUT'], 'a') as stream:
             stream.write('value=' + os.environ['VALUE'] + '\\n')
 """
     (action / "action.yml").write_text(source, encoding="utf-8")
@@ -387,7 +378,6 @@ runs:
         + """on: workflow_dispatch
 jobs:
   main:
-    runs-on: self-hosted
     outputs: {value: '${{ steps.local.outputs.value }}'}
     steps: [{id: local, uses: ./.relay/actions/echo}]
 """,
@@ -425,7 +415,6 @@ def test_bounded_agent_retry_preserves_rejected_report_and_frozen_prompt(
         + """on: workflow_dispatch
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - id: review
         uses: relay/agent@v1
@@ -469,17 +458,14 @@ def test_job_cancellation_settles_run_and_allows_unrelated_jobs(
         + """on: workflow_dispatch
 jobs:
   accepted:
-    runs-on: self-hosted
     steps: [{run: echo accepted > accepted.txt}]
   canceled:
-    runs-on: self-hosted
     steps:
       - run: echo rejected > rejected.txt
       - uses: relay/human-wait@v1
         with: {prompt: Continue?}
       - run: echo should-not-run
   unrelated:
-    runs-on: self-hosted
     steps: [{run: test -f accepted.txt && test ! -f rejected.txt}]
 """,
     )
@@ -513,7 +499,6 @@ def test_expired_human_step_exposes_failure_to_followup(
         + """on: workflow_dispatch
 jobs:
   main:
-    runs-on: self-hosted
     steps:
       - id: approval
         uses: relay/human-wait@v1
@@ -545,7 +530,6 @@ def test_successful_job_commits_once_after_edits_and_keeps_reports_unstaged(
         "defaults: {run: {shell: bash}}\n"
         + """jobs:
   main:
-    runs-on: self-hosted
     steps:
       - run: echo first > code.txt
       - run: |
@@ -580,13 +564,12 @@ def test_environment_url_resolves_after_steps_and_omits_secrets(
         "defaults: {run: {shell: bash}}\n"
         + """jobs:
   deploy:
-    runs-on: self-hosted
     environment:
       name: preview
       url: ${{ steps.deployment.outputs.url }}
     steps:
       - id: deployment
-        run: echo 'url=https://preview.example.test/build' >> "$GITHUB_OUTPUT"
+        run: echo 'url=https://preview.example.test/build' >> "$RELAY_OUTPUT"
 """,
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")

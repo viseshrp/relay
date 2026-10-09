@@ -32,8 +32,7 @@ def product_context(
     monkeypatch.setattr(ActionsStepExecutor, "execute", record)
     project.write_workflow(
         "products",
-        "jobs: {main: {runs-on: self-hosted, steps: "
-        "[{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}",
+        "jobs: {main: {steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}",
     )
     engine = InlineEngine(node_executors(), tmp_path / "attempt-artifacts")
     run_id = engine.launch(project, "products")

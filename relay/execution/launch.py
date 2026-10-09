@@ -226,14 +226,17 @@ def launch_workflow(
             environments=tuple(actions_context["environments"]),
         )
         source = project_launch_source(relay_root.parent)
-        actions_context["github"] = {
+        actions_context["relay"] = {
             "workflow": workflow.root.definition.name,
+            "workflow_ref": request.workflow_key,
             "actor": request.launcher,
             "repository": relay_root.parent.name,
             "event_name": "workflow_dispatch",
             "ref": f"refs/heads/{source.branch}" if source.branch else "",
             "ref_name": source.branch or "",
+            "ref_type": "branch" if source.branch else "",
             "sha": source.commit,
+            "event": {"inputs": typed_inputs},
             **request.event_context,
         }
         if request.event_context.get("event_name") == "push" and (
@@ -251,7 +254,7 @@ def launch_workflow(
             expressions.interpolate(
                 workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
                 {
-                    "github": actions_context["github"],
+                    "relay": actions_context["relay"],
                     "inputs": typed_inputs,
                     "vars": actions_context["vars"],
                 },
@@ -262,7 +265,7 @@ def launch_workflow(
             {
                 "inputs": typed_inputs,
                 "vars": actions_context["vars"],
-                "github": actions_context["github"],
+                "relay": actions_context["relay"],
             },
         )
         workflow = replace(

@@ -87,7 +87,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
 
 test("report handoffs explain retention and review material is readable beside the response", async ({ page }) => {
   expect((await post(page, "/__test__/report")).ok()).toBeTruthy();
-  const yaml = stringify({ name: "Retained review", jobs: { report: { "runs-on": "self-hosted", steps: [
+  const yaml = stringify({ name: "Retained review", jobs: { report: { steps: [
     { id: "retained", uses: "relay/validate-report@v1", with: { path: "REVIEW.md", format: "label", label: "Ready" } },
     { uses: "relay/human-wait@v1", with: { prompt: "Read REVIEW.md, inspect changes, and respond REVIEWED." } },
   ] } } });

@@ -1,5 +1,5 @@
-# Preserve byte-exact upstream schema and conformance fixtures.
-exclude: ^(tests/fixtures/actions/(expressions/.*\.json|LICENSE)|relay/workflows/actions/(upstream-schema\.json|LICENSE))$
+# Preserve byte-exact upstream expression fixtures and license notices.
+exclude: ^(tests/fixtures/actions/(expressions/.*\.json|LICENSE)|relay/workflows/actions/LICENSE)$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

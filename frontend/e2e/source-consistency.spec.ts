@@ -4,7 +4,7 @@ import { readableWorkflowYaml } from "../src/source-format";
 import { post } from "./setup-helpers";
 
 test("JSON display retains typed current workflow values and multiline scripts", () => {
-  const source = '{"name":"Current","jobs":{"work":{"runs-on":"self-hosted","steps":[{"run":"echo hello\\necho world"}]}},"env":{"BIG":9223372036854775807,"TEXT":"true"}}';
+  const source = '{"name":"Current","jobs":{"work":{"steps":[{"run":"echo hello\\necho world"}]}},"env":{"BIG":9223372036854775807,"TEXT":"true"}}';
   const displayed = readableWorkflowYaml(source);
   expect(displayed).toContain("9223372036854775807");
   expect(displayed).toContain("|-");
@@ -71,7 +71,7 @@ test.describe("workspace request and form consistency", () => {
   });
   test("a canceled lease failure cannot appear in the next workflow", async ({ page }) => {
     await page.addInitScript(() => sessionStorage.setItem("relay.editor-holder", "fixture"));
-    expect((await post(page, "/api/workflows", { key: "next", holder: "fixture", yaml: "name: Next workflow\njobs: {check: {runs-on: self-hosted, steps: [{run: echo next}]}}\n" })).ok()).toBeTruthy();
+    expect((await post(page, "/api/workflows", { key: "next", holder: "fixture", yaml: "name: Next workflow\njobs: {check: {steps: [{run: echo next}]}}\n" })).ok()).toBeTruthy();
     let release!: () => void;
     let received = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -117,7 +117,7 @@ test.describe("workspace request and form consistency", () => {
   });
 
   test("the captured workflow viewer displays current JSON as YAML", async ({ page }) => {
-    const source = JSON.stringify({ name: "Captured current source", jobs: { check: { "runs-on": "self-hosted", steps: [{ run: "echo current" }] } } });
+    const source = JSON.stringify({ name: "Captured current source", jobs: { check: { steps: [{ run: "echo current" }] } } });
     expect((await post(page, "/api/workflows", { key: "capture", holder: "fixture", yaml: source })).ok()).toBeTruthy();
     expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
     const launched = await post(page, "/api/runs", { workflow_key: "capture", inputs: {} });
@@ -132,7 +132,7 @@ test.describe("workspace request and form consistency", () => {
 
   test("a late save failure cannot appear in another workflow", async ({ page }) => {
     await page.addInitScript(() => sessionStorage.setItem("relay.editor-holder", "fixture"));
-    expect((await post(page, "/api/workflows", { key: "save-destination", holder: "fixture", yaml: "name: Save destination\njobs: {check: {runs-on: self-hosted, steps: [{run: echo next}]}}\n" })).ok()).toBeTruthy();
+    expect((await post(page, "/api/workflows", { key: "save-destination", holder: "fixture", yaml: "name: Save destination\njobs: {check: {steps: [{run: echo next}]}}\n" })).ok()).toBeTruthy();
     let release!: () => void;
     let received = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
