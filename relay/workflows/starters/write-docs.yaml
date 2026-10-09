@@ -1,0 +1,18 @@
+name: Write docs for a change
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What behavior or change should the docs explain?
+        required: true
+        default: Explain how to run this repository's tests in the README.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/write-docs.md
+        prompt: ${{ inputs.task }}

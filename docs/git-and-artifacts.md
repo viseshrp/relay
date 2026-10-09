@@ -1,8 +1,9 @@
 # Git worktrees and retained evidence
 
 Relay runs each workflow on a new branch and keeps failed work attributable to
-one attempt. It never checks out, rewinds, or merges the branch from which the
-run was launched.
+one attempt. It never checks out or rewinds the branch from which the run was
+launched. Merging into that branch requires the explicit completion option
+described below.
 
 ## Clean launch
 
@@ -21,6 +22,12 @@ files, and other `.relay` files stop launch. Root workflow documents such as `RE
 `WALKTHROUGH.md`, and `DRAFT_PLAN.md` may remain unstaged or untracked. Relay
 does not add Git exclusions, stage these files, or commit them. Existing owner
 documents stay in place. Symlinks and staged report changes still stop launch.
+
+The browser's **Run workflow** panel previews this same rule and explains
+blocking and permitted changes. It reads Git status and validates saved
+workflow sources without staging, stashing, or committing anything. Launch
+checks again before creating a snapshot or working copy, so a preview never
+authorizes changes made later.
 
 These report exemptions apply to writing-node cleanliness too, so a report
 can be preserved and passed to the next stage without a documentation commit.
@@ -53,10 +60,32 @@ before the agent or command runs, and normal fail-fast scheduling stops its
 downstream work. Agent context identifies the project and assigned checkout.
 
 The run branch remains after success, failure, cancellation, and worktree
-cleanup. Relay has no automatic merge. The owner decides whether and how to
-inspect, merge, or delete it.
+cleanup. By default, the owner decides whether and how to inspect, merge, or
+delete it. The opt-in integration policy can merge successful run commits.
 
-## Reader and writer admission
+## Actions job boundaries
+
+Current workflows execute one job at a time across the installation. Every
+step in a physical job uses its primary run worktree, including agents,
+scripts, composites, and owner waits. Steps can leave code edits for later
+tests and commits. At job success, code changes require a clean descendant
+commit; a clean no-op is valid. Report exemptions remain unchanged.
+
+Accepted commits advance the protected run head cumulatively. Failed jobs
+retain commits, diffs, untracked bytes, and reports. Before another job
+continues, Relay verifies that evidence, records continuation intent, moves
+the rejected checkout into a retained detached worktree, and recreates the
+primary at the protected head. A journal resumes interrupted continuation
+without discarding rejected bytes or resetting the owner's checkout.
+
+Matrix and reusable jobs use the same serial admission. Tolerating a failure
+changes dependency conclusions without accepting rejected code. Optional
+named artifact expiry and cache eviction never delete required evidence.
+
+## Historical reader and writer admission
+
+The following admission contract applies to captured legacy `nodes` runs.
+Current source uses [jobs and ordered steps](workflows.md).
 
 A writing attempt holds the run's exclusive database lock while it uses the
 primary worktree. No reader or second writer can start until that lock is
@@ -143,14 +172,23 @@ reset and cleanup.
 
 ## Rerun and resume reset
 
+Interrupted loops and subworkflows check the primary checkout against the
+latest protected head without resetting it. Unstaged root report handoffs keep
+the same exact exemptions as completed writers. Code changes, staged reports,
+nested report files, and an unrecorded head still stop recovery. Restart keeps
+an owner's dispatch pause, so recovery does not start held child steps.
+
 Manual rerun, automatic recovery, and interrupted resume use this order:
 
 1. Stop the attempt process.
 2. Preserve its ref, commits, diff, untracked files, and declared artifacts.
-3. Prove the reset target descends from the latest successful writer's
+3. Verify the complete manifest, each recorded file's byte count and SHA-256,
+   and the retained ref's commit. Missing, changed, or escaping evidence blocks
+   recovery while the current worktree remains intact.
+4. Prove the reset target descends from the latest successful writer's
    protected head.
-4. Reset the primary worktree to the attempt's recorded starting head.
-5. Remove remaining untracked files from that isolated worktree.
+5. Reset the primary worktree to the attempt's recorded starting head.
+6. Remove remaining untracked files from that isolated worktree.
 
 The protection check prevents a failed later attempt from erasing a successful
 upstream writer. Evidence remains available when the reset itself fails.
@@ -188,6 +226,51 @@ directory tree.
 The execution store refuses completion cleanup if any artifact record has not
 been preserved. Confirmed data cleanup removes known worktrees deepest first,
 so reader paths precede the primary.
+
+The [cleanup API](http-api.md#cleanup) can select a single run with `run_id`.
+Use `scope: "worktrees"` to discard its checkout while retaining history,
+artifact bytes, the protected run branch, and attempt refs. Other runs remain
+unchanged. This selection requires preserved artifact records and holds the
+same workspace lock as recovery, so a retry cannot reopen the checkout during
+removal. The project must have no active runs. Deleting a selected run with
+`scope: "all"` leaves shared process logs in place.
+
+## Opt-in run integration
+
+Select **Merge into the active branch, then delete working copies** in global
+defaults, project defaults, or Run workflow. The API and settings value is
+`cleanup_policy: "merge_on_success"`. Existing defaults stay unchanged.
+
+All writing jobs already commit onto one run branch. Read-only jobs have no
+changes to merge; their detached working copies are removed after each attempt.
+After every job succeeds or is skipped, Relay performs these steps:
+
+1. Record the run as `completing`, keeping the live event stream open.
+2. Verify retained evidence and the run's recorded commit. Acquire the run's
+   workspace lock and a repository-wide integration lock.
+3. Require the original checkout to be on the branch captured at launch and
+   completely clean. Staged changes, unstaged changes, and untracked files all
+   block integration, including workflow sources and root reports. Ignored
+   files follow Git's normal status rules. An unfinished merge, rebase,
+   cherry-pick, or revert also blocks it.
+4. Fast-forward that branch to the validated run commit, with automatic
+   stashing and Git hooks disabled. A diverged branch fails without creating
+   conflicts or changing the owner's checkout. Relay never switches branches.
+5. Record `merged_commit`, remove the primary run worktree, and record success.
+   Run history, artifacts, the run branch, and attempt refs remain available.
+
+Merge-enabled launches also require the strictly clean checkout and an attached
+branch. Commit workflow and report edits before launching with this option.
+The launch file preview uses the same strict policy.
+
+A dirty, switched, or diverged branch fails the run and retains its worktree.
+Completed jobs remain successful and retain their outputs. If deletion fails
+after merging, the run fails and shows the recorded merged commit and retained
+working copy. Relay does not undo an already completed merge.
+Startup reconciliation resumes runs left `completing`, including a crash after
+Git updated the branch but before the database recorded it, or after removing
+the worktree. It recognizes the integrated commit instead of merging twice.
+Pause and cancellation cannot interrupt this final integration step.
 
 ## Privacy and storage
 

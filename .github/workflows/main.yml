@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 15
       matrix:
         python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
         os: [ ubuntu-latest, macos-latest, windows-latest ]
@@ -61,6 +61,47 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Set up Node 20 for local action tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '20'
+
+      - name: Capture Node 20 runtime
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          executable = shutil.which("node")
+          assert executable is not None
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"RELAY_TEST_NODE_20={executable}\n")
+          PY
+
+      - name: Set up Node 24 for local action tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Capture Node 24 runtime
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          executable = shutil.which("node")
+          assert executable is not None
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"RELAY_TEST_NODE_24={executable}\n")
+          PY
+
+      - name: Validate Windows command and payload boundaries
+        if: runner.os == 'Windows'
+        run: >-
+          uv run pytest tests/test_windows_process.py
+          tests/test_workflow_starters.py
+          tests/test_actions_language_boundaries.py -q
 
       - name: Run tests
         run: make test
@@ -98,6 +139,14 @@ jobs:
 
       - name: Run browser tests against the isolated Relay server
         run: make test-frontend
+
+      - name: Retain failed browser traces
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-failure-traces
+          path: frontend/test-results/
+          retention-days: 7
 
   publish-to-testpypi:
     if: github.ref == 'refs/heads/main'

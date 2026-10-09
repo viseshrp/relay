@@ -17,7 +17,12 @@ from relay.agents.usage_limits import ProviderUsageLimit
 from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, RelayError
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
-from relay.vcs.commits import current_head, validate_reader_result, validate_writer_result
+from relay.vcs.commits import (
+    accept_job_result,
+    current_head,
+    validate_reader_result,
+    validate_writer_result,
+)
 from relay.vcs.worktree import create_reader_worktree, remove_worktree, require_project_worktree
 
 from .control import ClaimedControl
@@ -46,6 +51,7 @@ class AttemptContext:
     heartbeat_owners: HeartbeatOwners = ()
     deadline_at: float | None = None
     resources: AttemptResources | None = None
+    registered_cleanup: bool = False
 
     def heartbeat(self) -> bool:
         """Renew this attempt and every enclosing synchronous-scope owner."""
@@ -172,6 +178,8 @@ class ExecutionOutcome:
     wait_timeout_seconds: float | None = None
     error_message: str | None = None
     usage_limit: ProviderUsageLimit | None = None
+    raw_outcome: str | None = None
+    conclusion: str | None = None
 
 
 class AttemptExecutor(Protocol):
@@ -227,7 +235,7 @@ def _heartbeat_lease(
 
 
 def _uses_git(node_type: str) -> bool:
-    return node_type in {NodeType.AGENT.value, NodeType.COMMAND.value}
+    return node_type in {NodeType.AGENT.value, NodeType.COMMAND.value, NodeType.ACTIONS_JOB.value}
 
 
 def _assigned_worktree(claim: ClaimedAttempt) -> tuple[Path, bool]:
@@ -298,7 +306,7 @@ def execute_attempt(
         try:
             resources = (
                 allocate_attempt_resources(claim.run_id, claim.attempt_id)
-                if _uses_git(claim.node_type)
+                if _uses_git(claim.node_type) or claim.node_type == NodeType.ACTIONS_STEP.value
                 else None
             )
         except RelayError as error:
@@ -383,11 +391,19 @@ def _execute_attempt(
             deadline_at=deadline,
             resources=resources,
         )
-        if context.timed_out() and claim.node_type != NodeType.HUMAN_WAIT.value:
+        if context.timed_out() and claim.node_type not in {
+            NodeType.HUMAN_WAIT.value,
+            NodeType.ACTIONS_JOB.value,
+            NodeType.ACTIONS_STEP.value,
+        }:
             outcome = _timeout_failure()
         else:
             outcome = executor.execute(context)
-            if outcome.kind is OutcomeKind.SUCCEEDED and context.timed_out():
+            if (
+                outcome.kind is OutcomeKind.SUCCEEDED
+                and context.timed_out()
+                and claim.node_type != NodeType.ACTIONS_STEP.value
+            ):
                 outcome = _timeout_failure()
     except RelayError as error:
         outcome = _failure(error)
@@ -403,10 +419,34 @@ def _execute_attempt(
         store.mark_dispatch_consumed(claim.claim_token)
         store.release_attempt_lock(claim.attempt_id)
         return outcome
-    if _uses_git(claim.node_type) and worktree_assigned:
+    if (
+        _uses_git(claim.node_type) or claim.node_type == NodeType.ACTIONS_STEP.value
+    ) and worktree_assigned:
         try:
-            if outcome.kind is OutcomeKind.SUCCEEDED:
-                if claim.writes:
+            if (
+                claim.node_type == NodeType.ACTIONS_STEP.value
+                or claim.frozen_def.get("coordinator") is True
+            ):
+                # Steps retain evidence; the enclosing job owns commit acceptance.
+                ending_head = current_head(worktree)
+            elif outcome.kind is OutcomeKind.SUCCEEDED:
+                if claim.node_type == NodeType.ACTIONS_JOB.value:
+                    from relay.workflows.loader import workflow_key_parts
+
+                    key = str(claim.run_metadata["workflow_key"])
+                    raw_sources = claim.frozen_def.get("sources", {})
+                    sources = raw_sources if isinstance(raw_sources, Mapping) else {}
+                    snapshot_files = frozenset(
+                        {
+                            ".relay/workflows/" + "/".join(workflow_key_parts(key)),
+                            *(str(path) for path in sources if str(path).startswith(".relay/")),
+                        }
+                    )
+                    commit = accept_job_result(
+                        worktree, claim.starting_head, claim.node_id, snapshot_files=snapshot_files
+                    )
+                    ending_head = commit.ending_head
+                elif claim.writes:
                     allow_no_commit = claim.frozen_def.get("allow_no_commit") is True
                     commit = validate_writer_result(
                         worktree,

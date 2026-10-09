@@ -32,11 +32,42 @@ from .errors import (
 LOGGER = logging.getLogger(__name__)
 
 
+def _select_json(context: click.Context, _parameter: click.Parameter, value: bool) -> bool:
+    """Keep an explicit JSON choice across nested command contexts."""
+    if value:
+        context.meta["json_output"] = True
+    return value
+
+
+_json_option = click.option(
+    "--json",
+    is_flag=True,
+    expose_value=False,
+    callback=_select_json,
+    help="Keep the existing machine-readable output.",
+)
+
+
+def _json_output() -> bool:
+    return bool(click.get_current_context().meta.get("json_output", False))
+
+
 def _render_error(error: RelayError) -> str:
-    """`ConfigError('Bad host.')` ->
-    `{"code": "config_error", "context": {}, "message": "Bad host."}`.
-    """
-    return json.dumps(error.to_envelope(), sort_keys=True)
+    """Render the public description without exposing a third-party trace."""
+    if _json_output():
+        return json.dumps(error.to_envelope(), sort_keys=True)
+    lines = [f"Error: {error.message}"]
+    if error.next_action:
+        lines.append(f"Next: {error.next_action}")
+    return "\n".join(lines)
+
+
+def _startup_message(url: str, *, login_required: bool) -> None:
+    click.echo(f"Relay is ready at {url}")
+    if not _json_output():
+        click.echo(f"Login: {'on' if login_required else 'off'}")
+        click.echo("Press Ctrl+C to stop Relay.")
+        click.echo("Open the URL above to create your first workflow.")
 
 
 def _unexpected_error(message: str) -> PersistenceError:
@@ -46,6 +77,7 @@ def _unexpected_error(message: str) -> PersistenceError:
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(_version, "-v", "--version")
+@_json_option
 def main() -> None:
     """Run Relay setup and local administration commands.
 
@@ -56,6 +88,7 @@ def main() -> None:
 
 
 @main.command("init")
+@_json_option
 @click.pass_context
 def init_command(context: click.Context) -> None:
     """Create a blank .relay project surface in the current Git repository."""
@@ -80,6 +113,7 @@ def init_command(context: click.Context) -> None:
 
 
 @main.command("up")
+@_json_option
 @click.option("--host", default=DEFAULT_HOST, show_default=True)
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=click.IntRange(1, 65_535))
 @click.option("--no-browser", is_flag=True, help="Do not open the browser after startup.")
@@ -129,11 +163,12 @@ def up_command(
                 if context.get_parameter_source("login_required") is ParameterSource.DEFAULT
                 else login_required
             ),
+            stored.workflow_defaults,
         )
         run_supervisor(
             effective,
             open_browser=not no_browser,
-            on_ready=lambda url: click.echo(f"Relay is ready at {url}"),
+            on_ready=lambda url: _startup_message(url, login_required=effective.login_required),
         )
     except ConfigError as error:
         click.echo(_render_error(error), err=True)
@@ -153,22 +188,27 @@ def up_command(
 
 
 @main.command("doctor")
+@_json_option
 @click.pass_context
 def doctor_command(context: click.Context) -> None:
     """Check local storage, assets, Git, and coding-agent readiness."""
     from .agents.discovery import discover_agents
     from .agents.driver import probe_installed_agents
+    from .agents.readiness import probe_is_ready
     from .agents.registry import load_registry
     from .manage import apply_migrations
     from .projects.discovery import discover_relay_root, git_root
-    from .vcs.cleanliness import status_porcelain
+    from .vcs.cleanliness import execution_changes, status_porcelain
 
     checks = []
+    allowed_changes: tuple[str, ...] = ()
     repository = Path.cwd().resolve()
     try:
         repository = git_root()
         relay_root = discover_relay_root()
-        changes = status_porcelain(repository)
+        changes = execution_changes(repository, allow_initial_surface=True)
+        if not changes:
+            allowed_changes = status_porcelain(repository)
         checks.append(
             {
                 "id": "git",
@@ -258,12 +298,7 @@ def doctor_command(context: click.Context) -> None:
     agents = []
     for discovered, result in rows:
         models = [] if result is None else [item.model_value for item in result.models]
-        ready = (
-            discovered.installed
-            and result is not None
-            and result.general_error is None
-            and bool(models)
-        )
+        ready = probe_is_ready(discovered, result)
         registry_metadata = (
             registry.agents.get(discovered.profile.registry_id)
             if registry is not None and discovered.profile.registry_id is not None
@@ -325,18 +360,23 @@ def doctor_command(context: click.Context) -> None:
         }
     )
     all_ready = core_ready and any_agent_ready
-    click.echo(
-        json.dumps(
-            {
-                "ok": all_ready,
-                "temporary_sessions": True,
-                "checks": checks,
-                "registry": registry_payload,
-                "agents": agents,
-            },
-            sort_keys=True,
+    if _json_output():
+        click.echo(
+            json.dumps(
+                {
+                    "ok": all_ready,
+                    "temporary_sessions": True,
+                    "checks": checks,
+                    "registry": registry_payload,
+                    "agents": agents,
+                },
+                sort_keys=True,
+            )
         )
-    )
+    else:
+        from .cli_output import doctor_lines
+
+        click.echo("\n".join(doctor_lines(checks, agents, all_ready, allowed_changes)))
     if not all_ready:
         context.exit(EXIT_DOCTOR_FAILED)
 
@@ -347,6 +387,7 @@ def project_group() -> None:
 
 
 @project_group.command("list")
+@_json_option
 @click.pass_context
 def project_list_command(context: click.Context) -> None:
     """List projects registered in central Relay storage."""
@@ -365,10 +406,18 @@ def project_list_command(context: click.Context) -> None:
         error = _unexpected_error("Relay could not list registered projects.")
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
-    click.echo(json.dumps({"projects": [asdict(record) for record in records]}, sort_keys=True))
+    if _json_output():
+        click.echo(json.dumps({"projects": [asdict(record) for record in records]}, sort_keys=True))
+    elif records:
+        click.echo("Projects")
+        for record in records:
+            click.echo(f"  {record.display_name} — {record.canonical_path}")
+    else:
+        click.echo("No projects yet. Run relay up in your Git repository.")
 
 
 @project_group.command("relink")
+@_json_option
 @click.argument("path", type=click.Path(path_type=Path))
 @click.argument(
     "newpath", type=click.Path(path_type=Path, exists=True, file_okay=False, resolve_path=True)
@@ -394,7 +443,10 @@ def project_relink_command(context: click.Context, path: Path, newpath: Path) ->
         error = _unexpected_error("Relay could not relink the project.")
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
-    click.echo(json.dumps({"project": asdict(record)}, sort_keys=True))
+    if _json_output():
+        click.echo(json.dumps({"project": asdict(record)}, sort_keys=True))
+    else:
+        click.echo(f"Relinked {record.display_name} to {record.canonical_path}.")
 
 
 @main.group("data")
@@ -403,6 +455,7 @@ def data_group() -> None:
 
 
 @data_group.command("clean")
+@_json_option
 @click.option("--runs", is_flag=True, help="Delete run records, snapshots, and artifacts.")
 @click.option("--worktrees", is_flag=True, help="Remove preserved run worktrees.")
 @click.option("--branches", is_flag=True, help="Delete retained run and attempt refs.")
@@ -433,7 +486,11 @@ def data_clean_command(
         )
     )
     if not selected:
-        click.echo(json.dumps({"deleted": {}}, sort_keys=True))
+        click.echo(
+            json.dumps({"deleted": {}}, sort_keys=True)
+            if _json_output()
+            else "No cleanup selected. Choose --worktrees, --branches, --runs, or --all."
+        )
         context.exit(EXIT_NOTHING_TO_CLEAN)
     if clean_all and (runs or worktrees or branches):
         error = ConfigError("Use --all by itself or select individual cleanup categories.")
@@ -467,6 +524,14 @@ def data_clean_command(
         error = _unexpected_error("Relay could not clean the confirmed data.")
         click.echo(_render_error(error), err=True)
         context.exit(error.cli_exit_code)
-    click.echo(json.dumps({"deleted": deleted}, sort_keys=True))
+    if _json_output():
+        click.echo(json.dumps({"deleted": deleted}, sort_keys=True))
+    else:
+        click.echo(
+            "Deleted Relay data:" if any(deleted.values()) else "No retained data to delete."
+        )
+        if any(deleted.values()):
+            for category, count in deleted.items():
+                click.echo(f"  {category.replace('_', ' ')}: {count}")
     if not any(deleted.values()):
         context.exit(EXIT_NOTHING_TO_CLEAN)

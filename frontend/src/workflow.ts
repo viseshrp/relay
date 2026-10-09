@@ -7,12 +7,22 @@ import { stageLabel } from "./navigation";
 
 export interface WorkflowNodeValue {
   type: string;
+  run?: string[] | { command: string };
+  env?: Record<string, string>;
+  inherit_env?: boolean;
   needs?: string[];
   writes?: boolean;
   agents?: string[];
   agent_options?: Record<string, AgentOptions>;
   auto_retry?: boolean;
   prompts?: Array<{ local?: string; global?: string }>;
+  outputs?: Record<string, unknown>;
+  branches?: Record<string, string>;
+  body?: Record<string, WorkflowNodeValue>;
+  max_iterations?: number;
+  until?: string | null;
+  exhausted?: string;
+  workflow?: string;
   [key: string]: unknown;
 }
 
@@ -29,10 +39,24 @@ export interface WorkflowValue {
   name: string;
   model?: string;
   agents?: string[];
+  env?: Record<string, string>;
+  inherit_env?: boolean;
   inputs?: Record<string, InputDefinition>;
   nodes: Record<string, WorkflowNodeValue>;
   entrypoints?: Array<{ scope_path: string }>;
   recovery?: { enabled: boolean; max_retries?: number };
+  repairs?: Record<string, RepairRuleValue>;
+}
+
+export interface RepairRuleValue {
+  enabled?: boolean;
+  max_rounds?: number;
+  accepted_output: string;
+  accepted_value?: string | number | boolean | null;
+  fix: WorkflowNodeValue;
+  verify: WorkflowNodeValue;
+  fix_instruction?: string;
+  verify_instruction?: string;
 }
 
 export interface WorkflowNodeData extends Record<string, unknown> {
@@ -47,7 +71,7 @@ export interface ParsedWorkflow {
   errors: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -55,7 +79,13 @@ export function parseWorkflow(text: string): ParsedWorkflow {
   const document = parseDocument(text, { keepSourceTokens: true, prettyErrors: true });
   const errors = document.errors.map((error) => error.message);
   if (errors.length > 0) return { document, value: null, errors };
-  const value: unknown = document.toJS({ maxAliasCount: 100 });
+  let value: unknown;
+  try { value = document.toJS({ maxAliasCount: 100 }); }
+  catch (error) { return { document, value: null, errors: [String(error)] }; }
+  if (isRecord(value) && isRecord(value.jobs)) {
+    const jobs = Object.fromEntries(Object.entries(value.jobs).map(([name, job]) => [name, isRecord(job) ? { ...job, type: "actions_job", needs: typeof job.needs === "string" ? [job.needs] : job.needs } : { type: "actions_job" }]));
+    return { document, value: { ...value, name: String(value.name || "Workflow"), nodes: jobs } as unknown as WorkflowValue, errors: [] };
+  }
   if (!isRecord(value) || !isRecord(value.nodes)) {
     return { document, value: null, errors: ["The workflow must contain a nodes mapping."] };
   }
@@ -130,7 +160,7 @@ export function nodeDefaults(type: string): WorkflowNodeValue {
     case "human_wait":
       return { type, prompt: "Continue?" };
     case "condition":
-      return { type, expr: "true", branches: { true: "" } };
+      return { type, expr: "${{ \"true\" }}", branches: { true: "" } };
     case "loop":
       return { type, body: {}, max_iterations: 1, exhausted: "" };
     case "subworkflow":

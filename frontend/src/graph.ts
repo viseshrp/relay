@@ -32,7 +32,40 @@ export function arrangeGraph(nodes: Node<WorkflowNodeData>[], edges: Edge[]) {
   });
 }
 
-export function capturedRunGraph(records: RunNode[]): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
+export function repairOwnership(records: RunNode[]): Map<string, string> {
+  const explicit = new Map(records.filter((node) => node.repair_for).map((node) => [node.scope_path, node.repair_for!]));
+  const resolved = new Map(explicit);
+  function owner(scope: string): string | undefined {
+    if (resolved.has(scope)) return resolved.get(scope);
+    // root.hidden#2.fix belongs to an explicitly marked root.hidden. Ordinary
+    // loops named "repairs" are not hidden unless the server marks them.
+    const coordinator = scope.replace(/#\d+$/, "");
+    const parent = scope.slice(0, scope.lastIndexOf("."));
+    const found = explicit.get(coordinator) ?? (parent !== "root" && parent ? owner(parent) : undefined);
+    if (found) resolved.set(scope, found);
+    return found;
+  }
+  for (const node of records) owner(node.scope_path);
+  return resolved;
+}
+
+export function visibleRunStages(records: RunNode[]): RunNode[] {
+  const owners = repairOwnership(records);
+  const repairStates = new Map(records.filter((node) => node.repair_for && node.repair_settings).map((node) => [node.repair_for!, node.status]));
+  return records.filter((node) => !owners.has(node.scope_path)).map((node) => {
+    const state = repairStates.get(node.scope_path);
+    return {
+      ...node,
+      status: node.status === "succeeded" && state && !["succeeded", "skipped"].includes(state)
+        ? ["failed", "canceled"].includes(state) ? "repair_stopped" : "repairing" : node.status,
+      dependencies: Array.from(new Set(node.dependencies.map((source) => owners.get(source) ?? source))).filter((source) => source !== node.scope_path),
+      controls: node.controls.map((control) => ({ ...control, target: owners.get(control.target) ?? control.target })).filter((control) => control.target !== node.scope_path),
+    };
+  });
+}
+
+export function capturedRunGraph(allRecords: RunNode[]): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
+  const records = visibleRunStages(allRecords);
   const known = new Set(records.map((node) => node.scope_path));
   const connections = new Map<string, Edge>();
   const completionNodes: Node<WorkflowNodeData>[] = [];
@@ -60,7 +93,7 @@ export function capturedRunGraph(records: RunNode[]): { nodes: Node<WorkflowNode
       connect(node.scope_path, control.target, control.label);
       controlTargets.add(control.target);
     }
-    if (node.parent_scope) {
+    if (node.parent_scope && node.parent_scope !== "root") {
       const group = children.get(node.parent_scope) ?? [];
       group.push(node);
       children.set(node.parent_scope, group);

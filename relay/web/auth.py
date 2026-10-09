@@ -9,7 +9,10 @@ from typing import Concatenate, NoReturn, ParamSpec
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import AnonymousUser, User
-from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.password_validation import (
+    password_validators_help_texts,
+    validate_password,
+)
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError, transaction
 from django.http import HttpRequest, JsonResponse
@@ -51,6 +54,7 @@ def auth_state(request: HttpRequest) -> dict[str, object]:
         "authenticated": authenticated,
         "username": owner_username(request) if authenticated else None,
         "login_required": login_required,
+        "password_rules": password_validators_help_texts() if not owner_created else [],
     }
 
 

@@ -1,0 +1,19 @@
+name: Ask an agent
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What would you like to learn about this repository?
+        required: true
+        default: Explain what this repository does and where its main code
+          lives.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/ask-agent.md
+        prompt: ${{ inputs.task }}

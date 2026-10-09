@@ -13,6 +13,7 @@ from relay.constants import SCHEMA_VERSION
 from relay.errors import PathSafetyError, SchemaVersionError, WorkflowValidationError
 from relay.paths import safe_resolve
 
+from .repairs import compile_repairs
 from .schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
 
 
@@ -64,6 +65,13 @@ def load_workflow_text(text: str, *, source: Path | None = None) -> LoadedWorkfl
         message = f"Workflow {display} must contain a YAML mapping at the top level."
         raise WorkflowValidationError(message, context={"workflow": str(display)})
 
+    if "jobs" in document and "nodes" not in document and "version" not in document:
+        from .actions.compiler import definition as compile_actions
+        from .actions.language import load as load_actions
+
+        actions = load_actions(text, source=display)
+        return LoadedWorkflow(display, text, actions.document, compile_actions(actions))
+
     version = document.get("version")
     if isinstance(version, int) and not isinstance(version, bool) and version != SCHEMA_VERSION:
         message = f"Workflow schema version {version} is not supported by this Relay build."
@@ -80,7 +88,7 @@ def load_workflow_text(text: str, *, source: Path | None = None) -> LoadedWorkfl
         raise WorkflowValidationError(
             _validation_message(error), context={"workflow": str(display)}
         ) from None
-    return LoadedWorkflow(display, text, document, definition)
+    return LoadedWorkflow(display, text, document, compile_repairs(definition))
 
 
 def subworkflow_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[SubworkflowNode]:

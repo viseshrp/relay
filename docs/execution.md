@@ -1,7 +1,28 @@
 # Relay execution
 
+Current workflows use the [Actions jobs/steps dialect](workflows.md). One
+durable installation-wide lease admits a job and its nested/matrix steps
+serially. Each step is a committed attempt. Jobs suspend for owner/environment
+gates without repeating completed steps. Deadlines and matrix manifests
+persist through restart. Job success validates the cumulative Git checkpoint;
+agents can defer commits until that boundary.
+
+Raw outcomes and effective conclusions are stored separately. Failed steps
+admit explicit failure follow-ups; failed jobs do not cancel unrelated jobs.
+`continue-on-error` affects conclusions while retaining rejected evidence.
+Step conditions reconcile with recorded results, including failures before
+the executor starts. A timed-out step still honors `continue-on-error`.
+Historical snapshots keep their captured interpreter and the legacy node
+contracts described below where they differ.
+
 Relay runs each workflow from durable state in `relay.db`. Huey carries only an
 opaque claim token. A queue item is never the record of whether work ran.
+
+Launch resolves omitted workflow choices from project and global settings,
+then captures the resulting definitions, routes, and recovery policy in the
+snapshot. Settings changes affect future launches. Retries and later child
+jobs continue to use the captured choices; original YAML and prompts retain
+their exact bytes. See [Installation defaults](workflows.md#installation-defaults).
 
 ## State transitions
 
@@ -19,7 +40,12 @@ target state already holds is a no-op.
 | `pending` | `worktree_failed` | `creation_error` | `failed` | `run.failed` |
 | `running` | `node_waiting` | `one_or_more_nodes_waiting` | `paused_wait` | `run.paused` |
 | `paused_wait` | `wait_answered` | `no_waiting_nodes_and_none_failed` | `running` | `run.resumed` |
+| `paused_wait` | `jobs_settled` | `actions_jobs_and_descendants_terminal` | `running` | `run.resumed` |
 | `running` | `all_succeeded` | `all_nodes_terminal_success` | `succeeded` | `run.succeeded` |
+| `running` | `jobs_canceled` | `all_jobs_terminal_with_cancellation_and_none_failed` | `canceled` | `run.canceled` |
+| `running` | `completion_started` | `all_nodes_terminal_success_and_merge_requested` | `completing` | `run.completing` |
+| `completing` | `completion_succeeded` | `merge_and_worktree_removal_durable` | `succeeded` | `run.succeeded` |
+| `completing` | `completion_failed` | `merge_or_worktree_removal_failed` | `failed` | `run.failed` |
 | `running` | `node_failed` | `fail_fast` | `canceling` | `run.failing` |
 | `paused_wait` | `node_failed` | `fail_fast` | `canceling` | `run.failing` |
 | `running` | `owner_cancel` | `owner_requested` | `canceling` | `run.canceling` |
@@ -34,6 +60,12 @@ target state already holds is a no-op.
 
 A run succeeds only when every node is `succeeded` or `skipped`. A terminal
 `canceled` node cannot satisfy the `all_succeeded` guard.
+With `cleanup_policy: "merge_on_success"`, all successful jobs instead enter
+`completing`. The run succeeds only after the captured launch branch has been
+fast-forwarded and its working copy removed. Integration failures fail the run
+without changing completed job results. The merge commit is durable before
+cleanup; reconciliation resumes this state after a restart without reopening
+jobs. See [Run integration](git-and-artifacts.md#opt-in-run-integration).
 Canceling runs keep their owner-cancel or fail-fast intent during shutdown.
 Successful attempts keep their outputs and protected commits, and failed
 attempts keep their failure details. An interrupted attempt in a canceling run
@@ -50,6 +82,7 @@ or `failed`; restart never reopens canceled nodes.
 | `pending` | `guard_false` | `if_expression_false` | `skipped` | `node.skipped` |
 | `pending` | `dependencies_unreachable` | `upstream_terminal_blocks_needs` | `skipped` | `node.skipped` |
 | `ready` | `dispatch` | `claim_created` | `dispatched` | `node.dispatched` |
+| `dispatched` | `admission_failed` | `invalid_frozen_admission_policy` | `failed` | `node.failed` |
 | `dispatched` | `attempt_started` | `claim_won_and_gate_acquired` | `running` | `node.running` |
 | `running` | `interaction_requested` | `interaction_created` | `waiting` | `node.waiting` |
 | `waiting` | `interaction_answered` | `control_applied` | `running` | `node.running` |
@@ -122,6 +155,28 @@ does nothing. Duplicate deliveries of an existing claim still create one attempt
 attempt. A confirmed provider usage reset can authorize a fresh failed-node
 recovery as described below. An explicitly enabled recovery policy also
 authorizes bounded retries for eligible agent failures.
+
+### Stage repair rules
+
+A stage's frozen repair policy adds a durable coordinator behind the source
+stage. An accepted initial verdict completes that coordinator without running
+its fixer or verifier. A rejection creates scoped fix and verify attempts for
+each configured round. Only an exactly matching typed verdict releases the
+source's dependent stages. The last rejected round fails with
+`repair_exhausted`; reports and successful writer commits remain retained.
+
+These attempts use the same dispatch claims, admission locks, process controls,
+and evidence preservation as other nodes. A waiting or paused coordinator
+resumes its existing round. Provider recovery targets the failed role and
+reopens its enclosing coordinator without repeating completed fixers or
+increasing the verdict budget. An exhausted verdict budget does not schedule
+automatic error recovery.
+
+Expressions and child exports expose the accepted verifier's outputs under
+the source stage's name. The original source row and each rejected report
+remain unchanged. Fix and verify agent prompts include the frozen role
+instruction, round number, previous rejected outputs, and retained evidence.
+See [Stage repair rules](workflows.md#stage-repair-rules) for configuration.
 
 ### Automatic step recovery
 
@@ -229,7 +284,7 @@ can outlast the stale-attempt threshold without being mistaken for worker loss.
 | Type | Runtime behavior |
 | --- | --- |
 | `agent` | Starts one fresh routed agent session, sends the snapshotted prompts and declared context, and validates outputs after the session ends. |
-| `command` | Runs the declared argument vector with `shell=False`, merges `env` over the inherited environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
+| `command` | Runs the captured argument vector with `shell=False`, merges captured command variables over the worker/resource environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
 | `human_wait` | Creates a durable owner question with no subprocess. The current attempt completes after an answer, deadline, cancellation, or recovery decision. |
 | `condition` | Evaluates one restricted expression and records the target for the matching branch label. Unselected branch targets become `skipped`. |
 | `loop` | Executes its child graph in numbered scopes until `until` is true or `max_iterations` selects the `exhausted` target. |
@@ -240,6 +295,20 @@ subworkflow passes its remaining deadline into each nested attempt, so child
 work cannot outlive the enclosing node. A running timeout fails with stop
 reason `timeout`; a waiting `human_wait` may instead select its declared
 `on_timeout` edge.
+
+Command output is retained while the process runs, using separate readers
+for stdout and stderr so reading cannot change the child's write offsets.
+Each control poll drains a bounded number of chunks before checking timeout,
+cancellation, and worker ownership. An incremental UTF-8 decoder preserves
+characters split across reads. Process exit drains the remaining bytes,
+including output from canceled or timed-out commands. Child programs must
+flush their own buffers for immediate output.
+
+On Windows, the owned launcher resolves the target against the attempt's
+inherited `PATH` and working directory before starting its absolute path.
+This preserves workflow-selected tools instead of allowing the launcher's
+application directory to take priority. Arguments stay separate, and the
+target starts only after the launcher joins its kill-on-close Job Object.
 
 Agent and command nodes extract every declared output before success. Files
 used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
@@ -326,6 +395,32 @@ later automatic quota recovery. A subsequent effort or permission change
 preserves the replacement agent and model. Omitting all choices keeps the
 current route.
 Relay never changes providers automatically in response to an error.
+
+### Pause new steps and change an unstarted agent
+
+An owner can pause new steps while a provider session is running. The saved
+`dispatch_paused` flag blocks admission, including tokens already in Huey's
+queue. Existing attempts keep their sessions and can finish, retain outputs,
+and advance the committed head normally. This flag survives restart and does
+not change the run's state-machine status or freeze its deadlines. Nested scopes
+yield while their children wait, releasing worker capacity.
+
+Automatic error recovery and confirmed quota schedules wait while this flag is
+set; pausing does not cancel a schedule or reset its spent retry budget. Resume
+new steps explicitly to wake existing dispatch intent and advance successors.
+
+While paused, an agent node in `pending`, `ready`, or `dispatched` can receive
+new settings only if it has never started an attempt. Relay freshly proves the
+chosen tool/model and validates supported effort and permission choices before
+atomically rechecking the pause, admission, and previous settings. A concurrent
+resume, attempt start, or settings edit rejects a stale save. Saving settings
+keeps the run paused and does not reset its worktree or create an attempt.
+
+The selection uses the same durable per-node override as retry settings.
+Completed work, frozen prompts, snapshot hashes, and other nodes' settings stay
+unchanged. A changed tool/model appends an editable default handoff describing
+an unstarted step; effort or permission changes alone add no handoff. The
+selected provider starts a new session when the owner resumes new steps.
 
 Changing the tool/model pair appends a default continuation prompt to that
 step's captured prompt sequence. The owner can replace it with custom handoff

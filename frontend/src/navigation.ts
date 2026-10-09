@@ -1,34 +1,42 @@
+import { statusPresentation } from "./status";
 export interface LocationState {
-  view: "author" | "runs";
+  view: "home" | "workflows" | "runs" | "settings";
   project: string | null;
   workflow: string | null;
   run: string | null;
   interaction: string | null;
+  job: string | null;
 }
 
 const LOCATION_KEY = "relay.location";
 
 export function readLocation(): LocationState {
-  // ?view=runs&run=abc&interaction=42 opens that request; a plain reload uses the saved selection.
-  const query = window.location.search || localStorage.getItem(LOCATION_KEY) || "";
+  // Explicit workspace links remain authoritative; the bare root opens Home.
+  let stored = "";
+  try { stored = localStorage.getItem(LOCATION_KEY) ?? ""; }
+  catch { /* Navigation remains available when browser storage is disabled. */ }
+  const query = window.location.search;
   const parameters = new URLSearchParams(query);
+  const remembered = new URLSearchParams(stored);
   return {
-    view: parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "author",
-    project: parameters.get("project"),
+    view: parameters.get("view") === "home" || !query ? "home" : parameters.get("view") === "settings" ? "settings" : parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
+    project: parameters.get("project") ?? (!query ? remembered.get("project") : null),
     workflow: parameters.get("workflow"),
     run: parameters.get("run"),
     interaction: parameters.get("interaction"),
+    job: parameters.get("job"),
   };
 }
 
 export function saveLocation(location: LocationState, replace = false): void {
   const query = new URLSearchParams({ view: location.view });
-  for (const key of ["project", "workflow", "run", "interaction"] as const) {
+  for (const key of ["project", "workflow", "run", "interaction", "job"] as const) {
     const value = location[key];
     if (value) query.set(key, value);
   }
   const search = `?${query.toString()}`;
-  localStorage.setItem(LOCATION_KEY, search);
+  try { localStorage.setItem(LOCATION_KEY, search); }
+  catch { /* The URL remains authoritative without browser storage. */ }
   if (search !== window.location.search) {
     if (replace) window.history.replaceState(null, "", search);
     else window.history.pushState(null, "", search);
@@ -51,10 +59,5 @@ export function stageLabel(scope: string): string {
 }
 
 export function statusLabel(status: string): string {
-  return ({
-    pending: "Not started", ready: "Ready", dispatched: "Starting", running: "In progress",
-    waiting: "Needs your input", paused_wait: "Needs your input", succeeded: "Complete",
-    failed: "Needs attention", skipped: "Skipped", canceled: "Stopped", canceling: "Stopping",
-    failing: "Finishing after an error", interrupted: "Resuming after restart",
-  } as Record<string, string>)[status] ?? status;
+  return statusPresentation(status).label;
 }

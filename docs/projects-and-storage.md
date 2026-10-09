@@ -17,10 +17,13 @@ worktree root:
     └── workflow.yaml
 ```
 
-`workflow.yaml` contains the schema version, a name, and an empty node map.
-`prompt.md` is empty. Relay does not copy workflow steps, prompt text, or other
-templates. A second `relay init` leaves the directory unchanged and exits with
-status 2. Running outside Git exits with status 3.
+`workflow.yaml` contains a named manual workflow with one local job and an
+editable `echo Ready` step. `prompt.md` is empty. Relay does not copy prompt
+text or other templates. A second `relay init` leaves the directory unchanged
+and exits with status 2. Running outside Git exits with status 3.
+`relay up` creates this blank surface when no project is found, so the first
+start needs no separate initialization command. It preserves an existing
+project and uses the nearest `.relay` directory as before.
 The untouched, untracked starter files do not block the first launch of a newly
 created workflow. Relay leaves them in place and never stages or commits them.
 Edited unused starter files and staged files still require the owner to resolve
@@ -28,6 +31,13 @@ their Git changes before launch.
 
 From a subdirectory, Relay walks upward to the nearest `.relay/` directory but
 never above the containing Git worktree.
+
+The browser's **Open a project** dialog can browse directories inside the
+owner's home folder. **Up one folder** and **Home folder** navigate; **Use
+this folder** fills the repository path. The existing **Open project** action
+still validates and registers that Git repository. Typed paths remain
+available for repositories elsewhere. Browsing follows symlinks before
+checking containment and does not read or return file contents.
 
 ## Central paths
 
@@ -170,7 +180,9 @@ Relay never redirects or deletes the owner's personal browser profile.
 
 Completion removes only the allocation Relay created. Terminal-run cleanup
 also removes marked allocations for ended attempts and can be retried from
-the run's advanced view. A replaced directory, symlinked marker, wrong run,
+**Settings > Storage** by selecting a completed run and confirming. The browser
+loads only the selected project's succeeded, failed, and canceled runs, with
+bounded pages for older runs. A replaced directory, symlinked marker, wrong run,
 or mismatched token is not followed. Inner links are unlinked without deleting
 their targets. Unmarked files are preserved, including during confirmed run
 record deletion. Worktrees, retained evidence, provider credentials, and other
@@ -190,15 +202,20 @@ outside Relay's ownership. Cleanup failures are logged and reported as run
 events; they do not replace a completed attempt's result.
 
 Unexpected failures in `relay init`, `relay project list`,
-`relay project relink`, or `relay data clean` produce the same JSON error
-envelope as other administration commands. The local log retains the trace.
+`relay project relink`, or `relay data clean` show a plain error and a next
+action. Add `--json` to retain the previous JSON error envelope. The local log
+retains the trace. Project listings and cleanup counts also default to readable
+text; their `--json` output preserves the existing fields and sorted encoding.
 
 Static assets and retained artifact downloads use Python's built-in MIME
 tables, independent of operating-system registries and MIME files.
 
 ## Retention and deletion
 
-Run history remains until the owner confirms deletion. Project rows are
+Run history remains until the owner confirms deletion. Each project keeps a
+monotonic run counter. Deleting history never reuses a run number. Existing
+runs receive numbers in snapshot creation order during migration; subsequent
+runs keep their assigned number. Project rows are
 protected while runs reference them. Deleting a run may cascade only through
 that run's owned snapshot, nodes, attempts, events, interactions, controls,
 and artifact metadata.
@@ -215,9 +232,142 @@ append handlers stay attached, so active processes can continue logging after
 cleanup. The same Windows CI run verified that an open append handler writes
 to the cleared file after cleanup on Python 3.10 through 3.14.
 
-Agent and command processes inherit the worker environment. Relay has no secret
-vault or output masking, so the database, artifact directory, and logs may
-contain sensitive prompts, responses, command output, and tool results.
+Agent and command processes inherit the worker environment. Declared workflow
+secrets resolve through explicit environment or native-store references and
+are masked in public run output. Secret values do not enter binding rows or
+launch snapshots. Arbitrary inherited variables and retained files are not
+automatically redacted. See
+[variables and secrets](workflows.md#variables-secrets-and-environments).
 
 See the [README](../README.md) for installation and the local-only product
 boundary.
+
+## Global defaults and project overrides
+
+Open **Settings** in the browser to set defaults for every registered project.
+**Global defaults** saves to the installation's `settings.json`.
+**Project defaults** saves only explicit overrides in the project database row.
+Turn a project override off to inherit the current saved global value.
+Changes apply to future launches. Existing runs retain their settings through
+pause, restart, retries, loops, and child workflows.
+
+The complete settings inventory is:
+
+| Setting | Global control | Project or workflow override | Applies |
+| --- | --- | --- | --- |
+| Ordered agents | Default agent order | Project order; workflow and job `agents` come first | New launches |
+| Exact model | Shared default model and one model per agent | Project model; workflow `model`; run override; job `model` | New launches |
+| Thinking effort | Each agent's Thinking effort | Project agent defaults; job `agent_options.<id>.effort` | Matching exact model |
+| Agent permissions | Each agent's What the agent may do | Project agent defaults; job `permission_profile` or `agent_options.<id>.permission_mode` | Matching exact model |
+| Job timeout | Job timeout, such as `15m` | Project timeout; agent or command `timeout` | New launches |
+| Shared commands | Named program and argument lists | Project command map; job `run: {command: name}` selects one, or declares its own argument list | New command jobs |
+| Environment variables | Variable names and string values | Project variable map; workflow `env`; command job `env`; workflow/job `inherit_env` opt-out | New command jobs |
+| Automatic retry participation | Allow automatic retries for jobs | Project default; job `auto_retry` | New launches |
+| Automatic recovery | Enabled and maximum retries, 1 or 2 | Project policy; explicit workflow `recovery` fields | New launches |
+| Working-copy cleanup | After a successful run | Project policy; run launch `cleanup_policy` | New launches |
+| Merge successful run commits | Off | Project policy; run launch `cleanup_policy: merge_on_success` | New launches |
+| Repair rounds | Defaults for new repair rules, 1 through 100 | Project default; saved rule `max_rounds` | New editor rules |
+| Repair instructions | Fixer and verifier instructions | Project default; saved rule instructions | New editor rules |
+| Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |
+| Loopback address | Server and account | Explicit `relay up --host` | Restart required |
+| Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
+| Worker count | Server and account, positive integer | Explicit `relay up --workers` | Restart required |
+| Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
+| Welcome slides and guided tour | Welcome and guided tour provides replay and reset | This browser and installation address; no project override | Reset applies on next opening |
+| Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |
+| Local account | Server and account shows the current account and active login policy | Existing onboarding and sign-in | Read-only in the page |
+| Retained data deletion | Storage shows project counts, sizes, and deletion categories | Explicit confirmed project cleanup | On confirmation |
+
+Models resolve in this order: job, explicit run override, workflow, shared
+project/global model. If none supplies a model, Relay uses the configured model
+of the first agent in the effective agent order. It then requires fresh proof
+of that same exact value through the existing routing service. It never tries
+another agent's different default model to make a failed launch succeed.
+
+Per-agent effort and permissions inherit only when that agent's configured
+model equals the resolved exact model. An explicit job option takes precedence;
+an explicit `null` leaves that provider option unset even when a global value
+exists. An explicit `permission_profile` also prevents a global permission mode
+from replacing it. Changing an agent's model in Settings clears its saved
+options. Unsupported saved choices remain errors at launch.
+
+A project model change also clears inherited effort and permissions from the
+global model. Explicit project options for the new model still take precedence.
+
+Recovery fields inherit individually; `recovery: {enabled: false}` disables
+an inherited policy. Agent and command jobs without a declared timeout inherit
+the saved timeout; `timeout: null` explicitly opts out. Human waits and
+structural deadlines remain workflow decisions. Native agent ceilings still
+apply when the inherited timeout is absent.
+
+Shared commands are named argument lists, such as `test: [python, -m, pytest]`.
+A command job selects one explicitly with `run: {command: test}`. Existing
+argument lists remain explicit and do not inherit a different command.
+Missing names stop launch before a run is created. Programs and arguments
+remain separate; Relay does not expand shell syntax or environment variables
+inside an argument.
+
+A project's `commands` and `env` overrides each replace the entire global map.
+Enabling an override in the browser copies the current effective map so you
+can edit or remove entries. An empty map removes all entries for that project.
+Turning the override off restores the current global map.
+
+Command variables resolve in this order, with later values winning: global
+or replacement project `env`, workflow `env`, then job `env`. They are merged
+over the existing worker and resource environment when the process starts.
+Workflow `inherit_env: false` skips global/project variables. Job
+`inherit_env: false` skips both those variables and workflow variables; its
+own `env` still applies over the worker environment. Loop jobs and command
+repair roles use their containing workflow's variables. Child workflows use
+their own workflow variables, plus project/global defaults, rather than the
+parent workflow's variables. These defaults do not configure agent processes.
+
+Launch snapshots capture resolved arguments and variables, including child
+jobs and repair roles. Later settings edits affect future runs. Variable
+values are stored in local settings and captured run data. Ordinary variables
+do not automatically register output masks; use a declared secret binding
+for sensitive values. Names must be nonempty and contain neither `=` nor a
+NUL character. Values must be strings without NUL characters.
+
+For example, this global file sets Codex first, keeps successful working
+copies, and supplies a model and timeout for workflows that omit them:
+
+```json
+{
+  "agent_preferences": ["codex"],
+  "cleanup_policy": "retain",
+  "workflow_defaults": {
+    "providers": {"codex": {"model": "gpt-6-luna"}},
+    "timeout": "15m",
+    "recovery": {"enabled": false, "max_retries": 2}
+  }
+}
+```
+
+The model is an example exact value; the installed agent must advertise and
+confirm it. Settings reads and model menus never authorize a launch.
+
+Global saves validate the whole file and replace it atomically under a bounded
+kernel lock. A stale file hash returns `settings_conflict` and preserves the
+newer bytes. Project saves use the same conflict behavior in a database
+transaction. Login and server saves change only the next startup; current
+access, accounts, and run data remain intact.
+
+Dependency order, conditions, input defaults,
+output contracts, instructions, write access, no-op permission, approval
+questions/deadlines, loop bounds, subworkflow mappings, repair verdicts, and
+entry-point evidence remain explicit workflow choices. They define the task or
+its safety boundary and are not injected into every project. Provider login,
+credentials, installation, resource bounds, and process ownership stay with
+their existing adapters. `--no-browser` remains a startup-only CLI choice.
+
+**Settings › Storage** replaces project-wide cleanup on run pages. It counts
+retained reports from database metadata and measures working-copy files without
+following inner symlinks. A bounded or unreadable scan shows a lower bound.
+Run history shares database pages, and Git references share repository objects,
+so the page does not invent per-project disk sizes for those categories.
+No deletion category is selected initially. Confirmation describes the category
+and current counts; **Everything** also requires typing the project name.
+Cleanup still goes through the existing service and rejects active project
+runs. Everything also clears Relay's marked process logs across the
+installation, as the existing `all` cleanup contract specifies.

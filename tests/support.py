@@ -99,7 +99,7 @@ class RelayProject:
         """Write a repository file, creating parent directories as needed."""
         path = self.repository / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(text.encode("utf-8"))
         return path
 
     def write_workflow(self, key: str, text: str) -> None:
@@ -318,6 +318,7 @@ class FakeAgents:
     directory: Path
     transcript: Path
     monkeypatch: pytest.MonkeyPatch
+    host_path: str = ""
 
     def install(self, agent_id: str, *, mode: str = "success") -> Path:
         from relay.agents.profiles import PROFILES
@@ -345,6 +346,7 @@ class FakeAgents:
         return shutil.which(name, path=str(self.directory))
 
     def isolate_path(self) -> None:
+        self.host_path = os.environ.get("PATH", "")
         executable = shutil.which("git")
         if executable is None:
             message = "Git is required for the repository tests."
@@ -352,4 +354,15 @@ class FakeAgents:
         directories = [str(self.directory), str(Path(executable).parent)]
         if os.name == "nt":
             directories.append(str(Path(os.environ["SYSTEMROOT"]) / "System32"))
+        self.monkeypatch.setenv("PATH", os.pathsep.join(directories))
+
+    def allow_commands(self, *names: str) -> None:
+        """Expose selected installed commands without enabling real provider discovery."""
+        directories = os.environ["PATH"].split(os.pathsep)
+        for name in names:
+            executable = shutil.which(name, path=self.host_path)
+            if executable is not None:
+                directory = str(Path(executable).parent)
+                if directory not in directories:
+                    directories.append(directory)
         self.monkeypatch.setenv("PATH", os.pathsep.join(directories))

@@ -5,16 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from relay.errors import ArtifactPreservationError, WorktreeError
+from relay.errors import DirtyRepositoryError, WorktreeError
 from relay.paths import artifacts_dir
 from relay.vcs.artifacts import (
     PreservationResult,
     RecoveryReport,
     preserve_attempt_evidence,
     restore_recovery_reports,
+    validate_attempt_evidence,
     validate_recovery_reports,
 )
-from relay.vcs.cleanliness import require_clean
+from relay.vcs.cleanliness import execution_changes, require_clean
 from relay.vcs.commits import current_head
 from relay.vcs.worktree import remove_worktree, reset_worktree
 
@@ -52,7 +53,22 @@ def prepare_recovery_workspace(
             next_action="Restore or explicitly clean the retained run before restarting it.",
         )
     if not target.uses_git or target.attempt_id is None:
-        require_clean(worktree, stage="interrupted run recovery")
+        if target.uses_git:
+            require_clean(worktree, stage="interrupted run recovery")
+        else:
+            # Structural parents share the primary checkout with completed
+            # writers. Keep their unstaged root reports under the same exact
+            # exemptions used at writer completion; code and staged reports
+            # still block recovery. This check never changes the checkout.
+            changes = execution_changes(worktree)
+            if changes:
+                message = "The Git worktree is not clean at interrupted run recovery."
+                # ("?? a.py", " M b.py") becomes "?? a.py\n M b.py" in diagnostics.
+                raise DirtyRepositoryError(
+                    message,
+                    context={"project": str(worktree), "changes": "\n".join(changes)},
+                    next_action="Commit or set aside the listed code changes before continuing.",
+                )
         if current_head(worktree) != target.protected_head:
             message = "The interrupted run worktree moved away from its protected commit."
             raise WorktreeError(message, context={"project": target.project_path})
@@ -64,9 +80,9 @@ def prepare_recovery_workspace(
             repository, worktree, target.run_id, target.attempt_id, target.starting_head
         )
         store.record_preservation(target.attempt_id, preservation)
-    elif not (retained / "manifest.json").is_file():
-        message = "The retained attempt evidence has no complete manifest."
-        raise ArtifactPreservationError(message)
+    # Previously captured evidence can be damaged later. Verify all archived
+    # bytes and the retained commit before removing the current partial work.
+    validate_attempt_evidence(repository, target.run_id, target.attempt_id, target.starting_head)
     # Retain ignored/rejected reports from older attempts before any reset.
     # The database then selects the failed report and successful handoffs.
     store.capture_recovery_reports(target)

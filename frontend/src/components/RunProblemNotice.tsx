@@ -17,6 +17,7 @@ function failureReason(problem: RunProblem): string {
     model_selection_rejected_error: "The agent rejected the selected model.",
     agent_configuration_error: "The agent rejected the requested configuration.",
     output_validation_error: "The step did not produce its required output.",
+    repair_exhausted: "The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.",
     node_timeout: "The step reached its time limit.",
     worker_lost: "The worker stopped before finishing this step.",
     soft_denied: "The tool did not have permission to complete its work.",
@@ -27,8 +28,9 @@ function failureReason(problem: RunProblem): string {
     ?? "The step could not finish. Open its activity to inspect the cause.";
 }
 
-export function RunProblemNotice({ problem, onShowStep, onCancelRetry }: {
+export function RunProblemNotice({ problem, displayScope, onShowStep, onCancelRetry }: {
   problem: RunProblem;
+  displayScope?: string;
   onShowStep: (scope: string) => void;
   onCancelRetry: () => void;
 }) {
@@ -36,7 +38,7 @@ export function RunProblemNotice({ problem, onShowStep, onCancelRetry }: {
   return <Alert severity={scheduled ? "warning" : "error"} sx={{ mt: 2 }}>
     <Stack spacing={1}>
       <Typography variant="subtitle1" component="h2">
-        {stageLabel(problem.scope_path)} stopped
+        {stageLabel(displayScope ?? problem.scope_path)} stopped
       </Typography>
       <Typography>{failureReason(problem)}</Typography>
       {problem.provider_message && <>
@@ -57,7 +59,9 @@ export function RunProblemNotice({ problem, onShowStep, onCancelRetry }: {
             ? problem.retry.error_message ?? "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved."
             : problem.retry?.state === "canceled"
               ? "Automatic retry is canceled. You can retry this step manually."
-              : "Retry this step when the cause is resolved."}
+              : problem.error_code === "repair_exhausted"
+                ? "The repair budget stays spent. Change the rule in a new run if more rounds are needed."
+                : "Retry this step when the cause is resolved."}
       </Typography>
       <Button variant="outlined" sx={{ alignSelf: "flex-start" }} onClick={() => onShowStep(problem.scope_path)}>
         Show stopped step

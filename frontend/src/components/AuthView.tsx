@@ -41,8 +41,8 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
             <Typography variant="h4" sx={{ fontWeight: 760 }}>Relay</Typography>
             <Typography color="text.secondary">
               {state.owner_created
-                ? "Sign in to the local owner account."
-                : "Create the only owner account for this installation."}
+                ? "Sign in to Relay on this computer."
+                : "Create a password for this computer's Relay. Only people who can use this computer can reach it."}
             </Typography>
           </Box>
           {error && <Alert severity="error">{error}</Alert>}
@@ -62,15 +62,22 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
             autoComplete={state.owner_created ? "current-password" : "new-password"}
             required
           />
-          <Button type="submit" variant="contained" size="large" disabled={busy}>
-            {busy ? "Working…" : state.owner_created ? "Sign in" : "Create owner"}
-          </Button>
           {!state.owner_created && (
-            <Typography variant="body2" color="text.secondary">
-              The password must pass Django's local password checks. Relay never sends it off this
-              machine.
-            </Typography>
+            <Box>
+              <Typography variant="body2">Choose a password that follows these rules:</Typography>
+              <Box component="ul" sx={{ pl: 3, my: 1 }}>
+                {(state.password_rules ?? []).map((rule) => (
+                  <Typography component="li" variant="body2" key={rule}>{rule}</Typography>
+                ))}
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Relay keeps this password on your computer.
+              </Typography>
+            </Box>
           )}
+          <Button type="submit" variant="contained" size="large" disabled={busy}>
+            {busy ? "Working…" : state.owner_created ? "Sign in" : "Create password"}
+          </Button>
         </Stack>
       </Paper>
     </Box>

@@ -6,14 +6,16 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 
 from django.db import connections
-from django.test import Client
+from django.test import Client, override_settings
 import pytest
 
 from relay.agents.usage_limits import ProviderUsageLimit
-from relay.constants import DEFAULT_RECOVERY_PROMPT, RETRY_HANDOFF_MAX_BYTES
+from relay.constants import API_MAX_PAGE, DEFAULT_RECOVERY_PROMPT, RETRY_HANDOFF_MAX_BYTES
+from relay.errors import PersistenceError
 from relay.execution.automatic import recovery_instruction
 from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
@@ -23,7 +25,7 @@ from relay.execution.resume import RecoveryTarget, rerun_failed_node
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.web.models import Artifact, AutomaticRetry, NodeAttempt, NodeRun, Run, RunSnapshot
-from relay.web.repositories import DjangoExecutionStore
+from relay.web.repositories import DjangoExecutionStore, DjangoReadStore
 from relay.workflows.schema import AgentNode
 from tests.support import (
     Clock,
@@ -487,3 +489,187 @@ def test_large_multibyte_diagnostics_keep_the_instruction_within_its_byte_limit(
     assert note.startswith(DEFAULT_RECOVERY_PROMPT)
     assert len(note.encode("utf-8")) <= RETRY_HANDOFF_MAX_BYTES
     assert digest == sha256(note.encode("utf-8")).hexdigest()
+
+
+def test_missing_manifest_blocks_recovery_before_discarding_partial_work(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    from relay.paths import artifacts_dir
+
+    run_id = launch_report_run(project, recovery_engine)
+    attempt = NodeAttempt.objects.get(node_run__node_id="critique")
+    (artifacts_dir() / run_id / str(attempt.pk) / "manifest.json").unlink()
+    worktree = Path(str(Run.objects.get(pk=run_id).worktree_path))
+    partial = worktree / "unfinished.txt"
+    partial.write_text("Keep partial work\n", encoding="utf-8")
+    assert recovery_engine.store.resume_automatic_retries() == 0
+    assert partial.read_text(encoding="utf-8") == "Keep partial work\n"
+    assert AutomaticRetry.objects.get().state == "blocked"
+    assert NodeAttempt.objects.filter(node_run__node_id="critique").count() == 1
+
+
+def test_unknown_quota_reset_never_uses_the_generic_recovery_budget(
+    project: RelayProject, recovery_engine: InlineEngine, report_driver: ReportDriver
+) -> None:
+    report_driver.failure_code = "agent_usage_limit"
+    run_id = launch_report_run(project, recovery_engine)
+    assert recovery_engine.store.resume_automatic_retries() == 0
+    assert not AutomaticRetry.objects.exists()
+    assert NodeAttempt.objects.filter(node_run__node_id="critique").count() == 1
+    assert run_status(run_id) == "failed"
+
+
+def test_a_durable_shutdown_request_keeps_recovery_queued(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    launch_report_run(project, recovery_engine)
+    store = recovery_engine.store
+    instance = store.acquire_instance(os.getpid(), "test-host")
+    store.request_orderly_shutdown(instance)
+    assert store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "scheduled"
+
+
+def test_a_failed_command_cannot_create_an_unassigned_repair_agent(
+    project: RelayProject, engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "command-failure",
+        "version: 1\nname: Failed command\nrecovery: {enabled: true}\n"
+        "nodes:\n  check: {type: command, run: [git, not-a-git-command]}\n",
+    )
+    run_id = engine.launch(project, "command-failure")
+    engine.drain(run_id)
+    assert run_status(run_id) == "failed"
+    assert engine.store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "blocked"
+    assert NodeAttempt.objects.count() == 1
+
+
+def test_a_corrupt_stored_policy_surfaces_a_public_persistence_error(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    run_id = launch_report_run(project, recovery_engine)
+    Run.objects.filter(pk=run_id).update(recovery_policy={"enabled": True, "max_retries": 3})
+    with pytest.raises(PersistenceError) as error:
+        DjangoReadStore().run_detail(run_id, collection="nodes", since=0, limit=API_MAX_PAGE)
+    assert error.value.error_code == "persistence_error"
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+@pytest.mark.parametrize("enabled", [None, 1, "true"])
+def test_policy_api_rejects_non_boolean_values_without_changing_the_run(
+    project: RelayProject, recovery_engine: InlineEngine, enabled: str | int | None
+) -> None:
+    run_id = launch_report_run(project, recovery_engine, enabled=False)
+    response = Client().post(
+        f"/api/runs/{run_id}/recovery",
+        data=json.dumps({"enabled": enabled, "idempotency_key": "invalid-policy"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "config_error"
+    assert Run.objects.get(pk=run_id).recovery_policy["enabled"] is False
+    assert not AutomaticRetry.objects.exists()
+
+
+def test_an_invalid_policy_request_key_never_schedules_recovery(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    run_id = launch_report_run(project, recovery_engine, enabled=False)
+    assert recovery_engine.store.configure_recovery(run_id, True, "") is ControlResult.INVALID
+    assert not AutomaticRetry.objects.exists()
+    assert Run.objects.get(pk=run_id).recovery_policy["enabled"] is False
+
+
+def test_a_finished_run_rejects_new_recovery_policy_changes(
+    project: RelayProject, engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "finished", "version: 1\nname: Done\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(project, "finished")
+    engine.drain(run_id)
+    policy = Run.objects.get(pk=run_id).recovery_policy
+    assert engine.store.configure_recovery(run_id, True, "too-late") is ControlResult.STALE
+    assert Run.objects.get(pk=run_id).recovery_policy == policy
+
+
+def test_unrelated_failed_agents_block_automatic_workspace_preparation(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    project.write_workflow(
+        "siblings",
+        "version: 1\nname: Failed siblings\nmodel: m2\nagents: [codex]\n"
+        "recovery: {enabled: true}\nnodes:\n"
+        "  first: {type: agent}\n  second: {type: agent}\n",
+    )
+    run_id = recovery_engine.launch(project, "siblings")
+    store = recovery_engine.store
+    first = store.claim_dispatch(recovery_engine.tokens.popleft(), recovery_engine.worker_id)
+    second = store.claim_dispatch(recovery_engine.tokens.popleft(), recovery_engine.worker_id)
+    assert first.attempt is not None
+    assert second.attempt is not None
+    for attempt in (first.attempt, second.attempt):
+        store.finish_attempt(
+            attempt.attempt_id,
+            ExecutionOutcome(OutcomeKind.FAILED, error_code="agent_protocol_error"),
+            attempt.starting_head,
+        )
+    assert run_status(run_id) == "failed"
+    assert store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "scheduled"
+    for attempt in (first.attempt, second.attempt):
+        store.release_attempt_lock(attempt.attempt_id)
+    assert store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "blocked"
+    assert NodeAttempt.objects.count() == 2
+
+
+def test_recovery_supplement_metadata_cannot_disagree_with_its_retained_bytes(
+    project: RelayProject, recovery_engine: InlineEngine
+) -> None:
+    run_id = launch_report_run(project, recovery_engine)
+    store = recovery_engine.store
+    target = store.manual_rerun_target(run_id, "root.critique", "inspect-target")
+    assert target is not None
+    previous = tuple(
+        Artifact.objects.filter(attempt_id=target.attempt_id).values_list("pk", flat=True)
+    )
+    store.capture_recovery_reports(target)
+    supplemental = Artifact.objects.exclude(pk__in=previous).get(
+        attempt_id=target.attempt_id, declared_name="PLAN_CRITIQUE.md"
+    )
+    retained = Path(str(supplemental.retained_path)).read_bytes()
+    supplemental.sha256 = sha256(b"Incorrect metadata").hexdigest()
+    supplemental.save(update_fields=("sha256",))
+    assert store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "blocked"
+    assert Path(str(supplemental.retained_path)).read_bytes() == retained
+    assert NodeAttempt.objects.filter(node_run__node_id="critique").count() == 1
+
+
+@pytest.mark.parametrize("damage", ["missing", "changed"])
+def test_damaged_partial_work_evidence_blocks_before_reset(
+    project: RelayProject,
+    recovery_engine: InlineEngine,
+    report_driver: ReportDriver,
+    damage: str,
+) -> None:
+    report_driver.unfinished_code = True
+    run_id = launch_report_run(project, recovery_engine)
+    evidence = Artifact.objects.get(
+        attempt__node_run__node_id="critique", source_path__endswith="feature.txt"
+    )
+    saved = Path(str(evidence.retained_path))
+    if damage == "missing":
+        saved.unlink()
+    else:
+        saved.write_bytes(b"Damaged evidence\n")
+    worktree = Path(str(Run.objects.get(pk=run_id).worktree_path))
+    partial = worktree / "feature.txt"
+    original = partial.read_bytes()
+    assert recovery_engine.store.resume_automatic_retries() == 0
+    assert partial.read_bytes() == original
+    assert AutomaticRetry.objects.get().state == "blocked"
+    assert NodeAttempt.objects.filter(node_run__node_id="critique").count() == 1

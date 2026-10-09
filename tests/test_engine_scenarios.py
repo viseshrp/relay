@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import os
+import socket
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 from relay.execution.scheduler import dispatch_ready_nodes
-from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run
+from relay.execution.state import EventSensitivity, EventSource
+from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
+from relay.web.repositories import DjangoExecutionStore
 from tests.support import (
     PYTHON,
     Clock,
@@ -461,3 +465,91 @@ nodes:
     statuses = node_statuses(run_id)
     assert statuses["root.stop"] == "succeeded"
     assert statuses["root.other"] == "waiting"
+
+
+@pytest.mark.parametrize("ending", ["complete", "cancel", "timeout"])
+def test_command_output_is_durable_before_exit_and_survives_stopping(
+    project: RelayProject,
+    engine: InlineEngine,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    original = DjangoExecutionStore.append_attempt_event
+    observed: list[int | None] = []
+    peers: list[socket.socket] = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(5)
+        port = listener.getsockname()[1]
+        script = (
+            "import socket,sys; "
+            f"peer=socket.create_connection(('127.0.0.1',{port}),timeout=5); "
+            "sys.stdout.buffer.write(b'A\\xe2\\x82'); sys.stdout.flush(); "
+            "sys.stderr.buffer.write(b'warning\\n'); sys.stderr.flush(); peer.recv(1); "
+            "sys.stdout.buffer.write(b'\\xac\\n'+b'line\\n'*20000); sys.stdout.flush(); "
+            "sys.stderr.buffer.write(b'done\\n'); sys.stderr.flush()"
+        )
+        from yaml import safe_dump
+
+        project.write_workflow(
+            "live",
+            safe_dump(
+                {
+                    "version": 1,
+                    "name": "Live",
+                    "nodes": {
+                        "stream": {
+                            "type": "command",
+                            "run": [PYTHON, "-u", "-c", script],
+                            "timeout": "10s",
+                        },
+                    },
+                }
+            ),
+        )
+        run_id = engine.launch(project, "live")
+
+        def capture(
+            store: DjangoExecutionStore,
+            attempt_id: str,
+            event_type: str,
+            source: EventSource,
+            payload: Mapping[str, object],
+            *,
+            sensitivity: EventSensitivity = EventSensitivity.NORMAL,
+        ) -> None:
+            original(store, attempt_id, event_type, source, payload, sensitivity=sensitivity)
+            if event_type != "command.stdout" or observed:
+                return
+            observed.append(NodeAttempt.objects.get(pk=attempt_id).process_pid)
+            peer, _address = listener.accept()
+            peers.append(peer)
+            if ending == "complete":
+                peer.sendall(b"continue")
+            elif ending == "cancel":
+                store.request_run_cancellation(run_id, "cancel-live-command")
+            else:
+                clock.advance(11)
+
+        monkeypatch.setattr(DjangoExecutionStore, "append_attempt_event", capture)
+        try:
+            engine.drain(run_id)
+        finally:
+            for peer in peers:
+                peer.close()
+    assert observed and observed[0] is not None
+    attempt = NodeAttempt.objects.get(node_run__run_id=run_id)
+    assert attempt.process_pid is None
+    events = RunEvent.objects.filter(run_id=run_id).order_by("id")
+    stdout = "".join(event.payload["chunk"] for event in events if event.type == "command.stdout")
+    stderr = "".join(event.payload["chunk"] for event in events if event.type == "command.stderr")
+    if ending == "complete":
+        assert run_status(run_id) == "succeeded"
+        assert stdout == "A€\n" + "line\n" * 20000
+        assert stderr == "warning\ndone\n"
+    else:
+        assert attempt.stop_reason == ("canceled" if ending == "cancel" else "timeout")
+        assert stdout == "A\\xe2\\x82"
+        assert stderr == "warning\n"

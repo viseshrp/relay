@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { stringify } from "yaml";
 
+test.afterEach(async ({ page }) => {
+  // Finish route.fetch callbacks before the test runner closes their page.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows and cancels its scheduled retry" : "shows its provider limit and clears it on retry"}`, async ({ page }, testInfo) => {
   await page.request.get("/api/auth");
   const csrf = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
@@ -10,18 +15,18 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await page.goto("/?view=workflows");
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const workflowKey = automatic ? "scheduled-review" : "limited-review";
-  const created = await page.request.post("/api/workflows", {
+  const created = await page.request.post("/__test__/historical-workflows", {
     headers, data: { key: workflowKey, holder, yaml: stringify({
       version: 1, name: "Limited review",
       nodes: { review: { type: "command", run: ["git", "unknown-command"] } },
     }) },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
-  const launched = await page.request.post("/api/runs", {
+  const launched = await page.request.post("/__test__/historical-runs", {
     headers, data: { workflow_key: workflowKey, inputs: {} },
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
@@ -53,20 +58,14 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
   await expect(notice).toBeVisible();
   if (!automatic) {
     await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
-    const progress = page.getByRole("region", { name: "Step progress", exact: true });
-    await expect(progress).toBeInViewport({ ratio: 0.5 });
-    await expect(progress).toBeFocused();
-    const review = progress.locator('[data-id="root.review"]');
-    await expect(review).toBeInViewport();
-    const width = await review.evaluate((element) => element.getBoundingClientRect().width);
-    await progress.getByRole("button", { name: "Zoom Out", exact: true }).click();
-    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(width);
-    await notice.getByRole("button", { name: "Show stopped step", exact: true }).click();
-    await expect(progress).toBeInViewport({ ratio: 0.5 });
-    await expect(progress).toBeFocused();
-    await expect.poll(() => review.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(width);
-    await page.getByRole("button", { name: "Show step", exact: true }).click();
-    await expect(progress).toBeFocused();
+    const log = page.getByRole("region", { name: "Job log", exact: true });
+    await expect(log.getByRole("heading", { name: "Review", exact: true })).toBeFocused();
+    await expect(log.getByRole("alert")).toContainText("unknown-command");
+    await expect(page).toHaveURL(/job=root.review/);
+    await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
+    await page.getByRole("button", { name: "Open job log", exact: true }).click();
+    await expect(log.getByRole("alert")).toBeInViewport();
+    await page.getByRole("navigation", { name: "Jobs" }).getByRole("button", { name: "Summary", exact: true }).click();
   }
   if (automatic) {
     await expect(page.getByText("Relay is waiting for the provider's reset. It will retry automatically.", { exact: true })).toBeVisible();
@@ -89,11 +88,12 @@ for (const automatic of [false, true]) test(`a failed run ${automatic ? "shows a
     await retryGate;
     await route.continue();
   });
-  await page.getByRole("button", { name: "Retry step", exact: true }).click();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run job", exact: true }).click();
   await page.unroute(`**/api/runs/${runId}?collection=*`);
   releaseRetry();
   await expect(page.getByText("You've hit your session limit · resets 1:50pm (UTC)", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("alert")).toContainText("The tool exited with code 1.");
+  await expect(page.getByRole("region", { name: "Job log", exact: true }).getByRole("alert")).toContainText("Job failed with exit code 1.");
 });
 
 test("an owner can retry an agent with advertised effort while keeping its snapshot", async ({ page }, testInfo) => {
@@ -106,10 +106,10 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await page.goto("/?view=workflows");
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
-  const created = await page.request.post("/api/workflows", {
+  const created = await page.request.post("/__test__/historical-workflows", {
     headers, data: { key: "retry-effort", holder, yaml: stringify({
       version: 1, name: "Retry effort", model: "m2", agents: ["claude"],
       nodes: { review: {
@@ -120,7 +120,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
     }) },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
-  const launched = await page.request.post("/api/runs", {
+  const launched = await page.request.post("/__test__/historical-runs", {
     headers, data: { workflow_key: "retry-effort", inputs: {}, cleanup_policy: "retain" },
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
@@ -128,10 +128,12 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
   await page.goto(`/?view=runs&run=${runId}`);
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Effort", exact: true })).toBeEnabled();
-  await expect(dialog).toContainText("Keep current effort (low)");
+  await expect(dialog).toContainText("Keep current effort (Low)");
+  await expect(dialog).toContainText("Keep current permission mode (Auto)");
   await expect(dialog.getByRole("textbox", { name: "Handoff instructions", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toBeEnabled();
   await dialog.getByRole("combobox", { name: "Model", exact: true }).click();
@@ -171,9 +173,27 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
     const run = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
     return [run.status, run.problem?.attempt_number];
   }).toEqual(["failed", 3]);
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("Keep current effort (low)");
+  // Hold the refreshed state so this race does not depend on request timing.
+  let markRefreshStarted!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => { markRefreshStarted = resolve; });
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
+    const response = await route.fetch();
+    markRefreshStarted();
+    await refreshGate;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await refreshStarted;
+    await expect(page.getByRole("button", { name: "Re-run with settings", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Re-run job", exact: true })).toBeDisabled();
+  } finally {
+    releaseRefresh();
+  }
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Keep current effort (Low)");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("retry-effort.png"), fullPage: true });
 });
@@ -188,11 +208,11 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   const token = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
   const headers = { "X-CSRFToken": token?.value ?? "" };
   expect((await page.request.post("/__test__/reset", { headers })).ok()).toBeTruthy();
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await page.goto("/?view=workflows");
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const key = native ? "handoff-native" : "handoff-acp";
-  const created = await page.request.post("/api/workflows", {
+  const created = await page.request.post("/__test__/historical-workflows", {
     headers, data: { key, holder, yaml: stringify({
       version: 1, name: "Provider handoff", model: "m2", agents: ["claude"],
       nodes: {
@@ -206,25 +226,28 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
     }) },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
-  const launched = await page.request.post("/api/runs", {
+  const launched = await page.request.post("/__test__/historical-runs", {
     headers, data: { workflow_key: key, inputs: {}, cleanup_policy: "retain" },
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: runId } = await launched.json();
   await expect.poll(async () => (await (await page.request.get(`/api/runs/${runId}`)).json()).run.status).toBe("failed");
-  const before = (await (await page.request.get(`/api/runs/${runId}`)).json()).run;
+  const beforeResponse = await (await page.request.get(`/api/runs/${runId}`)).json();
+  const before = beforeResponse.run;
   if (!native) {
     // The first problem notice can describe a different concurrent failure.
     // Retry settings must still come from the selected failed step's own route.
-    await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      if (body.run.problem) body.run.problem.scope_path = "root.other";
-      await route.fulfill({ response, json: body });
-    });
+    // Fulfill the captured state directly so aborted reads cannot outlive route.fetch.
+    await page.route(`**/api/runs/${runId}?collection=*`, (route) => route.fulfill({
+      json: { ...beforeResponse, run: {
+        ...before, problem: { ...before.problem, scope_path: "root.other" },
+      } },
+    }));
   }
   await page.goto(`/?view=runs&run=${runId}`);
-  await page.getByRole("button", { name: "Retry with settings", exact: true }).click();
+  if (!native) await expect(page.getByRole("heading", { name: "Other stopped", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page.getByRole("button", { name: "Re-run with settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("combobox", { name: "Tool", exact: true })).toBeEnabled();
   await dialog.getByRole("combobox", { name: "Tool", exact: true }).click();
@@ -252,6 +275,8 @@ for (const native of [false, true]) test(`an owner can hand a failed Claude step
   await permission.click();
   await page.getByRole("option", { name: native ? "Auto approve" : "Auto", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("handoff-settings.png"), fullPage: true });
+  // Finish simulated reads before retrying; the new attempt uses the real API.
+  if (!native) await page.unrouteAll({ behavior: "wait" });
   const submitted = page.waitForResponse((response) => response.url().endsWith(`/api/runs/${runId}/rerun-node`));
   await dialog.getByRole("button", { name: "Retry with settings", exact: true }).click();
   const response = await submitted;

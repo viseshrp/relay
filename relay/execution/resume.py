@@ -33,6 +33,15 @@ def _release_local_rerun(run_id: str) -> None:
         _ACTIVE_RERUNS.discard(run_id)
 
 
+def recovery_workspace_lock(run_id: str) -> MigrationLock:
+    """Serialize recovery and confirmed cleanup of the same run workspace."""
+    # `../run` becomes a hexadecimal filename rather than a path component.
+    filename = sha256(run_id.encode()).hexdigest()
+    return MigrationLock(
+        data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0, purpose="run recovery"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RetryEffort:
     """An explicit owner choice; None requests the provider's default effort."""
@@ -49,7 +58,7 @@ class RetryPermissionMode:
 
 @dataclass(frozen=True, slots=True)
 class RetryAgent:
-    """An owner-selected replacement for one failed step's future attempts."""
+    """An owner-selected replacement for one agent step's future attempts."""
 
     agent_id: str
     model_value: str
@@ -59,11 +68,21 @@ class RetryAgent:
 
     def for_target(self, target: RecoveryTarget) -> RetryAgent:
         """Supply a continuation prompt only when the tool/model pair changes."""
-        changed = (self.agent_id, self.model_value) != (target.agent_id, target.model_value)
+        return self.for_selection(target.agent_id, target.model_value)
+
+    def for_selection(
+        self,
+        agent_id: str | None,
+        model_value: str | None,
+        *,
+        default_handoff: str = DEFAULT_RETRY_HANDOFF_PROMPT,
+    ) -> RetryAgent:
+        """Keep handoffs separate from captured prompts for either kind of change."""
+        changed = (self.agent_id, self.model_value) != (agent_id, model_value)
         if not changed and self.handoff_prompt is not None:
             message = "A handoff prompt requires changing the tool or model."
             raise ConfigError(message)
-        prompt = (self.handoff_prompt or DEFAULT_RETRY_HANDOFF_PROMPT) if changed else None
+        prompt = (self.handoff_prompt or default_handoff) if changed else None
         if prompt is not None and (
             not prompt.strip() or len(prompt.encode("utf-8")) > RETRY_HANDOFF_MAX_BYTES
         ):
@@ -163,11 +182,7 @@ def rerun_failed_node(
         return ControlResult.STALE
     # The consumer's scheduled recovery and the web owner's manual retry share
     # this kernel lock. It is released by the OS even if either process crashes.
-    # `../run` becomes a fixed hexadecimal filename, never a path component.
-    filename = sha256(run_id.encode()).hexdigest()
-    lock = MigrationLock(
-        data_dir() / "recovery-locks" / f"{filename}.lock", timeout=0, purpose="run recovery"
-    )
+    lock = recovery_workspace_lock(run_id)
     try:
         try:
             lock.__enter__()
@@ -236,6 +251,7 @@ __all__ = [
     "RetryAgent",
     "RetryEffort",
     "RetryPermissionMode",
+    "recovery_workspace_lock",
     "rerun_failed_node",
     "resume_interrupted",
 ]

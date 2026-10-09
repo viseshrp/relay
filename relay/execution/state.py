@@ -25,6 +25,7 @@ class ChoiceEnum(str, Enum):
 class RunStatus(ChoiceEnum):
     PENDING = "pending", "Pending"
     RUNNING = "running", "Running"
+    COMPLETING = "completing", "Merging and cleaning up"
     PAUSED_WAIT = "paused_wait", "Paused for input"
     CANCELING = "canceling", "Canceling"
     SUCCEEDED = "succeeded", "Succeeded"
@@ -43,6 +44,7 @@ class WorktreeState(ChoiceEnum):
 class CleanupPolicy(ChoiceEnum):
     CLEAN_ON_SUCCESS = "clean_on_success", "Clean on success"
     RETAIN = "retain", "Retain"
+    MERGE_ON_SUCCESS = "merge_on_success", "Merge and clean on success"
 
 
 class NodeStatus(ChoiceEnum):
@@ -58,6 +60,8 @@ class NodeStatus(ChoiceEnum):
 
 
 class NodeType(ChoiceEnum):
+    ACTIONS_JOB = "actions_job", "Job"
+    ACTIONS_STEP = "actions_step", "Step"
     AGENT = "agent", "Agent"
     COMMAND = "command", "Command"
     HUMAN_WAIT = "human_wait", "Human wait"
@@ -196,11 +200,46 @@ RUN_TRANSITIONS: tuple[Transition, ...] = (
         "run.resumed",
     ),
     Transition(
+        RunStatus.PAUSED_WAIT,
+        "jobs_settled",
+        "actions_jobs_and_descendants_terminal",
+        RunStatus.RUNNING,
+        "run.resumed",
+    ),
+    Transition(
         RunStatus.RUNNING,
         "all_succeeded",
         "all_nodes_terminal_success",
         RunStatus.SUCCEEDED,
         "run.succeeded",
+    ),
+    Transition(
+        RunStatus.RUNNING,
+        "jobs_canceled",
+        "all_jobs_terminal_with_cancellation_and_none_failed",
+        RunStatus.CANCELED,
+        "run.canceled",
+    ),
+    Transition(
+        RunStatus.RUNNING,
+        "completion_started",
+        "all_nodes_terminal_success_and_merge_requested",
+        RunStatus.COMPLETING,
+        "run.completing",
+    ),
+    Transition(
+        RunStatus.COMPLETING,
+        "completion_succeeded",
+        "merge_and_worktree_removal_durable",
+        RunStatus.SUCCEEDED,
+        "run.succeeded",
+    ),
+    Transition(
+        RunStatus.COMPLETING,
+        "completion_failed",
+        "merge_or_worktree_removal_failed",
+        RunStatus.FAILED,
+        "run.failed",
     ),
     Transition(
         RunStatus.RUNNING,
@@ -303,6 +342,13 @@ NODE_TRANSITIONS: tuple[Transition, ...] = (
         "claim_created",
         NodeStatus.DISPATCHED,
         "node.dispatched",
+    ),
+    Transition(
+        NodeStatus.DISPATCHED,
+        "admission_failed",
+        "invalid_frozen_admission_policy",
+        NodeStatus.FAILED,
+        "node.failed",
     ),
     Transition(
         NodeStatus.DISPATCHED,

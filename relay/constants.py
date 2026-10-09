@@ -66,6 +66,21 @@ HTTP_BAD_GATEWAY: Final = HTTPStatus.BAD_GATEWAY
 HTTP_SERVICE_UNAVAILABLE: Final = HTTPStatus.SERVICE_UNAVAILABLE
 
 MAX_LOOP_ITERATIONS: Final = 100
+DEFAULT_REPAIR_ROUNDS: Final = 4
+REPAIR_NODE_PREFIX: Final = "relay_repair_"
+DEFAULT_FIX_INSTRUCTION: Final = (
+    "Repair only the issues identified by the rejected review or verification "
+    "for this stage. Read its reports and retained evidence before acting. "
+    "Preserve completed work, original scope, and required checks. Do not weaken "
+    "acceptance criteria or rewrite a rejected verdict as a pass. Follow the "
+    "configured instructions and report genuine blockers."
+)
+DEFAULT_VERIFY_INSTRUCTION: Final = (
+    "Independently verify the repairs against the rejected findings, the original "
+    "scope, and fresh evidence. Write the configured verification report and "
+    "acceptance output. Keep failed verdicts accurate; a successful agent turn "
+    "does not establish that the work passed verification."
+)
 MAX_AUTOMATIC_RETRIES: Final = 2
 MAX_EXPANDED_NODES: Final = 10_000
 API_MAX_PAGE: Final = 200
@@ -87,6 +102,14 @@ DEFAULT_RETRY_HANDOFF_PROMPT: Final = (
     "Follow the original step instructions and its declared outputs. Preserve "
     "completed work and successful stages. Finish the remaining work for this "
     "step and report fresh verification evidence. Use the current Relay agent "
+    "and exact model for report provenance."
+)
+DEFAULT_UNSTARTED_HANDOFF_PROMPT: Final = (
+    "Perform this unstarted step in the existing Relay run. Read the existing "
+    "files and retained upstream reports before acting. Follow this step's "
+    "captured instructions and declared outputs. Preserve completed stages "
+    "and committed work rather than repeating them. Report fresh verification "
+    "evidence and identify any missing evidence. Use the current Relay agent "
     "and exact model for report provenance."
 )
 DEFAULT_RECOVERY_PROMPT: Final = (

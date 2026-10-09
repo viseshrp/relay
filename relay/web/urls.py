@@ -3,24 +3,40 @@
 from django.urls import URLPattern, URLResolver, path
 
 from .static_view import serve_spa
-from .views import actions, pages, stream
+from .views import actions, actions_language, pages, settings, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("api/workflow-language", actions_language.manifest),
+    path("api/workflow-library", actions_language.library),
+    path("api/workflow-language/validate", actions_language.validate),
+    path("api/workflow-bindings", actions_language.bindings),
+    path("api/workflow-environments", actions_language.environments),
+    path("api/workflow-triggers", actions_language.triggers),
+    path("api/repository-dispatch", actions_language.dispatch),
+    path("api/attempts/<str:attempt_id>/environment", actions_language.approve),
+    path("api/runs/<str:run_id>/products", actions_language.products),
     path("api/auth", actions.authentication_state, name="auth-state"),
     path("api/auth/onboard", actions.onboard, name="auth-onboard"),
     path("api/auth/login", actions.sign_in, name="auth-login"),
     path("api/auth/logout", actions.sign_out, name="auth-logout"),
+    path("api/settings", settings.owner_settings, name="owner-settings"),
+    path("api/projects/defaults", settings.project_defaults, name="project-defaults"),
+    path("api/projects/folders", pages.project_folders, name="project-folders"),
     path("api/projects", pages.projects, name="projects"),
+    path("api/dashboard", pages.dashboard, name="dashboard"),
     path("api/projects/current", pages.project_context, name="project-context"),
     path("api/projects/open", actions.open_project, name="project-open"),
     path("api/projects/relink", actions.relink_registered_project, name="project-relink"),
     path("api/workflows", actions.workflows_collection, name="workflows"),
+    path("api/workflow-templates", pages.workflow_templates, name="workflow-templates"),
+    path("api/workflows/<path:key>/preflight", pages.workflow_preflight, name="workflow-preflight"),
     path("api/workflows/<path:key>/draft", actions.autosave_draft, name="workflow-draft"),
     path("api/workflows/<path:key>/save", actions.save_workflow, name="workflow-save"),
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
     path("api/workflows/<path:key>/prompt", actions.workflow_prompt, name="workflow-prompt"),
     path("api/workflows/<path:key>", pages.workflow, name="workflow"),
     path("api/agents", pages.agents, name="agents"),
+    path("api/agents/check", actions.agent_readiness, name="agent-readiness"),
     path("api/agents/<str:agent_id>/models", actions.agent_models, name="agent-models"),
     path(
         "api/agents/<str:agent_id>/configuration",
@@ -28,9 +44,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
         name="agent-configuration",
     ),
     path("api/runs", actions.runs_collection, name="runs"),
+    path("api/attention", pages.attention, name="attention"),
     path("api/runs/<str:run_id>", pages.run_detail, name="run-detail"),
     path("api/runs/<str:run_id>/stream", stream.run_stream, name="run-stream"),
     path("api/runs/<str:run_id>/events", pages.run_events, name="run-events"),
+    path("api/runs/<str:run_id>/workflow", pages.run_workflow, name="run-workflow"),
+    path("api/runs/<str:run_id>/job", pages.run_job, name="run-job"),
     path("api/runs/<str:run_id>/artifacts", pages.run_artifacts, name="run-artifacts"),
     path("api/runs/<str:run_id>/changes", pages.run_changes, name="run-changes"),
     path(
@@ -39,7 +58,15 @@ urlpatterns: list[URLPattern | URLResolver] = [
         name="run-resources-clean",
     ),
     path("api/runs/<str:run_id>/cancel", actions.cancel_run, name="run-cancel"),
+    path("api/runs/<str:run_id>/launch-inputs", pages.run_launch_inputs, name="run-launch-inputs"),
     path("api/runs/<str:run_id>/recovery", actions.configure_run_recovery, name="run-recovery"),
+    path("api/runs/<str:run_id>/pause", actions.configure_dispatch_pause, name="run-pause"),
+    path("api/runs/<str:run_id>/repairs", actions.configure_repair_groups, name="run-repairs"),
+    path(
+        "api/runs/<str:run_id>/step-settings",
+        actions.configure_pending_step,
+        name="run-step-settings",
+    ),
     path("api/runs/<str:run_id>/rerun-node", actions.rerun_node, name="run-rerun-node"),
     path(
         "api/attempts/<str:attempt_id>/permission",
@@ -56,7 +83,13 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path(
         "api/artifacts/<str:artifact_id>/preview", pages.artifact_preview, name="artifact-preview"
     ),
+    path("api/data/usage", settings.storage_usage, name="data-usage"),
     path("api/data/clean", actions.clean_data, name="data-clean"),
+    path(
+        "api/workflow-artifacts/<str:artifact_id>/download",
+        actions_language.download_product,
+        name="workflow-artifact-download",
+    ),
     path("api", pages.api_not_found, name="api-root-not-found"),
     path("api/", pages.api_not_found, name="api-slash-not-found"),
     path("api/<path:path>", pages.api_not_found, name="api-not-found"),

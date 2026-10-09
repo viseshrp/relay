@@ -6,6 +6,7 @@ from relay.errors import NodeExecutionError
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason
 from relay.workflows.expressions import evaluate_expression
+from relay.workflows.repairs import accepted_verdict
 from relay.workflows.schema import LoopNode
 from relay.workflows.scope import enclosing_scope, loop_iteration_scope
 
@@ -23,6 +24,11 @@ class LoopExecutor:
     def execute(self, context: AttemptContext) -> ExecutionOutcome:
         node = parse_node(context, LoopNode)
         parent = enclosing_scope(context.attempt.scope_path)
+        repair = node.repair_rule
+        if repair is not None:
+            original = context.attempt.upstream_outputs.get(repair.source, {})
+            if accepted_verdict(original, repair.accepted_output, repair.accepted_value):
+                return ExecutionOutcome(OutcomeKind.SUCCEEDED, outputs=dict(original))
         combined_outputs = {}
         first_iteration = 1
         entry_point = context.attempt.run_metadata.get("entry_point")
@@ -67,6 +73,11 @@ class LoopExecutor:
             combined_outputs = {
                 node_id: dict(outputs) for node_id, outputs in result.node_outputs.items()
             }
+            if repair is not None:
+                verified = combined_outputs.get("verify", {})
+                if accepted_verdict(verified, repair.accepted_output, repair.accepted_value):
+                    return ExecutionOutcome(OutcomeKind.SUCCEEDED, outputs=verified)
+                continue
             if node.until is not None:
                 context_values = expression_context(context)
                 context_values["needs"] = {
@@ -79,6 +90,13 @@ class LoopExecutor:
                     raise NodeExecutionError(message, context={"node": context.attempt.scope_path})
                 if complete:
                     return ExecutionOutcome(OutcomeKind.SUCCEEDED)
+        if repair is not None:
+            return ExecutionOutcome(
+                OutcomeKind.FAILED,
+                stop_reason=AttemptStopReason.FAILED,
+                error_code="repair_exhausted",
+                outputs=combined_outputs.get("verify", {}),
+            )
         return ExecutionOutcome(
             OutcomeKind.SUCCEEDED,
             selected_branch=node.exhausted,

@@ -5,6 +5,11 @@ proposed TODO entries without modifying it.
 
 ## Agent configuration
 
+- [x] Change the tool, model, effort, and permissions for an unstarted agent
+  step while its run is paused. Validate advertised choices, keep captured
+  prompts and completed work, and supply editable handoff instructions only
+  when the tool/model changes. Saving keeps the run paused. See
+  [Monitor and control runs](web-ui.md#monitor-and-control-runs).
 - [x] Let the owner hand a failed agent step to another installed tool and exact
   model through Relay. Validate its settings before recovery, clear the previous
   tool's options, preserve the snapshot and completed work, and retain the
@@ -54,9 +59,25 @@ to change that effort.
   views. Explain what actions do and what happens next before starting,
   stopping, or approving work. Preserve explicit human review and permission
   decisions.
+- [x] Make long workflows easy to navigate in the authoring canvas.
+  Loading another workflow starts at its first stage with fresh positions
+  and readable zoom. A searchable stage list supports keyboard selection and
+  repeated centering after panning. Browser checks cover workflow changes,
+  narrow layouts, unchanged saved sources, and unsaved-instruction protection.
 
 ## Run navigation
 
+- [x] Configure fix-and-verify repair rules on a stage. Relay runs rejected
+  verdicts through the selected fixer and verifier, preserves each report,
+  and stops when the configured budget is exhausted. Keep repair work out of
+  the main map and expose its settings and attempts in a Repairs panel.
+  Existing captured loops can be explicitly grouped without changing their
+  execution. See [Stage repair rules](workflows.md#stage-repair-rules).
+- [x] Pause new steps without interrupting the currently running agent. Show
+  the hold in the run monitor, preserve it across restart, and let the owner
+  change unstarted-step settings before explicitly resuming. Queued deliveries
+  and automatic recovery respect the durable hold. See
+  [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 - [x] Explain the workflow editor and run monitor in the navigation. Show the
   selected project, workflow, and run together so the owner can identify the
   work being inspected.
@@ -132,6 +153,11 @@ to change that effort.
 - [x] Clean up run-owned temporary files, browser profiles, and processes
   through Relay after the run finishes. Preserve personal browser sessions,
   credentials, unrelated files, and the owner's existing Relay data.
+- [x] Select one terminal run for confirmed cleanup through the API. Preserve
+  earlier runs, shared logs, and retained reports when removing a checkout.
+  Reject missing, malformed, and foreign run selections without broadening
+  deletion, and serialize selected cleanup with recovery. Focused API checks
+  cover these boundaries and incomplete evidence.
 
 The [web guide](web-ui.md) covers project selection, workflow creation, run
 progress, report previews, explicit review decisions, and readable activity.

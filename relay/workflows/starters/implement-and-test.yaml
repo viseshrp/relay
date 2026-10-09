@@ -1,0 +1,34 @@
+name: Implement and test
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What change should the agent implement?
+        required: true
+        default: Improve the README's explanation of the main code folder.
+        type: string
+      test_runner:
+        description: Which test command does this repository use?
+        required: false
+        default: pytest
+        type: choice
+        options:
+        - pytest
+        - npm
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/implement.md
+        prompt: ${{ inputs.task }}
+    - if: inputs.test_runner == 'pytest'
+      uses: relay/command@v1
+      with:
+        argv: '["python", "-m", "pytest"]'
+    - if: inputs.test_runner == 'npm'
+      uses: relay/command@v1
+      with:
+        argv: '["npm", "test"]'

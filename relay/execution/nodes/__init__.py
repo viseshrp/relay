@@ -5,6 +5,7 @@ from __future__ import annotations
 from relay.execution.runner import AttemptExecutor
 from relay.execution.state import NodeType
 
+from .actions import ActionsJobExecutor, ActionsStepExecutor
 from .agent import AgentExecutor, AgentNodeDriver
 from .base import NestedScopeRunner, SynchronousScopeRunner
 from .command import CommandExecutor
@@ -35,6 +36,8 @@ def node_executors(
         NodeType.CONDITION.value: ConditionExecutor(),
         NodeType.LOOP.value: LoopExecutor(scopes),
         NodeType.SUBWORKFLOW.value: SubworkflowExecutor(scopes),
+        NodeType.ACTIONS_JOB.value: ActionsJobExecutor(driver),
+        NodeType.ACTIONS_STEP.value: ActionsStepExecutor(driver),
     }
 
 

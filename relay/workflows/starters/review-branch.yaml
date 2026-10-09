@@ -1,0 +1,22 @@
+name: Review my branch
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What should the review focus on?
+        required: true
+        default: Review this branch for bugs and missing tests.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/review-branch.md
+        prompt: ${{ inputs.task }}
+    - uses: relay/validate-report@v1
+      with:
+        report: REVIEW.md
+        label: Ready

@@ -4,28 +4,123 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
 
 from django.contrib.auth.models import User
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.http import HttpResponse
 from django.test import Client, override_settings
 import pytest
 
 from relay.agents.models import ModelObservation
 from relay.constants import (
+    APPLICATION_LOG_OWNERSHIP_LINE,
     DATABASE_INTEGER_MAX,
+    REVIEW_PREVIEW_MAX_BYTES,
     RUN_PROBLEM_MESSAGE_MAX_EVENTS,
     RUN_PROBLEM_TEXT_MAX_CHARS,
 )
+from relay.execution.resume import recovery_workspace_lock
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, EventSensitivity, EventSource
-from relay.web.models import Artifact, HumanInteraction, Run, RunEvent
+from relay.web.models import Artifact, HumanInteraction, NodeRun, Run, RunEvent, RunSnapshot
 from relay.web.repositories import DjangoAgentStore, DjangoReadStore
-from tests.support import FakeAgents, InlineEngine, RelayProject, fake_executable, run_status
+from relay.web.views import actions
+from tests.support import (
+    FakeAgents,
+    InlineEngine,
+    RelayProject,
+    create_project,
+    fake_executable,
+    git,
+    run_status,
+)
 
 PASSWORD = "Relay-Test-Passphrase-2026!"  # noqa: S105
+
+
+def test_library_import_accepts_bounded_large_bundles_without_raising_other_api_limits(
+    owner: Client,
+) -> None:
+    bundle = {
+        "metadata": {"name": "Large local template"},
+        "yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n",
+        "sources": {f".relay/prompts/part-{index}.md": "x" * 600_000 for index in range(2)},
+    }
+    imported = post(owner, "/api/workflow-library", bundle)
+    assert imported.status_code == 201, imported.json()
+    assert owner.get("/api/workflow-library", {"id": imported.json()["id"]}).json() == bundle
+    assert post(owner, "/api/settings", bundle).status_code == 400
+    bundle["sources"] = {f".relay/prompts/part-{index}.md": "x" for index in range(101)}
+    assert post(owner, "/api/workflow-library", bundle).status_code == 422
+
+
+def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    text = "name: Check\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    served.write_workflow("nested/check", text)
+    served.write("REVIEW.md", "Owner review\n")
+    served.write("loose code.py", "Owner code\n")
+    before = git(served.repository, "status", "--porcelain=v1")
+    head = git(served.repository, "rev-parse", "HEAD")
+    response = owner.get("/api/workflows/nested/check.yaml/preflight")
+    assert response.status_code == 200
+    assert response.json() == {
+        "clean": False,
+        "blocking_count": 1,
+        "allowed_count": 1,
+        "truncated": False,
+        "files": [
+            {
+                "status": "??",
+                "path": "loose code.py",
+                "original_path": None,
+                "allowed": False,
+                "reasons": ["untracked"],
+            },
+            {
+                "status": "??",
+                "path": "REVIEW.md",
+                "original_path": None,
+                "allowed": True,
+                "reasons": ["Root workflow report"],
+            },
+        ],
+    }
+    assert git(served.repository, "status", "--porcelain=v1") == before
+    assert git(served.repository, "rev-parse", "HEAD") == head
+    assert not Run.objects.exists()
+    assert "Owner code" not in response.content.decode()
+    other = create_project(tmp_path / "another")
+    other.write_workflow("nested/check", text)
+    selected = owner.get(f"/api/workflows/nested/check/preflight?project={other.project_id}")
+    assert selected.status_code == 200
+    assert selected.json() == {
+        "clean": True,
+        "blocking_count": 0,
+        "allowed_count": 0,
+        "files": [],
+        "truncated": False,
+    }
+    assert owner.post("/api/workflows/nested/check/preflight").status_code == 405
+
+
+def test_workflow_preflight_requires_login_and_returns_workflow_errors(
+    client: Client, owner: Client, served: RelayProject
+) -> None:
+    client.logout()
+    assert client.get("/api/workflows/workflow/preflight").status_code == 401
+    client.force_login(User.objects.get(username="owner"))
+    served.write(".relay/workflows/invalid.yaml", "nodes: [\n")
+    response = owner.get("/api/workflows/invalid/preflight")
+    assert response.status_code == 422
+    assert response.json()["code"] == "workflow_validation_error"
+    missing = owner.get("/api/workflows/missing/preflight")
+    assert missing.status_code == 422
+    assert missing.json()["code"] == "workflow_validation_error"
 
 
 def test_historical_provider_failure_is_visible_without_replaying_activity(
@@ -480,8 +575,32 @@ def test_auth_state_before_onboarding_issues_a_csrf_cookie(client: Client) -> No
         "authenticated": False,
         "username": None,
         "login_required": True,
+        "password_rules": [
+            "Your password can\u2019t be too similar to your other personal information.",
+            "Your password must contain at least 8 characters.",
+            "Your password can\u2019t be a commonly used password.",
+            "Your password can\u2019t be entirely numeric.",
+        ],
     }
     assert "relay_csrftoken" in client.cookies
+
+
+@override_settings(
+    AUTH_PASSWORD_VALIDATORS=[
+        {
+            "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+            "OPTIONS": {"min_length": 12},
+        }
+    ]
+)
+def test_onboarding_rules_follow_the_configured_password_policy(client: Client) -> None:
+    assert client.get("/api/auth").json()["password_rules"] == [
+        "Your password must contain at least 12 characters."
+    ]
+
+
+def test_created_accounts_do_not_show_onboarding_password_rules(owner: Client) -> None:
+    assert owner.get("/api/auth").json()["password_rules"] == []
 
 
 def test_onboarding_authenticates_the_new_owner(client: Client) -> None:
@@ -556,6 +675,12 @@ def test_disabled_login_opens_projects_without_creating_an_owner(client: Client)
         "authenticated": True,
         "username": "local",
         "login_required": False,
+        "password_rules": [
+            "Your password can\u2019t be too similar to your other personal information.",
+            "Your password must contain at least 8 characters.",
+            "Your password can\u2019t be a commonly used password.",
+            "Your password can\u2019t be entirely numeric.",
+        ],
     }
     assert "relay_csrftoken" in client.cookies
     assert "relay_sessionid" not in client.cookies
@@ -571,7 +696,7 @@ def test_disabled_login_still_rejects_untrusted_hosts(client: Client) -> None:
 @override_settings(RELAY_LOGIN_REQUIRED=False)
 def test_disabled_login_records_the_local_launcher(served: RelayProject) -> None:
     served.write_workflow(
-        "local", "version: 1\nname: Local\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "local", "name: Local\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     )
     served.commit("Save the local command workflow")
     client = Client(enforce_csrf_checks=True)
@@ -648,6 +773,129 @@ def test_registered_projects_are_listed(owner: Client, project: RelayProject) ->
     assert [row["id"] for row in rows] == [project.project_id]
 
 
+def test_project_context_adds_fresh_launch_source_for_the_selected_project(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    other = create_project(tmp_path / "other")
+    git(other.repository, "branch", "-m", "other/source")
+    source = owner.get(f"/api/projects/current?project={other.project_id}")
+    assert source.status_code == 200
+    assert source.json()["project"]["id"] == other.project_id
+    assert source.json()["launch_source"] == {
+        "branch": "other/source",
+        "commit": git(other.repository, "rev-parse", "HEAD"),
+    }
+    git(other.repository, "checkout", "--detach", "HEAD")
+    assert (
+        owner.get(f"/api/projects/current?project={other.project_id}").json()["launch_source"][
+            "branch"
+        ]
+        is None
+    )
+    assert owner.get("/api/projects/current").json()["project"]["id"] == served.project_id
+
+
+def test_project_context_launch_source_requires_owner_login(client: Client) -> None:
+    assert client.get("/api/projects/current").status_code == 401
+
+
+@pytest.mark.parametrize("status", ["succeeded", "failed", "canceled"])
+def test_previous_run_inputs_returns_only_the_launch_choices(
+    owner: Client, finished_run: str, status: str
+) -> None:
+    Run.objects.filter(pk=finished_run).update(status=status)
+    inputs = {"task": "Owner choice", "count": 0, "ratio": 0.5, "approved": False, "empty": None}
+    RunSnapshot.objects.filter(run_id=finished_run).update(
+        typed_inputs=inputs, resolved_prompts=[{"private": "captured instructions"}]
+    )
+    run = Run.objects.get(pk=finished_run)
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert response.status_code == 200
+    assert response.json() == {
+        "project_id": str(run.project_id),
+        "workflow_key": "done.yaml",
+        "status": status,
+        "inputs": inputs,
+    }
+    assert RunSnapshot.objects.get(run_id=finished_run).typed_inputs == inputs
+
+
+@pytest.mark.parametrize(
+    "status", ["pending", "running", "paused_wait", "canceling", "interrupted"]
+)
+def test_previous_run_inputs_rejects_a_run_that_has_not_finished(
+    owner: Client, finished_run: str, status: str
+) -> None:
+    Run.objects.filter(pk=finished_run).update(status=status)
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (400, "config_error")
+    assert "Wait for this run to finish" in response.json()["message"]
+
+
+def test_previous_run_inputs_keeps_authentication_bounds_and_missing_run_errors(
+    client: Client, owner: Client, finished_run: str
+) -> None:
+    unauthenticated = Client()
+    assert unauthenticated.get(f"/api/runs/{finished_run}/launch-inputs").status_code == 401
+    assert owner.get("/api/runs/not-a-uuid/launch-inputs").status_code == 404
+    assert (
+        owner.get("/api/runs/00000000-0000-0000-0000-000000000000/launch-inputs").status_code == 404
+    )
+    RunSnapshot.objects.filter(run_id=finished_run).update(typed_inputs={"task": "x" * 1_048_576})
+    assert client.get(f"/api/runs/{finished_run}/launch-inputs").status_code == 400
+
+
+def test_previous_run_inputs_database_errors_keep_the_public_envelope(
+    owner: Client, finished_run: str
+) -> None:
+    def unavailable(
+        execute: Callable[..., object], sql: str, params: object, many: bool, context: object
+    ) -> object:
+        if Run._meta.db_table in sql:
+            message = "private third-party failure"
+            raise DatabaseError(message)
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(unavailable):
+        response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert "private third-party" not in response.content.decode()
+
+
+def test_previous_run_inputs_missing_snapshot_keeps_the_public_envelope(
+    owner: Client, finished_run: str
+) -> None:
+    RunSnapshot.objects.filter(run_id=finished_run).delete()
+    response = owner.get(f"/api/runs/{finished_run}/launch-inputs")
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+
+
+def test_previous_inputs_launch_through_fresh_source_capture(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
+    source = (
+        "name: Previous\non: {workflow_dispatch: {inputs: {task: "
+        "{type: string, default: Original}}}}\n"
+        "jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    )
+    served.write_workflow("repeat", source)
+    previous = engine.launch(served, "repeat", inputs={"task": "Owner choice"})
+    engine.drain(previous)
+    old_snapshot = RunSnapshot.objects.get(run_id=previous).workflow_yaml
+    choices = owner.get(f"/api/runs/{previous}/launch-inputs").json()
+    served.write_workflow("repeat", source.replace("Previous", "Current"))
+    served.commit("Commit the current workflow")
+    result = post(owner, "/api/runs", choices)
+    assert result.status_code == 201
+    current = result.json()["run_id"]
+    assert current != previous
+    assert Run.objects.get(pk=current).source_commit == git(served.repository, "rev-parse", "HEAD")
+    assert RunSnapshot.objects.get(run_id=current).typed_inputs == {"task": "Owner choice"}
+    assert RunSnapshot.objects.get(run_id=current).workflow_yaml != old_snapshot
+    assert RunSnapshot.objects.get(run_id=previous).workflow_yaml == old_snapshot
+
+
 def test_opening_a_registered_project_keeps_its_identity(
     owner: Client, project: RelayProject
 ) -> None:
@@ -718,7 +966,7 @@ def test_invalid_workflow_save_fields_are_rejected(
 def test_saving_a_workflow_updates_the_durable_yaml(
     owner: Client, served: RelayProject, workflow_base: str
 ) -> None:
-    updated = "version: 1\nname: Edited\nnodes: {}\n"
+    updated = "name: Edited\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     response = post(
         owner,
         "/api/workflows/workflow/save",
@@ -745,7 +993,7 @@ def test_http_launch_records_the_authenticated_launcher(
     owner: Client, served: RelayProject
 ) -> None:
     served.write_workflow(
-        "check", "version: 1\nname: Check\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "check", "name: Check\njobs: {a: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
     )
     response = post(owner, "/api/runs", {"workflow_key": "check", "inputs": {}})
     assert response.status_code == 201
@@ -879,6 +1127,7 @@ def test_artifacts_download_as_byte_exact_attachments(owner: Client, finished_ru
 def test_artifact_pages_expose_retained_evidence(owner: Client, finished_run: str) -> None:
     rows = owner.get(f"/api/runs/{finished_run}/artifacts").json()["artifacts"]
     assert {row["name"] for row in rows} >= {"commits"}
+    assert all(row["scope_path"].startswith("root.") and row["attempt_number"] == 1 for row in rows)
 
 
 @pytest.mark.parametrize("artifact_id", ["0", "invalid", str(DATABASE_INTEGER_MAX)])
@@ -911,6 +1160,127 @@ def test_all_cleanup_removes_a_terminal_runs_rows_and_worktree(
     assert not Run.objects.filter(pk=finished_run).exists()
 
 
+def test_selected_worktree_cleanup_preserves_other_runs_and_retained_evidence(
+    owner: Client, finished_run: str, served: RelayProject, engine: InlineEngine
+) -> None:
+    other_id = engine.launch(served, "done")
+    engine.drain(other_id)
+    other_before = owner.get(f"/api/runs/{other_id}").json()
+    artifacts_before = owner.get(f"/api/runs/{finished_run}/artifacts").json()
+    checkout = Path(Run.objects.get(pk=finished_run).worktree_path)
+    other_checkout = Path(Run.objects.get(pk=other_id).worktree_path)
+
+    response = post(
+        owner,
+        "/api/data/clean",
+        {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"]["worktrees"] == 1
+    assert not checkout.exists()
+    assert other_checkout.exists()
+    assert owner.get(f"/api/runs/{other_id}").json() == other_before
+    assert owner.get(f"/api/runs/{finished_run}/artifacts").json() == artifacts_before
+    assert Run.objects.get(pk=finished_run).worktree_state == "removed"
+    assert RunEvent.objects.get(run_id=finished_run, type="run.cleanup_succeeded").payload == {
+        "worktree_state": "removed"
+    }
+
+
+def test_selected_all_cleanup_preserves_other_runs_and_shared_logs(
+    owner: Client,
+    finished_run: str,
+    served: RelayProject,
+    engine: InlineEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    other_id = engine.launch(served, "done")
+    engine.drain(other_id)
+    other_before = owner.get(f"/api/runs/{other_id}").json()
+    log = tmp_path / "shared.log"
+    log_bytes = f"{APPLICATION_LOG_OWNERSHIP_LINE}\nRetained diagnostics\n".encode()
+    log.write_bytes(log_bytes)
+    monkeypatch.setenv("RELAY_LOG_PATH", str(log))
+
+    response = post(
+        owner, "/api/data/clean", {"scope": "all", "run_id": finished_run, "confirm": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"]["runs"] == 1
+    assert response.json()["deleted"]["logs"] == 0
+    assert owner.get(f"/api/runs/{finished_run}").status_code == 404
+    assert owner.get(f"/api/runs/{other_id}").json() == other_before
+    assert Path(Run.objects.get(pk=other_id).worktree_path).exists()
+    assert log.read_bytes() == log_bytes
+
+
+@pytest.mark.parametrize(
+    "selector", [None, "", 7, "not-a-run", "00000000-0000-0000-0000-000000000000"]
+)
+def test_invalid_cleanup_selection_never_deletes_the_project(
+    owner: Client, finished_run: str, selector: object
+) -> None:
+    before = owner.get(f"/api/runs/{finished_run}").json()
+
+    response = post(owner, "/api/data/clean", {"scope": "all", "run_id": selector, "confirm": True})
+
+    assert response.status_code in {400, 404}
+    assert owner.get(f"/api/runs/{finished_run}").json() == before
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
+def test_cleanup_rejects_a_run_from_another_project(
+    owner: Client, finished_run: str, engine: InlineEngine, tmp_path: Path
+) -> None:
+    other_project = create_project(tmp_path / "other-project")
+    other_project.write_workflow(
+        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+    )
+    other_id = engine.launch(other_project, "done")
+    engine.drain(other_id)
+
+    response = post(owner, "/api/data/clean", {"scope": "all", "run_id": other_id, "confirm": True})
+
+    assert (response.status_code, response.json()["code"]) == (404, "project_discovery_error")
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+    assert Path(Run.objects.get(pk=other_id).worktree_path).exists()
+
+
+def test_selected_worktree_cleanup_waits_for_evidence_preservation(
+    owner: Client, finished_run: str
+) -> None:
+    Artifact.objects.filter(attempt__node_run__run_id=finished_run).update(
+        preservation_state="pending"
+    )
+
+    response = post(
+        owner,
+        "/api/data/clean",
+        {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+    )
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert Run.objects.get(pk=finished_run).worktree_state == "created"
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
+def test_selected_cleanup_cannot_remove_a_workspace_during_recovery(
+    owner: Client, finished_run: str
+) -> None:
+    with recovery_workspace_lock(finished_run):
+        response = post(
+            owner,
+            "/api/data/clean",
+            {"scope": "worktrees", "run_id": finished_run, "confirm": True},
+        )
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
 @pytest.mark.usefixtures("registry_network")
 def test_agents_report_detection_registry_and_model_observations(
     owner: Client, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -941,3 +1311,788 @@ def test_agents_report_detection_registry_and_model_observations(
     assert rows["codex"]["registry"]["distributions"][0]["manager"] == "npx"
     assert rows["antigravity"]["installed"] is False
     assert body["registry"]["stale"] is False
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+@pytest.mark.parametrize(
+    "mode,ready,code",
+    [
+        ("success", True, None),
+        ("auth", False, "agent_auth_error"),
+        ("no-selector", False, "model_selector_error"),
+    ],
+)
+def test_readiness_preserves_structured_probe_results(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+    mode: str,
+    ready: bool,
+    code: str | None,
+) -> None:
+    del served
+    fake_agents.install("codex", mode=mode)
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()["agents"]}
+    assert rows["codex"]["installed"] is True
+    assert rows["codex"]["ready"] is ready
+    assert rows["codex"]["error_code"] == code
+    assert rows["codex"]["login_command"] == "codex login"
+    assert rows["cursor"]["installed"] is False
+    assert rows["cursor"]["ready"] is False
+    assert not any(message.get("method") == "session/prompt" for message in fake_agents.messages())
+    assert not any(message.get("method") == "authenticate" for message in fake_agents.messages())
+
+
+@pytest.mark.usefixtures("registry_network")
+def test_readiness_with_no_agents_is_an_actionable_inventory(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+) -> None:
+    del served, fake_agents
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    rows = response.json()["agents"]
+    assert len(rows) == 5
+    assert all(not row["ready"] and not row["installed"] for row in rows)
+    assert all(row["install_url"].startswith("https://") for row in rows)
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+def test_readiness_checks_all_five_supported_transports(
+    owner: Client,
+    served: RelayProject,
+    fake_agents: FakeAgents,
+) -> None:
+    del served
+    for agent_id in ("codex", "claude", "copilot", "cursor", "antigravity"):
+        fake_agents.install(agent_id, mode="configuration")
+    response = post(owner, "/api/agents/check", {})
+    assert response.status_code == 200
+    assert all(row["ready"] for row in response.json()["agents"])
+    assert not any(message.get("method") == "session/prompt" for message in fake_agents.messages())
+
+
+def test_readiness_is_owner_only_and_post_only(owner: Client, served: RelayProject) -> None:
+    del served
+    assert Client().post("/api/agents/check", content_type="application/json").status_code == 401
+    assert owner.get("/api/agents/check").status_code == 405
+
+
+def test_readiness_keeps_csrf_in_no_login_mode(served: RelayProject) -> None:
+    from django.test import override_settings
+
+    del served
+    with override_settings(RELAY_LOGIN_REQUIRED=False):
+        response = Client(enforce_csrf_checks=True).post(
+            "/api/agents/check", data="{}", content_type="application/json"
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "csrf_failed"
+
+
+def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
+    owner: Client,
+    served: RelayProject,
+) -> None:
+    from relay.workflows.starters import STARTER_ROOT
+
+    assert Client().get("/api/workflow-templates").status_code == 401
+    gallery = owner.get("/api/workflow-templates")
+    assert gallery.status_code == 200
+    assert len(gallery.json()["templates"]) == 6
+    created = post(
+        owner,
+        "/api/workflows",
+        {
+            "key": "starter",
+            "holder": "template-tab",
+            "template_id": "ask-agent",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["yaml"].encode("utf-8") == (STARTER_ROOT / "ask-agent.yaml").read_bytes()
+    assert (served.relay_root / "prompts" / "ask-agent.md").read_bytes() == (
+        STARTER_ROOT / "ask-agent.md"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("extra", [{"yaml": "nodes: {}"}, {"template_id": "unknown"}])
+def test_invalid_template_requests_write_no_sources(
+    owner: Client,
+    served: RelayProject,
+    extra: dict[str, object],
+) -> None:
+    created = post(
+        owner,
+        "/api/workflows",
+        {
+            "key": "starter",
+            "holder": "template-tab",
+            "template_id": "ask-agent",
+            **extra,
+        },
+    )
+    assert created.status_code in {400, 422}
+    assert not (served.relay_root / "workflows" / "starter.yaml").exists()
+    assert not (served.relay_root / "prompts" / "ask-agent.md").exists()
+
+
+def test_job_history_filters_tail_events_and_keeps_attempts_separate(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
+    served.write_workflow(
+        "jobs", "version: 1\nname: Jobs\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "jobs")
+    first = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert first is not None
+    for index in range(205):
+        engine.store.append_attempt_event(
+            first.attempt_id, "command.stdout", EventSource.COMMAND, {"chunk": f"line {index}\n"}
+        )
+    engine.store.append_attempt_event(
+        first.attempt_id, "command.stderr", EventSource.COMMAND, {"chunk": "Last error\n"}
+    )
+    engine.store.finish_attempt(
+        first.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="First failure", exit_code=3),
+        first.starting_head,
+    )
+    retry = post(
+        owner,
+        f"/api/runs/{run_id}/rerun-node",
+        {"scope_path": "root.check", "idempotency_key": "second-job-attempt"},
+    )
+    assert retry.status_code == 202
+    second = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert second is not None
+    engine.store.append_attempt_event(
+        second.attempt_id, "command.stderr", EventSource.COMMAND, {"chunk": "Second error\n"}
+    )
+    engine.store.finish_attempt(
+        second.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="Second failure", exit_code=4),
+        second.starting_head,
+    )
+    path = f"/api/runs/{run_id}"
+    first_page = owner.get(f"{path}/job?job=root.check&limit=1").json()
+    assert first_page["job"]["attempts"][0]["number"] == 1
+    assert first_page["job"]["latest_attempt"]["number"] == 2
+    assert first_page["job"]["latest_attempt"]["error_message"] == "Second failure"
+    assert first_page["job"]["latest_attempt"]["exit_code"] == 4
+    assert "worker_id" not in first_page["job"]["latest_attempt"]
+    next_page = owner.get(f"{path}/job?job=root.check&limit=1&since={first_page['next']}").json()
+    assert next_page["job"]["attempts"][0]["number"] == 2
+    assert next_page["next"] is None
+    tail = owner.get(f"{path}/events?job=root.check&attempt=1&latest=true&limit=3").json()
+    assert any(event["payload"].get("chunk") == "Last error\n" for event in tail["events"])
+    ids = [event["id"] for event in tail["events"]]
+    assert ids == sorted(ids)
+    older = owner.get(
+        f"{path}/events?job=root.check&attempt=1&latest=true&limit=3&before={tail['next']}"
+    ).json()
+    assert all(event["id"] < ids[0] for event in older["events"])
+    assert all(event["payload"]["attempt_number"] == 1 for event in older["events"])
+    current = owner.get(f"{path}/events?job=root.check&attempt=2").json()
+    assert all(event["payload"].get("attempt_number", 2) == 2 for event in current["events"])
+    assert any(event["payload"].get("chunk") == "Second error\n" for event in current["events"])
+    assert "Last error" not in json.dumps(current)
+    summary = owner.get(path).json()["run"]["nodes"][0]
+    assert summary["started_at"] and summary["ended_at"]
+
+
+def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    served.write(".relay/prompts/owner.md", "Frozen owner instructions\n")
+    served.write_workflow(
+        "instructions",
+        "version: 1\nname: Instructions\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work: {type: agent, prompts: [{local: prompts/owner.md}]}\n",
+    )
+    run_id = engine.launch(served, "instructions")
+    served.write(".relay/prompts/owner.md", "Edited after launch\n")
+    response = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    assert response["instructions"] == [
+        {
+            "reference": {"local": "prompts/owner.md"},
+            "text": "Frozen owner instructions\n",
+            "truncated": False,
+        }
+    ]
+    assert response["latest_attempt"] is None
+    assert response["command"] is None
+    assert response["outputs"] == {}
+
+
+def test_actions_job_logs_expose_step_activity_names_and_frozen_agent_instructions(
+    owner: Client,
+    served: RelayProject,
+    engine: InlineEngine,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Provider discovery remains restricted to fake_agents.directory; scripts
+    # also need the installed operating-system shell.
+    fake_agents.allow_commands("bash", "sh", "pwsh")
+    fake_agents.install("codex", mode="configuration")
+    served.write(".relay/prompts/owner.md", "Captured instructions\n")
+    served.write_workflow(
+        "step-logs",
+        """on: workflow_dispatch
+jobs:
+  check:
+    name: Named job
+    runs-on: self-hosted
+    steps:
+      - id: script
+        name: Named script
+        run: echo Visible output
+      - id: command
+        uses: relay/command@v1
+        with: {argv: '["git", "status", "--short"]'}
+      - id: agent
+        name: Named agent
+        uses: relay/agent@v1
+        with:
+          agent: codex
+          model: m1
+          prompt-files: prompts/owner.md
+          prompt: Captured inline prompt
+      - id: review
+        name: Named review
+        uses: relay/human-wait@v1
+        with: {prompt: Review the result}
+""",
+    )
+    run_id = engine.launch(served, "step-logs")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "paused_wait", list(
+        RunEvent.objects.filter(run_id=run_id, type="attempt.ended").values_list(
+            "payload", flat=True
+        )
+    )
+    served.write(".relay/prompts/owner.md", "Changed after launch\n")
+    for step, activity_type, display_name in (
+        ("script", "command", "Named script"),
+        ("command", "command", "command"),
+        ("agent", "agent", "Named agent"),
+        ("review", "human_wait", "Named review"),
+    ):
+        response = owner.get(f"/api/runs/{run_id}/job?job=root.check.{step}")
+        assert response.status_code == 200, response.json()
+        job = response.json()["job"]
+        assert job["node_type"] == "actions_step"
+        assert job["activity_type"] == activity_type
+        assert job["display_name"] == display_name
+    agent = owner.get(f"/api/runs/{run_id}/job?job=root.check.agent").json()["job"]
+    assert agent["prompt"] == "Captured inline prompt"
+    assert agent["instructions"] == [
+        {
+            "reference": {"local": "prompts/owner.md"},
+            "text": "Captured instructions\n",
+            "truncated": False,
+        }
+    ]
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.check").json()["job"]
+    assert job["activity_type"] == "actions_job"
+    assert job["display_name"] == "Named job"
+
+
+def test_failed_job_settings_match_the_existing_run_record(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    served.write_workflow(
+        "failed-settings",
+        "version: 1\nname: Failed settings\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work:\n    type: agent\n    outputs:\n"
+        "      verdict: {json_path: {artifact: missing.json, path: verdict}}\n",
+    )
+    run_id = engine.launch(served, "failed-settings")
+    engine.drain(run_id)
+    assert run_status(run_id) == "failed"
+    detail = owner.get(f"/api/runs/{run_id}").json()["run"]
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    assert job["working_folder"] == Run.objects.get(pk=run_id).worktree_path
+    assert detail["working_folder"] == job["working_folder"]
+    assert job["retry_settings"] == detail["nodes"][0]["retry_settings"]
+    assert job["retry_settings"]["agent_id"] == "codex"
+    assert job["retry_settings"]["model_value"] == "m1"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("", 400),
+        ("?job=../outside", 422),
+        ("?job=root.missing", 404),
+        ("?job=root.check&limit=0", 400),
+        ("?job=root.check&since=-1", 400),
+    ],
+)
+def test_job_reads_reject_missing_or_invalid_targets(
+    owner: Client, served: RelayProject, engine: InlineEngine, query: str, expected: int
+) -> None:
+    served.write_workflow(
+        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "job")
+    assert owner.get(f"/api/runs/{run_id}/job{query}").status_code == expected
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "job?job=root.check",
+        "events?attempt=0",
+        "events?attempt=-1",
+        "events?before=bad",
+        "changes?attempt=0",
+        "changes?attempt=bad",
+    ],
+)
+def test_job_routes_preserve_auth_and_validate_parameters(
+    owner: Client, served: RelayProject, engine: InlineEngine, path: str
+) -> None:
+    served.write_workflow(
+        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    run_id = engine.launch(served, "job")
+    url = f"/api/runs/{run_id}/{path}"
+    assert Client().get(url).status_code == 401
+    assert owner.post(url).status_code == 405
+    if not path.startswith("job?"):
+        assert owner.get(url).status_code == 400
+
+
+def test_job_changes_are_limited_to_the_selected_attempt(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "changes",
+        "version: 1\nname: Changes\nnodes:\n"
+        "  work: {type: command, writes: true, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "changes")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    from relay.vcs.git import run_git
+
+    head = run_git(served.repository, ["rev-parse", "HEAD"]).stdout.strip()
+    run_git(served.repository, ["commit", "--allow-empty", "-m", "Job's own commit"])
+    ending = run_git(served.repository, ["rev-parse", "HEAD"]).stdout.strip()
+    engine.store.finish_attempt(attempt.attempt_id, ExecutionOutcome(OutcomeKind.SUCCEEDED), ending)
+    response = owner.get(f"/api/runs/{run_id}/changes?job=root.work&attempt=1").json()
+    assert response["source_commit"] == head
+    assert response["recorded_head"] == ending
+    assert response["commits"] == [{"sha": ending, "title": "Job's own commit"}]
+    missing = owner.get(f"/api/runs/{run_id}/changes?job=root.work&attempt=2").json()
+    assert missing["commits"] == []
+    assert missing["text"] == ""
+
+
+def test_job_reads_omit_redacted_output_and_failure_text(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "private",
+        "version: 1\nname: Private\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "private")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    engine.store.append_attempt_event(
+        attempt.attempt_id, "agent.message", EventSource.AGENT, {"text": "Public failure"}
+    )
+    engine.store.append_attempt_event(
+        attempt.attempt_id,
+        "agent.message",
+        EventSource.AGENT,
+        {"text": "Private provider content"},
+        sensitivity=EventSensitivity.REDACTED,
+    )
+    engine.store.finish_attempt(
+        attempt.attempt_id,
+        ExecutionOutcome(OutcomeKind.FAILED, error_message="Private failure"),
+        attempt.starting_head,
+    )
+    RunEvent.objects.filter(attempt_id=attempt.attempt_id, type="attempt.ended").update(
+        sensitivity=EventSensitivity.REDACTED.value
+    )
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.check").json()["job"]
+    assert job["latest_attempt"]["error_message"] is None
+    assert job["latest_attempt"]["provider_message"] == "Public failure"
+    for query in ("job=root.check", "attempt=1", "job=root.check&attempt=1&latest=true"):
+        response = owner.get(f"/api/runs/{run_id}/events?{query}").json()
+        assert "Private provider content" not in json.dumps(response)
+        assert "Private failure" not in json.dumps(response)
+
+
+def test_job_instruction_preview_shares_a_utf8_byte_budget(
+    owner: Client, served: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="configuration")
+    first = "界" * 100000
+    served.write(".relay/prompts/large.md", first)
+    served.write(".relay/prompts/last.md", "Last instruction")
+    served.write_workflow(
+        "large",
+        "version: 1\nname: Large\nmodel: m1\nagents: [codex]\nnodes:\n"
+        "  work: {type: agent, prompts: [{local: prompts/large.md}, {local: prompts/last.md}]}\n",
+    )
+    run_id = engine.launch(served, "large")
+    instructions = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]["instructions"]
+    assert instructions[0]["text"] == first[: 262144 // 3]
+    assert instructions[0]["truncated"] is True
+    assert instructions[1]["text"] == "L"
+    assert instructions[1]["truncated"] is True
+    assert sum(len(row["text"].encode("utf-8")) for row in instructions) == 262144
+
+
+def test_job_database_failure_keeps_the_public_error_envelope(
+    owner: Client, served: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served.write_workflow(
+        "failure",
+        "version: 1\nname: Failure\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "failure")
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        message = "Private database trace"
+        raise DatabaseError(message)
+
+    monkeypatch.setattr(NodeRun.objects, "filter", unavailable)
+    response = owner.get(f"/api/runs/{run_id}/job?job=root.check")
+    assert response.status_code == 503
+    assert response.json()["code"] == "persistence_error"
+    assert "Private database trace" not in response.content.decode()
+
+
+@pytest.mark.parametrize("kind", ["permission", "elicitation"])
+def test_attention_counts_only_requests_on_waiting_attempts(
+    owner: Client, served: RelayProject, engine: InlineEngine, kind: str
+) -> None:
+    served.write_workflow(
+        "attention",
+        "version: 1\nname: Attention\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "attention")
+    attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
+    assert attempt is not None
+    before = owner.get("/api/attention").json()
+    assert before["waiting_count"] == 0
+    interaction_id = engine.store.request_agent_interaction(
+        attempt.attempt_id, kind, "Answer this request.", ({"id": "allow"},)
+    )
+    attention = owner.get("/api/attention").json()
+    assert attention["waiting_count"] == 1
+    assert attention["waiting_runs"] == [run_id]
+    assert attention["finished"] == []
+    assert "Answer this request" not in json.dumps(attention)
+    detail = owner.get(f"/api/runs/{run_id}?collection=interactions&pending=true").json()["run"]
+    assert detail["waiting_count"] == 1
+    assert detail["interactions"][0]["respondable"] is True
+    assert detail["interactions"][0]["id"] == interaction_id
+    assert owner.get("/api/runs").json()["runs"][0]["waiting_count"] == 1
+    engine.store.finish_attempt(
+        attempt.attempt_id, ExecutionOutcome(OutcomeKind.FAILED), attempt.starting_head
+    )
+    assert owner.get("/api/attention").json()["waiting_count"] == 0
+    finished = owner.get(f"/api/attention?since={before['event_cursor']}").json()
+    assert finished["finished"][0]["status"] == "failed"
+    assert finished["finished"][0]["run_id"] == run_id
+
+
+def test_attention_reads_nested_human_waits_and_excludes_dispatch_pauses(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "nested-wait",
+        "version: 1\nname: Nested wait\nnodes:\n"
+        "  approvals:\n    type: loop\n    max_iterations: 1\n    until: '${{ loop.index >= 1 }}'\n"
+        "    exhausted: fallback\n    body:\n"
+        "      approval: {type: human_wait, prompt: Read the report.}\n"
+        "  fallback: {type: command, needs: [approvals], run: [git, status]}\n",
+    )
+    run_id = engine.launch(served, "nested-wait")
+    engine.drain(run_id)
+    response = post(
+        owner, f"/api/runs/{run_id}/pause", {"paused": True, "idempotency_key": "pause"}
+    )
+    assert response.status_code == 202
+    assert owner.get("/api/attention").json()["waiting_runs"] == [run_id]
+    detail = owner.get(f"/api/runs/{run_id}?collection=interactions&pending=true").json()["run"]
+    assert detail["interactions"][0]["scope_path"] == "root.approvals#1.approval"
+    assert detail["interactions"][0]["respondable"] is True
+    assert detail["dispatch_paused"] is True
+    response = post(owner, f"/api/runs/{run_id}/cancel", {"idempotency_key": "cancel-wait"})
+    assert response.status_code == 202
+    engine.store.resolve_human_wait_controls()
+    engine.drain(run_id)
+    assert owner.get("/api/attention").json()["waiting_count"] == 0
+
+
+def test_attention_completion_cursor_is_bounded_and_omits_payloads(
+    owner: Client, finished_run: str
+) -> None:
+    last = owner.get("/api/attention").json()
+    assert last["finished"] == []
+    RunEvent.objects.bulk_create(
+        [
+            RunEvent(
+                run_id=finished_run,
+                type="run.succeeded",
+                source=EventSource.SYSTEM.value,
+                payload={"private": "Do not return event payloads."},
+            )
+            for _ in range(201)
+        ]
+    )
+    page = owner.get(f"/api/attention?since={last['event_cursor']}").json()
+    assert len(page["finished"]) == 200
+    assert page["more"] is True
+    assert "Do not return" not in json.dumps(page)
+    next_page = owner.get(f"/api/attention?since={page['event_cursor']}").json()
+    assert len(next_page["finished"]) == 1
+    assert next_page["more"] is False
+    assert next_page["finished"][0]["id"] > page["finished"][-1]["id"]
+
+
+def test_attention_requires_owner_access_and_valid_cursors(owner: Client) -> None:
+    assert Client().get("/api/attention").status_code == 401
+    assert owner.post("/api/attention").status_code == 405
+    for cursor in ("bad", "-1", str(DATABASE_INTEGER_MAX + 1)):
+        assert owner.get(f"/api/attention?since={cursor}").status_code == 400
+
+
+def test_attention_counts_runs_independently_of_their_request_count(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "two-approvals",
+        "version: 1\nname: Two approvals\nnodes:\n"
+        "  first: {type: human_wait, prompt: First approval}\n"
+        "  second: {type: human_wait, prompt: Second approval}\n",
+    )
+    run_id = engine.launch(served, "two-approvals")
+    engine.drain(run_id)
+    assert owner.get(f"/api/runs/{run_id}").json()["run"]["waiting_count"] == 2
+    assert owner.get("/api/attention").json()["waiting_count"] == 1
+
+
+def test_attention_database_errors_keep_the_public_envelope(
+    owner: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        message = "Private database trace"
+        raise DatabaseError(message)
+
+    monkeypatch.setattr(HumanInteraction.objects, "filter", unavailable)
+    response = owner.get("/api/attention")
+    assert response.status_code == 503
+    assert response.json()["code"] == "persistence_error"
+    assert "Private database trace" not in response.content.decode()
+
+
+def test_history_filters_are_additive_and_titles_stay_captured(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    workflow = (
+        "version: 1\nname: Build and review\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    )
+    served.write_workflow("identity", workflow)
+    run_id = engine.launch(served, "identity")
+    engine.drain(run_id)
+    served.write_workflow("identity", workflow.replace("Build and review", "New workflow name"))
+    for query in (
+        "workflow=identity",
+        "workflow=identity.yaml",
+        "branch=main",
+        "query=review",
+        "query=Build",
+    ):
+        response = owner.get(f"/api/runs?project={served.project_id}&{query}")
+        assert response.status_code == 200
+        rows = response.json()["runs"]
+        assert [row["id"] for row in rows] == [run_id]
+        assert rows[0]["title"] == "Build and review"
+        assert rows[0]["number"] == 1
+        assert rows[0]["source_branch"] == "main"
+        assert rows[0]["created_at"]
+    assert owner.get("/api/runs?branch=missing").json()["runs"] == []
+    assert owner.get("/api/runs?query=missing").json()["runs"] == []
+    assert owner.get("/api/runs?workflow=missing").json()["runs"] == []
+    assert owner.get("/api/runs?query=" + "x" * 1025).status_code == 400
+
+
+def test_captured_workflow_is_immutable_and_bounded(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    original = "version: 1\nname: Captured\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    served.write_workflow("captured", original)
+    run_id = engine.launch(served, "captured")
+    snapshot = RunSnapshot.objects.get(run_id=run_id)
+    captured = snapshot.workflow_yaml
+    served.write_workflow("captured", original.replace("Captured", "Changed"))
+    response = owner.get(f"/api/runs/{run_id}/workflow")
+    assert response.status_code == 200
+    assert response.json() == {
+        "workflow_key": "captured",
+        "yaml": captured,
+        "sha256": sha256(captured.encode()).hexdigest(),
+        "truncated": False,
+    }
+    snapshot.workflow_yaml = "é" * (REVIEW_PREVIEW_MAX_BYTES + 1)
+    snapshot.save(update_fields=["workflow_yaml"])
+    bounded = owner.get(f"/api/runs/{run_id}/workflow").json()
+    assert bounded["truncated"] is True
+    assert len(bounded["yaml"].encode()) <= REVIEW_PREVIEW_MAX_BYTES
+    assert bounded["sha256"] == sha256(snapshot.workflow_yaml.encode()).hexdigest()
+    assert owner.get("/api/runs/not-a-uuid/workflow").status_code == 404
+    assert Client().get(f"/api/runs/{run_id}/workflow").status_code == 401
+
+
+@pytest.mark.parametrize("login_required", [True, False])
+def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
+    owner: Client, served: RelayProject, login_required: bool
+) -> None:
+    del served
+    strict = Client(enforce_csrf_checks=True)
+    if login_required:
+        strict.force_login(User.objects.get(username="owner"))
+    with override_settings(RELAY_LOGIN_REQUIRED=login_required):
+        strict.get("/api/auth")
+        body = {"yaml": "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"}
+        assert (
+            strict.post(
+                "/api/workflow-language/validate",
+                data=json.dumps(body),
+                content_type="application/json",
+            ).status_code
+            == 403
+        )
+        token = strict.cookies["relay_csrftoken"].value
+        response = strict.post(
+            "/api/workflow-language/validate",
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        assert response.status_code == 200
+        assert response.json()["valid"]
+        anonymous = Client()
+        assert anonymous.get("/api/workflow-bindings").status_code == (
+            401 if login_required else 200
+        )
+
+
+def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
+    owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    def unexpected_process(*args: object, **kwargs: object) -> None:
+        message = "Pure validation spawned a process."
+        raise AssertionError(message)
+
+    owner.get("/api/projects/current")
+    monkeypatch.setattr(subprocess, "Popen", unexpected_process)
+    good = "jobs: {main: {runs-on: self-hosted, steps: [{run: echo safe}]}}"
+    assert post(owner, "/api/workflow-language/validate", {"yaml": good}).json()["valid"]
+    legacy = "version: 1\nname: Old\nnodes: {}\n"
+    served.write(".relay/workflows/old.yaml", legacy)
+    response = post(owner, "/api/workflow-language/validate", {"yaml": legacy})
+    assert response.status_code == 200 and not response.json()["valid"]
+    assert post(owner, "/api/runs", {"workflow_key": "old", "inputs": {}}).status_code == 422
+    assert not Run.objects.exists()
+
+
+def test_secret_api_is_write_only_and_revision_refs_are_frozen(
+    owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from relay.web.actions_bindings import freeze_bindings
+    from relay.web.models import WorkflowBinding
+
+    calls: list[tuple[str, str, str | None]] = []
+    monkeypatch.setattr(
+        "relay.web.actions_bindings.credential",
+        lambda operation, reference, value=None: calls.append((operation, reference, value)),
+    )
+    body = {
+        "scope": "project",
+        "name": "KEY",
+        "kind": "secret",
+        "source": "credential-store",
+        "value": "private-native-value",
+    }
+    response = post(owner, "/api/workflow-bindings", body)
+    assert response.status_code == 200
+    assert "private-native-value" not in response.content.decode()
+    frozen = freeze_bindings(served.project_id)
+    first = WorkflowBinding.objects.get(kind="secret").reference
+    assert calls[0] == ("set", first, "private-native-value")
+    body["value"] = "replacement-private-value"
+    assert post(owner, "/api/workflow-bindings", body).status_code == 200
+    assert WorkflowBinding.objects.get(kind="secret").reference != first
+    assert frozen["secret_refs"]["KEY"]["reference"] == first
+    assert "private" not in json.dumps(frozen)
+    listing = owner.get("/api/workflow-bindings").json()
+    assert listing["bindings"][0]["value"] == ""
+    assert (
+        post(
+            owner,
+            "/api/workflow-bindings",
+            {**body, "source": "environment", "reference": "KEY_ENV"},
+        ).status_code
+        == 400
+    )
+
+
+def test_named_artifact_download_verifies_bytes_and_project_access(
+    owner: Client, served: RelayProject, tmp_path: Path
+) -> None:
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from relay.execution.nodes import node_executors
+    from relay.web.models import ActionsArtifact
+
+    served.write_workflow(
+        "products",
+        """jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+      - shell: python
+        run: from pathlib import Path; Path('evidence.txt').write_bytes(b'retained\\n')
+      - uses: relay/upload-artifact@v1
+        with: {name: evidence, path: evidence.txt}
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(served, "products")
+    engine.drain(run_id)
+    artifact = ActionsArtifact.objects.get(run_id=run_id)
+    response = owner.get(f"/api/workflow-artifacts/{artifact.pk}/download")
+    assert response.status_code == 200
+    with ZipFile(BytesIO(b"".join(response.streaming_content))) as archive:
+        assert archive.read("evidence.txt") == b"retained\n"
+    response.close()
+    other = create_project(tmp_path / "other-product-project")
+    assert (
+        owner.get(
+            f"/api/workflow-artifacts/{artifact.pk}/download?project={other.project_id}"
+        ).status_code
+        == 400
+    )
+    (Path(artifact.directory) / "evidence.txt").write_text("tampered")
+    assert owner.get(f"/api/workflow-artifacts/{artifact.pk}/download").status_code == 500

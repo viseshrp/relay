@@ -48,6 +48,15 @@ def release_admission(run_id: str) -> None:
         notify_dispatch(token)
 
 
+def release_serial_admission() -> None:
+    """Wake claims deferred by the installation-wide Actions job lease."""
+    with _ADMISSION_GUARD:
+        tokens = {token for pending in _DEFERRED.values() for token in pending}
+        _DEFERRED.clear()
+    for token in tokens:
+        notify_dispatch(token)
+
+
 class ClaimDisposition(str, Enum):
     """Why a dequeued Huey token did or did not create an attempt."""
 

@@ -10,6 +10,7 @@ export interface ActivityMessage {
   kind: string;
   text: string;
   timestamp: string;
+  tool?: { key: string; title: string; status: string; input: string; output: string };
 }
 
 function record(value: JsonValue | undefined): Record<string, JsonValue> | null {
@@ -62,6 +63,33 @@ function readableOutput(event: RunEvent, toolNames: Map<string, string>, owner: 
   return null;
 }
 
+function toolDetails(event: RunEvent, text: string, owner: string): ActivityMessage["tool"] {
+  if (event.type !== "agent.tool_call" && event.type !== "agent.tool_result") return undefined;
+  let summary: Record<string, JsonValue> | null = null;
+  if (typeof event.payload.summary === "string") {
+    try { summary = record(JSON.parse(event.payload.summary)); } catch { /* Incomplete parts stay in Details. */ }
+  }
+  const native = record(summary?.tool_info);
+  const input = record(native?.parameters ?? summary?.raw_input);
+  const command = input?.command ?? input?.CommandLine;
+  const location = Array.isArray(summary?.locations) ? record(summary.locations[0])?.path : undefined;
+  const path = input?.path ?? input?.file_path ?? location;
+  const kind = typeof summary?.kind === "string" ? summary.kind : "";
+  const original = text.split("\n", 1)[0].split(" · ", 1)[0];
+  const title = typeof command === "string" ? `Ran ${command.split("\n", 1)[0].slice(0, 120)}${command.split("\n", 1)[0].length > 120 ? "…" : ""}`
+    : typeof path === "string" ? `${kind === "edit" || /write|edit/i.test(original) ? "Changed" : "Read"} ${path}` : original;
+  const lines = text.split("\n").slice(1);
+  const inputText = typeof command === "string" ? command : typeof path === "string" ? path : "";
+  if (inputText && lines[0] === inputText) lines.shift();
+  return {
+    key: `${owner}:${event.payload.turn ?? ""}:${event.payload.tool_call_id ?? `event-${event.id}`}`,
+    title,
+    status: String(summary?.status ?? summary?.state ?? (event.type === "agent.tool_result" ? "completed" : "in_progress")),
+    input: inputText,
+    output: lines.join("\n"),
+  };
+}
+
 export function activityMessages(events: RunEvent[]): ActivityMessage[] {
   const agents = new Map<string, string>();
   const toolNames = new Map<string, string>();
@@ -107,10 +135,43 @@ export function activityMessages(events: RunEvent[]): ActivityMessage[] {
         id: event.id, lastId, scope, attempt,
         agent: typeof event.payload.agent_id === "string" ? event.payload.agent_id : agents.get(owner) ?? "",
         kind: event.type, text: "", timestamp: event.ts,
+        tool: toolDetails(event, text, owner),
       }, chunks: [text] });
     }
     previousKey = join ? key : null;
   }
   // "Hello " + "world\n" becomes "Hello world\n". Join once, retaining exact stream bytes.
   return rows.map(({ message, chunks }) => ({ ...message, text: chunks.join("") }));
+}
+
+export function relativeActivityText(text: string, workingFolder?: string): string {
+  if (!workingFolder) return text;
+  const root = workingFolder.replace(/[\\/]+$/, "");
+  if (!root) return text;
+  const pattern = root.split(/[\\/]/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
+  // Only the recorded run root and its reader prefix become relative. Other
+  // absolute paths and command escapes retain their original meaning.
+  return text.replace(new RegExp(`${pattern}[\\\\/](?:r-\\d+[\\\\/])?`, /^[A-Za-z]:/.test(root) ? "gi" : "g"), "");
+}
+
+export function activityRows(events: RunEvent[]): ActivityMessage[] {
+  const rows: ActivityMessage[] = [];
+  const tools = new Map<string, number>();
+  for (const message of activityMessages(events)) {
+    const index = message.tool ? tools.get(message.tool.key) : undefined;
+    const previous = index === undefined ? undefined : rows[index];
+    if (previous?.tool && message.tool) {
+      const title = message.tool.title === "Tool" || !message.tool.input && previous.tool.input ? previous.tool.title : message.tool.title;
+      const incoming = message.tool.output;
+      const output = !incoming || previous.tool.output.includes(incoming) ? previous.tool.output
+        : incoming.startsWith(previous.tool.output) ? incoming : `${previous.tool.output}\n${incoming}`;
+      const tool = { ...message.tool, title, input: message.tool.input || previous.tool.input,
+        output };
+      rows[index ?? 0] = { ...previous, lastId: message.lastId, text: `${title}\n${tool.input}\n${tool.output}`, tool };
+    } else {
+      if (message.tool) tools.set(message.tool.key, rows.length);
+      rows.push(message);
+    }
+  }
+  return rows;
 }

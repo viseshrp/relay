@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -19,18 +19,22 @@ from relay.errors import (
     WorkflowValidationError,
 )
 from relay.paths import safe_resolve
-from relay.projects.discovery import git_root
+from relay.projects.service import project_launch_source
 from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
+from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
-from relay.workflows.loader import load_workflow, resolve_workflow_path
+from relay.workflows.defaults import WorkflowDefaults, apply_workflow_defaults
+from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
 from relay.workflows.scope import parse_scope_path
 from relay.workflows.snapshot import SnapshotBundle, build_snapshot
-from relay.workflows.validation import ValidatedWorkflow, resolve_inputs, validate_loaded_workflow
+from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
+from .preflight import launch_source_files, load_launch_workflow
 from .scheduler import SchedulingStore, dispatch_ready_nodes
+from .state import CleanupPolicy
 
 _HASH_CHUNK_BYTES = 1024 * 1024
 LOGGER = logging.getLogger(__name__)
@@ -47,6 +51,9 @@ class LaunchRequest:
     entry_point: str | None
     owner_agents: Sequence[str]
     launcher: str
+    source_branch: str | None = None
+    defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
+    event_context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,18 +204,85 @@ def launch_workflow(
     enqueue: Callable[[str], object],
 ) -> LaunchResult:
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
-    workflows_root = relay_root / "workflows"
-    workflow_path = resolve_workflow_path(workflows_root, request.workflow_key)
-    root = load_workflow(workflow_path)
-    workflow = validate_loaded_workflow(root, relay_root)
-    typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
+    workflow = load_launch_workflow(relay_root, request.workflow_key)
+    actions_context = {}
+    if workflow.root.definition.actions:
+        from relay.web.actions_bindings import freeze_bindings
+        from relay.workflows.actions.compiler import bind_routes, validate_commands
+        from relay.workflows.actions.language import resolve_inputs as actions_inputs
+        from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
+
+        actions_context = freeze_bindings(project_id)
+        from relay.workflows.schema import ActionsJobNode
+
+        node = next(iter(workflow.root.definition.nodes.values()))
+        if isinstance(node, ActionsJobNode):
+            validate_commands(
+                workflow.root.definition.actions, node.sources, request.defaults.commands
+            )
+        typed_inputs = actions_inputs(
+            workflow.root.definition.actions,
+            request.inputs,
+            environments=tuple(actions_context["environments"]),
+        )
+        source = project_launch_source(relay_root.parent)
+        actions_context["github"] = {
+            "workflow": workflow.root.definition.name,
+            "actor": request.launcher,
+            "repository": relay_root.parent.name,
+            "event_name": "workflow_dispatch",
+            "ref": f"refs/heads/{source.branch}" if source.branch else "",
+            "ref_name": source.branch or "",
+            "sha": source.commit,
+            **request.event_context,
+        }
+        if request.event_context.get("event_name") == "push" and (
+            request.event_context.get("sha") != source.commit
+            or (
+                not str(request.event_context.get("ref", "")).startswith("refs/tags/")
+                and request.event_context.get("ref") != f"refs/heads/{source.branch}"
+            )
+        ):
+            message = "The observed Git ref is not the current owner checkout source."
+            raise WorkflowValidationError(message)
+        from relay.workflows.actions import expressions
+
+        actions_context["run_name"] = expressions.string(
+            expressions.interpolate(
+                workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
+                {
+                    "github": actions_context["github"],
+                    "inputs": typed_inputs,
+                    "vars": actions_context["vars"],
+                },
+            )
+        )
+        workflow = bind_routes(
+            workflow,
+            {
+                "inputs": typed_inputs,
+                "vars": actions_context["vars"],
+                "github": actions_context["github"],
+            },
+        )
+        workflow = replace(
+            workflow,
+            prompts=tuple(
+                resolve_prompt(reference, relay_root)
+                for agent in iter_agent_nodes(workflow.root.definition.nodes)
+                for reference in agent.prompts
+            ),
+        )
+    else:
+        typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
+    workflow = apply_workflow_defaults(
+        workflow, request.defaults, tuple(request.owner_agents), request.model
+    )
     repository = relay_root.parent.resolve()
-    captured = [workflow.root.path, *(item.path for item in workflow.subworkflows.values())]
-    captured.extend(Path(prompt.path) for prompt in workflow.prompts if prompt.source == "local")
-    # /repo/.relay/prompts/check.md becomes .relay/prompts/check.md in Git's root-relative status.
-    source_root = git_root(repository)
-    snapshot_files = frozenset(path.relative_to(source_root).as_posix() for path in captured)
+    snapshot_files = launch_source_files(workflow, repository)
     require_launch_clean(repository, snapshot_files)
+    if request.cleanup_policy == CleanupPolicy.MERGE_ON_SUCCESS.value:
+        require_merge_target(repository, project_launch_source(repository).branch)
     entry_point = _validate_entry_point(
         workflow,
         request.entry_point,
@@ -242,11 +316,23 @@ def launch_workflow(
             registry=registry,
             observation_store=store,
         )
-    snapshot = build_snapshot(workflow, typed_inputs=typed_inputs, routes=routes)
+    snapshot = build_snapshot(
+        workflow,
+        typed_inputs=typed_inputs,
+        routes=routes,
+        launch_defaults={
+            "workflow_defaults": request.defaults.model_dump(mode="json"),
+            "recovery": workflow.root.definition.recovery.model_dump(mode="json"),
+            **({"actions_context": actions_context} if actions_context else {}),
+        },
+    )
     source_commit = current_head(repository)
+    source = project_launch_source(repository)
+    if request.cleanup_policy == CleanupPolicy.MERGE_ON_SUCCESS.value:
+        require_merge_target(repository, source.branch)
     run_id = store.create_pending_run(
         project_id,
-        normalized_request,
+        replace(normalized_request, source_branch=source.branch),
         source_commit,
         snapshot,
         workflow.root.definition.nodes,

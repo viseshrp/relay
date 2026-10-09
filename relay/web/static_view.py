@@ -31,7 +31,20 @@ _STATIC_ASSETS: dict[str, Path] = _asset_catalog()
 
 
 def _asset(path: str) -> Path | None:
-    return _STATIC_ASSETS.get(path)
+    candidate = _STATIC_ASSETS.get(path)
+    if candidate is None or not candidate.is_file():
+        # Editable checkouts can replace their hashed assets while the server runs.
+        _STATIC_ASSETS.clear()
+        _STATIC_ASSETS.update(_asset_catalog())
+        candidate = _STATIC_ASSETS.get(path)
+    if candidate is None:
+        return None
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(STATIC_ROOT.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
 
 
 @require_http_methods(("GET", "HEAD"))
@@ -44,7 +57,11 @@ def serve_spa(request: HttpRequest, asset_path: str = "") -> FileResponse:
     path = requested or _asset("index.html")
     if path is None:
         raise Http404
-    response = FileResponse(path.open("rb"), content_type=media_type_for(path))
+    try:
+        asset = path.open("rb")
+    except OSError:
+        raise Http404 from None
+    response = FileResponse(asset, content_type=media_type_for(path))
     response["Cache-Control"] = (
         "public, max-age=31536000, immutable"
         if requested is not None and asset_path.startswith("assets/")

@@ -3,17 +3,33 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from relay.constants import MAX_AUTOMATIC_RETRIES, MAX_LOOP_ITERATIONS
+from relay.constants import (
+    DEFAULT_FIX_INSTRUCTION,
+    DEFAULT_REPAIR_ROUNDS,
+    DEFAULT_VERIFY_INSTRUCTION,
+    MAX_AUTOMATIC_RETRIES,
+    MAX_LOOP_ITERATIONS,
+    REPAIR_NODE_PREFIX,
+)
 
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DURATION_PATTERN = re.compile(r"^[0-9]+(?:ms|s|m|h)$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 Scalar = str | int | float | bool | None
+
+
+def validate_environment(value: dict[str, str]) -> dict[str, str]:
+    """Reject values the process environment cannot represent on supported systems."""
+    for name, content in value.items():
+        if not name or "=" in name or "\x00" in name or "\x00" in content:
+            message = "Use nonempty variable names without '='; NUL characters are not allowed"
+            raise ValueError(message)
+    return value
 
 
 class StrictModel(BaseModel):
@@ -227,6 +243,12 @@ class AgentNode(NodeBase):
     auto_retry: bool = True
 
 
+class SharedCommandReference(StrictModel):
+    """Select a named owner command whose arguments are frozen at launch."""
+
+    command: str = Field(pattern=NODE_ID_PATTERN.pattern)
+
+
 class CommandNode(NodeBase):
     """A shell-free argument-vector process."""
 
@@ -234,8 +256,11 @@ class CommandNode(NodeBase):
     writes: bool = False
     allow_no_commit: bool = False
     outputs: dict[str, OutputSelector] = Field(default_factory=dict)
-    run: list[str] = Field(min_length=1)
+    run: Annotated[list[str], Field(min_length=1)] | SharedCommandReference
     env: dict[str, str] = Field(default_factory=dict)
+    inherit_env: bool = True
+
+    validate_env = field_validator("env")(validate_environment)
 
 
 class HumanWaitNode(NodeBase):
@@ -256,6 +281,16 @@ class ConditionNode(NodeBase):
     branches: dict[str, str] = Field(min_length=1)
 
 
+class RepairAcceptance(StrictModel):
+    """Frozen acceptance and instructions for an implicit repair coordinator."""
+
+    source: str
+    accepted_output: str
+    accepted_value: Scalar
+    fix_instruction: str
+    verify_instruction: str
+
+
 class LoopNode(NodeBase):
     """A bounded, scoped subgraph repeated until its condition holds."""
 
@@ -264,6 +299,7 @@ class LoopNode(NodeBase):
     max_iterations: int = Field(ge=1, le=MAX_LOOP_ITERATIONS)
     until: str | None = None
     exhausted: str
+    repair_rule: RepairAcceptance | None = None
 
 
 class SubworkflowNode(NodeBase):
@@ -275,8 +311,56 @@ class SubworkflowNode(NodeBase):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
+class ActionsStepNode(NodeBase):
+    """Internal compiled step; public fields come from the Actions language."""
+
+    type: Literal["actions_step"] = "actions_step"
+    step: dict[str, Any]
+    workflow: dict[str, Any]
+    job: dict[str, Any]
+    job_id: str
+    step_id: str
+    index: int
+    matrix: dict[str, Any] = Field(default_factory=dict)
+    sources: dict[str, str] = Field(default_factory=dict)
+    bound_agent: AgentNode | None = None
+    bound_agents: dict[str, AgentNode] = Field(default_factory=dict)
+    caller_inputs: dict[str, Any] = Field(default_factory=dict)
+    state_scope: str = ""
+    action_path: str = ""
+
+
+class ActionsJobNode(NodeBase):
+    """Internal job coordinator owns the shared checkout and commit boundary."""
+
+    type: Literal["actions_job"] = "actions_job"
+    writes: bool = True
+    allow_no_commit: bool = True
+    job_id: str
+    job: dict[str, Any]
+    workflow: dict[str, Any]
+    sources: dict[str, str] = Field(default_factory=dict)
+    matrix: dict[str, Any] = Field(default_factory=dict)
+    matrix_index: int | None = None
+    bound_agents: dict[str, AgentNode] = Field(default_factory=dict)
+    coordinator: bool = False
+    caller_inputs: dict[str, Any] = Field(default_factory=dict)
+    caller_secrets: dict[str, str] = Field(default_factory=dict)
+    caller_secret_scope: str | None = None
+    caller_secret_mapping: dict[str, Any] | Literal["inherit"] | None = None
+    caller_cache_mode: str | None = None
+    workflow_scope: str = "root"
+
+
 NodeDefinition = Annotated[
-    AgentNode | CommandNode | HumanWaitNode | ConditionNode | LoopNode | SubworkflowNode,
+    AgentNode
+    | CommandNode
+    | HumanWaitNode
+    | ConditionNode
+    | LoopNode
+    | SubworkflowNode
+    | ActionsJobNode
+    | ActionsStepNode,
     Field(discriminator="type"),
 ]
 
@@ -312,8 +396,32 @@ class RecoveryPolicy(StrictModel):
     max_retries: int = Field(default=MAX_AUTOMATIC_RETRIES, ge=1, le=MAX_AUTOMATIC_RETRIES)
 
 
+class RepairRule(StrictModel):
+    """A stage's bounded fix-and-verify policy, separate from its main graph."""
+
+    enabled: bool = True
+    max_rounds: int = Field(default=DEFAULT_REPAIR_ROUNDS, ge=1, le=MAX_LOOP_ITERATIONS)
+    accepted_output: str = Field(min_length=1)
+    accepted_value: Scalar = "Yes"
+    fix: AgentNode | CommandNode
+    verify: AgentNode | CommandNode
+    fix_instruction: str = Field(default=DEFAULT_FIX_INSTRUCTION, min_length=1)
+    verify_instruction: str = Field(default=DEFAULT_VERIFY_INSTRUCTION, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_roles(self) -> RepairRule:
+        for role in (self.fix, self.verify):
+            if role.needs or role.condition is not None or role.on_timeout is not None:
+                message = "repair roles cannot declare needs, if, or on_timeout"
+                raise ValueError(message)
+        if self.accepted_output not in self.verify.outputs:
+            message = "the verifier must declare the accepted_output"
+            raise ValueError(message)
+        return self
+
+
 class WorkflowDefinition(StrictModel):
-    """One complete Relay workflow document."""
+    """Internal execution IR; version 1 is retained for historical snapshots."""
 
     version: int
     name: str = Field(min_length=1)
@@ -321,14 +429,34 @@ class WorkflowDefinition(StrictModel):
     model: str | None = None
     agents: list[str] = Field(default_factory=list)
     nodes: dict[str, NodeDefinition]
+    env: dict[str, str] = Field(default_factory=dict)
+    inherit_env: bool = True
     entrypoints: list[EntryPoint] = Field(default_factory=list)
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
+    repairs: dict[str, RepairRule] = Field(default_factory=dict)
+    actions: dict[str, Any] = Field(default_factory=dict)
+
+    validate_env = field_validator("env")(validate_environment)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> WorkflowDefinition:
         _validate_node_map(self.nodes, "nodes")
+        for source, rule in self.repairs.items():
+            node = self.nodes.get(source)
+            if node is None or node.type not in {"agent", "command"}:
+                message = f"repair source {source!r} must be an agent or command stage"
+                raise ValueError(message)
+            if (
+                isinstance(node, (AgentNode, CommandNode))
+                and rule.accepted_output not in node.outputs
+            ):
+                message = f"repair source {source!r} must declare {rule.accepted_output!r}"
+                raise ValueError(message)
+            if f"{REPAIR_NODE_PREFIX}{source}" in self.nodes:
+                message = f"repair coordinator id conflicts with a stage for {source!r}"
+                raise ValueError(message)
         for name in self.inputs:
-            if NODE_ID_PATTERN.fullmatch(name) is None:
+            if not self.actions and NODE_ID_PATTERN.fullmatch(name) is None:
                 message = f"input id {name!r} must match {NODE_ID_PATTERN.pattern}"
                 raise ValueError(message)
         scopes = [entry.scope_path for entry in self.entrypoints]
@@ -340,10 +468,18 @@ class WorkflowDefinition(StrictModel):
 
 def _validate_node_map(nodes: dict[str, NodeDefinition], location: str) -> None:
     for node_id, node in nodes.items():
-        if NODE_ID_PATTERN.fullmatch(node_id) is None:
+        pattern = (
+            r"^[A-Za-z_][A-Za-z0-9_-]*$"
+            if isinstance(node, (ActionsJobNode, ActionsStepNode))
+            else NODE_ID_PATTERN.pattern
+        )
+        if re.fullmatch(pattern, node_id) is None:
             message = f"{location} id {node_id!r} must match {NODE_ID_PATTERN.pattern}"
             raise ValueError(message)
         if isinstance(node, LoopNode):
+            if node.repair_rule is not None:
+                message = "repair_rule is internal; configure repairs on the workflow instead"
+                raise ValueError(message)
             _validate_node_map(node.body, f"{location}.{node_id}.body")
 
 

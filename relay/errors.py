@@ -106,6 +106,11 @@ class WorktreeError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_INTERNAL_SERVER_ERROR
 
 
+class RunMergeError(GitError):
+    error_code: ClassVar[str] = "run_merge_failed"
+    http_status: ClassVar[int] = constants.HTTP_CONFLICT
+
+
 class CommitValidationError(RelayError):
     error_code: ClassVar[str] = "commit_validation_error"
     cli_exit_code: ClassVar[int] = constants.EXIT_GIT_ERROR
@@ -239,3 +244,9 @@ __all__ = [
     "WorkflowValidationError",
     "WorktreeError",
 ]
+
+
+class SettingsConflictError(RelayError):
+    error_code: ClassVar[str] = "settings_conflict"
+    cli_exit_code: ClassVar[int] = constants.EXIT_CONFIG_ERROR
+    http_status: ClassVar[int] = constants.HTTP_CONFLICT

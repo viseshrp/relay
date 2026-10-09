@@ -119,14 +119,18 @@ applicable; do not silently change adjacent behavior.
 
 ### Git isolation and retained evidence
 
-- Never check out, reset, or merge the launch branch as part of a run. Writers
-  use the primary run worktree exclusively; readers use detached worktrees at
-  the recorded committed head. Remove reader worktrees before releasing their
-  admission locks.
-- Runtime writing nodes commit their own changes, leave the index and code
-  clean, and advance from the attempt's starting head. Only an explicit
-  `allow_no_commit: true` permits a valid no-op. These runtime rules do not
-  authorize repository commits outside the current task.
+- Never check out or reset the launch branch as part of a run. Only the explicit
+  `merge_on_success` policy may fast-forward the captured launch branch after
+  every job succeeds. Require a strictly clean checkout on that same branch;
+  retain the run workspace on integration failure. Writers use the primary run
+  worktree exclusively; readers use detached worktrees at the recorded committed
+  head. Remove reader worktrees before releasing their admission locks.
+- Current Actions jobs share the primary workspace across ordered steps. Commit
+  changed code once at a successful job boundary; a clean no-op is valid.
+  Accepted jobs advance the protected head. Preserve a failed job's bytes before
+  restoring that head for an unrelated job. Historical v1 writing nodes retain
+  their per-node commit and explicit `allow_no_commit` contracts. These runtime
+  rules do not authorize repository commits outside the current task.
 - Preserve the exact report and workflow-source exemptions in
   [cleanliness.py](relay/vcs/cleanliness.py). Validated launch sources and exempt
   root reports may remain unstaged or untracked. Unrelated edits and staged

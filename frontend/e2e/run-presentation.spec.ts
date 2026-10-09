@@ -70,3 +70,14 @@ test("captured loop iterations and nested branches retain their execution order"
   expect(positions.get("root.repeat#2.a")!.y).toBeGreaterThan(positions.get("root.repeat#1.b")!.y);
   expect(positions.get("root.end")!.y).toBeGreaterThan(positions.get("root.repeat#2.a")!.y);
 });
+
+
+test("the top-level scope adds no synthetic completion job", () => {
+  const graph = capturedRunGraph([
+    node("root.first", [], "root"), node("root.second", ["root.first"], "root"),
+    node("root.child", ["root.second"], "root"), node("root.child.check", [], "root.child"),
+  ]);
+  expect(graph.nodes.map((stage) => stage.id)).toEqual(["root.first", "root.second", "root.child", "root.child.check", "root.child::complete"]);
+  expect(graph.edges.some((edge) => edge.source === "root.child.check" && edge.target === "root.child::complete")).toBeTruthy();
+  expect(graph.nodes.some((stage) => stage.id === "root::complete")).toBeFalsy();
+});

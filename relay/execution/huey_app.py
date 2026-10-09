@@ -135,6 +135,9 @@ def reconcile_dispatch() -> ReconcileResult:
         orderly_shutdown=shutdown_marker_path().exists(),
     )
     _advance_changed_runs(store)
+    from relay.web.actions_automation import reconcile as reconcile_actions
+
+    reconcile_actions()
     return result
 
 

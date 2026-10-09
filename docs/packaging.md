@@ -2,7 +2,8 @@
 
 Relay publishes one Python source distribution and one wheel. The wheel
 contains the compiled browser application, so an installed `relay up` never
-needs Node.js or npm.
+needs Node.js or npm to serve it. Opt-in local JavaScript actions require
+their declared installed Node 20 or 24 runtime.
 
 ## Locked build tools
 
@@ -32,7 +33,7 @@ these argument vectors with `shell=False` from `frontend/`:
 
 ```text
 [resolved npm executable, "ci"]
-[resolved npm executable, "run", "build"]
+[resolved npm executable, "run", "build:dist"]
 ```
 
 The hook fails if the build does not create both `index.html` and an asset
@@ -65,14 +66,23 @@ make check-dist
 Twine metadata checks and `scripts/check_distribution_contents.py`. The
 content check requires compiled static files in the wheel, requires the
 frontend lockfile and hook in the source distribution, rejects certification
-evidence, and rejects bundled workflow or prompt templates. Relay ships only
-the blank files created by `relay init`; no example workflow or prompt enters
-a distribution.
+evidence, and rejects workflow or prompt templates outside the exact allow-list
+for the six [starter workflows](workflows.md#starter-workflows). Their twelve
+source files live under `relay/workflows/starters/` and ship in both archives.
+The content gate still rejects every other YAML or template path. The blank
+files created by `relay init` remain separate from these opt-in starters.
 
 The distribution jobs install Python dependencies in editable mode, then
 install the pinned Node version before building the source distribution and wheel.
 The release publication job downloads the already-built artifacts and does not
 rebuild them.
+
+## Source dependency checks
+
+The dependency scan in `make check` excludes installed Python environments,
+including the `.tox/` directories created by `make test`. It scans Relay
+source without treating third-party packages as project imports. The
+lockfile, vulnerability and license checks still validate dependencies.
 
 ## Runtime check without Node
 
@@ -80,3 +90,18 @@ Install the wheel into a fresh virtual environment, remove Node from `PATH`,
 and run `relay up --no-browser`. A successful readiness response from
 `GET /api/auth` proves the installed Python package can serve its compiled
 assets without an end-user Node runtime.
+
+## Updating an editable frontend
+
+`npm --prefix frontend run build` checks types and builds into a temporary
+staging directory beside the served asset directory, preserving relative
+source-map paths. It publishes assets first, then atomically replaces
+`index.html`. Earlier hashed assets remain available for open tabs that have
+not yet loaded every workspace. A failed asset copy leaves the previous entry
+page in place. This updates only compiled frontend files; the running server
+and durable state stay in place.
+
+Wheel builds use `npm run build:dist`, which cleans the asset output before
+building. Releases therefore contain one build, without older checkout chunks.
+`npm --prefix frontend run test:build` checks publication failure and a browser
+tab loading an earlier lazy chunk after publication.

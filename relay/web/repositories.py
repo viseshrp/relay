@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from functools import lru_cache
 from hashlib import sha256
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 import shutil
 import tempfile
-from typing import NamedTuple, NoReturn, TypeVar
+from typing import Any, NamedTuple, NoReturn, TypeVar, cast
 import uuid
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -30,6 +30,7 @@ from relay.constants import (
     CONTROL_CLAIM_STALE_AFTER_SECONDS,
     CONTROL_REQUEST_TTL_SECONDS,
     DEFAULT_RETRY_HANDOFF_PROMPT,
+    DEFAULT_UNSTARTED_HANDOFF_PROMPT,
     DISPATCH_ORPHAN_AFTER_SECONDS,
     EDITOR_LEASE_TTL_SECONDS,
     EVENT_MAX_PAYLOAD_BYTES,
@@ -54,6 +55,7 @@ from relay.execution.automatic import (
     RECOVERABLE_ERRORS,
     recovery_instruction,
 )
+from relay.execution.completion import MergeTarget, complete_run_merge
 from relay.execution.control import (
     ClaimedControl,
     ControlRecovery,
@@ -78,8 +80,15 @@ from relay.execution.machine import (
 )
 from relay.execution.process_identity import ProcessIdentity, process_identity
 from relay.execution.reconcile import AttemptRecovery
+from relay.execution.relaunch import PreviousRunInputs
 from relay.execution.resources import cleanup_run_resources
-from relay.execution.resume import RecoveryTarget, RetryAgent, RetryEffort, RetryPermissionMode
+from relay.execution.resume import (
+    RecoveryTarget,
+    RetryAgent,
+    RetryEffort,
+    RetryPermissionMode,
+    recovery_workspace_lock,
+)
 from relay.execution.runner import ExecutionOutcome, OutcomeKind, ScopeNodeRecord
 from relay.execution.scheduler import (
     RunSchedule,
@@ -89,6 +98,7 @@ from relay.execution.scheduler import (
 )
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
+    TERMINAL_RUN_STATUSES,
     AttemptStatus,
     AttemptStopReason,
     CleanupPolicy,
@@ -107,6 +117,7 @@ from relay.execution.state import (
     RunStatus,
     WorktreeState,
 )
+from relay.execution.step_settings import UnstartedAgentTarget
 from relay.execution.timing import duration_seconds
 from relay.paths import (
     artifacts_dir,
@@ -117,7 +128,12 @@ from relay.paths import (
 )
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
-from relay.vcs.artifacts import PreservationResult, RecoveryReport, preserve_recovery_reports
+from relay.vcs.artifacts import (
+    PreservationResult,
+    RecoveryReport,
+    preserve_recovery_reports,
+    validate_attempt_evidence,
+)
 from relay.vcs.git import git_stdout, run_git, run_git_to_file
 from relay.vcs.worktree import (
     reader_worktree_path,
@@ -126,8 +142,8 @@ from relay.vcs.worktree import (
     run_worktree_path,
 )
 from relay.workflows.graph import CompiledGraph, compile_graph
-from relay.workflows.loader import load_workflow_text
-from relay.workflows.schema import NodeDefinition, RecoveryPolicy
+from relay.workflows.loader import load_workflow_text, workflow_key_parts
+from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
 from relay.workflows.scope import (
     enclosing_scope,
     node_scope,
@@ -217,6 +233,9 @@ class _ClaimContext(NamedTuple):
 def _compiled_run_graph(run_id: str) -> CompiledGraph:
     """Compile each immutable snapshot once while its run stays in the cache."""
     snapshot = RunSnapshot.objects.get(run_id=run_id)
+    resolved = _mapping(snapshot, "resolved_definition")
+    if resolved:
+        return compile_graph(WorkflowDefinition.model_validate(resolved).nodes)
     loaded = load_workflow_text(
         _string(snapshot, "workflow_yaml"), source=Path(f"snapshot:{run_id}")
     )
@@ -448,6 +467,13 @@ def _require_run(run: Run | None, run_id: str) -> Run:
     return run
 
 
+def _require_job(node: NodeRun | None, run_id: str, scope_path: str) -> NodeRun:
+    if node is None:
+        message = "The requested job does not exist in this run."
+        raise ProjectDiscoveryError(message, context={"run": run_id, "job": scope_path})
+    return node
+
+
 def _require_artifact(artifact: Artifact | None) -> Artifact:
     if artifact is None:
         message = "The requested artifact does not exist."
@@ -472,6 +498,11 @@ def _reject_schedule_mismatch(run_id: str) -> NoReturn:
 def _reject_active_cleanup(project_id: str) -> NoReturn:
     message = "Relay will not clean data while this project has an active run."
     raise PermissionFlowError(message, context={"project": project_id})
+
+
+def _reject_incomplete_cleanup_evidence(run_id: str) -> NoReturn:
+    message = "Relay retained the run worktree because its evidence is incomplete."
+    raise PersistenceError(message, context={"run": run_id})
 
 
 def _reject_branch_with_worktree(run_id: str) -> NoReturn:
@@ -532,7 +563,11 @@ def _run_worktree_paths(run: Run) -> tuple[Path, ...]:
         node_run__node_type__in=(NodeType.AGENT.value, NodeType.COMMAND.value),
     ).values_list("pk", flat=True)
     readers = tuple(reader_worktree_path(primary, str(attempt_id)) for attempt_id in reader_ids)
-    return (*readers, primary)
+    continued = tuple(
+        safe_resolve(worktrees_dir(), path)
+        for path in cast(list[str], _mapping(run, "actions_state").get("continuations", []))
+    )
+    return (*readers, *continued, primary)
 
 
 def _derived_control_key(namespace: str, *parts: str) -> str:
@@ -693,18 +728,45 @@ def _run_record(run: Run) -> dict[str, object]:
         "id": _identifier(run),
         "project_id": _foreign_key_text(run, "project"),
         "workflow_key": _string(run, "workflow_key"),
+        "number": _integer(run, "number"),
+        "title": _string(run, "title"),
+        "source_branch": run.source_branch,
+        "created_at": _datetime_text(_datetime_field(run, "created_at")),
         "status": _string(run, "status"),
         "source_commit": _string(run, "source_commit"),
         "run_branch": _string(run, "run_branch"),
         "worktree_state": _string(run, "worktree_state"),
         "cleanup_policy": _string(run, "cleanup_policy"),
+        "merged_commit": run.merged_commit,
         "launcher": _string(run, "launcher"),
         "started_at": _datetime_text(_datetime_field(run, "started_at")),
         "ended_at": _datetime_text(_datetime_field(run, "ended_at")),
         "failure_code": run.failure_code,
         "failure_summary": run.failure_summary,
         "entry_point": run.entry_point,
+        "dispatch_paused": _boolean(run, "dispatch_paused"),
+        "waiting_count": _integer(run, "read_waiting_count"),
     }
+
+
+def _waiting_filter(prefix: str = "") -> Q:
+    """Keep attention counts tied to requests whose attempts can accept an answer."""
+    return Q(
+        **{
+            f"{prefix}status": InteractionStatus.PENDING.value,
+            f"{prefix}attempt__status": AttemptStatus.WAITING.value,
+        }
+    )
+
+
+def _dashboard_identifier(instance: models.Model, name: str) -> str | None:
+    value = getattr(instance, name)
+    if value is None:
+        return None
+    if isinstance(value, (uuid.UUID, int, str)) and not isinstance(value, bool):
+        return str(value)
+    message = f"Stored field {name} is not a record identifier."
+    raise PersistenceError(message)
 
 
 def _provider_failure_message(attempt: NodeAttempt) -> tuple[str | None, bool]:
@@ -853,7 +915,23 @@ def _run_problem(run: Run) -> dict[str, object] | None:
     }
 
 
-def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
+def _repair_groups(run: Run) -> dict[str, str]:
+    groups = {}
+    for scope, source in _mapping(run, "repair_groups").items():
+        if not isinstance(source, str):
+            message = "The stored repair presentation is invalid."
+            raise PersistenceError(message, context={"run": _identifier(run)})
+        groups[scope] = source
+    return groups
+
+
+def _node_record(
+    node: NodeRun,
+    snapshot: RunSnapshot,
+    *,
+    dispatch_paused: bool = False,
+    repair_groups: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
     scope = _string(node, "scope_path")
@@ -861,6 +939,35 @@ def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
     parent = scope.rsplit(".", 1)[0]
     needs = frozen.get("needs", [])
     branches = frozen.get("branches", {})
+    repair = frozen.get("repair_rule")
+    repair_for = (repair_groups or {}).get(scope)
+    if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+        repair_for = sibling_scope(scope, repair["source"])
+    repair_settings = None
+    if (
+        repair_for is not None
+        and _string(node, "node_type") == NodeType.LOOP.value
+        and parse_scope_path(scope)[-1].iteration is None
+    ):
+        body = frozen.get("body", {})
+        repair_settings = {
+            "legacy": not isinstance(repair, dict),
+            "max_rounds": frozen.get("max_iterations"),
+            "accepted_output": repair.get("accepted_output") if isinstance(repair, dict) else None,
+            "accepted_value": repair.get("accepted_value") if isinstance(repair, dict) else None,
+            "fix_instruction": repair.get("fix_instruction") if isinstance(repair, dict) else None,
+            "verify_instruction": repair.get("verify_instruction")
+            if isinstance(repair, dict)
+            else None,
+            "roles": {
+                role: {
+                    field: definition.get(field)
+                    for field in ("type", "model", "agents", "agent_options", "writes")
+                }
+                for role, definition in (body.items() if isinstance(body, dict) else ())
+                if isinstance(role, str) and isinstance(definition, dict)
+            },
+        }
     controls = [
         {"target": f"{parent}.{target}", "label": label}
         for label, target in (branches.items() if isinstance(branches, dict) else ())
@@ -868,14 +975,25 @@ def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
     ]
     for field, label in (("on_timeout", "Time limit"), ("exhausted", "Iteration limit")):
         target = frozen.get(field)
-        if isinstance(target, str):
+        if isinstance(target, str) and target:
             controls.append({"target": f"{parent}.{target}", "label": label})
     return {
         "id": _identifier(node),
         "scope_path": _string(node, "scope_path"),
         "node_id": _string(node, "node_id"),
+        "display_name": cast(
+            dict, _mapping(_related(node, "run", Run), "actions_state").get("display_names", {})
+        ).get(scope, _string(node, "node_id")),
+        "matrix": frozen.get("matrix", {}),
         "node_type": _string(node, "node_type"),
+        "outcome": _string(node, "outcome"),
+        "conclusion": _string(node, "conclusion"),
+        "job_id": str(frozen.get("job_id", "")),
+        "step_id": str(frozen.get("step_id", "")),
+        "matrix_index": frozen.get("matrix_index"),
         "status": _string(node, "status"),
+        "started_at": _datetime_text(_datetime_field(node, "latest_started_at")),
+        "ended_at": _datetime_text(_datetime_field(node, "latest_ended_at")),
         "writes": _boolean(node, "writes"),
         "selected_branch": node.selected_branch,
         "loop_index": node.loop_index,
@@ -884,10 +1002,24 @@ def _node_record(node: NodeRun, snapshot: RunSnapshot) -> dict[str, object]:
         if isinstance(needs, list)
         else [],
         "controls": controls,
+        "repair_for": repair_for,
+        "repair_settings": repair_settings,
         "retry_settings": (
             _retry_configuration(node, snapshot)
             if _string(node, "node_type") == NodeType.AGENT.value
             and _string(node, "status") == NodeStatus.FAILED.value
+            else None
+        ),
+        "pending_settings": (
+            {
+                **_retry_configuration(node, snapshot),
+                "default_handoff_prompt": DEFAULT_UNSTARTED_HANDOFF_PROMPT,
+            }
+            if dispatch_paused
+            and _string(node, "node_type") == NodeType.AGENT.value
+            and _string(node, "status")
+            in {NodeStatus.PENDING.value, NodeStatus.READY.value, NodeStatus.DISPATCHED.value}
+            and not _boolean(node, "has_attempt")
             else None
         ),
     }
@@ -906,6 +1038,9 @@ def _interaction_record(interaction: HumanInteraction) -> dict[str, object]:
             else None
         ),
         "status": _string(interaction, "status"),
+        "respondable": _string(interaction, "status") == InteractionStatus.PENDING.value
+        and _string(_related(interaction, "attempt", NodeAttempt), "status")
+        == AttemptStatus.WAITING.value,
         "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
         "created_at": _datetime_text(_datetime_field(interaction, "created_at")),
         "answered_at": _datetime_text(_datetime_field(interaction, "answered_at")),
@@ -924,7 +1059,11 @@ def _event_record(event: RunEvent) -> dict[str, object]:
 
 
 def _artifact_record(artifact: Artifact) -> dict[str, object]:
+    attempt = _related(artifact, "attempt", NodeAttempt)
+    node = _related(attempt, "node_run", NodeRun)
     return {
+        "scope_path": _string(node, "scope_path"),
+        "attempt_number": _integer(attempt, "attempt_number"),
         "id": _identifier(artifact),
         "attempt_id": _foreign_key_text(artifact, "attempt"),
         "name": _string(artifact, "declared_name"),
@@ -958,16 +1097,327 @@ def _bounded_page(
     return records, more
 
 
+def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
+    """Expose attempt facts without worker, process, session, or provider-private fields."""
+    ended = (
+        RunEvent.objects.filter(
+            attempt=attempt, type="attempt.ended", sensitivity=EventSensitivity.NORMAL.value
+        )
+        .order_by("-id")
+        .first()
+    )
+    error = _mapping(ended, "payload").get("error_message") if ended else None
+    provider_message, truncated = _provider_failure_message(attempt)
+    return {
+        "id": _identifier(attempt),
+        "number": _integer(attempt, "attempt_number"),
+        "status": _string(attempt, "status"),
+        "agent_id": _string(attempt, "agent_id"),
+        "model_value": _string(attempt, "model_value"),
+        "started_at": _datetime_text(_datetime_field(attempt, "started_at")),
+        "ended_at": _datetime_text(_datetime_field(attempt, "ended_at")),
+        "stop_reason": attempt.stop_reason,
+        "exit_code": attempt.exit_code,
+        "error_code": attempt.error_code,
+        "error_message": _truncate_utf8(error, RUN_PROBLEM_TEXT_MAX_CHARS)
+        if isinstance(error, str)
+        else None,
+        "provider_message": provider_message,
+        "provider_message_truncated": truncated,
+        "starting_head": _string(attempt, "starting_head"),
+        "ending_head": attempt.ending_head,
+    }
+
+
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
-    def run_changes(self, run_id: str) -> dict[str, object]:
+    def dashboard(
+        self, *, section: str | None, cursor: str | None, limit: int, query_text: str
+    ) -> dict[str, object]:
+        """Read project activity without probing Git, providers, or saved run content."""
+        sections = ("projects", "waiting", "active", "recent")
+        if section is not None and section not in sections:
+            message = "section must be projects, waiting, active, or recent."
+            raise ConfigError(message)
+        if cursor is not None and section is None:
+            message = "A dashboard cursor requires a section."
+            raise ConfigError(message)
+        if len(query_text) > 1024:
+            message = "Project search must not exceed 1024 characters."
+            raise ConfigError(message)
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            with transaction.atomic():
+                runs = Run.objects.select_related("project").annotate(
+                    read_waiting_count=models.Count(
+                        "interactions", filter=_waiting_filter("interactions__")
+                    ),
+                    dashboard_request_id=models.Subquery(
+                        HumanInteraction.objects.filter(
+                            _waiting_filter(), run_id=models.OuterRef("pk")
+                        )
+                        .order_by("created_at", "pk")
+                        .values("pk")[:1]
+                    ),
+                )
+                unfinished = runs.exclude(status__in=TERMINAL_RUN_STATUSES)
+                pending = HumanInteraction.objects.filter(_waiting_filter())
+                counts = {
+                    "projects": Project.objects.count(),
+                    "waiting": pending.values("run_id").distinct().count(),
+                    "unfinished": unfinished.count(),
+                    "paused": unfinished.filter(dispatch_paused=True).count(),
+                }
+                result: dict[str, object] = {"counts": counts}
+                for name in (section,) if section else sections:
+                    page = self._dashboard_page(
+                        name,
+                        cursor,
+                        bounded,
+                        query_text,
+                        runs,
+                        byte_budget=API_MAX_PAGE_BYTES // (1 if section else 4),
+                    )
+                    result[name] = page
+                return result
+        except DatabaseError:
+            message = "Relay could not read the dashboard."
+            raise PersistenceError(message) from None
+
+    def _dashboard_page(
+        self,
+        section: str,
+        cursor: str | None,
+        limit: int,
+        query_text: str,
+        runs: models.QuerySet,
+        *,
+        byte_budget: int,
+    ) -> dict[str, object]:
+        if section == "projects":
+            projects = Project.objects.annotate(
+                unfinished_count=models.Count(
+                    "runs",
+                    filter=~Q(runs__status__in=TERMINAL_RUN_STATUSES),
+                    distinct=True,
+                ),
+                waiting_count=models.Count(
+                    "runs",
+                    filter=_waiting_filter("runs__interactions__"),
+                    distinct=True,
+                ),
+                latest_run_id=models.Subquery(
+                    Run.objects.filter(project_id=models.OuterRef("pk"))
+                    .order_by("-created_at", "-pk")
+                    .values("pk")[:1]
+                ),
+            ).order_by("display_name", "pk")
+            if query_text:
+                projects = projects.filter(
+                    Q(display_name__icontains=query_text) | Q(canonical_path__icontains=query_text)
+                )
+            if cursor:
+                anchor = Project.objects.filter(pk=cursor).first()
+                if anchor is None:
+                    message = "The dashboard project cursor no longer exists."
+                    raise ConfigError(message)
+                title = _string(anchor, "display_name")
+                projects = projects.filter(
+                    Q(display_name__gt=title) | Q(display_name=title, pk__gt=anchor.pk)
+                )
+            rows = list(projects[: limit + 1])
+            latest = {
+                _identifier(run): _run_record(run)
+                for run in runs.filter(
+                    pk__in=[_dashboard_identifier(project, "latest_run_id") for project in rows]
+                )
+            }
+
+            def project_record(project: Project) -> dict[str, object]:
+                return {
+                    **asdict(_record(project)),
+                    "unfinished_count": _integer(project, "unfinished_count"),
+                    "waiting_count": _integer(project, "waiting_count"),
+                    "latest_run": latest.get(str(_dashboard_identifier(project, "latest_run_id"))),
+                }
+
+            records, more = _bounded_page(rows, limit, project_record, byte_budget=byte_budget)
+        else:
+            selected = runs
+            if section == "waiting":
+                selected = selected.filter(read_waiting_count__gt=0)
+            elif section == "active":
+                selected = selected.exclude(status__in=TERMINAL_RUN_STATUSES).filter(
+                    read_waiting_count=0
+                )
+            else:
+                selected = selected.filter(status__in=TERMINAL_RUN_STATUSES)
+            field = "ended_at" if section == "recent" else "created_at"
+            selected = selected.annotate(dashboard_order=Coalesce(field, "created_at"))
+            selected = selected.order_by("-dashboard_order", "-pk")
+            if cursor:
+                anchor = (
+                    runs.annotate(dashboard_order=Coalesce(field, "created_at"))
+                    .filter(pk=cursor)
+                    .first()
+                )
+                if anchor is None:
+                    message = "The dashboard run cursor no longer exists."
+                    raise ConfigError(message)
+                when = _datetime_field(anchor, "dashboard_order")
+                selected = selected.filter(
+                    Q(dashboard_order__lt=when) | Q(dashboard_order=when, pk__lt=anchor.pk)
+                )
+            run_rows = list(selected[: limit + 1])
+            requests: dict[str, HumanInteraction] = {}
+            if section == "waiting":
+                for request in (
+                    HumanInteraction.objects.filter(
+                        _waiting_filter(),
+                        pk__in=[
+                            _dashboard_identifier(run, "dashboard_request_id") for run in run_rows
+                        ],
+                    )
+                    .select_related("node_run")
+                    .order_by("created_at", "pk")
+                ):
+                    requests.setdefault(_foreign_key_text(request, "run"), request)
+
+            def run_record(run: Run) -> dict[str, object]:
+                request = requests.get(_identifier(run))
+                return {
+                    **_run_record(run),
+                    "project": asdict(_record(_related(run, "project", Project))),
+                    "request": {
+                        "id": _identifier(request),
+                        "kind": _string(request, "kind"),
+                        "scope_path": _string(_related(request, "node_run", NodeRun), "scope_path"),
+                    }
+                    if request
+                    else None,
+                }
+
+            records, more = _bounded_page(run_rows, limit, run_record, byte_budget=byte_budget)
+        return {
+            "items": records,
+            "next_cursor": str(records[-1]["id"]) if more and records else None,
+        }
+
+    def previous_run_inputs(self, run_id: str) -> PreviousRunInputs:
+        """Read launch input values without returning prompts or provider routes."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("snapshot", "project").filter(pk=run_id).first(), run_id
+            )
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            source = PreviousRunInputs(
+                project_id=_identifier(_related(run, "project", Project)),
+                workflow_key=_string(run, "workflow_key"),
+                status=_string(run, "status"),
+                inputs=_mapping(snapshot, "typed_inputs"),
+            )
+        except (DatabaseError, ObjectDoesNotExist):
+            message = "Relay could not read the previous run's inputs."
+            raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return source
+
+    def attention(self, since: int | None) -> dict[str, object]:
+        """Read owner requests and new completion facts without event payloads."""
+        try:
+            with transaction.atomic():
+                pending = HumanInteraction.objects.filter(_waiting_filter())
+                waiting_runs = pending.values_list("run_id", flat=True).distinct()
+                latest = RunEvent.objects.order_by("-id").first()
+                cursor = _integer(latest, "id") if latest is not None else 0
+                finished: list[dict[str, object]] = []
+                more = False
+                if since is not None:
+                    rows = list(
+                        RunEvent.objects.select_related("run")
+                        .filter(
+                            id__gt=since,
+                            type__in=("run.succeeded", "run.failed", "run.canceled"),
+                        )
+                        .order_by("id")[: API_MAX_PAGE + 1]
+                    )
+                    finished, more = _bounded_page(
+                        rows,
+                        API_MAX_PAGE,
+                        lambda event: {
+                            "id": _integer(event, "id"),
+                            "run_id": _foreign_key_text(event, "run"),
+                            "project_id": _foreign_key_text(_related(event, "run", Run), "project"),
+                            "workflow_key": _string(_related(event, "run", Run), "workflow_key"),
+                            "status": _string(event, "type").removeprefix("run."),
+                        },
+                    )
+                    if more and finished:
+                        cursor = int(str(finished[-1]["id"]))
+                    cursor = max(since, cursor)
+                waiting_count = waiting_runs.count()
+                return {
+                    "waiting_count": waiting_count,
+                    "waiting_runs": [str(value) for value in waiting_runs[:API_MAX_PAGE]],
+                    "waiting_runs_truncated": waiting_count > API_MAX_PAGE,
+                    "finished": finished,
+                    "event_cursor": cursor,
+                    "more": more,
+                }
+        except DatabaseError:
+            message = "Relay could not read waiting requests."
+            raise PersistenceError(message) from None
+
+    def run_changes(
+        self, run_id: str, *, scope_path: str | None = None, attempt_number: int | None = None
+    ) -> dict[str, object]:
         """Preview committed changes from the source commit to the protected run head."""
         try:
             run = _require_run(
                 Run.objects.select_related("project").filter(pk=run_id).first(), run_id
             )
             project = _related(run, "project", Project)
+            source_commit = _string(run, "source_commit")
+            recorded_head = _string(run, "recorded_head")
+            commits: list[dict[str, str]] = []
+            if scope_path is not None:
+                parse_scope_path(scope_path)
+                node = _require_job(
+                    NodeRun.objects.filter(run=run, scope_path=scope_path).first(),
+                    run_id,
+                    scope_path,
+                )
+                query = NodeAttempt.objects.filter(node_run=node)
+                if attempt_number is not None:
+                    query = query.filter(attempt_number=attempt_number)
+                attempt = query.order_by("-attempt_number").first()
+                if attempt is not None:
+                    source_commit = _string(attempt, "starting_head")
+                    recorded_head = str(attempt.ending_head or source_commit)
+                else:
+                    recorded_head = source_commit
+                with tempfile.TemporaryFile(mode="w+b") as log:
+                    run_git_to_file(
+                        Path(_string(project, "git_root")),
+                        [
+                            "log",
+                            "--format=%H%x00%s",
+                            "-100",
+                            f"{source_commit}..{recorded_head}",
+                            "--",
+                        ],
+                        log,
+                    )
+                    log.seek(0)
+                    for line in (
+                        log.read(REVIEW_PREVIEW_MAX_BYTES)
+                        .decode("utf-8", errors="replace")
+                        .splitlines()
+                    ):
+                        sha, separator, title = line.partition("\0")
+                        if separator:
+                            commits.append({"sha": sha, "title": title})
             with tempfile.TemporaryFile(mode="w+b") as output:
                 run_git_to_file(
                     Path(_string(project, "git_root")),
@@ -975,23 +1425,27 @@ class DjangoReadStore:
                         "diff",
                         "--no-ext-diff",
                         "--no-textconv",
-                        _string(run, "source_commit"),
-                        _string(run, "recorded_head"),
+                        source_commit,
+                        recorded_head,
                         "--",
                     ],
                     output,
                 )
                 output.seek(0)
                 content = output.read(REVIEW_PREVIEW_MAX_BYTES + 1)
-            return {
+            result: dict[str, object] = {
                 "text": content[:REVIEW_PREVIEW_MAX_BYTES].decode("utf-8", errors="replace"),
                 "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
-                "source_commit": _string(run, "source_commit"),
-                "recorded_head": _string(run, "recorded_head"),
+                "source_commit": source_commit,
+                "recorded_head": recorded_head,
             }
+            if scope_path is not None:
+                result["commits"] = commits
         except DatabaseError:
             message = "Relay could not read the run's committed changes."
             raise PersistenceError(message, context={"run": run_id}) from None
+        else:
+            return result
 
     def list_runs(
         self,
@@ -1000,14 +1454,39 @@ class DjangoReadStore:
         status: str | None,
         since: str | None,
         limit: int,
+        workflow: str | None = None,
+        branch: str | None = None,
+        query_text: str | None = None,
     ) -> tuple[list[dict[str, object]], str | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            query = Run.objects.order_by("-started_at", "-pk")
+            query = Run.objects.annotate(
+                read_waiting_count=models.Count(
+                    "interactions",
+                    filter=models.Q(
+                        interactions__status=InteractionStatus.PENDING.value,
+                        interactions__attempt__status=AttemptStatus.WAITING.value,
+                    ),
+                )
+            ).order_by("-started_at", "-pk")
             if project_id is not None:
                 query = query.filter(project_id=project_id)
             if status is not None:
                 query = query.filter(status=status)
+            if workflow is not None:
+                canonical = "/".join(workflow_key_parts(workflow))
+                aliases = {canonical, workflow}
+                if canonical.endswith(".yaml"):
+                    aliases.add(canonical[:-5])
+                query = query.filter(workflow_key__in=aliases)
+            if branch is not None:
+                query = query.filter(source_branch=branch)
+            if query_text:
+                query = query.filter(
+                    models.Q(title__icontains=query_text)
+                    | models.Q(workflow_key__icontains=query_text)
+                    | models.Q(source_commit__startswith=query_text)
+                )
             if since is not None:
                 cursor = _require_run(Run.objects.filter(pk=since).first(), since)
                 cursor_started = _datetime_field(cursor, "started_at")
@@ -1049,9 +1528,16 @@ class DjangoReadStore:
             run = _require_run(
                 Run.objects.select_related("snapshot", "project")
                 .annotate(
+                    read_waiting_count=models.Count(
+                        "interactions",
+                        filter=models.Q(
+                            interactions__status=InteractionStatus.PENDING.value,
+                            interactions__attempt__status=AttemptStatus.WAITING.value,
+                        ),
+                    ),
                     read_event_cursor=Coalesce(
                         models.Subquery(latest_event), 0, output_field=models.BigIntegerField()
-                    )
+                    ),
                 )
                 .filter(pk=run_id)
                 .first(),
@@ -1059,6 +1545,7 @@ class DjangoReadStore:
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            result["working_folder"] = _string(run, "worktree_path")
             result["problem"] = _run_problem(run)
             result["recovery"] = _run_recovery(run)
             result["event_cursor"] = _integer(run, "read_event_cursor")
@@ -1074,13 +1561,43 @@ class DjangoReadStore:
             # Reserve half the response ceiling for run and snapshot metadata.
             byte_budget = API_MAX_PAGE_BYTES // 2
             if collection == "nodes":
+                repair_groups = _repair_groups(run)
+                # Legacy exhaustion sentinels belong to the explicitly grouped
+                # repair loop. Their execution and frozen definitions stay intact.
+                for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
+                    target = _mapping(coordinator, "frozen_def").get("exhausted")
+                    if isinstance(target, str) and target:
+                        repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
+                            repair_groups[_string(coordinator, "scope_path")]
+                        )
                 nodes = list(
-                    NodeRun.objects.filter(run=run, pk__gt=since).order_by("pk")[: bounded + 1]
+                    NodeRun.objects.filter(run=run, pk__gt=since)
+                    .annotate(
+                        has_attempt=models.Exists(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                        ),
+                        latest_started_at=models.Subquery(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                            .order_by("-attempt_number")
+                            .values("started_at")[:1]
+                        ),
+                        latest_ended_at=models.Subquery(
+                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                            .order_by("-attempt_number")
+                            .values("ended_at")[:1]
+                        ),
+                    )
+                    .order_by("pk")[: bounded + 1]
                 )
                 records, more = _bounded_page(
                     nodes,
                     bounded,
-                    lambda node: _node_record(node, snapshot),
+                    lambda node: _node_record(
+                        node,
+                        snapshot,
+                        dispatch_paused=_boolean(run, "dispatch_paused"),
+                        repair_groups=repair_groups,
+                    ),
                     byte_budget=byte_budget,
                 )
             else:
@@ -1110,14 +1627,32 @@ class DjangoReadStore:
         run_id: str,
         since: int,
         limit: int,
+        *,
+        scope_path: str | None = None,
+        attempt_number: int | None = None,
+        latest: bool = False,
+        before: int | None = None,
     ) -> tuple[list[dict[str, object]], int | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
             query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
+            if scope_path is not None:
+                parse_scope_path(scope_path)
+                query = query.filter(node_run__scope_path=scope_path)
+            if attempt_number is not None:
+                query = query.filter(attempt__attempt_number=attempt_number)
+            if scope_path is not None or attempt_number is not None:
+                query = query.filter(sensitivity=EventSensitivity.NORMAL.value)
+            if before is not None:
+                query = query.filter(id__lt=before)
+            if latest:
+                query = query.order_by("-id")
             rows = list(query[: bounded + 1])
             events, more = _bounded_page(rows, bounded, _event_record)
             next_value = int(str(events[-1]["id"])) if more and events else None
+            if latest:
+                events.reverse()
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except DatabaseError:
@@ -1125,6 +1660,118 @@ class DjangoReadStore:
             raise PersistenceError(message, context={"run": run_id}) from None
         else:
             return events, next_value
+
+    def run_job(
+        self, run_id: str, scope_path: str, *, since: int, limit: int
+    ) -> tuple[dict[str, object], int | None]:
+        """Read captured instructions and a bounded page of this job's attempts."""
+        parse_scope_path(scope_path)
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+                )
+                node = _require_job(
+                    NodeRun.objects.filter(run=run, scope_path=scope_path).first(),
+                    run_id,
+                    scope_path,
+                )
+                frozen = _mapping(node, "frozen_def")
+                snapshot = _related(run, "snapshot", RunSnapshot)
+                bound_agent = frozen.get("bound_agent")
+                instruction_source = bound_agent if isinstance(bound_agent, dict) else frozen
+                references = instruction_source.get("prompts", [])
+                contents = _resolved_prompt_contents(snapshot, instruction_source)
+                step = frozen.get("step", {})
+                activity_type = _string(node, "node_type")
+                if activity_type == NodeType.ACTIONS_STEP.value and isinstance(step, dict):
+                    activity_type = (
+                        "command"
+                        if "run" in step
+                        else {
+                            "relay/command@v1": "command",
+                            "relay/agent@v1": "agent",
+                            "relay/human-wait@v1": "human_wait",
+                        }.get(step.get("uses"), activity_type)
+                    )
+                instructions: list[dict[str, object]] = []
+                remaining = API_MAX_PAGE_BYTES // 4
+                for index, content in enumerate(contents):
+                    reference = references[index] if isinstance(references, list) else {}
+                    text = _truncate_utf8(content, max(remaining, 0))
+                    remaining -= len(text.encode("utf-8"))
+                    instructions.append(
+                        {"reference": reference, "text": text, "truncated": text != content}
+                    )
+                attempts = list(
+                    NodeAttempt.objects.filter(node_run=node, pk__gt=since).order_by("pk")[
+                        : bounded + 1
+                    ]
+                )
+                records, more = _bounded_page(attempts, bounded, _job_attempt_record)
+                result = {
+                    "scope_path": scope_path,
+                    "working_folder": _string(run, "worktree_path"),
+                    "node_type": _string(node, "node_type"),
+                    "activity_type": activity_type,
+                    "display_name": cast(
+                        dict, _mapping(run, "actions_state").get("display_names", {})
+                    ).get(scope_path, _string(node, "node_id")),
+                    "status": _string(node, "status"),
+                    "writes": _boolean(node, "writes"),
+                    "command": frozen.get("run"),
+                    "retry_settings": (
+                        _retry_configuration(node, snapshot)
+                        if _string(node, "node_type") == NodeType.AGENT.value
+                        and _string(node, "status") == NodeStatus.FAILED.value
+                        else None
+                    ),
+                    "prompt": (
+                        step.get("with", {}).get("prompt")
+                        if activity_type == "agent" and isinstance(step, dict) and step
+                        else frozen.get("prompt")
+                    ),
+                    "instructions": instructions,
+                    "outputs": _mapping(node, "outputs"),
+                    "attempts": records,
+                    "latest_attempt": _job_attempt_record(latest)
+                    if (
+                        latest := NodeAttempt.objects.filter(node_run=node)
+                        .order_by("-attempt_number")
+                        .first()
+                    )
+                    is not None
+                    else None,
+                }
+                next_value = int(str(records[-1]["id"])) if more and records else None
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read this job's attempts."
+            raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
+        else:
+            return result, next_value
+
+    def run_workflow(self, run_id: str) -> dict[str, object]:
+        """Read the immutable workflow captured for a run, with a bounded preview."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
+            )
+            snapshot = _related(run, "snapshot", RunSnapshot)
+            content = _string(snapshot, "workflow_yaml").encode("utf-8")
+            return {
+                "workflow_key": _string(run, "workflow_key"),
+                "yaml": content[:REVIEW_PREVIEW_MAX_BYTES].decode("utf-8", errors="ignore"),
+                "truncated": len(content) > REVIEW_PREVIEW_MAX_BYTES,
+                "sha256": sha256(content).hexdigest(),
+            }
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read the captured workflow."
+            raise PersistenceError(message, context={"run": run_id}) from None
 
     def page_artifacts(
         self,
@@ -1140,7 +1787,9 @@ class DjangoReadStore:
                 Artifact.objects.filter(
                     attempt__node_run__run_id=run_id,
                     pk__gt=since,
-                ).order_by("pk")[: bounded + 1]
+                )
+                .select_related("attempt__node_run")
+                .order_by("pk")[: bounded + 1]
             )
             records, more = _bounded_page(rows, bounded, _artifact_record)
             next_value = int(str(records[-1]["id"])) if more and records else None
@@ -1182,6 +1831,9 @@ def _append_event(
     attempt: NodeAttempt | None = None,
     sensitivity: EventSensitivity = EventSensitivity.NORMAL,
 ) -> RunEvent:
+    from relay.execution.masking import redactor
+
+    payload = cast(Mapping[str, object], redactor(_identifier(run)).payload(payload))
     key = payload.get("idempotency_key")
     return RunEvent.objects.create(
         run=run,
@@ -1281,6 +1933,10 @@ def _interaction_accepts_payload(
     interaction: HumanInteraction,
 ) -> bool:
     """Validate an answer against the exact pending interaction it targets."""
+    if kind == ControlKind.WAIT_ANSWER.value and _mapping(interaction, "request_payload").get(
+        "environment"
+    ):
+        return False
     if "interaction_id" in payload and payload["interaction_id"] != _identifier(interaction):
         return False
     if "feedback" in payload:
@@ -1498,7 +2154,12 @@ class DjangoExecutionStore(DjangoAgentStore):
             # Human waits and yielded structural scopes have no worker to lose.
             attempts = attempts.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value).exclude(
                 status=AttemptStatus.WAITING.value,
-                node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                node_run__node_type__in=(
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                ),
             )
         attempt_ids = list(attempts.order_by("started_at", "pk").values_list("pk", flat=True))
         stopped = 0
@@ -1585,11 +2246,18 @@ class DjangoExecutionStore(DjangoAgentStore):
                         next_action="Start Relay again, then relaunch the workflow.",
                     )
                 project = _project_by_id(project_id)
+                number = _integer(project, "next_run_number")
+                Project.objects.filter(pk=project.pk).update(next_run_number=number + 1)
                 run_transition = transition_run(None, "launch")
                 run = Run.objects.create(
                     id=run_id,
                     project=project,
                     workflow_key=request.workflow_key,
+                    number=number,
+                    title=cast(dict, snapshot.launch_defaults.get("actions_context", {})).get(
+                        "run_name", policy.definition.name
+                    ),
+                    source_branch=request.source_branch,
                     status=run_transition.status,
                     source_commit=source_commit,
                     run_branch=branch,
@@ -1599,7 +2267,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                     launcher=request.launcher,
                     entry_point=request.entry_point,
                     recorded_head=source_commit,
-                    recovery_policy=policy.definition.recovery.model_dump(mode="json"),
+                    recovery_policy=snapshot.launch_defaults.get(
+                        "recovery", policy.definition.recovery.model_dump(mode="json")
+                    ),
                 )
                 RunSnapshot.objects.create(run=run, **snapshot.to_dict())
                 _append_event(
@@ -1777,6 +2447,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     "source_commit": _string(run, "source_commit"),
                     "run_branch": _string(run, "run_branch"),
                     "status": _string(run, "status"),
+                    "dispatch_paused": _boolean(run, "dispatch_paused"),
+                    **cast(dict, _mapping(snapshot, "launch_defaults").get("actions_context", {})),
                 },
                 run.entry_point if isinstance(run.entry_point, str) else None,
             )
@@ -1851,8 +2523,20 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not enumerate active runs for scheduling."
             raise PersistenceError(message) from None
 
-    def clean_project_data(self, project_id: str, scope: str) -> dict[str, int]:
-        """Delete one confirmed category for the current project in preservation order."""
+    def clean_project_data(
+        self, project_id: str, scope: str, *, run_id: str | None = None
+    ) -> dict[str, int]:
+        """Clean a confirmed category for the project or one explicitly selected run."""
+        if run_id is not None:
+            # Recovery must not reopen the selected run while its checkout is removed.
+            with recovery_workspace_lock(run_id):
+                return self._clean_project_data(project_id, scope, run_id=run_id)
+        return self._clean_project_data(project_id, scope)
+
+    def _clean_project_data(
+        self, project_id: str, scope: str, *, run_id: str | None = None
+    ) -> dict[str, int]:
+        """Apply the selected cleanup in worktree, ref, then record order."""
         if scope not in {"runs", "worktrees", "branches", "all"}:
             message = "scope must be runs, worktrees, branches, or all."
             raise PermissionFlowError(message)
@@ -1868,7 +2552,18 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             if active.exists():
                 _reject_active_cleanup(project_id)
-            runs = list(Run.objects.filter(project=project).order_by("started_at", "pk"))
+            candidates = Run.objects.filter(project=project)
+            if run_id is not None:
+                # An unknown or foreign run must never fall back to project-wide cleanup.
+                runs = [_require_run(candidates.filter(pk=run_id).first(), run_id)]
+            else:
+                runs = list(candidates.order_by("started_at", "pk"))
+            if run_id is not None and scope == "worktrees":
+                pending_evidence = Artifact.objects.filter(attempt__node_run__run=runs[0]).exclude(
+                    preservation_state=PreservationState.PRESERVED.value
+                )
+                if pending_evidence.exists():
+                    _reject_incomplete_cleanup_evidence(run_id)
             repository = Path(_string(project, "git_root"))
             deleted = {
                 "runs": 0,
@@ -1886,7 +2581,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                             deleted["worktrees"] += 1
                     if _string(run, "worktree_state") != WorktreeState.REMOVED.value:
                         _set_model_field(run, "worktree_state", WorktreeState.REMOVED.value)
-                        run.save(update_fields=("worktree_state",))
+                        with transaction.atomic():
+                            run.save(update_fields=("worktree_state",))
+                            if run_id is not None:
+                                _append_event(
+                                    run,
+                                    "run.cleanup_succeeded",
+                                    EventSource.SYSTEM,
+                                    {"worktree_state": WorktreeState.REMOVED.value},
+                                )
             if scope in {"branches", "all"}:
                 for run in runs:
                     worktree = safe_resolve(worktrees_dir(), _string(run, "worktree_path"))
@@ -1929,7 +2632,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         deleted["artifact_roots"] += 1
                 deleted["runs"] = len(runs)
                 Run.objects.filter(pk__in=[run.pk for run in runs]).delete()
-            if scope == "all":
+            # Process logs are shared across runs; selected-run deletion cannot clear them.
+            if scope == "all" and run_id is None:
                 deleted["logs"] = clear_application_logs()
         except (PermissionFlowError, PersistenceError, ProjectDiscoveryError):
             raise
@@ -1992,6 +2696,9 @@ class DjangoExecutionStore(DjangoAgentStore):
             return removed
 
     def _cleanup_terminal_resources(self, run_id: str) -> None:
+        from relay.execution.masking import release_redactor
+
+        release_redactor(run_id)
         try:
             self.clean_run_resources(run_id)
         except RelayError:
@@ -2073,6 +2780,120 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             self._record_cleanup_failure(run_id, error)
 
+    def run_merge_target(self, run_id: str) -> MergeTarget | None:
+        run = (
+            Run.objects.select_related("project")
+            .filter(pk=run_id, status=RunStatus.COMPLETING.value)
+            .first()
+        )
+        if run is None:
+            return None
+        project = _related(run, "project", Project)
+        return MergeTarget(
+            Path(_string(project, "git_root")),
+            safe_resolve(worktrees_dir(), _string(run, "worktree_path")),
+            run.source_branch if isinstance(run.source_branch, str) else None,
+            _string(run, "run_branch"),
+            _string(run, "recorded_head"),
+            run.merged_commit if isinstance(run.merged_commit, str) else None,
+        )
+
+    def require_completion_evidence(self, run_id: str) -> None:
+        if (
+            Artifact.objects.filter(attempt__node_run__run_id=run_id)
+            .exclude(preservation_state=PreservationState.PRESERVED.value)
+            .exists()
+        ):
+            message = "Relay kept the run working copy because evidence preservation is incomplete."
+            raise PersistenceError(message, context={"run": run_id})
+        run = Run.objects.select_related("project").get(pk=run_id)
+        project = _related(run, "project", Project)
+        repository = Path(_string(project, "git_root"))
+        for attempt in NodeAttempt.objects.filter(
+            node_run__run=run,
+            node_run__node_type__in=(NodeType.AGENT.value, NodeType.COMMAND.value),
+        ):
+            validate_attempt_evidence(
+                repository, run_id, _identifier(attempt), _string(attempt, "starting_head")
+            )
+
+    def record_run_merge(self, run_id: str, commit: str) -> None:
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=run_id)
+            if _string(run, "status") != RunStatus.COMPLETING.value or run.merged_commit:
+                return
+            _set_model_field(run, "merged_commit", commit)
+            run.save(update_fields=("merged_commit",))
+            _append_event(
+                run,
+                "run.merged",
+                EventSource.RUN,
+                {"branch": run.source_branch, "merged_commit": commit},
+            )
+
+    def finish_run_completion(self, run_id: str, error: RelayError | None) -> None:
+        with transaction.atomic():
+            run = Run.objects.select_for_update().get(pk=run_id)
+            if _string(run, "status") != RunStatus.COMPLETING.value:
+                return
+            transition = transition_run(
+                _string(run, "status"),
+                "completion_failed" if error else "completion_succeeded",
+            )
+            _set_model_field(run, "status", transition.status)
+            _set_model_field(run, "ended_at", timezone.now())
+            if error:
+                _set_model_field(run, "failure_code", error.error_code)
+                _set_model_field(run, "failure_summary", error.message)
+                _append_event(run, "error", EventSource.SYSTEM, error.to_envelope())
+            else:
+                _set_model_field(run, "worktree_state", WorktreeState.REMOVED.value)
+                _append_event(
+                    run,
+                    "run.cleanup_succeeded",
+                    EventSource.SYSTEM,
+                    {"worktree_state": WorktreeState.REMOVED.value},
+                )
+            run.save(
+                update_fields=(
+                    "status",
+                    "ended_at",
+                    "failure_code",
+                    "failure_summary",
+                    "worktree_state",
+                )
+            )
+            _append_event(
+                run,
+                transition.event,
+                EventSource.RUN,
+                {
+                    "status": transition.status,
+                    "failure_code": run.failure_code,
+                    "failure_summary": run.failure_summary,
+                },
+            )
+            transaction.on_commit(lambda: self._cleanup_terminal_resources(run_id))
+
+    def _complete_merged_run(self, run_id: str) -> None:
+        try:
+            complete_run_merge(self, run_id)
+        except RelayError as error:
+            self.finish_run_completion(run_id, error)
+        except (DatabaseError, ObjectDoesNotExist):
+            LOGGER.exception(
+                "Could not persist run integration; reconciliation will resume it",
+                extra={"run": run_id},
+            )
+
+    def resume_run_completions(self) -> None:
+        for run_id in (
+            Run.objects.filter(status=RunStatus.COMPLETING.value)
+            .order_by("created_at")
+            .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+        ):
+            self._complete_merged_run(str(run_id))
+
     def append_attempt_event(
         self,
         attempt_id: str,
@@ -2125,6 +2946,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         )
         needs = _string_list(frozen.get("needs", []), field="needs")
         upstream = {}
+        repaired_outputs = {}
         scope_path = _string(node, "scope_path")
         for needed in needs:
             dependency = NodeRun.objects.filter(
@@ -2135,6 +2957,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 message = f"The durable dependency {needed!r} is missing."
                 raise PersistenceError(message, context={"node": scope_path})
             upstream[needed] = _mapping(dependency, "outputs")
+            repair = _mapping(dependency, "frozen_def").get("repair_rule")
+            if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+                repaired_outputs[repair["source"]] = _mapping(dependency, "outputs")
+        # Keep rejected source rows intact; dependents see the accepted verifier's
+        # outputs as needs.review.outputs instead of the original rejection.
+        upstream.update(repaired_outputs)
         metadata = {
             "run_id": _identifier(run),
             "workflow_key": _string(run, "workflow_key"),
@@ -2154,7 +2982,39 @@ class DjangoExecutionStore(DjangoAgentStore):
                 raise PersistenceError(message, context={"node": scope_path})
             metadata["loop_index"] = loop_index
         route = _effective_route(node, snapshot)
-        prompts = _resolved_prompt_contents(snapshot, frozen)
+        agent = frozen.get("bound_agent")
+        prompts = _resolved_prompt_contents(snapshot, agent if isinstance(agent, dict) else frozen)
+        if parent_scope is not None and _string(node, "node_id") in {"fix", "verify"}:
+            # root.relay_repair_review#2 -> root.relay_repair_review. Only an
+            # explicitly marked coordinator can add repair instructions.
+            coordinator_scope = parent_scope.rsplit("#", maxsplit=1)[0]
+            coordinator = NodeRun.objects.filter(run=run, scope_path=coordinator_scope).first()
+            repair = (
+                _mapping(coordinator, "frozen_def").get("repair_rule")
+                if coordinator is not None
+                else None
+            )
+            if isinstance(repair, dict) and isinstance(repair.get("source"), str):
+                source_scope = sibling_scope(coordinator_scope, repair["source"])
+                report_scope = source_scope
+                if isinstance(loop_index, int) and loop_index > 1:
+                    report_scope = f"{coordinator_scope}#{loop_index - 1}.verify"
+                report = NodeRun.objects.filter(run=run, scope_path=report_scope).first()
+                repair_context = {
+                    "source_scope": source_scope,
+                    "round": loop_index,
+                    "max_rounds": _mapping(coordinator, "frozen_def").get("max_iterations"),
+                    "rejected_report_scope": report_scope,
+                    "rejected_outputs": _mapping(report, "outputs") if report is not None else {},
+                    "retained_evidence": str(artifacts_dir() / _identifier(run)),
+                }
+                metadata["repair"] = repair_context
+                instruction = repair.get(f"{_string(node, 'node_id')}_instruction")
+                if isinstance(instruction, str):
+                    prompts = (
+                        *prompts,
+                        instruction + "\nRepair context:\n" + json.dumps(repair_context),
+                    )
         handoff = route.get("handoff_prompt")
         if isinstance(handoff, str):
             # ("Review the code",) becomes ("Review the code", "Continue...").
@@ -2192,7 +3052,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 run = _related(node, "run", Run)
                 resuming = _string(node, "status") == NodeStatus.WAITING.value and _string(
                     node, "node_type"
-                ) in {NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                ) in {
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 if _string(node, "status") in {
                     NodeStatus.RUNNING.value,
                     NodeStatus.SUCCEEDED.value,
@@ -2292,15 +3157,85 @@ class DjangoExecutionStore(DjangoAgentStore):
                 run = Run.objects.select_for_update().get(pk=related_run.pk)
                 project = _related(run, "project", Project)
                 snapshot = _related(run, "snapshot", RunSnapshot)
-                if _string(run, "status") not in {
-                    RunStatus.RUNNING.value,
-                    RunStatus.PAUSED_WAIT.value,
-                }:
+                cleanup_resume = (
+                    _string(run, "status") == RunStatus.CANCELING.value
+                    and _string(node, "node_type")
+                    in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}
+                    and isinstance(claim.attempt, NodeAttempt)
+                    and _string(claim.attempt, "status") == AttemptStatus.WAITING.value
+                )
+                if (
+                    _string(run, "status")
+                    not in {
+                        RunStatus.RUNNING.value,
+                        RunStatus.PAUSED_WAIT.value,
+                    }
+                    and not cleanup_resume
+                ):
                     return ClaimResult(ClaimDisposition.IGNORED)
                 if _string(node, "status") != NodeStatus.DISPATCHED.value:
                     return ClaimResult(ClaimDisposition.IGNORED)
+                if _boolean(run, "dispatch_paused") and not cleanup_resume:
+                    # An already queued token can arrive after the owner's pause.
+                    # Keep its intent and defer admission; the active attempt is untouched.
+                    defer_dispatch(_identifier(run), claim_token)
+                    return ClaimResult(ClaimDisposition.BUSY)
 
                 node_type = _string(node, "node_type")
+                frozen = _mapping(node, "frozen_def")
+                if node_type == NodeType.ACTIONS_JOB.value and not cleanup_resume:
+                    from .actions_automation import admit_queue
+                    from .actions_repository import node_context
+
+                    launch_context = node_context(node)
+                    launch_context["inputs"] = (
+                        frozen.get("caller_inputs") or launch_context["inputs"]
+                    )
+                    launch_context["matrix"] = frozen.get("matrix", {})
+                    launch_context["strategy"] = {"max-parallel": 1}
+                    try:
+                        with transaction.atomic():
+                            admitted = admit_queue(node, launch_context)
+                    except ConfigError as error:
+                        changed = transition_node(_string(node, "status"), "admission_failed")
+                        NodeRun.objects.filter(pk=node.pk).update(
+                            status=changed.status, outcome="failure", conclusion="failure"
+                        )
+                        DispatchClaim.objects.filter(pk=claim.pk).update(
+                            state=DispatchState.CONSUMED.value, consumed_at=timezone.now()
+                        )
+                        _append_event(
+                            run,
+                            changed.event,
+                            EventSource.NODE,
+                            {
+                                "scope_path": node.scope_path,
+                                "status": changed.status,
+                                "error": error.to_envelope(),
+                            },
+                            node=node,
+                        )
+                        self._finish_run_if_terminal(run)
+                        return ClaimResult(ClaimDisposition.IGNORED)
+                    if not admitted:
+                        defer_dispatch(_identifier(run), claim_token)
+                        return ClaimResult(ClaimDisposition.BUSY)
+                from .actions_repository import claim_job_lease
+
+                if not claim_job_lease(node):
+                    defer_dispatch(_identifier(run), claim_token)
+                    return ClaimResult(ClaimDisposition.BUSY)
+                if (
+                    node_type == NodeType.ACTIONS_JOB.value
+                    and not cleanup_resume
+                    and not admit_queue(
+                        node,
+                        launch_context,
+                        activate=True,
+                    )
+                ):
+                    message = "Queue ownership changed inside atomic job admission."
+                    raise PersistenceError(message)  # noqa: TRY301 - abort atomic admission
                 needs_lock = node_type in {NodeType.AGENT.value, NodeType.COMMAND.value}
                 writes = _boolean(node, "writes")
                 decision = decide_admission(
@@ -2322,7 +3257,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     message = "The snapshotted agent route is malformed."
                     raise PersistenceError(message, context={"node": scope_path})  # noqa: TRY301
                 driver_kind = None
-                if node_type == NodeType.AGENT.value:
+                if node_type == NodeType.AGENT.value or (
+                    node_type == NodeType.ACTIONS_STEP.value
+                    and isinstance(frozen.get("bound_agent"), dict)
+                ):
                     driver_kind = (
                         DriverKind.ANTIGRAVITY.value
                         if selected_agent == "antigravity"
@@ -2882,6 +3820,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                 structural = _string(node, "node_type") in {
                     NodeType.LOOP.value,
                     NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    *(
+                        [NodeType.ACTIONS_STEP.value]
+                        if cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
+                        != "relay/human-wait@v1"
+                        else []
+                    ),
                 }
                 transition = transition_node(
                     _string(node, "status"),
@@ -2912,31 +3857,60 @@ class DjangoExecutionStore(DjangoAgentStore):
                         descendants = NodeRun.objects.filter(
                             run=run, scope_path__startswith=_string(node, "scope_path") + "#"
                         ).exclude(node_type=NodeType.LOOP.value, attempts__isnull=True)
-                    if not descendants.filter(
-                        status__in=(
-                            NodeStatus.RUNNING.value,
-                            NodeStatus.WAITING.value,
-                            NodeStatus.DISPATCHED.value,
-                        )
-                    ).exists():
+                    if (
+                        not HumanInteraction.objects.filter(
+                            attempt=attempt, status="pending"
+                        ).exists()
+                        and not UsageRetry.objects.filter(
+                            run=run, state="scheduled", reset_at__gt=timezone.now()
+                        ).exists()
+                        and not descendants.filter(
+                            status__in=(
+                                NodeStatus.RUNNING.value,
+                                NodeStatus.WAITING.value,
+                                NodeStatus.DISPATCHED.value,
+                            )
+                        ).exists()
+                    ):
                         token = self.create_dispatch(_identifier(node))
                         if token is not None:
                             transaction.on_commit(lambda: notify_dispatch(token))
                     return
-                prompt = _mapping(node, "frozen_def").get("prompt", "Owner input required.")
-                interaction = HumanInteraction.objects.create(
-                    run=run,
-                    node_run=node,
+                frozen = _mapping(node, "frozen_def")
+                prompt = (
+                    cast(dict[str, Any], frozen.get("step", {}))
+                    .get("with", {})
+                    .get("prompt", "Owner input required.")
+                    if _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                    else frozen.get("prompt", "Owner input required.")
+                )
+                wait_deadline = (
+                    timezone.now() + timedelta(seconds=timeout_seconds)
+                    if timeout_seconds is not None
+                    else None
+                )
+                if _string(node, "node_type") == NodeType.ACTIONS_STEP.value and isinstance(
+                    attempt.deadline_at, datetime
+                ):
+                    wait_deadline = (
+                        min(wait_deadline, attempt.deadline_at)
+                        if wait_deadline is not None
+                        else attempt.deadline_at
+                    )
+                interaction, _created = HumanInteraction.objects.get_or_create(
                     attempt=attempt,
                     kind=InteractionKind.WAIT.value,
-                    request_payload={"prompt": prompt if isinstance(prompt, str) else str(prompt)},
                     status=InteractionStatus.PENDING.value,
-                    deadline=(
-                        timezone.now() + timedelta(seconds=timeout_seconds)
-                        if timeout_seconds is not None
-                        else None
-                    ),
+                    defaults={
+                        "run": run,
+                        "node_run": node,
+                        "request_payload": {
+                            "prompt": prompt if isinstance(prompt, str) else str(prompt)
+                        },
+                        "deadline": wait_deadline,
+                    },
                 )
+                prompt = _mapping(interaction, "request_payload").get("prompt", prompt)
                 _append_event(
                     run,
                     "wait.requested",
@@ -3114,8 +4088,13 @@ class DjangoExecutionStore(DjangoAgentStore):
         owner_request: bool = False,
     ) -> None:
         policy = _recovery_policy(run)
+        frozen = _mapping(node, "frozen_def")
+        actions_agent = _string(node, "node_type") == NodeType.ACTIONS_STEP.value and isinstance(
+            frozen.get("bound_agent"), dict
+        )
+        explicit_retry = cast(dict, frozen.get("step", {})).get("with", {}).get("auto-retry")
         existing = AutomaticRetry.objects.filter(attempt=attempt).first()
-        if not policy.enabled:
+        if not policy.enabled and not (actions_agent and explicit_retry in (True, "true")):
             return
         if existing is not None and not (
             owner_request and _string(existing, "state") == "canceled"
@@ -3130,9 +4109,13 @@ class DjangoExecutionStore(DjangoAgentStore):
         used = AutomaticRetry.objects.filter(attempt__node_run=node, state="resumed").count()
         state = "scheduled"
         reason = ""
-        if _string(node, "node_type") != NodeType.AGENT.value:
+        if _string(node, "node_type") != NodeType.AGENT.value and not actions_agent:
             state, reason = "blocked", "This failed step has no assigned recovery agent."
-        elif _mapping(node, "frozen_def").get("auto_retry", True) is False:
+        elif (
+            cast(dict, frozen.get("bound_agent", {})).get("auto_retry", True)
+            if actions_agent
+            else frozen.get("auto_retry", True)
+        ) is False:
             state, reason = "blocked", "Automatic recovery is disabled for this agent step."
         elif error_code not in RECOVERABLE_ERRORS or _string(attempt, "stop_reason") in {
             AttemptStopReason.CANCELED.value,
@@ -3172,7 +4155,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         ):
             transition = transition_node(_string(node, "status"), "timeout_routed")
             reason = AttemptStopReason.TIMEOUT.value
-        elif outcome.kind is OutcomeKind.SUCCEEDED:
+        elif outcome.kind is OutcomeKind.SUCCEEDED or outcome.conclusion == "success":
             transition = transition_node(_string(node, "status"), "complete")
             reason = (outcome.stop_reason or AttemptStopReason.COMPLETED).value
         elif outcome.stop_reason == AttemptStopReason.CANCELED:
@@ -3275,11 +4258,59 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def _finish_run_if_terminal(self, run: Run) -> None:
         status = _string(run, "status")
+        if status == RunStatus.CANCELING.value:
+            # Historical loop iteration markers own no attempt. Settle them only
+            # after their canceled coordinator and every child have drained.
+            summaries = NodeRun.objects.filter(
+                run=run,
+                node_type=NodeType.LOOP.value,
+                attempts__isnull=True,
+                status__in=(NodeStatus.RUNNING.value, NodeStatus.WAITING.value),
+            )
+            for summary in summaries:
+                scope = _string(summary, "scope_path")
+                coordinator = scope.rsplit("#", maxsplit=1)[0]
+                if (
+                    coordinator == scope
+                    or not NodeRun.objects.filter(
+                        run=run, scope_path=coordinator, status=NodeStatus.CANCELED.value
+                    ).exists()
+                ):
+                    continue
+                if (
+                    NodeRun.objects.filter(run=run, scope_path__startswith=scope + ".")
+                    .exclude(status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES))
+                    .exists()
+                ):
+                    continue
+                changed = transition_node(_string(summary, "status"), "cancel")
+                _set_model_field(summary, "status", changed.status)
+                summary.save(update_fields=("status",))
+                _append_event(
+                    run,
+                    changed.event,
+                    EventSource.NODE,
+                    {
+                        "scope_path": scope,
+                        "node_type": NodeType.LOOP.value,
+                        "status": NodeStatus.CANCELED.value,
+                    },
+                    node=summary,
+                )
+        actions = (
+            _string(_related(run, "snapshot", RunSnapshot), "semantics_revision") != "relay-v1"
+        )
         active = NodeRun.objects.filter(run=run).exclude(
             status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES)
         )
         if active.exists():
             return
+        if actions and status == RunStatus.PAUSED_WAIT.value:
+            resumed = transition_run(status, "jobs_settled")
+            status = resumed.status
+            _set_model_field(run, "status", status)
+            run.save(update_fields=("status",))
+            _append_event(run, resumed.event, EventSource.RUN, {"status": status})
         if status == RunStatus.CANCELING.value:
             action = (
                 "failure_drain_complete"
@@ -3287,20 +4318,29 @@ class DjangoExecutionStore(DjangoAgentStore):
                 else "cancel_drain_complete"
             )
         elif status == RunStatus.RUNNING.value:
-            failed_node = (
-                NodeRun.objects.filter(run=run, status=NodeStatus.FAILED.value)
-                .order_by("scope_path", "pk")
-                .first()
-            )
+            failure_rows = NodeRun.objects.filter(run=run, status=NodeStatus.FAILED.value)
+            if actions:
+                failure_rows = failure_rows.filter(parent_scope_path__isnull=True)
+            failed_node = failure_rows.order_by("scope_path", "pk").first()
             if failed_node is None:
+                canceled_jobs = (
+                    actions
+                    and NodeRun.objects.filter(
+                        run=run, parent_scope_path__isnull=True, status=NodeStatus.CANCELED.value
+                    ).exists()
+                )
                 # Canceled nodes cannot satisfy the run's all-success guard.
                 if (
-                    NodeRun.objects.filter(run=run)
+                    (
+                        NodeRun.objects.filter(run=run, parent_scope_path__isnull=True)
+                        if actions
+                        else NodeRun.objects.filter(run=run)
+                    )
                     .exclude(status__in=(NodeStatus.SUCCEEDED.value, NodeStatus.SKIPPED.value))
                     .exists()
-                ):
+                ) and not canceled_jobs:
                     return
-                action = "all_succeeded"
+                action = "jobs_canceled" if canceled_jobs else "all_succeeded"
             else:
                 latest_error = (
                     NodeAttempt.objects.filter(node_run=failed_node)
@@ -3327,6 +4367,25 @@ class DjangoExecutionStore(DjangoAgentStore):
                 status = failing.status
                 action = "failure_drain_complete"
         else:
+            return
+        if (
+            action == "all_succeeded"
+            and _string(run, "cleanup_policy") == CleanupPolicy.MERGE_ON_SUCCESS.value
+        ):
+            transition = transition_run(status, "completion_started")
+            _set_model_field(run, "status", transition.status)
+            run.save(update_fields=("status",))
+            _append_event(
+                run,
+                transition.event,
+                EventSource.RUN,
+                {
+                    "status": transition.status,
+                    "branch": run.source_branch,
+                },
+            )
+            run_id = _identifier(run)
+            transaction.on_commit(lambda: self._complete_merged_run(run_id))
             return
         transition = transition_run(status, action)
         if not transition.changed:
@@ -3369,6 +4428,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return
                 node = _related(attempt, "node_run", NodeRun)
                 run = _related(node, "run", Run)
+                actions_node = _string(node, "node_type") in {
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 # Shutdown interruptions must not reopen canceled work. Preserve
                 # completed results, including a successful writer's protected head.
                 if (
@@ -3389,6 +4452,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     if outcome.error_message is not None
                     else None
                 )
+                if actions_node and failure_message:
+                    from relay.execution.masking import redactor
+
+                    failure_message = redactor(_identifier(run)).text(failure_message)
                 now = timezone.now()
                 _set_model_field(attempt, "status", AttemptStatus.TERMINAL.value)
                 _set_model_field(attempt, "ending_head", ending_head)
@@ -3412,8 +4479,47 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _set_model_field(node, "status", node_status)
                 _set_model_field(node, "selected_branch", outcome.selected_branch)
                 _set_model_field(node, "outputs", dict(outcome.outputs))
-                node.save(update_fields=("status", "selected_branch", "outputs"))
-                if outcome.kind is OutcomeKind.SUCCEEDED and _boolean(node, "writes"):
+                if actions_node:
+                    raw = outcome.raw_outcome or (
+                        "cancelled"
+                        if outcome.stop_reason is AttemptStopReason.CANCELED
+                        else "success"
+                        if outcome.kind is OutcomeKind.SUCCEEDED
+                        else "failure"
+                    )
+                    _set_model_field(node, "outcome", raw)
+                    _set_model_field(node, "conclusion", outcome.conclusion or raw)
+                node.save(
+                    update_fields=("status", "selected_branch", "outputs", "outcome", "conclusion")
+                )
+                if (
+                    actions_node
+                    and _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                    and outcome.kind is OutcomeKind.FAILED
+                ):
+                    if (
+                        outcome.usage_limit is not None
+                        and outcome.usage_limit.reset_at is not None
+                        and outcome.usage_limit.reset_at > now
+                    ):
+                        UsageRetry.objects.update_or_create(
+                            run=run,
+                            defaults={
+                                "attempt": attempt,
+                                "reset_at": outcome.usage_limit.reset_at,
+                                "state": "scheduled",
+                                "error_message": None,
+                            },
+                        )
+                    else:
+                        self._schedule_automatic_retry(
+                            run, node, attempt, failure_message or outcome.error_code or stop_reason
+                        )
+                if (
+                    outcome.kind is OutcomeKind.SUCCEEDED
+                    and _boolean(node, "writes")
+                    and not _mapping(node, "frozen_def").get("coordinator")
+                ):
                     _set_model_field(run, "recorded_head", ending_head)
                     run.save(update_fields=("recorded_head",))
                 _append_event(
@@ -3447,10 +4553,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                     node=node,
                     attempt=attempt,
                 )
-                if outcome.kind is OutcomeKind.FAILED and stop_reason not in {
-                    AttemptStopReason.CANCELED.value,
-                    AttemptStopReason.INTERRUPTED.value,
-                }:
+                if (
+                    not actions_node
+                    and outcome.kind is OutcomeKind.FAILED
+                    and stop_reason
+                    not in {
+                        AttemptStopReason.CANCELED.value,
+                        AttemptStopReason.INTERRUPTED.value,
+                    }
+                ):
                     run_status = _string(run, "status")
                     if run_status in {
                         RunStatus.RUNNING.value,
@@ -3518,6 +4629,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                 self._resume_run_after_waits(run)
                 self._finish_run_if_terminal(run)
                 self._wake_enclosing_scope(node, run)
+                if actions_node:
+                    from .actions_repository import release_job_lease
+
+                    release_job_lease(node)
         except PersistenceError:
             raise
         except (DatabaseError, IntegrityError):
@@ -3545,7 +4660,11 @@ class DjangoExecutionStore(DjangoAgentStore):
         connections.close_all()
 
     def _wake_enclosing_scope(self, node: NodeRun, run: Run) -> None:
-        if _string(run, "status") not in {RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value}:
+        if _string(run, "status") not in {
+            RunStatus.RUNNING.value,
+            RunStatus.PAUSED_WAIT.value,
+            RunStatus.CANCELING.value,
+        }:
             return
         parent_scope = _string(node, "scope_path").rsplit(".", maxsplit=1)[0]
         if parent_scope == "root":
@@ -3559,9 +4678,18 @@ class DjangoExecutionStore(DjangoAgentStore):
             run=run,
             scope_path=parent_scope,
             status=NodeStatus.WAITING.value,
-            node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+            node_type__in=(
+                NodeType.LOOP.value,
+                NodeType.SUBWORKFLOW.value,
+                NodeType.ACTIONS_JOB.value,
+                NodeType.ACTIONS_STEP.value,
+            ),
         ).first()
         if parent is not None:
+            if _string(run, "status") == RunStatus.CANCELING.value and _string(
+                parent, "node_type"
+            ) not in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}:
+                return
             token = self.create_dispatch(_identifier(parent))
             if token is not None:
                 transaction.on_commit(lambda: notify_dispatch(token))
@@ -3852,6 +4980,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         NodeType.HUMAN_WAIT.value,
                         NodeType.LOOP.value,
                         NodeType.SUBWORKFLOW.value,
+                        NodeType.ACTIONS_STEP.value,
+                        NodeType.ACTIONS_JOB.value,
                     ),
                 )
                 .order_by("created_at")
@@ -3864,6 +4994,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                 control = self.claim_next_control(str(attempt_id), worker_id)
                 if control is None or not self.apply_control(control.request_id, worker_id):
                     continue
+                node = _related(attempt, "node_run", NodeRun)
+                if control.kind == ControlKind.CANCEL.value and (
+                    _string(node, "node_type") == NodeType.ACTIONS_JOB.value
+                    or (
+                        _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                        and cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
+                        != "relay/human-wait@v1"
+                    )
+                ):
+                    # The exact yielded attempt resumes after its child settles;
+                    # its executor owns registered cleanup and Git preservation.
+                    applied += 1
+                    continue
                 outcome = (
                     ExecutionOutcome(
                         OutcomeKind.FAILED,
@@ -3875,6 +5018,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                 )
                 if control.kind == ControlKind.CANCEL.value:
                     self._discard_attempt_mailbox(attempt)
+                from .actions_repository import human_wait_result
+
+                outputs = human_wait_result(
+                    str(attempt_id),
+                    control.payload,
+                    failed=control.kind == ControlKind.CANCEL.value,
+                    canceled=control.kind == ControlKind.CANCEL.value,
+                )
+                outcome = replace(outcome, outputs=outputs)
                 self.finish_attempt(str(attempt_id), outcome, _string(attempt, "starting_head"))
                 self.release_attempt_lock(str(attempt_id))
                 applied += 1
@@ -3895,7 +5047,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     status=InteractionStatus.PENDING.value,
                     kind=InteractionKind.WAIT.value,
                     deadline__lte=now,
-                    node_run__node_type=NodeType.HUMAN_WAIT.value,
+                    node_run__node_type__in=(
+                        NodeType.HUMAN_WAIT.value,
+                        NodeType.ACTIONS_STEP.value,
+                        NodeType.ACTIONS_JOB.value,
+                    ),
                 )
                 .order_by("deadline")
                 .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
@@ -3933,6 +5089,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                             stop_reason=AttemptStopReason.TIMEOUT,
                             error_code="node_timeout",
                         )
+                    if _string(node, "node_type") == NodeType.ACTIONS_STEP.value:
+                        from .actions_repository import human_wait_result
+
+                        human_wait_result(_identifier(attempt), {}, failed=True)
                     self.finish_attempt(
                         _identifier(attempt), outcome, _string(attempt, "starting_head")
                     )
@@ -3970,7 +5130,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                     NodeAttempt.objects.select_for_update()
                     .filter(
                         status=AttemptStatus.WAITING.value,
-                        node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                        node_run__node_type__in=(
+                            NodeType.LOOP.value,
+                            NodeType.SUBWORKFLOW.value,
+                            NodeType.ACTIONS_JOB.value,
+                            NodeType.ACTIONS_STEP.value,
+                        ),
                         deadline_at__lte=timezone.now(),
                     )
                     .order_by("deadline_at")[:RECONCILE_MAX_ITEMS]
@@ -4002,6 +5167,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         RunStatus.RUNNING.value,
                         RunStatus.PAUSED_WAIT.value,
                     ),
+                    node_run__run__dispatch_paused=False,
                 )
                 .filter(
                     models.Q(enqueued_at__lte=cutoff)
@@ -4056,7 +5222,13 @@ class DjangoExecutionStore(DjangoAgentStore):
             if (
                 not orderly_shutdown
                 and _string(node, "node_type")
-                in {NodeType.HUMAN_WAIT.value, NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                in {
+                    NodeType.HUMAN_WAIT.value,
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 and _string(attempt, "status") == AttemptStatus.WAITING.value
             ):
                 return None
@@ -4177,7 +5349,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                         return ControlResult.ACCEPTED
                 if canceled_recovery and status == RunStatus.FAILED.value:
                     return ControlResult.ACCEPTED
-                if status in {RunStatus.PENDING.value, RunStatus.INTERRUPTED.value}:
+                if status in {
+                    RunStatus.PENDING.value,
+                    RunStatus.INTERRUPTED.value,
+                    RunStatus.COMPLETING.value,
+                }:
                     return ControlResult.STALE
                 if status in {
                     RunStatus.SUCCEEDED.value,
@@ -4322,6 +5498,211 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not find the requested failed-node rerun target."
             raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
 
+    def configure_repair_groups(
+        self, run_id: str, groups: Mapping[str, str], idempotency_key: str
+    ) -> ControlResult:
+        """Fold explicitly selected legacy loops into a paused run's repair panel."""
+        from relay.execution.control import valid_idempotency_key
+
+        if not valid_idempotency_key(idempotency_key):
+            return ControlResult.INVALID
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="run.repairs_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                if not _boolean(run, "dispatch_paused"):
+                    return ControlResult.STALE
+                if len(set(groups.values())) != len(groups):
+                    return ControlResult.INVALID
+                paths = set(groups) | set(groups.values())
+                nodes = {
+                    _string(node, "scope_path"): node
+                    for node in NodeRun.objects.filter(run=run, scope_path__in=paths)
+                }
+                if set(nodes) != paths:
+                    return ControlResult.INVALID
+                for coordinator, source in groups.items():
+                    loop = nodes[coordinator]
+                    if (
+                        _string(loop, "node_type") != NodeType.LOOP.value
+                        or parse_scope_path(coordinator)[-1].iteration is not None
+                        or coordinator == source
+                        or scope_is_ancestor(coordinator, source)
+                        or source in groups
+                        or nodes[source].parent_scope_path != loop.parent_scope_path
+                        or _mapping(loop, "frozen_def").get("repair_rule") is not None
+                    ):
+                        return ControlResult.INVALID
+                _set_model_field(run, "repair_groups", dict(groups))
+                run.save(update_fields=("repair_groups",))
+                _append_event(
+                    run,
+                    "run.repairs_changed",
+                    EventSource.RUN,
+                    {"groups": dict(groups), "idempotency_key": idempotency_key},
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the repair presentation."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def configure_dispatch_pause(
+        self, run_id: str, paused: bool, idempotency_key: str
+    ) -> ControlResult:
+        """Gate future claims while preserving every current attempt and session."""
+        from relay.execution.control import valid_idempotency_key
+
+        if not valid_idempotency_key(idempotency_key):
+            return ControlResult.INVALID
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=run_id).first(), run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="run.dispatch_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                if _string(run, "status") in {
+                    RunStatus.SUCCEEDED.value,
+                    RunStatus.CANCELED.value,
+                    RunStatus.CANCELING.value,
+                }:
+                    return ControlResult.STALE
+                _set_model_field(run, "dispatch_paused", paused)
+                run.save(update_fields=("dispatch_paused",))
+                _append_event(
+                    run,
+                    "run.dispatch_changed",
+                    EventSource.RUN,
+                    {"paused": paused, "idempotency_key": idempotency_key},
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the run's pause setting."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def pending_dispatch_tokens(self, run_id: str) -> tuple[str, ...]:
+        """Wake existing delivery intent immediately after an explicit resume."""
+        try:
+            return tuple(
+                DispatchClaim.objects.filter(
+                    node_run__run_id=run_id,
+                    state=DispatchState.DISPATCHED.value,
+                    node_run__run__dispatch_paused=False,
+                )
+                .order_by("created_at")
+                .values_list("claim_token", flat=True)[:RECONCILE_MAX_ITEMS]
+            )
+        except DatabaseError:
+            message = "Relay could not read the run's paused dispatch tokens."
+            raise PersistenceError(message, context={"run": run_id}) from None
+
+    def unstarted_agent_target(
+        self, run_id: str, scope_path: str, idempotency_key: str
+    ) -> UnstartedAgentTarget | None:
+        """Capture choices for a fresh probe, without holding a lock during I/O."""
+        try:
+            run = _require_run(
+                Run.objects.select_related("project", "snapshot").filter(pk=run_id).first(),
+                run_id,
+            )
+            if RunEvent.objects.filter(
+                run=run, type="node.settings_changed", idempotency_key=idempotency_key
+            ).exists():
+                return None
+            node = NodeRun.objects.filter(run=run, scope_path=scope_path).first()
+            if (
+                node is None
+                or not _boolean(run, "dispatch_paused")
+                or _string(run, "status")
+                in {RunStatus.SUCCEEDED.value, RunStatus.CANCELED.value, RunStatus.CANCELING.value}
+                or _string(node, "node_type") != NodeType.AGENT.value
+                or _string(node, "status")
+                not in {
+                    NodeStatus.PENDING.value,
+                    NodeStatus.READY.value,
+                    NodeStatus.DISPATCHED.value,
+                }
+                or NodeAttempt.objects.filter(node_run=node).exists()
+            ):
+                message = "Pause new steps before changing an agent step that has never started."
+                raise PermissionFlowError(message, context={"run": run_id, "node": scope_path})
+            return UnstartedAgentTarget(
+                run_id,
+                _identifier(node),
+                scope_path,
+                _string(_related(run, "project", Project), "git_root"),
+                _effective_route(node, _related(run, "snapshot", RunSnapshot)),
+                _mapping(node, "retry_options"),
+            )
+        except DatabaseError:
+            message = "Relay could not read the unstarted agent step's settings."
+            raise PersistenceError(message, context={"run": run_id, "node": scope_path}) from None
+
+    def save_unstarted_agent_settings(
+        self,
+        target: UnstartedAgentTarget,
+        options: Mapping[str, object],
+        idempotency_key: str,
+    ) -> ControlResult:
+        """Recheck pause, admission, and prior choices after the provider probe."""
+        try:
+            with transaction.atomic():
+                run = _require_run(
+                    Run.objects.select_for_update().filter(pk=target.run_id).first(), target.run_id
+                )
+                if RunEvent.objects.filter(
+                    run=run, type="node.settings_changed", idempotency_key=idempotency_key
+                ).exists():
+                    return ControlResult.ALREADY_APPLIED
+                node = (
+                    NodeRun.objects.select_for_update()
+                    .filter(pk=target.node_run_id, run=run)
+                    .first()
+                )
+                if (
+                    node is None
+                    or not _boolean(run, "dispatch_paused")
+                    or _string(run, "status")
+                    in {
+                        RunStatus.SUCCEEDED.value,
+                        RunStatus.CANCELED.value,
+                        RunStatus.CANCELING.value,
+                    }
+                    or _string(node, "status")
+                    not in {
+                        NodeStatus.PENDING.value,
+                        NodeStatus.READY.value,
+                        NodeStatus.DISPATCHED.value,
+                    }
+                    or _mapping(node, "retry_options") != target.options
+                    or NodeAttempt.objects.filter(node_run=node).exists()
+                ):
+                    return ControlResult.STALE
+                _set_model_field(node, "retry_options", dict(options))
+                node.save(update_fields=("retry_options",))
+                _append_event(
+                    run,
+                    "node.settings_changed",
+                    EventSource.NODE,
+                    {
+                        "scope_path": target.scope_path,
+                        "options": dict(options),
+                        "idempotency_key": idempotency_key,
+                    },
+                    node=node,
+                )
+                return ControlResult.ACCEPTED
+        except DatabaseError:
+            message = "Relay could not save the unstarted agent step's settings."
+            raise PersistenceError(message, context={"run": target.run_id}) from None
+
     def configure_recovery(self, run_id: str, enabled: bool, idempotency_key: str) -> ControlResult:
         """Record an owner policy override without modifying the launch snapshot."""
         from relay.execution.control import valid_idempotency_key
@@ -4384,7 +5765,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         with transaction.atomic():
             run = Run.objects.select_for_update().get(pk=run_id)
             if (
-                not _recovery_policy(run).enabled
+                _boolean(run, "dispatch_paused")
+                or not _recovery_policy(run).enabled
                 or _string(run, "status") != RunStatus.FAILED.value
             ):
                 return None
@@ -4430,6 +5812,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             .filter(
                 state__in=PENDING_RECOVERY_STATES,
                 attempt__node_run__run__status=RunStatus.FAILED.value,
+                attempt__node_run__run__dispatch_paused=False,
             )
             .order_by("created_at", "pk")[:RECONCILE_MAX_ITEMS]
         )
@@ -4489,6 +5872,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 retry is None
                 or latest is None
                 or _identifier(latest) != target.attempt_id
+                or _boolean(run, "dispatch_paused")
                 or not _recovery_policy(run).enabled
                 or _string(run, "status") != RunStatus.FAILED.value
                 or Instance.objects.filter(shutdown_requested=True).exists()
@@ -4514,7 +5898,10 @@ class DjangoExecutionStore(DjangoAgentStore):
         due = list(
             UsageRetry.objects.select_related("attempt__node_run")
             .filter(
-                state="scheduled", reset_at__lte=timezone.now(), run__status=RunStatus.FAILED.value
+                state="scheduled",
+                reset_at__lte=timezone.now(),
+                run__status=RunStatus.FAILED.value,
+                run__dispatch_paused=False,
             )
             .order_by("reset_at", "pk")[:RECONCILE_MAX_ITEMS]
         )
@@ -4625,7 +6012,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     )
                     .first()
                 )
-                if retry is None or _string(run, "status") != RunStatus.FAILED.value:
+                if (
+                    retry is None
+                    or _boolean(run, "dispatch_paused")
+                    or _string(run, "status") != RunStatus.FAILED.value
+                ):
                     return False
                 return self.activate_recovery(target, idempotency_key, preserve_recovery_note=True)
         except (DatabaseError, ObjectDoesNotExist):

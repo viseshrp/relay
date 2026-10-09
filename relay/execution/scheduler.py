@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
 from relay.workflows.expressions import evaluate_expression
 from relay.workflows.graph import CompiledGraph
-from relay.workflows.schema import NodeDefinition
+from relay.workflows.repairs import effective_dependency_outputs
+from relay.workflows.schema import ActionsJobNode, NodeDefinition
 from relay.workflows.scope import node_scope, parse_scope_path
 
 from .state import NodeStatus
@@ -80,6 +81,35 @@ def evaluate_eligibility(
     expression_context: Mapping[str, object],
 ) -> Eligibility:
     """Decide readiness from named dependencies without scanning other nodes."""
+    if isinstance(node, ActionsJobNode):
+        from relay.workflows.actions.expressions import condition
+
+        terminal = {"succeeded", "failed", "skipped", "canceled"}
+        if any(dependency_statuses.get(item) not in terminal for item in node.needs):
+            return Eligibility(None, "job dependencies are still active")
+        names = {
+            "succeeded": "success",
+            "failed": "failure",
+            "canceled": "cancelled",
+            "skipped": "skipped",
+        }
+        needs = cast(dict, expression_context.get("needs", {}))
+        values = {
+            "github": cast(dict, expression_context.get("run", {})).get("github", {}),
+            "inputs": expression_context.get("inputs", {}),
+            "vars": cast(dict, expression_context.get("run", {})).get("vars", {}),
+            "needs": {
+                key: {**needs.get(key, {}), "result": names[status]}
+                for key, status in dependency_statuses.items()
+            },
+            "_statuses": [names[status] for status in dependency_statuses.values()],
+            "_cancelled": cast(dict, expression_context.get("run", {})).get("status")
+            in {"canceling", "canceled"},
+        }
+        return Eligibility(
+            "dependencies_satisfied" if condition(node.job.get("if"), values) else "guard_false",
+            "the job condition was evaluated",
+        )
     unavailable = {
         NodeStatus.FAILED.value,
         NodeStatus.CANCELED.value,
@@ -182,7 +212,10 @@ def advance_run_schedule(
             )
         )
     schedule = store.load_run_schedule(run_id, seeds)
-    if schedule.run_metadata.get("status") not in {"running", "paused_wait"}:
+    if (
+        schedule.run_metadata.get("status") not in {"running", "paused_wait"}
+        or schedule.run_metadata.get("dispatch_paused") is True
+    ):
         return ()
     rows = dict(schedule.nodes)
     entry_root = entry_node_for_scope(schedule.entry_point, None)
@@ -259,8 +292,11 @@ def advance_run_schedule(
                     {
                         "inputs": dict(schedule.inputs),
                         "needs": {
-                            needed: {"outputs": dict(item.outputs)}
-                            for needed, item in dependencies.items()
+                            needed: {"outputs": dict(outputs)}
+                            for needed, outputs in effective_dependency_outputs(
+                                graph.nodes,
+                                {needed: item.outputs for needed, item in dependencies.items()},
+                            ).items()
                         },
                         "run": dict(schedule.run_metadata),
                         "loop": {},

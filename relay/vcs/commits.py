@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from relay.constants import WORKFLOW_DOCUMENT_NAMES
 from relay.errors import CommitValidationError, GitError
 
-from .cleanliness import execution_changes, status_porcelain
+from .cleanliness import execution_changes, execution_status, status_porcelain
 from .git import git_stdout, run_git
 
 
@@ -77,6 +78,45 @@ def validate_writer_result(
             ),
         )
     return CommitResult(starting_head, ending_head, len(commits))
+
+
+def accept_job_result(
+    worktree: Path, starting_head: str, job_id: str, *, snapshot_files: frozenset[str] = frozenset()
+) -> CommitResult:
+    """Commit changed code at a successful Actions job boundary, or accept a no-op."""
+    if not is_ancestor(worktree, starting_head, current_head(worktree)):
+        message = "A job moved HEAD outside its starting commit ancestry."
+        raise CommitValidationError(message)
+    changes = [
+        change
+        for change in execution_status(worktree, snapshot_files=snapshot_files)
+        if not change.allowed
+    ]
+    if any(
+        change.path in WORKFLOW_DOCUMENT_NAMES
+        or change.path in snapshot_files
+        or "U" in change.status
+        for change in changes
+    ):
+        message = "Staged workflow evidence or unresolved conflicts block job acceptance."
+        raise CommitValidationError(message)
+    if changes:
+        paths = sorted(
+            {path for change in changes for path in (change.path, change.original_path) if path}
+        )
+        run_git(worktree, ["add", "--all", "--", *paths])
+        run_git(worktree, ["commit", "-m", f"Relay: complete job {job_id}"])
+    # Retained report and captured source exemptions remain unstaged.
+    if execution_changes(worktree, snapshot_files=snapshot_files):
+        message = "A job left uncommitted code after its checkpoint."
+        raise CommitValidationError(message)
+    ending_head = current_head(worktree)
+    if not is_ancestor(worktree, starting_head, ending_head):
+        message = "A job moved HEAD outside its starting commit ancestry during acceptance."
+        raise CommitValidationError(message)
+    return CommitResult(
+        starting_head, ending_head, len(commits_between(worktree, starting_head, ending_head))
+    )
 
 
 def validate_reader_result(worktree: Path, starting_head: str) -> None:

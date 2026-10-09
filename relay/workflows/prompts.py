@@ -10,7 +10,7 @@ from pathlib import Path
 from relay.errors import PathSafetyError, PromptResolutionError
 from relay.paths import global_prompts_dir, safe_resolve
 
-from .schema import AgentNode, GlobalPrompt, LocalPrompt, LoopNode, NodeDefinition
+from .schema import ActionsJobNode, AgentNode, GlobalPrompt, LocalPrompt, LoopNode, NodeDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +32,8 @@ def iter_agent_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[AgentNode]
     for node in nodes.values():
         if isinstance(node, AgentNode):
             yield node
+        elif isinstance(node, ActionsJobNode):
+            yield from node.bound_agents.values()
         elif isinstance(node, LoopNode):
             yield from iter_agent_nodes(node.body)
 

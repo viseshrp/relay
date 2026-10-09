@@ -1,0 +1,26 @@
+name: Plan, approve, implement
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What change should the agent plan and implement?
+        required: true
+        default: Add a short explanation of the main code folder to the README.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/plan.md
+        prompt: ${{ inputs.task }}
+    - uses: relay/human-wait@v1
+      with:
+        prompt: Review the plan, then approve implementation.
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/implement.md
+        prompt: ${{ inputs.task }}

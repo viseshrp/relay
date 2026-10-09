@@ -9,36 +9,23 @@
 [![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 [![Typing: ty](https://img.shields.io/badge/typing-checked-blue.svg)](https://docs.astral.sh/ty/)
 
-Relay turns coding-agent runbooks into local, durable workflows. It keeps the
-workflow definition in Git, runs each attempt in an isolated worktree, and
-puts authoring, launch, live output, human decisions, and recovery in one
-loopback-only web application.
+Relay lets you draw, edit, and run coding-agent workflows in your browser.
 
-## Status
+![A completed Ask an agent run in Relay](docs/images/run-page.png)
 
-Relay Phase 1 is implemented but unreleased. All five supported agents passed
-authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
-Live provider execution on Linux and Windows remains unverified. Exact
-versions, model selectors, artifact hashes, cleanup results, and remaining
-verification limits are recorded in [`certification/`](certification/README.md).
-The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
-contracts at the first release.
+## Quick start
 
-Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, model fallback, automatic merge, or
-bundled workflow templates.
-Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
-eligible agent failures up to twice with the same model and settings, retained
-reports, and a separate repair instruction. It stops on unsafe failures or an
-exhausted budget.
-Confirmed provider usage resets can resume a failed stage automatically while
-preserving its captured model, effort, and prompts. Unsupported or missing reset
-information remains visible for the owner. See
-[Provider usage resets](docs/execution.md#provider-usage-resets).
-An owner can retry a stopped agent step with another installed tool and exact
-model. Relay validates the selection and keeps completed steps, prompts, and
-the original snapshot. See
-[Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
+1. Install Relay: `pip install relay-app`.
+2. Open a terminal in your Git repository and run `relay up`.
+3. Create your local password, check the agent connections, and select
+   **Start from a template › Ask an agent**.
+4. Press **Run workflow** with the sample question. Follow the job and its
+   conversation on the run page.
+
+You need Python 3.10 or newer, Git, and one supported coding agent installed
+and signed in. The setup screen gives install links and sign-in commands.
+Relay opens your browser and creates the blank project files on first start.
+To open the local app without a password, use `relay up --no-login`.
 
 ## Requirements
 
@@ -47,8 +34,10 @@ the original snapshot. See
 - macOS, Linux, or Windows
 - At least one supported coding agent with its own credentials for agent nodes
 
-End users do not need Node.js. Contributors who build the browser application
-need a Node version supported by Vite; see [CONTRIBUTING.md](CONTRIBUTING.md).
+The installed browser application runs without Node.js. Local JavaScript
+actions require an installed Node 20 or 24 runtime matching their metadata.
+Contributors who build the browser application need a Node version supported
+by Vite; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Installation
 
@@ -59,21 +48,13 @@ pip install relay-app
 `pipx install relay-app` and `uv tool install relay-app` provide isolated CLI
 installations.
 
-## Quick start
+## Administration
 
-Run these commands from a clean Git repository:
-
-```bash
-relay init
-relay doctor
-relay up
-```
-
-`relay init` creates only `.relay/workflows/workflow.yaml` and
-`.relay/prompts/prompt.md`. `relay up` binds to loopback and opens the browser.
-In **Workflows**, choose **New workflow**, add stages and instructions, save,
-and start work. **Runs** shows progress, readable output, and requests for your
-input.
+Open **Settings** in the browser to choose default agents, models, thinking
+effort, shared commands, environment variables, recovery, and cleanup for every
+project. Projects and workflows can override these choices. Server and login
+changes show when a restart is needed.
+See the [settings inventory](docs/projects-and-storage.md#global-defaults-and-project-overrides).
 
 Login is required by default. Use `relay up --no-login` to open the local app
 without credentials. The saved `login_required` setting keeps this choice for
@@ -91,6 +72,20 @@ for the launch rules.
 packaged-asset, and registry checks pass and at least one supported agent is
 ready. Missing optional agents remain visible in the report. A failed core
 check or no ready agent returns exit code 6.
+
+Administration commands show readable text by default. Use `relay doctor
+--json`, `relay project list --json`, `relay project relink OLD_PATH NEW_PATH
+--json`, or `relay data clean --json` to keep their previous sorted JSON
+output. `relay --json COMMAND` also selects that output for a nested command.
+Relay errors show `Error: <message>` and, when available,
+`Next: <next_action>`; `--json` keeps the previous error envelope and exit
+codes. Initialization and startup keep their previous text in `--json` mode.
+
+`relay doctor` uses the launch cleanliness checker for untouched starter files
+and root reports. It lists allowed changes as a warning. Unrelated edits and
+staged files still fail the check. Workflow-specific source exemptions are
+validated during launch for the selected workflow; `doctor` does not select
+a workflow or certify its inputs and model routes.
 
 ## Command reference
 
@@ -126,6 +121,7 @@ Usage: relay [OPTIONS] COMMAND [ARGS]...
 
 Options:
   -v, --version  Show the version and exit.
+  --json         Keep the existing machine-readable output.
   -h, --help     Show this message and exit.
 
 Commands:
@@ -143,6 +139,7 @@ Usage: relay data clean [OPTIONS]
   Delete confirmed local run data and retained Git state.
 
 Options:
+  --json       Keep the existing machine-readable output.
   --runs       Delete run records, snapshots, and artifacts.
   --worktrees  Remove preserved run worktrees.
   --branches   Delete retained run and attempt refs.
@@ -154,6 +151,44 @@ Options:
 The CLI handles setup and administration. Workflow launch, permissions,
 elicitations, waits, cancellation, resume, rerun, history, artifacts, and
 cleanup are browser actions.
+
+## Status
+
+Relay Phase 1 is implemented but unreleased. All five supported agents passed
+authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
+Live provider execution on Linux and Windows remains unverified. Exact
+versions, model selectors, artifact hashes, cleanup results, and remaining
+verification limits are recorded in [`certification/`](certification/README.md).
+The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
+contracts at the first release.
+
+Phase 1 is local and single-owner. It contains no remote workers, containers,
+Redis, Postgres, model fallback, or automatic merge. Six
+[starter workflows](docs/workflows.md#starter-workflows) copy into the project
+when the owner chooses one; runs use the saved project files.
+Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries
+eligible agent failures up to twice with the same model and settings, retained
+reports, and a separate repair instruction. It stops on unsafe failures or an
+exhausted budget.
+Workflows use the [Actions jobs and steps dialect](docs/workflows.md), with
+serial matrices, local reusable workflows and actions, scoped secrets,
+environment approvals, caches, artifacts, and opt-in local triggers. Each job
+shares one workspace across its ordered steps and commits accepted changes at
+its boundary. Bounded repair steps inspect retained reports before continuing.
+See the [language compatibility record](docs/workflow-language-compatibility.md)
+for the source comparison, feature coverage, and supported limits.
+Confirmed provider usage resets can resume a failed stage automatically while
+preserving its captured model, effort, and prompts. Unsupported or missing reset
+information remains visible for the owner. See
+[Provider usage resets](docs/execution.md#provider-usage-resets).
+An owner can retry a stopped agent step with another installed tool and exact
+model. Relay validates the selection and keeps completed steps, prompts, and
+the original snapshot. See
+[Failure and recovery](docs/execution.md#failure-cancellation-and-recovery).
+Use **Pause new steps** to let current work finish while holding the next
+stage. Change an unstarted agent's settings, then resume explicitly; completed
+work and captured instructions stay saved. See
+[Pause new steps](docs/execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 ## Architecture
 
@@ -171,14 +206,19 @@ artifacts, and worktrees use operating-system-specific user directories.
 
 Relay binds to loopback, emits no product telemetry, and stores owner-visible
 run history until explicit deletion. Agent and command processes inherit the
-worker environment. Relay does not mask environment values or manage agent
-credentials, so prompts, output, logs, and commands may contain sensitive
-data.
+worker environment. Declared workflow secrets and `add-mask` values are
+redacted from public run output. Arbitrary inherited variables and retained
+files are not automatically redacted. Provider authentication remains with
+the installed agents. See
+[variables and secrets](docs/workflows.md#variables-secrets-and-environments).
 
 Relay rejects staged changes and unrelated edits before launch. Validated
 workflow sources and supported generated documents follow the
-[launch rules](docs/git-and-artifacts.md#clean-launch). Relay never merges a
-run branch into the launch branch.
+[launch rules](docs/git-and-artifacts.md#clean-launch). By default, run branches
+remain separate. Choose **Merge into the active branch, then delete working
+copies** in Settings or Run workflow to integrate successful runs. This requires
+a completely clean checkout on the branch selected at launch and a fast-forward
+merge. See [Run integration](docs/git-and-artifacts.md#opt-in-run-integration).
 
 ## Development
 

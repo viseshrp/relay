@@ -119,7 +119,7 @@ class WireAgent:
         params = message.get("params")
         params = params if isinstance(params, dict) else {}
         trace(message)
-        if request_id == "owner-permission" and "result" in message:
+        if request_id in {"owner-permission", "owner-question"} and "result" in message:
             self.reply(self.pending_prompt, {"stopReason": "end_turn"})
             self.pending_prompt = None
             return
@@ -199,6 +199,19 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "configuration-starters":
+                blocks = params.get("prompt", [])
+                text = (
+                    "\n".join(
+                        str(block.get("text", "")) for block in blocks if isinstance(block, dict)
+                    )
+                    if isinstance(blocks, list)
+                    else ""
+                )
+                if "Edit only REVIEW.md." in text:
+                    (Path(self.cwd) / "REVIEW.md").write_text(
+                        "Ready: Yes\nNo blocking findings in the fake review.\n", encoding="utf-8"
+                    )
             if self.mode == "configuration-recovery":
                 blocks = params.get("prompt", [])
                 text = (
@@ -237,6 +250,28 @@ class WireAgent:
                     self.update({"sessionUpdate": "usage_update", "used": 10, "size": 100})
                 self.error(
                     request_id, RequestError.internal_error(data={"errorKind": "rate_limit"})
+                )
+                return
+            if self.mode == "elicitation" and self.prompt_count == 1:
+                self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
+                emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "owner-question",
+                        "method": "elicitation/create",
+                        "params": {
+                            "sessionId": "scratch-session",
+                            "message": "Which component should I check?",
+                            "mode": "form",
+                            "requestedSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "component": {"type": "string", "title": "Component"}
+                                },
+                                "required": ["component"],
+                            },
+                        },
+                    }
                 )
                 return
             if self.mode == "feedback" and self.prompt_count == 1:

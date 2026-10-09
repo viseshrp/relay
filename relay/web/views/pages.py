@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import asdict
+from pathlib import Path
 
 from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
@@ -11,16 +12,26 @@ from django.views.decorators.http import require_GET
 from relay.agents.discovery import discover_agents
 from relay.agents.registry import load_registry
 from relay.config import load_config
-from relay.constants import API_MAX_PAGE, DATABASE_INTEGER_MAX, REVIEW_PREVIEW_MAX_BYTES
-from relay.errors import ConfigError, RelayError
-from relay.execution.state import RunStatus
-from relay.projects.service import list_registered_projects
+from relay.constants import (
+    API_MAX_PAGE,
+    DATABASE_INTEGER_MAX,
+    MAX_LOOP_ITERATIONS,
+    REVIEW_PREVIEW_MAX_BYTES,
+)
+from relay.errors import ConfigError, GitError, ProjectDiscoveryError, RelayError
+from relay.execution.preflight import inspect_launch_cleanliness
+from relay.execution.relaunch import read_previous_inputs
+from relay.execution.state import CleanupPolicy, RunStatus
+from relay.owner_settings import effective_config
+from relay.projects.folders import browse_folders
+from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
     read_workflow_document,
     workflow_handoff_warnings,
 )
 from relay.workflows.loader import load_workflow_text, load_workflow_tree
+from relay.workflows.starters import starter_inventory
 
 from ..auth import owner_required
 from ..repositories import (
@@ -29,6 +40,7 @@ from ..repositories import (
     DjangoReadStore,
     DjangoWorkflowStore,
 )
+from ..settings_repository import DjangoSettingsStore
 from . import api_errors, canonical_record_id, canonical_uuid, current_project
 
 
@@ -70,6 +82,27 @@ def _page_parameters(request: HttpRequest) -> tuple[int, int]:
     return since, _page_limit(request)
 
 
+def _attempt_parameter(request: HttpRequest) -> int | None:
+    value = request.GET.get("attempt")
+    if value is None:
+        return None
+    number = _nonnegative_int(value, field="attempt", default=0, maximum=DATABASE_INTEGER_MAX)
+    if number == 0:
+        message = "attempt must be at least 1."
+        raise ConfigError(message)
+    return number
+
+
+@api_errors
+@owner_required
+@require_GET
+def project_folders(request: HttpRequest) -> HttpResponse:
+    listing = browse_folders(
+        request.GET.get("path"), since=request.GET.get("since", ""), limit=_page_limit(request)
+    )
+    return JsonResponse(asdict(listing))
+
+
 @api_errors
 @owner_required
 @require_GET
@@ -82,9 +115,81 @@ def projects(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def attention(request: HttpRequest) -> HttpResponse:
+    value = request.GET.get("since")
+    since = (
+        _nonnegative_int(value, field="since", default=0, maximum=DATABASE_INTEGER_MAX)
+        if value is not None
+        else None
+    )
+    return JsonResponse(DjangoReadStore().attention(since))
+
+
+@api_errors
+@owner_required
+@require_GET
+def dashboard(request: HttpRequest) -> HttpResponse:
+    cursor = request.GET.get("cursor")
+    if cursor is not None:
+        cursor = canonical_uuid(cursor, resource="dashboard cursor")
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=10)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    return JsonResponse(
+        DjangoReadStore().dashboard(
+            section=request.GET.get("section"),
+            cursor=cursor,
+            limit=limit,
+            query_text=request.GET.get("query", ""),
+        )
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
-    return JsonResponse({"project": asdict(project)})
+    return JsonResponse(
+        {
+            "project": asdict(project),
+            "launch_source": asdict(project_launch_source(Path(project.git_root))),
+            "cleanup_policy": effective_config(DjangoSettingsStore(), project.id).cleanup_policy,
+        }
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
+def workflow_templates(request: HttpRequest) -> HttpResponse:
+    del request
+    return JsonResponse({"templates": starter_inventory()})
+
+
+@api_errors
+@owner_required
+@require_GET
+def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
+    from relay.config import validate_config
+
+    relay_root, project = current_project(request)
+    policy = validate_config(
+        {
+            "cleanup_policy": request.GET.get(
+                "cleanup_policy", effective_config(DjangoSettingsStore(), project.id).cleanup_policy
+            )
+        }
+    ).cleanup_policy
+    strict = policy == CleanupPolicy.MERGE_ON_SUCCESS.value
+    from relay.workflows.actions.language import load as load_actions
+    from relay.workflows.loader import load_workflow, resolve_workflow_path
+
+    source = resolve_workflow_path(relay_root / "workflows", key)
+    load_actions(load_workflow(source).text, source=source)
+    preview = inspect_launch_cleanliness(relay_root, key, merge_on_success=strict)
+    return JsonResponse(asdict(preview))
 
 
 @api_errors
@@ -115,6 +220,7 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
                 )
     except RelayError:
         warnings = []
+    repair_defaults = effective_config(DjangoSettingsStore(), project.id).workflow_defaults.repairs
     return JsonResponse(
         {
             "yaml": document.yaml,
@@ -122,6 +228,12 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
             "base_hash": document.base_hash,
             "project": asdict(project),
             "warnings": warnings,
+            "repair_defaults": {
+                "max_rounds": repair_defaults.max_rounds,
+                "max_allowed_rounds": MAX_LOOP_ITERATIONS,
+                "fix_instruction": repair_defaults.fix_instruction,
+                "verify_instruction": repair_defaults.verify_instruction,
+            },
         }
     )
 
@@ -130,7 +242,14 @@ def workflow(request: HttpRequest, key: str) -> HttpResponse:
 @owner_required
 @require_GET
 def agents(request: HttpRequest) -> HttpResponse:
-    del request
+    owner_config = load_config()
+    try:
+        _root, project = current_project(request)
+    except (ProjectDiscoveryError, GitError):
+        if "project" in request.GET:
+            raise
+    else:
+        owner_config = effective_config(DjangoSettingsStore(), project.id)
     registry = load_registry()
     observations = DjangoAgentStore().list_model_observations()
     grouped = {}
@@ -182,7 +301,8 @@ def agents(request: HttpRequest) -> HttpResponse:
     return JsonResponse(
         {
             "agents": rows,
-            "preferences": list(load_config().agent_preferences),
+            "preferences": list(owner_config.agent_preferences),
+            "defaults": owner_config.workflow_defaults.model_dump(mode="json"),
             "registry": {
                 "source_url": registry.source_url,
                 "fetched_at": registry.fetched_at.isoformat(),
@@ -209,13 +329,29 @@ def runs(request: HttpRequest) -> HttpResponse:
     since = request.GET.get("since")
     if since is not None:
         since = canonical_uuid(since, resource="run")
+    filters = {key: request.GET.get(key) for key in ("workflow", "branch", "query")}
+    if any(value is not None and len(value) > 1024 for value in filters.values()):
+        message = "Run filters must be 1024 characters or fewer."
+        raise ConfigError(message)
     records, next_value = DjangoReadStore().list_runs(
         project_id=project_id,
         status=status,
         since=since,
         limit=limit,
+        workflow=filters["workflow"],
+        branch=filters["branch"],
+        query_text=filters["query"],
     )
     return JsonResponse({"runs": records, "next": next_value})
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_launch_inputs(request: HttpRequest, run_id: str) -> HttpResponse:
+    del request
+    run_id = canonical_uuid(run_id, resource="run")
+    return JsonResponse(asdict(read_previous_inputs(DjangoReadStore(), run_id)))
 
 
 @api_errors
@@ -247,8 +383,44 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
     since, limit = _page_parameters(request)
-    events, next_value = DjangoReadStore().page_events(run_id, since, limit)
+    events, next_value = DjangoReadStore().page_events(
+        run_id,
+        since,
+        limit,
+        scope_path=request.GET.get("job"),
+        attempt_number=_attempt_parameter(request),
+        latest=request.GET.get("latest") == "true",
+        before=_nonnegative_int(
+            request.GET.get("before"), field="before", default=0, maximum=DATABASE_INTEGER_MAX
+        )
+        if request.GET.get("before") is not None
+        else None,
+    )
     return JsonResponse({"events": events, "next": next_value})
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_job(request: HttpRequest, run_id: str) -> HttpResponse:
+    since, limit = _page_parameters(request)
+    scope = request.GET.get("job")
+    if not scope:
+        message = "job must identify a job in this run."
+        raise ConfigError(message)
+    job, next_value = DjangoReadStore().run_job(
+        canonical_uuid(run_id, resource="run"), scope, since=since, limit=limit
+    )
+    return JsonResponse({"job": job, "next": next_value})
+
+
+@api_errors
+@owner_required
+@require_GET
+def run_workflow(request: HttpRequest, run_id: str) -> HttpResponse:
+    del request
+    workflow = DjangoReadStore().run_workflow(canonical_uuid(run_id, resource="run"))
+    return JsonResponse(workflow)
 
 
 @api_errors
@@ -310,8 +482,13 @@ def artifact_preview(request: HttpRequest, artifact_id: str) -> HttpResponse:
 @owner_required
 @require_GET
 def run_changes(request: HttpRequest, run_id: str) -> HttpResponse:
-    del request
-    return JsonResponse(DjangoReadStore().run_changes(canonical_uuid(run_id, resource="run")))
+    return JsonResponse(
+        DjangoReadStore().run_changes(
+            canonical_uuid(run_id, resource="run"),
+            scope_path=request.GET.get("job"),
+            attempt_number=_attempt_parameter(request),
+        )
+    )
 
 
 @api_errors
@@ -332,10 +509,12 @@ __all__ = [
     "agents",
     "api_not_found",
     "artifact",
+    "project_folders",
     "projects",
     "run_artifacts",
     "run_detail",
     "run_events",
+    "run_workflow",
     "runs",
     "workflow",
 ]
