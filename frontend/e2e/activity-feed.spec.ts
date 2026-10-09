@@ -124,7 +124,9 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
   await expect(feed.getByRole("article")).toHaveCount(1);
   await feed.getByRole("textbox", { name: "Search activity", exact: true }).fill("missing phrase");
   await expect(feed.getByText("No messages match these filters.", { exact: true })).toBeVisible();
-  await page.getByText("Advanced diagnostics and saved files", { exact: true }).click();
+  const diagnostics = page.locator(".MuiAccordion-root").filter({ has: page.getByRole("button", { name: "Advanced diagnostics and saved files", exact: true }) });
+  await diagnostics.getByRole("button", { name: "Advanced diagnostics and saved files", exact: true }).click();
+  await expect(diagnostics.locator(".MuiCollapse-root")).toHaveClass(/MuiCollapse-entered/);
   await expect(page.getByRole("heading", { name: "Event history", exact: true })).toBeHidden();
   await page.getByLabel("Raw event details", { exact: true }).locator(":scope > summary").click();
   await expect(page.getByRole("heading", { name: "Event history", exact: true })).toBeVisible();
