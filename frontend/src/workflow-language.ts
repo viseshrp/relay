@@ -14,6 +14,10 @@ export interface LanguageDefinition {
   };
 }
 export interface LanguageManifest {
+  host_scripts?: Record<
+    string,
+    { shell: string; argv: string[]; installed: boolean }
+  >;
   definitions: Record<string, LanguageDefinition>;
   builtins: string[];
   builtin_inputs: Record<string, { allowed: string[]; required: string[] }>;

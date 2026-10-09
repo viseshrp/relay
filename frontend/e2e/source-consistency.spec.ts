@@ -1,7 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { parseActions } from "../src/actions-workflow";
 import { readableWorkflowYaml } from "../src/source-format";
-import { post } from "./setup-helpers";
+import {
+  post,
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
 
 test("JSON display retains typed current workflow values and multiline scripts", () => {
   const source =
@@ -53,18 +58,18 @@ test.describe("workspace request and form consistency", () => {
     await expect(
       page.getByText("Ready to edit", { exact: true }),
     ).toBeVisible();
-    for (const label of [
-      "Matrix and strategy",
-      "Job outputs",
-      "Environment",
-      "Concurrency",
-      "Step environment variables",
+    for (const [label, tab] of [
+      ["Matrix axes", "General"],
+      ["Job outputs", "Outputs"],
+      ["Job environment variables", "Environment"],
+      ["Step environment variables", "Steps"],
     ]) {
-      const field = page.getByRole("textbox", { name: label, exact: true });
+      const field = await advancedField(page, label, tab);
       await field.fill(" { } ");
       await field.press("Tab");
     }
-    await page.getByRole("tab", { name: "Runs", exact: true }).click();
+    await closeJobSettings(page);
+    await page.getByRole("link", { name: "Runs", exact: true }).click();
     expect(writes).toBe(0);
     expect(
       (await (await page.request.get("/api/workflows/workflow.yaml")).json())
@@ -80,21 +85,14 @@ test.describe("workspace request and form consistency", () => {
     await expect(
       page.getByText("Ready to edit", { exact: true }),
     ).toBeVisible();
-    await page
-      .getByRole("textbox", { name: "Environment", exact: true })
-      .fill('"production"');
-    await page
-      .getByRole("textbox", { name: "Environment", exact: true })
-      .press("Tab");
+    const environment = await advancedField(page, "Environment", "Environment");
+    await environment.fill('"production"');
+    await environment.press("Tab");
     await expect(page.locator(".cm-content")).toContainText(
       "environment: production",
     );
-    await page
-      .getByRole("textbox", { name: "Environment", exact: true })
-      .fill("");
-    await page
-      .getByRole("textbox", { name: "Environment", exact: true })
-      .press("Tab");
+    await environment.fill("");
+    await environment.press("Tab");
     await expect(page.locator(".cm-content")).not.toContainText(
       "environment: production",
     );
@@ -103,7 +101,7 @@ test.describe("workspace request and form consistency", () => {
   test("a newer frontend offers a reload and saves the current edit first", async ({
     page,
   }) => {
-    await page.route("http://127.0.0.1:4174/", (route) =>
+    await page.route(/^http:\/\/[^/]+\/$/, (route) =>
       route.fulfill({
         status: 200,
         contentType: "text/html",
@@ -117,9 +115,11 @@ test.describe("workspace request and form consistency", () => {
     await expect(
       page.getByRole("button", { name: "Reload Relay", exact: true }),
     ).toBeVisible();
+    await openJobSettings(page, "General");
     await page
       .getByRole("textbox", { name: "Job name", exact: true })
       .fill("Current edit");
+    await closeJobSettings(page);
     await page
       .getByRole("button", { name: "Reload Relay", exact: true })
       .click();
@@ -133,7 +133,7 @@ test.describe("workspace request and form consistency", () => {
   test("optional update discovery failure does not create a startup error", async ({
     page,
   }) => {
-    await page.route("http://127.0.0.1:4174/", (route) =>
+    await page.route(/^http:\/\/[^/]+\/$/, (route) =>
       route.fulfill({ status: 503, body: "Unavailable" }),
     );
     await page.goto("/?view=workflows");
@@ -330,9 +330,11 @@ test.describe("workspace request and form consistency", () => {
       await expect(
         page.getByText("Ready to edit", { exact: true }),
       ).toBeVisible();
+      await openJobSettings(page, "General");
       await page
         .getByRole("textbox", { name: "Job name", exact: true })
         .fill("Changed first workflow");
+      await closeJobSettings(page);
       await expect(
         page.getByRole("button", { name: "Save", exact: true }),
       ).toBeEnabled();

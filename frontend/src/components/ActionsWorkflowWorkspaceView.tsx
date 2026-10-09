@@ -1,3 +1,4 @@
+import { ViewSkeleton } from "./ViewSkeleton";
 import { WorkflowEditorHeader } from "./WorkflowEditorHeader";
 import { WorkflowEditorDialogs } from "./WorkflowEditorDialogs";
 import { WorkflowCanvas } from "./WorkflowCanvas";
@@ -29,6 +30,7 @@ export function ActionsWorkflowWorkspaceView({
 }) {
   const {
     inventory,
+    setLoadRevision,
     key,
     props,
     setCreate,
@@ -176,7 +178,16 @@ export function ActionsWorkflowWorkspaceView({
             {leaseError}
           </Alert>
         )}
-        {error && <Alert severity="error">{error}</Alert>}
+        {error && (
+          <Alert severity="error">
+            {error}
+            {!text && (
+              <Button onClick={() => setLoadRevision((value) => value + 1)}>
+                Retry workflow
+              </Button>
+            )}
+          </Alert>
+        )}
         {(draft || text !== saved) && saved && (
           <Alert severity="info">
             Your unsaved draft is not included when you run the saved workflow.
@@ -218,7 +229,11 @@ export function ActionsWorkflowWorkspaceView({
             {item.message}
           </Alert>
         ))}
-        <WorkflowCanvas state={state} />
+        {key && !text && !error ? (
+          <ViewSkeleton view="workflows" header={false} />
+        ) : (
+          <WorkflowCanvas state={state} />
+        )}
         <WorkflowEditorDialogs state={state} />
       </Stack>
     </Box>

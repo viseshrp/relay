@@ -216,6 +216,12 @@ export function actionsGraph(value: ActionWorkflow | null): {
     data: {
       label: job.name || id,
       kind: "actions_job",
+      childWorkflow:
+        job.uses ??
+        job.steps?.find((step) => step.uses === "relay/loop@v1")?.with
+          ?.workflow,
+      loopBody:
+        job.steps?.some((step) => step.uses === "relay/loop@v1") ?? false,
       detail:
         job.uses ||
         job.steps

@@ -1,4 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
+import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
 import { post, currentWorkflow } from "./setup-helpers";
 
@@ -26,7 +31,9 @@ async function saveWorkflow(page: Page) {
   });
   if (await confirmation.isVisible()) await confirmation.click();
   await expect(
-    page.getByText("Workflow saved and validated.", { exact: true }),
+    page.getByText("Workflow and instructions saved and validated.", {
+      exact: true,
+    }),
   ).toBeVisible();
 }
 
@@ -255,10 +262,10 @@ test("command action inputs and scoped environment values save and execute", asy
     }),
   );
   await page.goto("/?view=workflows&workflow=shared-command");
-  const inputs = page.getByLabel("Action inputs", { exact: true });
+  const inputs = await advancedField(page, "Action inputs");
   await inputs.fill(JSON.stringify({ command: "test" }));
   await inputs.blur();
-  const env = page.getByLabel("Step environment variables", { exact: true });
+  const env = await advancedField(page, "Step environment variables");
   await env.fill(JSON.stringify({ GIT_AUTHOR_NAME: "Command Job" }));
   await env.blur();
   await saveWorkflow(page);
@@ -281,6 +288,8 @@ test("command action inputs and scoped environment values save and execute", asy
     },
   });
   await page.reload();
+  await advancedField(page, "Action inputs");
+  await advancedField(page, "Step environment variables");
   await expect(inputs).toHaveValue(
     JSON.stringify({ command: "test" }, null, 2),
   );
@@ -335,7 +344,7 @@ test("YAML edits populate action inputs and an unresolved command fails before l
     ).ok(),
   ).toBeTruthy();
   await page.goto("/?view=workflows&workflow=portable-command");
-  const inputs = page.getByLabel("Action inputs", { exact: true });
+  const inputs = await advancedField(page, "Action inputs");
   await expect(inputs).toHaveValue(
     JSON.stringify({ command: "missing" }, null, 2),
   );
@@ -344,6 +353,11 @@ test("YAML edits populate action inputs and an unresolved command fails before l
     inputs: {},
   });
   expect(invalid.status()).toBe(422);
+  await closeJobSettings(page);
+  await page
+    .getByRole("combobox", { name: "Editor mode", exact: true })
+    .click();
+  await page.getByRole("option", { name: "YAML", exact: true }).click();
   const editor = page.locator(".cm-content");
   await editor.click();
   await page.keyboard.press("ControlOrMeta+A");
@@ -363,11 +377,12 @@ test("YAML edits populate action inputs and an unresolved command fails before l
       },
     }),
   );
+  await advancedField(page, "Action inputs");
   await expect(inputs).toHaveValue(
     JSON.stringify({ argv: '["git","log","--oneline"]' }, null, 2),
   );
   await expect(
-    page.getByLabel("Step environment variables", { exact: true }),
+    await advancedField(page, "Step environment variables"),
   ).toHaveValue(JSON.stringify({ JOB_VAR: "changed" }, null, 2));
   await saveWorkflow(page);
   expect(

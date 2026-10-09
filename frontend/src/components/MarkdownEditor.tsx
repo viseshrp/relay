@@ -41,7 +41,7 @@ export function MarkdownEditor({
           EditorView.theme({
             ".cm-content": { minHeight: "160px" },
             "&": { fontSize: "14px" },
-            ".cm-scroller": { fontFamily: "ui-monospace, monospace" },
+            ".cm-scroller": { fontFamily: '"JetBrains Mono", monospace' },
           }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !applying.current)
@@ -50,6 +50,8 @@ export function MarkdownEditor({
         ],
       }),
     });
+    editor.scrollDOM.tabIndex = 0;
+    editor.scrollDOM.setAttribute("aria-label", `Scrollable ${label}`);
     view.current = editor;
     return () => {
       editor.destroy();

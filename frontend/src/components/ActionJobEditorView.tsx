@@ -1,3 +1,4 @@
+import { ReusableWorkflowPreview } from "./ReusableWorkflowPreview";
 import { ActionJobSteps } from "./ActionJobSteps";
 import {
   Autocomplete,
@@ -32,6 +33,7 @@ export function ActionJobEditorView({
     suggestions,
     change,
     manifest,
+    project,
   } = state;
   return (
     <Stack spacing={2}>
@@ -104,6 +106,9 @@ export function ActionJobEditorView({
                 else field("uses", undefined);
               }}
             />
+            {job.uses && (
+              <ReusableWorkflowPreview reference={job.uses} project={project} />
+            )}
             <MatrixEditor
               value={job.strategy}
               onChange={(value) =>

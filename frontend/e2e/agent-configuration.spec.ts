@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { parse } from "yaml";
 
 async function post(page: Page, path: string, body: object = {}) {
@@ -18,13 +18,16 @@ async function workflow(page: Page) {
 }
 
 async function save(page: Page) {
+  await page.getByRole("button", { name: "Close job settings" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   const confirmation = page.getByRole("button", {
     name: "Save canonical YAML",
     exact: true,
   });
   if (await confirmation.isVisible()) await confirmation.click();
-  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
 }
 
 async function choose(page: Page, tool: string, label: string, value: string) {
@@ -34,6 +37,8 @@ async function choose(page: Page, tool: string, label: string, value: string) {
 }
 
 async function launch(page: Page) {
+  const close = page.getByRole("button", { name: "Close job settings" });
+  if (await close.isVisible()) await close.click();
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const created = page.waitForResponse(
     (response) =>
@@ -71,6 +76,7 @@ test.beforeEach(async ({ page }) => {
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/?view=workflows");
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
+  await page.getByRole("tab", { name: "Steps", exact: true }).click();
   await page.getByRole("combobox", { name: "Agent", exact: true }).click();
   await page.getByRole("option", { name: "Codex", exact: true }).click();
   await expect(
@@ -87,7 +93,7 @@ test("provider defaults remain absent and reach the worker unchanged", async ({
     const region = page.getByRole("region", { name: `${tool} configuration` });
     await expect(
       region.getByRole("combobox", { name: "Effort", exact: true }),
-    ).toHaveText("Provider default");
+    ).toHaveText("Use project and global defaults");
     await expect(
       region.getByRole("combobox", { name: "Permission mode", exact: true }),
     ).toHaveCount(0);
@@ -110,6 +116,7 @@ test("explicit effort choices survive save, reload, and execution", async ({
   expect((await workflow(page)).jobs.work.steps[0].with.effort).toBe("low");
   await page.reload();
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
+  await page.getByRole("tab", { name: "Steps", exact: true }).click();
   await expect(
     page
       .getByRole("region", { name: "Codex configuration" })
@@ -136,14 +143,14 @@ test("tools without an effort selector show provider default without an override
     const body = await response.json();
     await route.fulfill({ response, json: { ...body, effort: null } });
   });
-  await page.getByLabel("Exact model override", { exact: true }).fill("m2");
+  await page.getByRole("combobox", { name: "Model", exact: true }).fill("m2");
   const region = page.getByRole("region", { name: "Codex configuration" });
   await expect(
     region.getByText("This tool does not expose a separate effort selector."),
   ).toBeVisible();
   await expect(
     region.getByRole("combobox", { name: "Effort", exact: true }),
-  ).toHaveText("Provider default");
+  ).toHaveText("Use project and global defaults");
   await expect(
     region.getByRole("combobox", { name: "Effort", exact: true }),
   ).toBeDisabled();
@@ -151,11 +158,11 @@ test("tools without an effort selector show provider default without an override
   expect((await workflow(page)).jobs.work.steps[0].with.effort).toBeUndefined();
 });
 
-test("returning to provider default removes the saved overrides", async ({
+test("returning to inherited defaults removes the saved overrides", async ({
   page,
 }) => {
   await choose(page, "Codex", "Effort", "Low");
-  await choose(page, "Codex", "Effort", "Provider default");
+  await choose(page, "Codex", "Effort", "Use project and global defaults");
   await save(page);
   expect((await workflow(page)).jobs.work.steps[0].with.effort).toBeUndefined();
   const events = await launch(page);
@@ -171,12 +178,12 @@ test("changing the model refreshes its choices and resets effort", async ({
   page,
 }) => {
   await choose(page, "Codex", "Effort", "High");
-  await page.getByLabel("Exact model override", { exact: true }).fill("m2");
+  await page.getByRole("combobox", { name: "Model", exact: true }).fill("m2");
   const effort = page
     .getByRole("region", { name: "Codex configuration" })
     .getByRole("combobox", { name: "Effort", exact: true });
   await expect(effort).toBeEnabled();
-  await expect(effort).toHaveText("Provider default");
+  await expect(effort).toHaveText("Use project and global defaults");
   await effort.click();
   await expect(
     page.getByRole("option", { name: "Medium", exact: true }),
@@ -208,7 +215,7 @@ test("failed capability reads offer retry without writing an override", async ({
       },
     }),
   );
-  await page.getByLabel("Exact model override", { exact: true }).fill("m2");
+  await page.getByRole("combobox", { name: "Model", exact: true }).fill("m2");
   const region = page.getByRole("region", { name: "Codex configuration" });
   await expect(region.getByText("Probe failed.")).toBeVisible();
   await page.unroute("**/api/agents/codex/configuration");
@@ -218,7 +225,7 @@ test("failed capability reads offer retry without writing an override", async ({
   ).toBeEnabled();
   await expect(
     region.getByRole("combobox", { name: "Effort", exact: true }),
-  ).toHaveText("Provider default");
+  ).toHaveText("Use project and global defaults");
   await save(page);
   expect((await workflow(page)).jobs.work.steps[0].with.effort).toBeUndefined();
 });

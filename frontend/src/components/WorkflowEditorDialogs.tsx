@@ -71,6 +71,9 @@ export function WorkflowEditorDialogs({
     setAuthorize,
     authorize,
     toggleTrigger,
+    save,
+    lease,
+    valid,
   } = state;
   return (
     <>
@@ -90,6 +93,19 @@ export function WorkflowEditorDialogs({
           </Typography>
           <Stack direction="row">
             <Button onClick={() => setDrawer(false)}>Close job settings</Button>
+            <Button
+              disabled={
+                !lease ||
+                !valid ||
+                (text === saved && !Object.keys(promptEdits).length)
+              }
+              onClick={() => {
+                setDrawer(false);
+                void save();
+              }}
+            >
+              Save
+            </Button>
             <Button onClick={() => removeJob(jobId)}>Remove job</Button>
           </Stack>
           {job && parsed.value && manifest && (

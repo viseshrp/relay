@@ -45,6 +45,7 @@ type ReadResponse7 = { triggers: Trigger[] };
 
 export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const { requestProject, onWorkflowLoaded, onNavigationReady } = props;
+  const [loadRevision, setLoadRevision] = useState(0);
   const [inventory, setInventory] = useState<WorkflowEntry[]>([]);
   const [key, setKey] = useState(props.initialWorkflow || "");
   const {
@@ -259,7 +260,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       window.removeEventListener("pagehide", release);
       release();
     };
-  }, [key, requestProject, onWorkflowLoaded, setText]);
+  }, [key, requestProject, onWorkflowLoaded, setText, loadRevision]);
   const flush = useCallback(async () => {
     if (
       !key ||
@@ -498,16 +499,18 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
         ? [parsed.value.on]
         : [];
   useEffect(resetUndo, [base, key, resetUndo]);
-  function removeJob(id: string) {
-    let next = editActions(text, ["jobs", id], undefined);
+  function removeJob(id: string | string[]) {
+    const ids = Array.isArray(id) ? id : [id];
+    let next = text;
+    for (const key of ids) next = editActions(next, ["jobs", key], undefined);
     for (const [other, value] of Object.entries(parsed.value?.jobs ?? {})) {
       const needs =
         typeof value.needs === "string" ? [value.needs] : (value.needs ?? []);
-      if (other !== id && needs.includes(id))
+      if (!ids.includes(other) && needs.some((needed) => ids.includes(needed)))
         next = editActions(
           next,
           ["jobs", other, "needs"],
-          needs.filter((item) => item !== id),
+          needs.filter((item) => !ids.includes(item)),
         );
     }
     setText(next);
@@ -575,6 +578,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   return {
     fallback: null as null,
     inventory,
+    setLoadRevision,
     key,
     props,
     setCreate,

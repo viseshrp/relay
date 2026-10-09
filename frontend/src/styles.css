@@ -41,7 +41,7 @@ body {
   border-radius: 4px;
 }
 .markdown-text code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 .markdown-text table {
   border-collapse: collapse;
@@ -105,10 +105,7 @@ body {
   gap: var(--relay-space-2);
   white-space: nowrap;
   font:
-    600 0.8rem ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
+    600 0.8rem "JetBrains Mono",
     monospace;
 }
 .diff-add-count {
@@ -211,7 +208,7 @@ body {
 .diff-rendered {
   display: block;
   min-width: 0;
-  --diffs-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --diffs-font-family: "JetBrains Mono", monospace;
   --diffs-header-font-family: system-ui, sans-serif;
   --diffs-font-size: 0.8rem;
   --diffs-line-height: 1.65;
@@ -254,10 +251,7 @@ p.diff-empty {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font:
-    0.8rem/1.65 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
+    0.8rem/1.65 "JetBrains Mono",
     monospace;
 }
 .diff-original {
@@ -577,7 +571,7 @@ p.diff-empty {
 
 .output-text {
   color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono", monospace;
   margin: 6px 0 0;
   overflow: hidden;
   max-height: 40px;
@@ -867,7 +861,13 @@ p.diff-empty {
 .run-graph-node strong {
   font-size: 14px;
   flex: 1;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+.run-graph-node .graph-agent {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .run-graph-node small {
   display: block;
@@ -934,7 +934,7 @@ p.diff-empty {
 .step-duration {
   margin-left: auto !important;
   padding-left: 10px;
-  font-family: monospace !important;
+  font-family: "JetBrains Mono", monospace !important;
 }
 .job-workspace .MuiAccordionDetails-root {
   padding: 10px var(--relay-space-5) var(--relay-space-5);
@@ -961,10 +961,7 @@ p.diff-empty {
   background: var(--relay-terminal);
   color: var(--relay-text-on-dark);
   font:
-    13px/26px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
+    13px/26px "JetBrains Mono",
     monospace;
 }
 .terminal-log-row {
@@ -984,10 +981,7 @@ p.diff-empty {
   color: var(--relay-muted-on-dark);
   user-select: none;
   font:
-    12px/26px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
+    12px/26px "JetBrains Mono",
     monospace;
 }
 .terminal-log-row code {
@@ -1035,6 +1029,7 @@ p.diff-empty {
 }
 .conversation-log-row .log-line-number {
   margin-top: var(--relay-space-3);
+  color: var(--relay-text-secondary);
 }
 .fullscreen-log .job-log-viewport {
   height: calc(100vh - 190px);
@@ -1142,6 +1137,8 @@ p.diff-empty {
 /* List icons keep their own column even when a title spans several lines. */
 .actions-sidebar .MuiListItemButton-root {
   align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
   padding-block: 6px;
 }
 .workflow-author-layout > .actions-sidebar .MuiListItemButton-root {
@@ -1158,10 +1155,20 @@ p.diff-empty {
 }
 .actions-sidebar .MuiListItemText-primary {
   line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .actions-sidebar .MuiList-root {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--relay-space-1);
+}
+.actions-sidebar .MuiListItem-root {
+  min-width: 0;
+  max-width: 100%;
 }
 .settings-content .MuiFormControlLabel-root {
   margin-left: 0;
@@ -1445,7 +1452,7 @@ p.diff-empty {
 }
 .command-fields textarea,
 .command-fields input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 .condition-branch > .help-field {
   flex: 1 1 180px;
@@ -1839,10 +1846,7 @@ p.diff-empty {
 .captured-source {
   white-space: pre;
   font:
-    13px/1.6 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
+    13px/1.6 "JetBrains Mono",
     monospace;
   padding: var(--relay-space-3);
   border: 1px solid var(--relay-border-subtle);
@@ -2036,7 +2040,7 @@ p.diff-empty {
   max-width: 100%;
   min-width: 0;
 }
-.react-flow__node {
+.react-flow__node-editorJob {
   max-width: 260px;
 }
 .react-flow__node h3,
@@ -2170,6 +2174,98 @@ summary:focus-visible,
   overflow: hidden;
 }
 .editor-graph-node {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-content: center;
+  gap: var(--relay-space-2);
+  padding: var(--relay-space-3);
+  box-sizing: border-box;
+  width: 260px;
   height: 104px;
   min-height: 104px;
+  border: 1px solid var(--relay-border);
+  border-radius: 7px;
+  background: var(--relay-surface);
+  color: var(--relay-text);
+}
+.editor-graph-node span {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--relay-text-secondary);
+}
+.editor-graph-node .MuiButton-root {
+  grid-column: 1 / -1;
+}
+.react-flow__node.selected .editor-graph-node {
+  border-color: var(--relay-primary);
+  box-shadow: 0 0 0 1px var(--relay-primary);
+}
+@media (max-width: 767px) {
+  .workflow-canvas .flow-canvas {
+    height: 360px;
+  }
+}
+
+.skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: var(--relay-space-4);
+  padding: var(--relay-space-3) var(--relay-space-6);
+  min-height: 64px;
+  box-sizing: border-box;
+}
+.skeleton-sidebar {
+  padding: var(--relay-space-4);
+  min-height: 260px;
+}
+.view-skeleton {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  .app-header {
+    min-height: 112px;
+  }
+  .skeleton-header {
+    flex-wrap: wrap;
+  }
+  .skeleton-header .project-context {
+    order: 4;
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 479px) {
+  .app-header {
+    min-height: 120px;
+  }
+  .skeleton-header {
+    padding: var(--relay-space-2) var(--relay-space-3);
+  }
+  .skeleton-header > :last-child {
+    width: 150px !important;
+  }
+}
+
+.editor-graph-node:has(.MuiButton-root) {
+  height: 144px;
+}
+.editor-graph-node .MuiButton-root {
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.react-flow__attribution,
+.react-flow__attribution a {
+  color: var(--relay-text-secondary) !important;
+  background: var(--relay-surface) !important;
+  font-size: 12px !important;
+}
+
+.dashboard-project,
+.dashboard-project h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dashboard-project-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
 }

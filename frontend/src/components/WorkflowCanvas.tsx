@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ReusableWorkflowPreview } from "./ReusableWorkflowPreview";
 import {
   Alert,
   Box,
@@ -20,7 +22,9 @@ export function WorkflowCanvas({
 }: {
   state: ActionsWorkflowWorkspaceState;
 }) {
+  const [expandedChild, setExpandedChild] = useState<string | null>(null);
   const {
+    props,
     mode,
     valid,
     lastValid,
@@ -29,6 +33,7 @@ export function WorkflowCanvas({
     jobId,
     graph,
     addJob,
+    removeJob,
     setJobId,
     setDrawer,
     setContextMenu,
@@ -43,6 +48,7 @@ export function WorkflowCanvas({
     newKind,
     setNewKind,
     manifest,
+    drawer,
     diagnostics,
     events,
     triggerRows,
@@ -51,6 +57,7 @@ export function WorkflowCanvas({
   } = state;
   return (
     <Box
+      className="workflow-canvas"
       sx={{
         display: "grid",
         gridTemplateColumns: {
@@ -72,14 +79,24 @@ export function WorkflowCanvas({
             {!valid && lastValid && (
               <Alert severity="info">Showing the last valid version</Alert>
             )}
-            <Box sx={{ opacity: !valid && lastValid ? 0.6 : 1 }}>
+            <Box
+              sx={{ filter: !valid && lastValid ? "grayscale(1)" : undefined }}
+            >
               <FlowCanvas
                 key={key}
                 focusRequest={focusRequest}
                 selectedId={jobId || undefined}
-                initialFocusId={graph.nodes[0]?.id}
-                followSelection
-                nodes={graph.nodes}
+                followSelection={drawer}
+                initialFocusId={
+                  graph.nodes.length > 5 ? graph.nodes[0]?.id : undefined
+                }
+                nodes={graph.nodes.map((node) => ({
+                  ...node,
+                  data: {
+                    ...node.data,
+                    onExpand: () => setExpandedChild(node.id),
+                  },
+                }))}
                 edges={graph.edges.map((edge) => ({
                   ...edge,
                   type: "insertJob",
@@ -107,6 +124,9 @@ export function WorkflowCanvas({
                     [...new Set([...needs, connection.source])],
                   );
                 }}
+                onDeleteNodes={(nodes) =>
+                  removeJob(nodes.map((node) => node.id))
+                }
                 onDeleteEdges={(edges) => {
                   let next = text;
                   for (const edge of edges) {
@@ -125,6 +145,21 @@ export function WorkflowCanvas({
                 }}
               />
             </Box>
+            {graph.nodes
+              .filter(
+                (node) =>
+                  node.id === expandedChild &&
+                  typeof node.data.childWorkflow === "string",
+              )
+              .map((node) => (
+                <ReusableWorkflowPreview
+                  key={node.id}
+                  reference={String(node.data.childWorkflow)}
+                  project={props.requestProject}
+                  loop={Boolean(node.data.loopBody)}
+                  expanded
+                />
+              ))}
             <Stack component="nav" aria-label="Workflow job navigation">
               <TextField
                 disabled={!parsed.value}

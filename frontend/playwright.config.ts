@@ -3,11 +3,13 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: "optional-login.spec.ts",
+  snapshotPathTemplate: "{testDir}/baselines/{arg}{ext}",
   fullyParallel: false,
   workers: 1,
   use: {
     baseURL: "http://127.0.0.1:4174",
     browserName: "chromium",
+    timezoneId: "America/New_York",
     // Existing behavior specs start after onboarding; its own specs use fresh storage.
     storageState: {
       cookies: [],

@@ -131,6 +131,11 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     def reset(request: HttpRequest) -> JsonResponse:
         del request
         from relay.execution.cancellation import request_cancellation
+        from relay.web.models import WorkflowControl
+        from tests.ui_fixtures import clear_ui_fixtures
+
+        clear_ui_fixtures()
+        WorkflowControl.objects.all().delete()
 
         for run_id in Run.objects.filter(
             status__in=("running", "paused_wait", "pending", "canceling")
@@ -356,6 +361,17 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         )
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def worst_case(request: HttpRequest) -> JsonResponse:
+        from tests.ui_fixtures import seed_ui_fixture
+
+        return JsonResponse(
+            seed_ui_fixture(root, worst=json_body(request).get("enabled", True) is True)
+        )
+
+    urlpatterns.insert(0, path("__test__/worst-case", worst_case))
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))

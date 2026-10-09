@@ -12,6 +12,55 @@ export async function post(page: Page, path: string, data: object = {}) {
   });
 }
 
+export async function closeJobSettings(page: Page) {
+  const close = page.getByRole("button", {
+    name: "Close job settings",
+    exact: true,
+  });
+  if (await close.isVisible()) {
+    await close.click();
+    await expect(close).toHaveCount(0);
+  }
+}
+
+export async function openJobSettings(page: Page, tab = "Steps") {
+  if (!(await page.locator(".react-flow__node").count())) {
+    const mode = page.getByRole("combobox", {
+      name: "Editor mode",
+      exact: true,
+    });
+    if (await mode.isVisible()) {
+      await mode.click();
+      await page.getByRole("option", { name: "Split", exact: true }).click();
+    }
+  }
+  if (
+    !(await page
+      .getByRole("button", { name: "Close job settings", exact: true })
+      .isVisible())
+  )
+    await page
+      .getByRole("navigation", { name: "Workflow job navigation" })
+      .getByRole("button")
+      .first()
+      .click();
+  await page.getByRole("tab", { name: tab, exact: true }).click();
+}
+
+export async function advancedField(page: Page, label: string, tab = "Steps") {
+  await openJobSettings(page, tab);
+  const toggle = page.getByRole("button", {
+    name: `Advanced JSON: ${label}`,
+    exact: true,
+  });
+  const accordion = toggle.locator(
+    "xpath=ancestor::*[contains(@class, 'MuiAccordion-root')][1]",
+  );
+  const field = accordion.getByRole("textbox", { name: label, exact: true });
+  if (!(await field.isVisible())) await toggle.click();
+  return field;
+}
+
 // Historical fixtures exercise monitoring and recovery of retained v1 snapshots.
 // Current authoring and launch tests use post() and the public jobs/steps API.
 export async function historicalPost(
@@ -48,7 +97,8 @@ export async function openSettings(page: Page): Promise<void> {
   if (await account.count()) {
     await account.click();
     await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-  } else await page.getByRole("tab", { name: "Settings", exact: true }).click();
+  } else
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
 }
 
 export async function runStarter(

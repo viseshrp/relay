@@ -1,3 +1,4 @@
+import { ScriptEditor } from "./ScriptEditor";
 import {
   Button,
   Checkbox,
@@ -151,12 +152,11 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                 />
               ) : (
                 <>
-                  <TextField
-                    label="Script"
-                    multiline
-                    minRows={3}
+                  <ScriptEditor
                     value={step.run ?? ""}
-                    onChange={(event) => stepField("run", event.target.value)}
+                    shell={step.shell}
+                    manifest={manifest}
+                    onChange={(value) => stepField("run", value)}
                   />
                   <TextField
                     select
@@ -167,11 +167,13 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                     }
                   >
                     <MenuItem value="">Host default</MenuItem>
-                    {["bash", "sh", "pwsh", "python"].map((shell) => (
-                      <MenuItem value={shell} key={shell}>
-                        {shell}
-                      </MenuItem>
-                    ))}
+                    {["bash", "sh", "pwsh", "powershell", "cmd", "python"].map(
+                      (shell) => (
+                        <MenuItem value={shell} key={shell}>
+                          {shell}
+                        </MenuItem>
+                      ),
+                    )}
                   </TextField>
                   <TextField
                     label="Working directory"

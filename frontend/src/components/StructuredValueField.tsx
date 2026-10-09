@@ -9,17 +9,20 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { isRecord } from "../workflow";
+import { AdvancedJsonField } from "./AdvancedJsonField";
 
 export function StructuredValueField({
   label,
   value,
   onChange,
   object = false,
+  advanced = true,
 }: {
   label: string;
   value: unknown;
   onChange: (value: unknown) => void;
   object?: boolean;
+  advanced?: boolean;
 }) {
   const [error, setError] = useState("");
   const kind = isRecord(value)
@@ -105,6 +108,7 @@ export function StructuredValueField({
                 }}
               />
               <StructuredValueField
+                advanced={false}
                 label={`${label}.${key}`}
                 value={entry}
                 onChange={(next) => onChange({ ...record, [key]: next })}
@@ -131,6 +135,7 @@ export function StructuredValueField({
           {(value as unknown[]).map((entry, index) => (
             <Stack key={index} direction="row" spacing={1}>
               <StructuredValueField
+                advanced={false}
                 label={`${label} item ${index + 1}`}
                 value={entry}
                 onChange={(next) =>
@@ -186,6 +191,14 @@ export function StructuredValueField({
         />
       )}
       {error && <Alert severity="error">{error}</Alert>}
+      {advanced && (
+        <AdvancedJsonField
+          label={label}
+          value={value}
+          object={object}
+          onChange={onChange}
+        />
+      )}
     </Stack>
   );
 }

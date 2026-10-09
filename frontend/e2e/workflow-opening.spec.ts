@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
@@ -55,7 +55,7 @@ test("opening current JSON displays YAML without creating a recovery draft", asy
       .locator(".app-header")
       .getByRole("button", { name: "About Projects", exact: true }),
   ).toHaveCSS("color", "rgb(49, 86, 211)");
-  await page.getByRole("tab", { name: "Runs", exact: true }).click();
+  await page.getByRole("link", { name: "Runs", exact: true }).click();
   const after = await (
     await page.request.get("/api/workflows/current-json.yaml")
   ).json();

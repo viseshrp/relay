@@ -140,13 +140,15 @@ export function YamlEditor({
             "&": { height: "100%", fontSize: "13px" },
             ".cm-scroller": {
               overflow: "auto",
-              fontFamily: "ui-monospace, monospace",
+              fontFamily: '"JetBrains Mono", monospace',
             },
             ".cm-content": { minHeight: "520px" },
           }),
         ],
       }),
     });
+    editor.scrollDOM.tabIndex = 0;
+    editor.scrollDOM.setAttribute("aria-label", "Scrollable workflow YAML");
     view.current = editor;
     return () => {
       editor.destroy();

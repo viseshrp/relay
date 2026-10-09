@@ -1,7 +1,12 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
-import { post, currentWorkflow } from "./setup-helpers";
+import {
+  post,
+  currentWorkflow,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
 
 import type { WorkflowNodeValue } from "../src/workflow";
 
@@ -102,6 +107,7 @@ test("switching workflows resets the canvas and shows the first stage at a reada
   });
   await navigation.getByRole("button", { name: "Review", exact: true }).click();
   await expectCenteredStage(page, "review");
+  await closeJobSettings(page);
   await page.getByLabel("Find a job", { exact: true }).fill("REVIEW");
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option", { name: "Canvas short", exact: true }).click();
@@ -132,14 +138,17 @@ test("search and keyboard selection restore an off-screen stage without changing
   await review.focus();
   await review.press("Enter");
   await expectCenteredStage(page, "review");
-  await expect(review).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Job name", { exact: true })).toHaveValue("");
+  await closeJobSettings(page);
+  await expect(review).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Fit View" }).click();
   await review.click();
   await expectCenteredStage(page, "review");
+  await closeJobSettings(page);
   await page.setViewportSize({ width: 760, height: 900 });
   await review.click();
   await expectCenteredStage(page, "review");
+  await closeJobSettings(page);
   await navigation
     .getByLabel("Find a job", { exact: true })
     .fill("not a stage");
@@ -162,9 +171,11 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
     work: { type: "agent" },
   });
   await page.goto("/?view=author&workflow=navigation-agent.yaml");
+  await openJobSettings(page);
   await page
     .getByLabel("Agent prompt", { exact: true })
     .fill("Keep these instructions in this workflow.");
+  await closeJobSettings(page);
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page
     .getByRole("option", { name: "Configuration", exact: true })
@@ -183,7 +194,8 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
   await page
     .getByRole("option", { name: "Navigation agent", exact: true })
     .click();
-  await expect(page.getByLabel("Agent prompt", { exact: true })).toHaveValue(
+  await openJobSettings(page);
+  await expect(page.getByLabel("Agent prompt", { exact: true })).toContainText(
     "Keep these instructions in this workflow.",
   );
   const document = await (

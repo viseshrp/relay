@@ -1,5 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { post } from "./setup-helpers";
+import { parse, stringify } from "yaml";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -130,7 +131,7 @@ test("drawing changes rewrite YAML and can be undone, redone, and formatted", as
   await expect(page.locator('[aria-label="Workflow YAML"]')).toContainText(
     "needs:",
   );
-  await page.locator(".react-flow__edge").first().click();
+  await page.locator(".react-flow__edge").first().focus();
   await page.keyboard.press("Delete");
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
   await page.getByRole("button", { name: "Format as YAML" }).click();
@@ -243,4 +244,142 @@ test("matrix, concurrency, comparisons, and bounded retry controls round trip wi
       name: "Cancel in-progress work in this group",
     }),
   ).toBeChecked();
+});
+
+test("script editing previews the host arguments, saves, executes, and deletes jobs with undo", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem("relay.editor-holder", "script-test"),
+  );
+  const source = {
+    name: "Scripts",
+    on: "workflow_dispatch",
+    jobs: {
+      build: { steps: [{ id: "check", run: "print('old')", shell: "python" }] },
+      later: { needs: ["build"], steps: [{ run: "echo later" }] },
+    },
+  };
+  const created = await post(page, "/api/workflows", {
+    key: "scripts.yaml",
+    holder: "script-test",
+    yaml: stringify(source),
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await page.goto("/?view=workflows&workflow=scripts.yaml");
+  await page.locator('.react-flow__node[data-id="build"]').click();
+  await page.getByRole("tab", { name: "Steps", exact: true }).click();
+  const script =
+    "import sys\nprint('quoted 王秀英')\nassert sys.version_info.major == 3\n";
+  await page.locator('[aria-label="Script"]').fill(script);
+  await page.getByText("Process arguments", { exact: true }).click();
+  const manifest = await (
+    await page.request.get("/api/workflow-language")
+  ).json();
+  await expect(page.locator(".script-editor").locator("..")).toContainText(
+    manifest.host_scripts.python.argv[0],
+  );
+  await page.getByRole("button", { name: "Close job settings" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+  const saved = await (
+    await page.request.get("/api/workflows/scripts.yaml")
+  ).json();
+  expect(parse(saved.yaml).jobs.build.steps[0]).toMatchObject({
+    run: script,
+    shell: "python",
+  });
+  await page.locator('.react-flow__node[data-id="later"]').click();
+  await page.getByRole("button", { name: "Close job settings" }).click();
+  await page.locator('.react-flow__node[data-id="later"]').focus();
+  await page.keyboard.press("Delete");
+  await expect(page.locator('.react-flow__node[data-id="later"]')).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(
+    page.locator('.react-flow__node[data-id="later"]'),
+  ).toBeVisible();
+  expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const launched = await post(page, "/api/runs", {
+    workflow_key: "scripts.yaml",
+    inputs: {},
+  });
+  expect(launched.status(), await launched.text()).toBe(201);
+  const run = (await launched.json()).run_id;
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/runs/${run}`)).json()).run.status,
+    )
+    .toBe("succeeded");
+  const events = (
+    await (await page.request.get(`/api/runs/${run}/events`)).json()
+  ).events;
+  expect(
+    events.some((event: { payload: { chunk?: string } }) =>
+      event.payload.chunk?.includes("quoted 王秀英"),
+    ),
+  ).toBeTruthy();
+});
+
+test("loop and reusable cards expand their child graph and link to the editable source", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem("relay.editor-holder", "linked-test"),
+  );
+  for (const [key, source] of Object.entries({
+    "body.yaml": {
+      name: "Loop body",
+      on: "workflow_call",
+      jobs: { child: { name: "Child", steps: [{ run: "echo child" }] } },
+    },
+    "linked.yaml": {
+      name: "Linked workflows",
+      on: "workflow_dispatch",
+      jobs: {
+        repeat: {
+          steps: [
+            {
+              uses: "relay/loop@v1",
+              with: {
+                workflow: "./.relay/workflows/body.yaml",
+                "max-iterations": "2",
+              },
+            },
+          ],
+        },
+        reuse: { uses: "./.relay/workflows/body.yaml" },
+      },
+    },
+  })) {
+    const response = await post(page, "/api/workflows", {
+      key,
+      holder: "linked-test",
+      yaml: stringify(source),
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+  }
+  await page.goto("/?view=workflows&workflow=linked.yaml");
+  await page
+    .getByRole("button", { name: "Expand loop body", exact: true })
+    .click();
+  await expect(
+    page.getByRole("application", { name: "Read-only workflow graph" }),
+  ).toContainText("Child");
+  await expect(
+    page.getByRole("link", { name: "Open loop body to edit" }),
+  ).toHaveAttribute("href", /workflow=body.yaml/);
+  await page
+    .getByRole("button", { name: "Loop body: body.yaml", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open child workflow", exact: true })
+    .click();
+  await expect(
+    page.getByRole("link", { name: "Open child workflow to edit" }),
+  ).toHaveAttribute("href", /workflow=body.yaml/);
 });

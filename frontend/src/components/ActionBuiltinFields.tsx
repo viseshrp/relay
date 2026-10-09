@@ -1,3 +1,6 @@
+import { BuiltinInputFields } from "./BuiltinInputFields";
+import { ActionCommandFields } from "./ActionCommandFields";
+import { ReusableWorkflowPreview } from "./ReusableWorkflowPreview";
 import {
   Autocomplete,
   Accordion,
@@ -17,6 +20,7 @@ import { AgentConfiguration } from "./AgentConfiguration";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PromptFilesEditor, type PromptEdits } from "./PromptFilesEditor";
 import { StructuredValueField } from "./StructuredValueField";
+import { AdvancedJsonField } from "./AdvancedJsonField";
 
 export function ActionBuiltinFields({
   step,
@@ -65,12 +69,18 @@ export function ActionBuiltinFields({
           "retry-limit",
         ]
       : step.uses === "relay/command@v1"
-        ? ["argv"]
+        ? ["argv", "command"]
         : step.uses === "relay/human-wait@v1"
           ? ["options"]
           : [];
   return (
     <Stack spacing={2}>
+      <AdvancedJsonField
+        label="Action inputs"
+        object
+        value={inputs}
+        onChange={(value) => onChange("__all__", value)}
+      />
       {step.uses === "relay/agent@v1" && (
         <>
           <TextField
@@ -112,6 +122,7 @@ export function ActionBuiltinFields({
               model={model}
               project={project}
               fields={["effort"]}
+              inheritDefaults
               options={
                 typeof inputs.effort === "string" || inputs.effort === null
                   ? { effort: inputs.effort }
@@ -166,23 +177,7 @@ export function ActionBuiltinFields({
         </>
       )}
       {step.uses === "relay/command@v1" && (
-        <StructuredValueField
-          label="Program and arguments"
-          value={(() => {
-            try {
-              return JSON.parse(String(inputs.argv ?? '["echo","Ready"]'));
-            } catch {
-              return [];
-            }
-          })()}
-          onChange={(value) =>
-            onChange("__all__", {
-              ...inputs,
-              command: undefined,
-              argv: JSON.stringify(value),
-            })
-          }
-        />
+        <ActionCommandFields inputs={inputs} onChange={onChange} />
       )}
       {step.uses === "relay/human-wait@v1" && (
         <>
@@ -210,38 +205,16 @@ export function ActionBuiltinFields({
         </>
       )}
       {fields ? (
-        fields.allowed
-          .filter((field) => !special.includes(field))
-          .map((field) => (
-            <TextField
-              key={field}
-              required={fields.required.includes(field)}
-              label={`Action ${field}`}
-              multiline={[
-                "prompt",
-                "inputs",
-                "options",
-                "argv",
-                "command",
-              ].includes(field)}
-              value={String(inputs[field] ?? "")}
-              onChange={(event) =>
-                onChange(field, event.target.value || undefined)
-              }
-              helperText={
-                field === "workflow"
-                  ? "Choose a local reusable workflow, for example ./.relay/workflows/fix.yaml."
-                  : field === "options"
-                    ? "One answer per line. Free text remains available."
-                    : field === "format"
-                      ? "exists records a boolean; label, json, or yaml retains a report."
-                      : undefined
-              }
-            />
-          ))
+        <BuiltinInputFields
+          fields={fields}
+          special={special}
+          inputs={inputs}
+          onChange={onChange}
+        />
       ) : (
         <StructuredValueField
           label="Action inputs"
+          advanced={false}
           object
           value={inputs}
           onChange={(value) => {
@@ -287,13 +260,12 @@ export function ActionBuiltinFields({
           />
         </>
       )}
-      {step.uses === "relay/loop@v1" && (
-        <Button
-          component="a"
-          href={`/?view=workflows&workflow=${encodeURIComponent(String(inputs.workflow ?? "").replace(/^\.\/.relay\/workflows\//, ""))}${project ? `&project=${encodeURIComponent(project)}` : ""}`}
-        >
-          Open loop body
-        </Button>
+      {step.uses === "relay/loop@v1" && Boolean(inputs.workflow) && (
+        <ReusableWorkflowPreview
+          reference={String(inputs.workflow)}
+          project={project}
+          loop
+        />
       )}
     </Stack>
   );

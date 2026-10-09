@@ -132,7 +132,12 @@ export const relayTheme = createTheme({
     },
     MuiFormHelperText: {
       styleOverrides: {
-        root: { marginLeft: 0, marginRight: 0, lineHeight: 1.5 },
+        root: {
+          marginLeft: 0,
+          marginRight: 0,
+          lineHeight: 1.5,
+          "&.Mui-disabled": { color: paletteTokens["text-secondary"] },
+        },
       },
     },
     MuiSwitch: { defaultProps: { size: "small" } },
@@ -176,16 +181,22 @@ export const relayTheme = createTheme({
       },
     },
     MuiTab: {
+      defaultProps: { disableRipple: true },
       styleOverrides: {
         root: {
           minHeight: 40,
           padding: "10px 14px",
           minWidth: 0,
           color: "#3156d3",
+          backgroundColor: paletteTokens.surface,
           opacity: 1,
           "&.Mui-selected": {
             color: "#233d96",
             fontWeight: 600,
+            backgroundColor: "#eef2ff",
+          },
+          "&.Mui-focusVisible": {
+            color: paletteTokens["primary-strong"],
             backgroundColor: "#eef2ff",
           },
           "&.Mui-disabled": { color: "rgba(0, 0, 0, 0.38)" },

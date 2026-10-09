@@ -36,6 +36,7 @@ interface FlowCanvasProps {
   focusRequest?: number;
   initialFocusId?: string | null;
   onConnect?: (connection: Connection) => void;
+  onDeleteNodes?: (nodes: Node[]) => void;
   onDeleteEdges?: (edges: Edge[]) => void;
   onContextMenu?: (id: string, x: number, y: number) => void;
 }
@@ -105,6 +106,7 @@ export function FlowCanvas({
   initialFocusId,
   onConnect,
   onDeleteEdges,
+  onDeleteNodes,
   onContextMenu,
 }: FlowCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
@@ -177,6 +179,7 @@ export function FlowCanvas({
         onConnectEnd={() => {
           lastConnection.current = performance.now();
         }}
+        onNodesDelete={runMode ? undefined : onDeleteNodes}
         onEdgesDelete={runMode ? undefined : onDeleteEdges}
         onNodeContextMenu={
           runMode
@@ -197,6 +200,9 @@ export function FlowCanvas({
           runMode
             ? {
                 "node.a11yDescription.default": "Press Enter to open this job.",
+                "node.a11yDescription.keyboardDisabled":
+                  "Press Enter to open this job.",
+                "edge.a11yDescription.default": "Job dependency. Read-only.",
                 "controls.interactive.ariaLabel": "Read-only graph",
               }
             : undefined
@@ -222,7 +228,7 @@ export function FlowCanvas({
             focusRequest={focusRequest}
           />
         )}
-        {!runMode && <MiniMap pannable zoomable />}
+        {!runMode && nodes.length > 5 && <MiniMap pannable zoomable />}
         <Controls
           position={runMode ? "bottom-right" : "bottom-left"}
           showInteractive={!runMode}
