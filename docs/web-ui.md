@@ -168,12 +168,15 @@ models; it does not prove the account is signed in. Only a structured
 authentication error gets the sign-in label. Cards provide install links and
 commands to copy; Relay never installs an agent or signs it in.
 
-Choose **Start from a template**, select a starter, and create the workflow.
-The checklist shows its sample inputs and an exact model from a fresh probe.
-You can edit those inputs or change the model before pressing **Run workflow**.
+Choose **Start from a template** to open the gallery with **AI coding workflow**
+selected. Create it, enter your task once, and choose the coding agent's exact
+model and a Claude Opus model from fresh connection results. The workflow
+follows its phase instruction files and pauses for human approvals. Both
+models must be available before **Run workflow** becomes enabled. Smaller
+starters use one exact model and show their sample inputs instead.
 Launch uses the existing validation and preflight services. With no working
 agent, the checklist explains the fix and disables the run button.
-**Blank workflow** opens the same gallery with the blank option available;
+**Blank workflow** opens the same gallery with the blank option selected;
 close the checklist and add its jobs in the editor before running it.
 
 ## Choose a project and workflow
@@ -189,9 +192,9 @@ shows its run number and source branch, and states what happens next.
 Internal IDs and provider JSON are under advanced views. Cleanup controls live
 in **Settings > Storage**.
 
-**New workflow** opens the same six-starter gallery as the checklist. Each
+**New workflow** opens the same seven-starter gallery as the checklist. Each
 card shows its purpose, job graph preview, required agent, and input types.
-Selection copies sources into `.relay/workflows/` and `.relay/prompts/` without
+Selection copies workflow, prompt, and local action sources into `.relay/` without
 overwriting owner files. The editor and launch use those copies. A blank
 workflow accepts a name and opens with one safe echo job.
 
@@ -199,7 +202,7 @@ workflow accepts a name and opens with one safe echo job.
 
 Choose a saved workflow or **Create workflow**. New sources use `jobs` and
 ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
-six-starter gallery copies selected sources without overwriting owner files.
+seven-starter gallery copies selected sources without overwriting owner files.
 
 **Add job** adds a local job. Select its graph node to edit its name,
 dependencies, condition, timeout, environment, matrix, outputs, concurrency,

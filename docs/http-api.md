@@ -124,7 +124,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/projects/relink` | `{"old":"/old","new":"/new"}` | `200 {"project":...}` |
 | `GET /api/workflows` | optional `?project={id}` | `200 {"workflows":[{"key":"review.yaml","name":"Review"}],"project":...}` |
 | `POST /api/workflows` | `{"key":"review","holder":"tab-id"}`; optional `yaml`, `name`, `template_id` | `201`; creates a validated workflow without overwriting an existing file |
-| `GET /api/workflow-templates` | none | `200 {"templates":[...]}`; the six starter bundles and their typed inputs |
+| `GET /api/workflow-templates` | none | `200 {"templates":[...]}`; seven starter bundles with typed inputs and a `default` selection flag |
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |

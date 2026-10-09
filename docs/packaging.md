@@ -67,8 +67,10 @@ Twine metadata checks and `scripts/check_distribution_contents.py`. The
 content check requires compiled static files in the wheel, requires the
 frontend lockfile and hook in the source distribution, rejects certification
 evidence, and rejects workflow or prompt templates outside the exact allow-list
-for the six [starter workflows](workflows.md#starter-workflows). Their twelve
-source files live under `relay/workflows/starters/` and ship in both archives.
+for the seven [starter workflows](workflows.md#starter-workflows). Approved
+sources live under `relay/workflows/starters/` and ship in both archives,
+including the full AI coding workflow's helper workflows, local action,
+original phase prompts, Relay instructions, MIT license, and provenance hashes.
 The content gate still rejects every other YAML or template path. The blank
 files created by `relay init` remain separate from these opt-in starters.
 

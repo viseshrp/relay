@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
+import json
 from pathlib import Path
 import sys
 
@@ -42,6 +44,8 @@ def test_starter_copies_exact_sources_and_validates(
         assert (project.relay_root / "prompts" / name).read_bytes() == (
             STARTER_ROOT / name
         ).read_bytes()
+    for target, source in starter.files:
+        assert (project.relay_root / target).read_bytes() == (STARTER_ROOT / source).read_bytes()
     validate_loaded_workflow(
         load_workflow(project.relay_root / "workflows" / key), project.relay_root
     )
@@ -51,11 +55,12 @@ def test_starter_copies_exact_sources_and_validates(
     assert second.yaml == document.yaml
 
 
-def test_gallery_has_six_templates_and_schema_defined_inputs() -> None:
+def test_gallery_has_seven_templates_and_schema_defined_inputs() -> None:
     inventory = starter_inventory()
-    assert len(inventory) == 6
+    assert len(inventory) == 7
     assert all(item["jobs"] and item["required_agents"] for item in inventory)
-    assert inventory[0]["inputs"] == {
+    assert [item["id"] for item in inventory if item["default"]] == ["ai-coding-workflow"]
+    assert next(item for item in inventory if item["id"] == "ask-agent")["inputs"] == {
         "task": {
             "type": "string",
             "description": "What would you like to learn about this repository?",
@@ -187,3 +192,174 @@ def test_fix_tests_starter_uses_real_verdicts_and_a_bounded_repair_budget(
     engine.drain(run_id)
     assert run_status(run_id) == status
     assert counter.read_text(encoding="utf-8") == str(checks)
+
+
+def test_ai_starter_preserves_upstream_prompt_bytes() -> None:
+    root = STARTER_ROOT / "ai-coding-workflow"
+    provenance = json.loads((root / "provenance.json").read_text())
+    assert len(provenance["prompts"]) == 10
+    for name, digest in provenance["prompts"].items():
+        assert sha256((root / name).read_bytes()).hexdigest() == digest
+    # The copied workflow carries the upstream notice with the editable bundle.
+    source = (STARTER_ROOT / "ai-coding-workflow.yaml").read_text()
+    assert all(
+        "# " + line in source for line in (root / "LICENSE").read_text().splitlines() if line
+    )
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "workflows/ai-coding-workflow/plan-cycle.yaml",
+        "actions/ai-coding-workflow/read-generated-prompt/action.yaml",
+    ],
+)
+def test_ai_starter_preserves_owner_companion_sources(project: RelayProject, target: str) -> None:
+    path = project.relay_root / target
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("Owner source\n")
+    with pytest.raises(PermissionFlowError):
+        create_starter_workflow(
+            DjangoWorkflowStore(),
+            project.relay_root,
+            project.project_id,
+            "full.yaml",
+            "ai-coding-workflow",
+        )
+    assert path.read_text() == "Owner source\n"
+    assert not (project.relay_root / "workflows/full.yaml").exists()
+    assert not (project.relay_root / "prompts/ai-coding-workflow/interaction.md").exists()
+
+
+def test_ai_starter_rolls_back_companions_if_main_workflow_cannot_publish(
+    project: RelayProject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = starters._atomic_create
+    workflow = project.relay_root / "workflows/full.yaml"
+
+    def fail_main(path: Path, text: str) -> None:
+        if path == workflow:
+            message = "Could not publish the main workflow."
+            raise PermissionFlowError(message)
+        original(path, text)
+
+    monkeypatch.setattr(starters, "_atomic_create", fail_main)
+    with pytest.raises(PermissionFlowError):
+        create_starter_workflow(
+            DjangoWorkflowStore(),
+            project.relay_root,
+            project.project_id,
+            "full.yaml",
+            "ai-coding-workflow",
+        )
+    for relative, _ in starters._sources(STARTERS[0], "full.yaml"):
+        assert not (project.relay_root / relative).exists()
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+@pytest.mark.parametrize(
+    "plan_ready,review_ready,audit_ready,audit_next,decision,status",
+    [
+        (2, 2, 2, "", "FOLLOWUP", "succeeded"),
+        (1, 1, 1, "", "TESTS", "succeeded"),
+        (99, 1, 1, "", "TESTS", "failed"),
+        (1, 99, 1, "", "TESTS", "failed"),
+        (1, 1, 99, "", "TESTS", "failed"),
+        (1, 1, 1, "human", "TESTS", "failed"),
+    ],
+)
+def test_full_starter_executes_handoffs_gates_and_bounded_loops(
+    project: RelayProject,
+    fake_agents: FakeAgents,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    plan_ready: int,
+    review_ready: int,
+    audit_ready: int,
+    audit_next: str,
+    decision: str,
+    status: str,
+) -> None:
+    from relay.execution.nodes import node_executors
+    from relay.execution.scheduler import dispatch_ready_nodes
+    from relay.web.models import HumanInteraction, Run
+    from tests.fake_agent import AI_HANDOFF
+
+    counters = tmp_path / "phase-counters"
+    counters.mkdir()
+    monkeypatch.setenv("FAKE_AI_COUNTER_ROOT", str(counters))
+    for name, value in (("PLAN", plan_ready), ("REVIEW", review_ready), ("AUDIT", audit_ready)):
+        monkeypatch.setenv(f"FAKE_AI_{name}_READY_AFTER", str(value))
+    if audit_next:
+        monkeypatch.setenv("FAKE_AI_AUDIT_NEXT", audit_next)
+    for agent in ("codex", "claude"):
+        fake_agents.install(agent, mode="configuration-ai-starter")
+    create_starter_workflow(
+        DjangoWorkflowStore(),
+        project.relay_root,
+        project.project_id,
+        "full.yaml",
+        "ai-coding-workflow",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(
+        project,
+        "full.yaml",
+        inputs={
+            "task": "Add dark mode",
+            "agent": "codex",
+            "model": "m1",
+            "opus_model": "m2",
+        },
+    )
+    engine.drain(run_id)
+    answers = ["IMPLEMENT", decision, "ACCEPT"]
+    answered = 0
+    while run_status(run_id) != "failed" and answered < 3:
+        pending = HumanInteraction.objects.get(run_id=run_id, kind="wait", status="pending")
+        # No later phase runs before its owner gate has been answered.
+        if answered == 0:
+            assert not (counters / "review").exists()
+        if answered == 1:
+            assert not (counters / "tests").exists()
+        engine.store.submit_control(
+            str(pending.attempt_id),
+            "wait_answer",
+            f"answer-{answered}",
+            {"value": answers[answered]},
+            600.0,
+        )
+        engine.store.resolve_human_wait_controls()
+        dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
+        engine.drain(run_id)
+        answered += 1
+    from relay.web.models import RunEvent
+
+    assert run_status(run_id) == status, (
+        Run.objects.get(pk=run_id).failure_summary,
+        list(RunEvent.objects.filter(run_id=run_id, type="error").values("type", "payload")),
+    )
+    assert int((counters / "plan").read_text()) == min(plan_ready, 3)
+    if plan_ready <= 3:
+        assert int((counters / "review").read_text()) == min(review_ready, 3)
+    if plan_ready <= 3 and review_ready <= 3:
+        assert int((counters / "audit").read_text()) == (1 if audit_next else min(audit_ready, 3))
+    turns = [
+        message["params"]["prompt"]
+        for message in fake_agents.messages()
+        if message.get("method") == "session/prompt"
+    ]
+    prompts = [turn[0]["text"] for turn in turns]
+    assert "PLAN\r\n" + AI_HANDOFF in prompts
+    if plan_ready <= 3:
+        assert "IMPLEMENT\r\n" + AI_HANDOFF in prompts
+        assert "FIX\r\n" + AI_HANDOFF in prompts
+    # The task is supplied once, apart from the phase files and Relay metadata.
+    assert sum(block.get("text") == "Add dark mode" for turn in turns for block in turn) == 1
+    if status == "succeeded":
+        assert answered == 3
+        worktree = Path(Run.objects.get(pk=run_id).worktree_path)
+        assert ("FOLLOWUP = True" in (worktree / "feature.py").read_text()) == (
+            decision == "FOLLOWUP"
+        )

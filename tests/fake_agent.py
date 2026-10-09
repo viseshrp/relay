@@ -49,6 +49,68 @@ def selector(value: str = "m1") -> dict[str, object]:
     }
 
 
+AI_HANDOFF = 'Generated instructions: café\r\nKeep ${literal} and quotes: "yes".\r\n'
+
+
+def ai_starter_artifacts(cwd: Path, prompt: str) -> None:
+    """Supply phase artifacts while exercising the real starter runner offline."""
+
+    def write(name: str, text: str) -> None:
+        (cwd / name).write_bytes(text.encode("utf-8"))
+
+    def count(phase: str) -> int:
+        root = Path(os.environ["FAKE_AI_COUNTER_ROOT"])
+        path = root / phase
+        value = int(path.read_text()) + 1 if path.exists() else 1
+        path.write_text(str(value))
+        return value
+
+    if prompt.startswith("# 01 "):
+        write("INITIAL_OPUS_PLANNING_PROMPT.md", "PLAN\r\n" + AI_HANDOFF)
+    elif prompt.startswith("PLAN\r\n"):
+        write("FEATURE_SPEC_AND_PLAN.md", "The verified feature plan.\n")
+        write("EXECUTION_PROMPT.md", "IMPLEMENT\r\n" + AI_HANDOFF)
+    elif prompt.startswith("# 02 "):
+        write("OPUS_PLAN_REVISION_REQUEST.md", "REVISE\r\n" + AI_HANDOFF)
+    elif prompt.startswith("REVISE\r\n"):
+        write("FEATURE_SPEC_AND_PLAN.md", "The revised feature plan.\n")
+    elif prompt.startswith("# 03 "):
+        ready = count("plan") >= int(os.environ.get("FAKE_AI_PLAN_READY_AFTER", "1"))
+        write(
+            "PLAN_REVISION_VERIFICATION.md",
+            f"- Ready for implementation: {'Yes' if ready else 'No'}\n",
+        )
+    elif prompt.startswith("IMPLEMENT\r\n"):
+        write("feature.py", "ENABLED = True\n")
+    elif prompt.startswith("# 04 "):
+        write("REVIEW.md", "The independent review.\n")
+        write("REVIEW_FIX_PROMPT.md", "FIX\r\n" + AI_HANDOFF)
+    elif prompt.startswith("FIX\r\n"):
+        write("feature.py", "ENABLED = True\nREVIEWED = True\n")
+    elif prompt.startswith("# 05 "):
+        ready = count("review") >= int(os.environ.get("FAKE_AI_REVIEW_READY_AFTER", "1"))
+        write(
+            "REVIEW_FIX_VERIFICATION.md",
+            f"- Ready to finalize review/walkthrough docs: {'Yes' if ready else 'No'}\n",
+        )
+    elif prompt.startswith("# 06 "):
+        write("WALKTHROUGH.md", "Walk through feature.py.\n")
+    elif prompt.startswith("# 07 "):
+        write("FOLLOWUP.md", "The owner decides whether follow-up is needed.\n")
+    elif prompt.startswith("# 08 "):
+        write("feature.py", "ENABLED = True\nREVIEWED = True\nFOLLOWUP = True\n")
+    elif prompt.startswith("# 09 "):
+        write(
+            "test_feature.py",
+            "from feature import ENABLED\ndef test_enabled():\n    assert ENABLED\n",
+        )
+        count("tests")
+    elif prompt.startswith("# 10 "):
+        ready = count("audit") >= int(os.environ.get("FAKE_AI_AUDIT_READY_AFTER", "1"))
+        next_phase = os.environ.get("FAKE_AI_AUDIT_NEXT", "done" if ready else "tests")
+        write("TEST_AUDIT.md", f"Next phase: {next_phase}\n")
+
+
 @dataclass
 class WireAgent:
     mode: str
@@ -199,6 +261,13 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "configuration-ai-starter":
+                blocks = params.get("prompt", [])
+                if isinstance(blocks, list):
+                    text = "\n".join(
+                        str(block.get("text", "")) for block in blocks if isinstance(block, dict)
+                    )
+                    ai_starter_artifacts(Path(self.cwd), text)
             if self.mode == "configuration-starters":
                 blocks = params.get("prompt", [])
                 text = (

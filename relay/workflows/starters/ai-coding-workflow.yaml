@@ -1,0 +1,203 @@
+name: AI coding workflow
+description: Exploration, Opus planning, implementation, review, and tests.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        type: string
+        required: true
+        description: What should we build?
+      agent:
+        type: choice
+        options: [codex, claude, copilot, cursor]
+        default: codex
+        description: Agent for the model-agnostic phases
+      model:
+        type: string
+        required: true
+        description: Exact model value for the selected agent
+      opus_model:
+        type: string
+        required: true
+        description: Exact Claude Opus model value advertised by Claude
+
+jobs:
+  explore:
+    name: 01 · Explore and clarify
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: |
+            prompts/ai-coding-workflow/01_initial_exploration_any_model.md
+            prompts/ai-coding-workflow/interaction.md
+          prompt: ${{ inputs.task }}
+
+  plan:
+    name: Opus · Generate the plan and execution prompt
+    needs: explore
+    steps:
+      - id: instruction
+        uses: ./.relay/actions/ai-coding-workflow/read-generated-prompt
+        with:
+          file: INITIAL_OPUS_PLANNING_PROMPT.md
+      - uses: relay/agent@v1
+        with:
+          agent: claude
+          model: ${{ inputs.opus_model }}
+          prompt: ${{ steps.instruction.outputs.prompt }}
+
+  refine_plan:
+    name: 02–03 · Critique, revise, and verify
+    needs: plan
+    steps:
+      - uses: relay/loop@v1
+        with:
+          workflow: ./.relay/workflows/ai-coding-workflow/plan-cycle.yaml
+          inputs: &models >-
+            {"agent":${{ toJSON(inputs.agent) }},
+             "model":${{ toJSON(inputs.model) }},
+             "opus_model":${{ toJSON(inputs.opus_model) }}}
+          max-iterations: 3
+          until-output: ready
+          equals: 'Yes'
+
+  implement:
+    name: Approve and implement the verified plan
+    needs: refine_plan
+    steps:
+      - id: approval
+        uses: relay/human-wait@v1
+        with:
+          prompt: |
+            Review FEATURE_SPEC_AND_PLAN.md, EXECUTION_PROMPT.md, and
+            PLAN_REVISION_VERIFICATION.md in the run workspace.
+            Reply IMPLEMENT to authorize the locked implementation,
+            valid review fixes, focused tests, commits, push, and PR
+            creation when missing. This does not authorize merging.
+      - uses: relay/validate-input@v1
+        with:
+          value: ${{ toJSON(steps.approval.outputs.answer) }}
+          type: enum
+          constraints: '{"values":["IMPLEMENT"]}'
+      - id: instruction
+        uses: ./.relay/actions/ai-coding-workflow/read-generated-prompt
+        with:
+          file: EXECUTION_PROMPT.md
+      - uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt: ${{ steps.instruction.outputs.prompt }}
+
+  review:
+    name: 04–05 · Review, fix valid findings, and verify
+    needs: implement
+    steps:
+      - uses: relay/loop@v1
+        with:
+          workflow: ./.relay/workflows/ai-coding-workflow/review-cycle.yaml
+          inputs: *models
+          max-iterations: 3
+          until-output: ready
+          equals: 'Yes'
+
+  refresh:
+    name: 06 · Refresh the final review and walkthrough
+    needs: review
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: claude
+          model: ${{ inputs.opus_model }}
+          prompt-files: >-
+            prompts/ai-coding-workflow/06_opus_refresh_review_and_walkthrough.md
+
+  human_review:
+    name: 07–08 · Human walkthrough and approved follow-up
+    needs: refresh
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: |
+            prompts/ai-coding-workflow/07_human_code_walkthrough.md
+            prompts/ai-coding-workflow/interaction.md
+      - id: decision
+        uses: relay/human-wait@v1
+        with:
+          prompt: |
+            Continue only after phase 07 is complete: each changed file
+            has explicit RESOLVE and verified GitHub Viewed state, and
+            each FOLLOWUP.md item has its own explicit AGREE.
+            Reply FOLLOWUP to authorize those exact agreed items.
+            Reply TESTS only when no follow-up work remains.
+            Otherwise leave this request pending.
+      - uses: relay/validate-input@v1
+        with:
+          value: ${{ toJSON(steps.decision.outputs.answer) }}
+          type: enum
+          constraints: '{"values":["FOLLOWUP","TESTS"]}'
+      - if: steps.decision.outputs.answer == 'FOLLOWUP'
+        uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: >-
+            prompts/ai-coding-workflow/08_implement_human_followup_any_model.md
+
+  tests:
+    name: 09–10 · Focused tests and independent audit
+    needs: human_review
+    steps:
+      - uses: relay/loop@v1
+        with:
+          workflow: ./.relay/workflows/ai-coding-workflow/test-cycle.yaml
+          inputs: *models
+          max-iterations: 3
+          until-output: next
+          equals: done
+
+  final_review:
+    name: Human review of the audited test diff
+    needs: tests
+    steps:
+      - id: approval
+        uses: relay/human-wait@v1
+        with:
+          prompt: |
+            Review the final test diff and TEST_AUDIT.md.
+            Reply ACCEPT only after your human review passes.
+            This finishes the workflow and does not merge the PR.
+      - uses: relay/validate-input@v1
+        with:
+          value: ${{ toJSON(steps.approval.outputs.answer) }}
+          type: enum
+          constraints: '{"values":["ACCEPT"]}'
+
+# Phase instructions: https://github.com/viseshrp/ai-coding-workflow
+# Source commit: 7a0bf4ec37ab87946acb4ae5c218e433837cd9cd
+# License for the copied phase instructions:
+# MIT License
+#
+# Copyright (c) 2026 viseshrp
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.

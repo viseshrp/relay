@@ -12,11 +12,12 @@ interface CreateWorkflowDialogProps {
   open: boolean;
   requestProject: string | null;
   holder: string;
+  startBlank?: boolean;
   onClose: () => void;
   onCreated: (key: string, template: WorkflowTemplate | null) => Promise<void>;
 }
 
-export function CreateWorkflowDialog({ open, requestProject, holder, onClose, onCreated }: CreateWorkflowDialogProps) {
+export function CreateWorkflowDialog({ open, requestProject, holder, startBlank = false, onClose, onCreated }: CreateWorkflowDialogProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [selected, setSelected] = useState<WorkflowTemplate | null>(null);
   const [name, setName] = useState("New workflow");
@@ -35,11 +36,17 @@ export function CreateWorkflowDialog({ open, requestProject, holder, onClose, on
     setLoading(true);
     setError(null);
     void api<{ templates: WorkflowTemplate[] }>("/api/workflow-templates")
-      .then((value) => { if (active) setTemplates(value.templates); })
+      .then((value) => {
+        if (!active) return;
+        setTemplates(value.templates);
+        const starter = startBlank ? null : value.templates.find((item) => item.default) ?? null;
+        setSelected(starter);
+        setName(starter?.name ?? "New workflow");
+      })
       .catch((caught: unknown) => { if (active) setError(errorMessage(caught)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [open, check]);
+  }, [open, check, startBlank]);
 
   async function create() {
     setBusy(true);
@@ -74,21 +81,21 @@ export function CreateWorkflowDialog({ open, requestProject, holder, onClose, on
               <Typography variant="body2">Requires: {template.required_agents}</Typography>
               <Typography variant="body2">Inputs: {Object.entries(template.inputs).map(([key, input]) => `${key} (${input.type})`).join(", ")}</Typography>
               <Button variant={selected?.id === template.id ? "contained" : "outlined"} aria-pressed={selected?.id === template.id}
-                onClick={() => { setSelected(template); setName(template.name); }} disabled={busy}>
+                onClick={() => { setSelected(template); setName(template.name); }} disabled={busy || loading}>
                 Use {template.name}
               </Button>
             </Stack>
           </Paper>)}
         </Box>
         <Button variant={selected === null ? "contained" : "outlined"} aria-pressed={selected === null}
-          onClick={() => { setSelected(null); setName("New workflow"); }} disabled={busy}>Blank workflow</Button>
+          onClick={() => { setSelected(null); setName("New workflow"); }} disabled={busy || loading}>Blank workflow</Button>
         {!selected && <TextField autoFocus label="Workflow name" value={name} onChange={(event) => setName(event.target.value)} disabled={busy} />}
         {error && <Alert severity="error" action={<Button onClick={() => setCheck((value) => value + 1)} disabled={busy}>Try again</Button>}>{error}</Alert>}
       </Stack>
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={busy}>Cancel</Button>
-      <Button variant="contained" onClick={() => void create()} disabled={busy || !name.trim()}>Create workflow</Button>
+      <Button variant="contained" onClick={() => void create()} disabled={busy || loading || !name.trim()}>Create workflow</Button>
     </DialogActions>
   </Dialog>;
 }

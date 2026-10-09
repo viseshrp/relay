@@ -45,7 +45,7 @@ export async function runStarter(page: Page, id: string, name: string, testInfo:
   await expect(setup.getByRole("article", { name: "Claude Code", exact: true })).toContainText("Not installed");
   await setup.getByRole("button", { name: "Start from a template", exact: true }).click();
   const gallery = page.getByRole("dialog", { name: "Choose a workflow" });
-  await expect(gallery.getByRole("button", { name: /^Use / })).toHaveCount(6);
+  await expect(gallery.getByRole("button", { name: /^Use / })).toHaveCount(7);
   await gallery.getByRole("button", { name: `Use ${name}`, exact: true }).click();
   const saved = page.waitForResponse((response) => response.url().endsWith("/api/workflows") && response.request().method() === "POST");
   await gallery.getByRole("button", { name: "Create workflow", exact: true }).click();

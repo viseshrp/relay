@@ -575,11 +575,39 @@ jobs:
 
 ## Starter workflows
 
-**Get started** and **Create workflow** offer six editable starters: Ask an
-agent; Plan, approve, implement; Implement and test; Review my branch; Fix
-until tests pass; and Write docs for a change. All use ordered local actions
-and typed task inputs. Implement and test also offers a test-runner choice.
-Writing starters commit at the job end. Existing owner files are never replaced.
+**Get started** and **Create workflow** preselect **AI coding workflow**.
+Enter the task once, such as `Add dark mode`. The task tells the agent what
+to build; the copied phase files tell it how to work. Choose an exact coding
+model and an advertised Claude Opus model before launch. The full starter
+needs Claude Code plus Codex, Claude Code, Copilot, or Cursor for the general
+phases. Saved model-specific effort and permission settings still apply.
+
+The full workflow includes exploration, Opus planning, plan critique and
+verification, approved implementation, branch review and fixes, the human
+walkthrough, agreed follow-up, focused tests, and an independent test audit.
+Plan, review, and test cycles each stop after three rounds. Implementation
+waits for `IMPLEMENT`; the walkthrough waits for `FOLLOWUP` or `TESTS`; the
+final test review waits for `ACCEPT`. It never merges the pull request.
+Audit findings requiring production changes, documentation, or a human
+decision stop the run for owner follow-up instead of repeating test edits.
+Questions and walkthrough decisions use native form elicitation; an agent
+without that capability must report the blocker and preserve the human gates.
+
+The ten original phase files come from
+[ai-coding-workflow](https://github.com/viseshrp/ai-coding-workflow/tree/7a0bf4ec37ab87946acb4ae5c218e433837cd9cd).
+They remain byte-exact. Two small Relay instruction files describe interaction
+and audit routing. Local reusable workflows and a composite action carry
+generated prompts verbatim into subsequent agent turns. Creation copies all
+required files under `.relay/workflows/`, `.relay/prompts/`, and
+`.relay/actions/`. The workflow includes the upstream MIT notice; the package
+also retains its license and prompt hashes. The copied files are editable.
+
+Six smaller starters remain available: Ask an agent; Plan, approve, implement;
+Implement and test; Review my branch; Fix until tests pass; and Write docs for
+a change. **Blank workflow** remains available. All starters use ordered local
+actions and typed task inputs. Implement and test also offers a test-runner
+choice. Writing starters commit at the job end. Existing owner files are
+never replaced.
 
 The owner library imports/exports bounded JSON bundles containing `yaml`,
 `sources`, and gallery `metadata` (`name`, `description`, `iconName`,

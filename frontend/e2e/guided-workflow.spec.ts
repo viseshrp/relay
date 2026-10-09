@@ -21,6 +21,7 @@ test.beforeEach(async ({ page }) => {
 
 test("create a workflow, inspect connected progress, reload its review, and explicitly continue", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Create workflow", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose a workflow" }).getByRole("button", { name: "Blank workflow", exact: true }).click();
   await page.getByLabel("Workflow name").fill("Guided browser flow");
   await page.getByRole("dialog", { name: "Choose a workflow" }).getByRole("button", { name: "Create workflow", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Guided browser flow", exact: true })).toBeVisible();

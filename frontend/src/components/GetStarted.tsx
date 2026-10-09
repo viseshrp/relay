@@ -35,7 +35,7 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState(0);
   const [complete, setComplete] = useState<boolean | null>(null);
-  const [newWorkflow, setNewWorkflow] = useState(false);
+  const [newWorkflow, setNewWorkflow] = useState<"starter" | "blank" | null>(null);
   const [workflow, setWorkflow] = useState<string | null>(null);
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
   const [inputs, setInputs] = useState<Record<string, JsonScalar>>({});
@@ -43,6 +43,14 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
   const [launching, setLaunching] = useState(false);
   const holder = useRef(editorHolder());
   const models = Array.from(new Set(readiness.filter((row) => row.ready).flatMap((row) => row.models)));
+  const fullWorkflow = template?.id === "ai-coding-workflow";
+  const codingModels = readiness.find((row) => row.id === inputs.agent && row.ready)?.models ?? [];
+  const claudeModels = readiness.find((row) => row.id === "claude" && row.ready)?.models ?? [];
+  const readyToRun = fullWorkflow
+    ? typeof inputs.model === "string" && codingModels.includes(inputs.model)
+      && typeof inputs.opus_model === "string" && claudeModels.includes(inputs.opus_model)
+      && typeof inputs.task === "string" && Boolean(inputs.task.trim())
+    : Boolean(model) && models.includes(model);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +87,7 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
     setError(null);
     try {
       const response = await api<{ run_id: string }>(projectPath("/api/runs", requestProject), {
-        method: "POST", body: JSON.stringify({ workflow_key: workflow, project_id: project.id, model, inputs }),
+        method: "POST", body: JSON.stringify({ workflow_key: workflow, project_id: project.id, ...(!fullWorkflow ? { model } : {}), inputs }),
       });
       onRunLaunched(response.run_id);
     } catch (caught) { setError(errorMessage(caught)); }
@@ -101,7 +109,7 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
           </Box>
           <Box>
             <Typography variant="h6">2. Agents</Typography>
-            <Typography variant="body2">One working agent is enough. A connection check reads available models; authentication is verified when a run starts.</Typography>
+            <Typography variant="body2">The full AI coding workflow needs a coding agent and Claude Code with Opus. Other starters need one working agent. A connection check reads available models; authentication is verified when a run starts.</Typography>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", lg: "repeat(5, 1fr)" }, gap: 1, mt: 1 }}>
               {inventory?.agents.map((agent) => {
                 const row = readiness.find((item) => item.id === agent.id);
@@ -127,32 +135,39 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
           </Box>
           <Box>
             <Typography variant="h6">3. First workflow {workflow ? "✓" : ""}</Typography>
-            <Button variant="outlined" onClick={() => setNewWorkflow(true)}>Start from a template</Button>
-            <Button onClick={() => setNewWorkflow(true)}>Blank workflow</Button>
+            <Button variant="outlined" onClick={() => setNewWorkflow("starter")}>Start from a template</Button>
+            <Button onClick={() => setNewWorkflow("blank")}>Blank workflow</Button>
             {workflow && <Typography variant="body2">{template?.name ?? "Blank workflow"} is saved in your project.</Typography>}
           </Box>
           <Box>
             <Typography variant="h6">4. First run {complete ? "✓" : ""}</Typography>
             {!template ? <Typography variant="body2">Choose a template above, or close this checklist to add jobs in the workflow editor.</Typography> : <Stack spacing={2} sx={{ mt: 1 }}>
-              {Object.entries(template.inputs).map(([key, definition]) => definition.type === "enum" ? <FormControl key={key}>
+              {Object.entries(template.inputs).map(([key, definition]) => fullWorkflow && (key === "model" || key === "opus_model") ? <FormControl key={key} required>
                 <InputLabel id={`setup-input-${key}`}>{definition.description ?? key}</InputLabel>
                 <Select labelId={`setup-input-${key}`} label={definition.description ?? key} value={inputs[key] ?? ""}
                   onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))}>
+                  {(key === "model" ? codingModels : claudeModels).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                </Select>
+              </FormControl> : definition.type === "enum" ? <FormControl key={key}>
+                <InputLabel id={`setup-input-${key}`}>{definition.description ?? key}</InputLabel>
+                <Select labelId={`setup-input-${key}`} label={definition.description ?? key} value={inputs[key] ?? ""}
+                  onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value, ...(fullWorkflow && key === "agent" ? { model: "" } : {}) }))}>
                   {definition.constraints?.values?.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
                 </Select>
               </FormControl> : <TextField key={key} label={definition.description ?? key} value={inputs[key] ?? ""}
                 onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))} />)}
-              <FormControl><InputLabel id="setup-model">Model</InputLabel><Select labelId="setup-model" label="Model" value={model} onChange={(event) => setModel(event.target.value)}>
+              {fullWorkflow && !claudeModels.length && <Alert severity="warning">Install and sign in to Claude Code, then choose Check again. This workflow uses Claude Opus for planning and review.</Alert>}
+              {!fullWorkflow && <FormControl><InputLabel id="setup-model">Model</InputLabel><Select labelId="setup-model" label="Model" value={model} onChange={(event) => setModel(event.target.value)}>
                 {models.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-              </Select></FormControl>
-              <Button variant="contained" onClick={() => void launch()} disabled={launching || checking || !model || !models.includes(model)}>Run workflow</Button>
+              </Select></FormControl>}
+              <Button variant="contained" onClick={() => void launch()} disabled={launching || checking || !readyToRun}>Run workflow</Button>
             </Stack>}
           </Box>
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions><Button onClick={onClose}>Close checklist</Button></DialogActions>
-      <CreateWorkflowDialog open={newWorkflow} requestProject={requestProject} holder={holder.current} onClose={() => setNewWorkflow(false)}
+      <CreateWorkflowDialog open={newWorkflow !== null} startBlank={newWorkflow === "blank"} requestProject={requestProject} holder={holder.current} onClose={() => setNewWorkflow(null)}
         onCreated={async (key, selected) => {
           await onWorkflowCreated(key);
           setWorkflow(key); setTemplate(selected);
