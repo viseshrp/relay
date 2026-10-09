@@ -16,13 +16,17 @@
             "type": "jobs",
             "required": true
           },
-          "cache-mode": "cache-mode"
+          "cache-mode": "cache-mode",
+          "entrypoints": "entrypoints",
+          "recovery": "recovery"
         }
       },
       "description": "Relay workflow: local jobs and ordered steps."
     },
     "workflow-name": {
-      "string": {}
+      "string": {
+        "max-length": 256
+      }
     },
     "workflow-description": {
       "string": {}
@@ -33,7 +37,9 @@
         "inputs",
         "vars"
       ],
-      "string": {}
+      "string": {
+        "max-length": 1000
+      }
     },
     "on": {
       "one-of": [
@@ -1021,6 +1027,53 @@
       "sequence": {
         "item-type": "local-event"
       }
+    },
+    "entrypoints": {
+      "sequence": {
+        "item-type": "entrypoint"
+      },
+      "description": "Declared local job start points and their required inputs or retained artifacts."
+    },
+    "entrypoint": {
+      "mapping": {
+        "properties": {
+          "scope_path": {
+            "type": "non-empty-string",
+            "required": true
+          },
+          "inputs": "sequence-of-non-empty-string",
+          "artifacts": "entry-artifacts"
+        }
+      }
+    },
+    "entry-artifacts": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "entry-artifact"
+      }
+    },
+    "entry-artifact": {
+      "mapping": {
+        "properties": {
+          "path": {
+            "type": "non-empty-string",
+            "required": true
+          },
+          "sha256": {
+            "type": "non-empty-string",
+            "required": true
+          }
+        }
+      }
+    },
+    "recovery": {
+      "mapping": {
+        "properties": {
+          "enabled": "boolean",
+          "max_retries": "number"
+        }
+      },
+      "description": "Opt-in bounded automatic recovery. Per-step auto-retry can opt out."
     }
   }
 }

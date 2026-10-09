@@ -17,6 +17,7 @@ export interface AuthState {
 }
 
 export interface WorkflowDraft {
+  prompts?: Record<string, { text: string; base_hash: string | null }>;
   yaml: string;
   base_hash: string;
   validation_state: "valid" | "invalid" | "unchecked";

@@ -670,6 +670,7 @@ class DjangoWorkflowStore:
                 "base_hash": _string(row, "base_file_hash"),
                 "validation_state": _string(row, "validation_state"),
                 "updated_at": _datetime_text(row.updated_at),
+                **({"prompts": _mapping(row, "prompt_edits")} if row.prompt_edits else {}),
             }
         except DatabaseError:
             message = "Relay could not read the workflow recovery draft."
@@ -682,6 +683,8 @@ class DjangoWorkflowStore:
         yaml_text: str,
         base_hash: str,
         validation_state: DraftValidationState,
+        *,
+        prompts: dict[str, object] | None = None,
     ) -> dict[str, object]:
         try:
             project = _project_by_id(project_id)
@@ -692,6 +695,7 @@ class DjangoWorkflowStore:
                     "recovery_yaml": yaml_text,
                     "base_file_hash": base_hash,
                     "validation_state": validation_state.value,
+                    **({"prompt_edits": prompts} if prompts is not None else {}),
                 },
             )
             return {
@@ -699,6 +703,7 @@ class DjangoWorkflowStore:
                 "base_hash": _string(row, "base_file_hash"),
                 "validation_state": _string(row, "validation_state"),
                 "updated_at": _datetime_text(row.updated_at),
+                **({"prompts": _mapping(row, "prompt_edits")} if row.prompt_edits else {}),
             }
         except ProjectDiscoveryError:
             raise

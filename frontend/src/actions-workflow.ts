@@ -22,6 +22,7 @@ export interface ActionJob {
 export interface ActionWorkflow {
   name?: string; "run-name"?: string; on?: unknown;
   jobs: Record<string, ActionJob>; env?: Record<string, unknown>;
+  entrypoints?: Array<{ scope_path: string; inputs?: string[]; artifacts?: Record<string, unknown> }>; recovery?: { enabled?: boolean; max_retries?: number };
   defaults?: unknown; concurrency?: unknown; "cache-mode"?: string;
 }
 
@@ -97,7 +98,7 @@ export function moveActionStep(text: string, jobId: string, index: number, desti
 
 export function actionsGraph(value: ActionWorkflow | null): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
   if (!value) return { nodes: [], edges: [] };
-  const nodes = Object.entries(value.jobs).map(([id, job]) => ({ id, position: { x: 0, y: 0 }, data: { label: job.name || id, kind: "actions_job" } }));
+  const nodes = Object.entries(value.jobs).map(([id, job]) => ({ id, type: "editorJob", position: { x: 0, y: 0 }, data: { label: job.name || id, kind: "actions_job", detail: job.uses || job.steps?.map(step => step.uses === "relay/agent@v1" ? `${String(step.with?.agent ?? "Agent")} · ${String(step.with?.model ?? "Saved model")}` : step.uses ?? step.run?.split("\n")[0] ?? "Step").join(" → ") } }));
   const edges = Object.entries(value.jobs).flatMap(([target, job]) => (typeof job.needs === "string" ? [job.needs] : job.needs || []).map(source => ({ id: `${source}-${target}`, source, target })));
   return { nodes: arrangeGraph(nodes, edges), edges };
 }
@@ -116,5 +117,5 @@ export function launchView(value: ActionWorkflow | null, environments: string[] 
     }
     inputs[name] = { ...definition, type: definition.type === "choice" ? "enum" : definition.type === "environment" ? "string" : String(definition.type || "string") as InputDefinition["type"], ...(definition.options ? { constraints: { values: definition.options } } : {}) };
   }
-  return { version: 1, name: value.name || "Workflow", nodes: Object.fromEntries(Object.entries(value.jobs).map(([name, job]) => [name, { type: "actions_job", needs: typeof job.needs === "string" ? [job.needs] : job.needs }])), inputs };
+  return { version: 1, name: value.name || "Workflow", entrypoints: value.entrypoints, nodes: Object.fromEntries(Object.entries(value.jobs).map(([name, job]) => [name, { type: "actions_job", needs: typeof job.needs === "string" ? [job.needs] : job.needs }])), inputs };
 }

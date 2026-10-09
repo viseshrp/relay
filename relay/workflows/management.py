@@ -55,46 +55,49 @@ def manage_workflow_document(
     new_key: str | None = None,
     name: str | None = None,
 ) -> str | None:
-    path = _path(relay_root, key)
-    raw = path.read_bytes()
-    if sha256(raw).hexdigest() != base_hash:
-        message = "The saved workflow changed after you loaded it."
-        raise PermissionFlowError(message, next_action="Reload before managing the workflow.")
-    if action == "delete":
-        _reject_references(relay_root, key)
-        path.unlink()
-        return None
-    if action not in {"rename", "duplicate"} or not new_key:
-        message = "Choose rename, duplicate, or delete, with a new file name when needed."
-        raise WorkflowValidationError(message)
-    new_key = "/".join(workflow_key_parts(new_key))
-    _require_portable_names(workflow_key_parts(new_key))
-    destination = resolve_workflow_path(relay_root / "workflows", new_key)
-    if action == "rename":
-        _reject_references(relay_root, key)
-    text = raw.decode("utf-8")
-    if name is not None:
-        parsed = load(text)
-        document = cast(MutableMapping[str, Any], parsed.document)
-        document["name"] = name
-        output = StringIO()
-        YAML(typ="rt").dump(document, output)
-        text = output.getvalue()
-    if destination == path:
-        if action == "duplicate":
-            message = "A duplicate needs a different file name."
-            raise PermissionFlowError(message)
-        from .editor import save_workflow_document
+    from .source_bundle import source_lock
 
-        save_workflow_document(store, relay_root, project_id, key, text, base_hash)
-        return key
-    from .editor import create_workflow_document
-
-    create_workflow_document(store, relay_root, project_id, new_key, text)
-    if action == "rename":
-        try:
+    with source_lock(relay_root):
+        path = _path(relay_root, key)
+        raw = path.read_bytes()
+        if sha256(raw).hexdigest() != base_hash:
+            message = "The saved workflow changed after you loaded it."
+            raise PermissionFlowError(message, next_action="Reload before managing the workflow.")
+        if action == "delete":
+            _reject_references(relay_root, key)
             path.unlink()
-        except OSError:
-            destination.unlink()
-            raise
-    return new_key
+            return None
+        if action not in {"rename", "duplicate"} or not new_key:
+            message = "Choose rename, duplicate, or delete, with a new file name when needed."
+            raise WorkflowValidationError(message)
+        new_key = "/".join(workflow_key_parts(new_key))
+        _require_portable_names(workflow_key_parts(new_key))
+        destination = resolve_workflow_path(relay_root / "workflows", new_key)
+        if action == "rename":
+            _reject_references(relay_root, key)
+        text = raw.decode("utf-8")
+        if name is not None:
+            parsed = load(text)
+            document = cast(MutableMapping[str, Any], parsed.document)
+            document["name"] = name
+            output = StringIO()
+            YAML(typ="rt").dump(document, output)
+            text = output.getvalue()
+        if destination == path:
+            if action == "duplicate":
+                message = "A duplicate needs a different file name."
+                raise PermissionFlowError(message)
+            from .editor import save_workflow_document
+
+            save_workflow_document(store, relay_root, project_id, key, text, base_hash)
+            return key
+        from .editor import create_workflow_document
+
+        create_workflow_document(store, relay_root, project_id, new_key, text)
+        if action == "rename":
+            try:
+                path.unlink()
+            except OSError:
+                destination.unlink()
+                raise
+        return new_key

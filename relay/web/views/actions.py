@@ -38,7 +38,6 @@ from relay.workflows.editor import (
     read_prompt_document,
     read_workflow_document,
     save_prompt_document,
-    save_workflow_document,
 )
 from relay.workflows.loader import workflow_key_parts
 from relay.workflows.scope import parse_scope_path
@@ -350,10 +349,13 @@ def relink_registered_project(request: HttpRequest) -> HttpResponse:
 @owner_required
 @require_POST
 def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
+    from relay.workflows.source_bundle import prompt_edits
+
     relay_root, project = current_project(request)
     body = json_body(request)
     store = DjangoWorkflowStore()
     store.require_lease(project.id, key, _lease_holder(body))
+    edits = prompt_edits(body.get("prompts", {}), relay_root)
     draft = autosave_workflow_draft(
         store,
         relay_root,
@@ -361,6 +363,7 @@ def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
         key,
         _yaml_text(body),
         _base_hash(body),
+        prompts=dict(edits),
     )
     return JsonResponse({"draft": draft})
 
@@ -369,17 +372,20 @@ def autosave_draft(request: HttpRequest, key: str) -> HttpResponse:
 @owner_required
 @require_POST
 def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
+    from relay.workflows.source_bundle import prompt_edits, save_source_bundle
+
     relay_root, project = current_project(request)
     body = json_body(request)
     store = DjangoWorkflowStore()
     store.require_lease(project.id, key, _lease_holder(body))
-    save_workflow_document(
+    save_source_bundle(
         store,
         relay_root,
         project.id,
         key,
         _yaml_text(body),
         _base_hash(body),
+        prompt_edits(body.get("prompts", {}), relay_root),
     )
     return JsonResponse({"ok": True})
 
@@ -536,6 +542,22 @@ def read_workflow_prompt(request: HttpRequest, key: str) -> HttpResponse:
     if reference is None:
         message = "reference is required."
         raise ConfigError(message)
+    if reference.startswith("global:"):
+        from relay.workflows.prompts import resolve_prompt
+        from relay.workflows.schema import GlobalPrompt
+
+        prompt = resolve_prompt(GlobalPrompt(global_=reference[7:]), relay_root)
+        if len(prompt.content.encode()) > 1_048_576:
+            message = "These instructions exceed the editor’s size limit."
+            raise ConfigError(message)
+        return JsonResponse(
+            {
+                "reference": reference,
+                "text": prompt.content,
+                "base_hash": prompt.sha256,
+                "readonly": True,
+            }
+        )
     return JsonResponse(read_prompt_document(relay_root, reference))
 
 

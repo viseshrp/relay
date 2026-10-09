@@ -104,7 +104,9 @@ class WorkflowControl(RelayModel):
 
 
 class WorkflowDraft(RelayModel):
-    """Latest recovery YAML for one tracked workflow."""
+    """Latest recovery YAML and prompt edits for one tracked workflow."""
+
+    prompt_edits: models.JSONField = models.JSONField(default=dict)
 
     project: models.ForeignKey = models.ForeignKey(
         Project, on_delete=models.CASCADE, related_name="workflow_drafts"

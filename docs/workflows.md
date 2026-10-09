@@ -247,7 +247,9 @@ Copilot CLI, and Cursor CLI; Antigravity uses its native headless adapter.
 
 ## Automatic recovery
 
-The owner can enable bounded recovery in defaults or an active run's controls.
+The owner can enable bounded recovery in defaults, an active run's controls,
+or workflow `recovery: {enabled: true, max_retries: 2}`. The lifetime retry
+budget stays bounded by the existing recovery limit.
 `with.auto-retry: true` explicitly enables bounded agent repair; `false` opts
 that step out. Omission follows the run policy. Eligible report, protocol, and
 timeout failures retain rejected evidence and append a separate repair
@@ -599,3 +601,14 @@ settings manage scoped variables and secret references.
 Sources are portable. Databases, claims, credentials, logs, artifacts, caches,
 private state, and worktrees stay in platform-specific installation storage.
 See [projects and storage](projects-and-storage.md) and [HTTP API](http-api.md).
+
+## Declared start points
+
+`entrypoints` declares local top-level job start points, for example
+`[{scope_path: root.check, inputs: [task]}]`. Each entry can also declare
+`artifacts`, mapping names to `{path, sha256}`. Launch verifies required
+inputs and exact retained artifact hashes before starting from that job.
+Existing scheduling rules select downstream work and preserve skipped
+upstream distinctions. **Run from here** in the editor saves a declaration
+before opening the launch panel. Workflow names allow 256 characters and
+run titles allow 1000 characters, including the resolved expression result.

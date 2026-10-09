@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,6 +37,35 @@ from . import api_errors, current_project, json_body, required_text
 @require_GET
 def manifest(request: HttpRequest) -> JsonResponse:
     return JsonResponse(support_manifest())
+
+
+@api_errors
+@owner_required
+@require_GET
+def prompt_inventory(request: HttpRequest) -> JsonResponse:
+    from relay.constants import API_MAX_PAGE
+    from relay.paths import global_prompts_dir
+
+    root, _ = current_project(request)
+    records = []
+    for prefix, directory in (("prompts/", root / "prompts"), ("global:", global_prompts_dir())):
+        for parent, children, files in os.walk(directory, followlinks=False):
+            children[:] = sorted(
+                name for name in children if not (Path(parent) / name).is_symlink()
+            )
+            for name in sorted(files):
+                path = Path(parent) / name
+                if path.is_symlink() or path.stat().st_size > 1_048_576:
+                    continue
+                records.append(
+                    {
+                        "reference": prefix + path.relative_to(directory).as_posix(),
+                        "readonly": prefix == "global:",
+                    }
+                )
+                if len(records) >= API_MAX_PAGE:
+                    return JsonResponse({"prompts": records, "truncated": True})
+    return JsonResponse({"prompts": records, "truncated": False})
 
 
 @api_errors

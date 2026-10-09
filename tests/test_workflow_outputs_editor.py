@@ -58,6 +58,8 @@ class _MemoryDrafts:
         yaml_text: str,
         base_hash: str,
         validation_state: DraftValidationState,
+        *,
+        prompts: dict[str, object] | None = None,
     ) -> dict[str, object]:
         draft = {"yaml": yaml_text, "base_hash": base_hash, "state": validation_state.value}
         self.drafts[(project_id, workflow_key)] = draft

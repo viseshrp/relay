@@ -6,6 +6,7 @@ from .static_view import serve_spa
 from .views import actions, actions_language, pages, settings, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("api/workflow-prompts", actions_language.prompt_inventory),
     path("api/workflow-language", actions_language.manifest),
     path("api/workflow-library", actions_language.library),
     path("api/workflow-language/validate", actions_language.validate),

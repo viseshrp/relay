@@ -1,5 +1,4 @@
-import { HelpSelectField } from "./HelpTip";
-import { Alert, Button, MenuItem, Stack } from "@mui/material";
+import { Alert, Autocomplete, Button, Stack, TextField } from "@mui/material";
 import { useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
@@ -24,11 +23,7 @@ export function ModelPicker({ agents, value, project, disabled = false, onChange
     setObserved(available); setError(failures.join("\n") || (available.length ? null : "No models were returned. Check that a selected tool is installed and signed in.")); setBusy(false);
   }
   return <Stack spacing={1} className="model-picker">
-    <HelpSelectField topic="model" label="Model" fullWidth size="small" value={value} disabled={disabled || busy} onChange={(event) => onChange(event.target.value)}>
-      <MenuItem value="">{defaultLabel}</MenuItem>
-      {value && !models.has(value) && <MenuItem value={value}>{value}</MenuItem>}
-      {Array.from(models, ([id, name]) => <MenuItem key={id} value={id}>{name}</MenuItem>)}
-    </HelpSelectField>
+    <Autocomplete freeSolo value={value} options={[...models.keys()]} disabled={disabled || busy} getOptionLabel={id => models.get(id) || id} onChange={(_, selected) => onChange(selected ?? "")} onInputChange={(_, input, reason) => { if (reason === "input") onChange(input); }} renderInput={parameters => <TextField {...parameters} label="Model" size="small" placeholder={defaultLabel} helperText={value ? `Exact provider value: ${value}` : defaultLabel} />} />
     <Button sx={{ alignSelf: "flex-start" }} disabled={disabled || busy || agents.every((agent) => !agent.installed)} onClick={() => void load()}>{busy ? "Loading models…" : "Load available models"}</Button>
     {error && <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>{error}</Alert>}
   </Stack>;

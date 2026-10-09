@@ -217,15 +217,16 @@ action steps expose their local action reference and input mapping. Agent steps
 provide an exact model override, prompt files, runtime prompt, and the selected
 provider's current effort choices. Permission modes are owner settings.
 
-The CodeMirror YAML editor remains visible. Form edits and YAML edits share one
+Choose **Visual**, **YAML**, or **Split**. Form edits and YAML edits share one
 CST document. Comments and unrelated fields survive edits; editing an alias
 detaches that occurrence. Server validation reports invalid fields before Save
 or Run. Pure validation never executes a command or probes an agent.
 
 Drafts autosave after editing and before navigation. A renewed editing lease and
 saved-file hash protect publication. A recovered draft can be inspected or
-replaced with the saved source. Saving validates and publishes only that
-workflow. Saved sources and drafts use the current jobs-and-steps format.
+replaced with the saved source. Saving validates and publishes that workflow
+and every pending local prompt edit together. Saved sources and drafts use
+the current jobs-and-steps format.
 Historical run snapshots remain inspectable.
 
 JSON-formatted current workflow sources appear as block YAML in the editor and
@@ -251,6 +252,22 @@ Environment approval uses its own attempt-specific control; a generic human
 answer cannot bypass it. Job failure tolerance retains the raw outcome beside
 the effective conclusion.
 
+Job settings open in a drawer. Connect graph handles to add a dependency;
+select an edge and press Delete to remove it. The plus button between jobs
+inserts a job. Right-click a card to duplicate, delete, or run from that job.
+**Run from here** saves a declared start point before opening launch options.
+Undo and redo reverse document edits. **Format as YAML** previews changes
+before applying them to the draft. YAML completion and hover help use the
+server language manifest; diagnostics underline their source position.
+
+**Workflow settings** edits names, launch inputs, defaults, environment,
+concurrency, events, recovery, and declared start points. Job forms use
+key/value tables and lists. Agent prompts support Markdown preview, ordered
+local or shared global files, reuse, and reordering. Global files are read
+only. Renaming a prompt copies this job's instructions and retains the shared
+original for other workflows. **What the agent receives** explains prompt,
+input, output, and run context.
+
 See [Workflow language](workflows.md) for exact YAML keys and limits.
 
 ## Drafts, leases, and conflicts
@@ -275,9 +292,11 @@ the editing lease or rewriting the workflow file. A newer draft from another
 tab causes a conflict. The editor shows the saved source beside the draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
-Save validates the complete workflow, prompts, and subworkflows, then replaces
-one file atomically. It also sends the SHA-256 hash of the exact bytes loaded by
-the tab. If another process changed the file, Relay returns a conflict and
+Save validates the complete workflow, prompts, and subworkflows, then publishes
+YAML and local prompt edits as one recoverable bundle. A portable source lock
+protects readers and launch capture; an interrupted publication rolls back
+before the next source operation. Save sends the SHA-256 hashes loaded by the
+tab. If another process changed a file, Relay returns a conflict and
 keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
 again. A successful Save clears the draft and refreshes the base hash.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,

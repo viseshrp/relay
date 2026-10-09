@@ -405,6 +405,23 @@ def validate_steps(steps: object, path: str) -> None:
 
 
 def _validate_contracts(workflow: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from relay.workflows.schema import EntryPoint, RecoveryPolicy
+
+    for field, model in (("entrypoints", EntryPoint), ("recovery", RecoveryPolicy)):
+        values = workflow.get(field, []) if field == "entrypoints" else [workflow.get(field, {})]
+        for value in values:
+            try:
+                parsed = model.model_validate(value)
+            except ValidationError:
+                raise _issue(
+                    field, "Use valid local start points or a bounded recovery policy."
+                ) from None
+            if isinstance(parsed, EntryPoint):
+                scope = parsed.scope_path.removeprefix("root.")
+                if scope not in workflow["jobs"]:
+                    raise _issue(field, "A start point must name a top-level job.")
     triggers = events(workflow)
     for event, raw in triggers.items():
         if event not in EVENTS:

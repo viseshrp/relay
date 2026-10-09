@@ -3,6 +3,7 @@ import {
   Controls,
   getNodesBounds,
   type Edge,
+  type Connection,
   MiniMap,
   type Node,
   type NodeMouseHandler,
@@ -16,10 +17,14 @@ import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 
 import { RunGraphNode } from "./RunGraphNode";
+import { EditorGraphNode } from "./EditorGraphNode";
+import { InsertJobEdge } from "./InsertJobEdge";
 
 import type { WorkflowNodeData } from "../workflow";
 
 const RUN_NODE_TYPES = { runJob: RunGraphNode };
+const EDITOR_NODE_TYPES = { editorJob: EditorGraphNode };
+const EDITOR_EDGE_TYPES = { insertJob: InsertJobEdge };
 
 interface FlowCanvasProps {
   runMode?: boolean;
@@ -30,6 +35,9 @@ interface FlowCanvasProps {
   followSelection?: boolean;
   focusRequest?: number;
   initialFocusId?: string | null;
+  onConnect?: (connection: Connection) => void;
+  onDeleteEdges?: (edges: Edge[]) => void;
+  onContextMenu?: (id: string, x: number, y: number) => void;
 }
 
 function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; focusRequest: number }) {
@@ -63,8 +71,9 @@ function InitialRunViewport({ container }: { container: RefObject<HTMLDivElement
   return null;
 }
 
-export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0, initialFocusId }: FlowCanvasProps) {
+export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0, initialFocusId, onConnect, onDeleteEdges, onContextMenu }: FlowCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
+  const lastConnection = useRef(0);
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -85,7 +94,7 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
 
   useEffect(() => setEdges(edges), [edges, setEdges]);
 
-  const selectNode: NodeMouseHandler = (_event, node) => onSelect?.(node.id);
+  const selectNode: NodeMouseHandler = (_event, node) => { if (performance.now() - lastConnection.current > 300) onSelect?.(node.id); };
 
   return (
     <div ref={container} className="flow-canvas" onKeyDown={runMode ? (event) => {
@@ -101,7 +110,16 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={selectNode}
-        nodeTypes={runMode ? RUN_NODE_TYPES : undefined}
+        onConnect={runMode ? undefined : onConnect}
+        onConnectEnd={() => { lastConnection.current = performance.now(); }}
+        onEdgesDelete={runMode ? undefined : onDeleteEdges}
+        onNodeContextMenu={runMode ? undefined : (event, node) => { if (onContextMenu) { event.preventDefault(); onContextMenu(node.id, event.clientX, event.clientY); } }}
+        nodeTypes={runMode ? RUN_NODE_TYPES : EDITOR_NODE_TYPES}
+        edgeTypes={runMode ? undefined : EDITOR_EDGE_TYPES}
+        nodesConnectable={!runMode}
+        edgesFocusable={!runMode}
+        deleteKeyCode={runMode ? null : ["Backspace", "Delete"]}
+        ariaLabelConfig={runMode ? { "node.a11yDescription.default": "Press Enter to open this job.", "controls.interactive.ariaLabel": "Read-only graph" } : undefined}
         nodesDraggable={!runMode}
         zoomOnScroll={!runMode}
         preventScrolling={!runMode}

@@ -47,6 +47,14 @@ cookie value in `X-CSRFToken`. A missing or expired token gets
 `403 csrf_failed`. For example, if the cookie is `relay_csrftoken=abc`, the
 request header is `X-CSRFToken: abc`.
 
+Workflow draft and Save bodies also accept `prompts`, a mapping of local
+`prompts/<file>` references to `{text, base_hash}`. Use `base_hash: null` for
+a new prompt. One Save publishes the YAML and up to 32 prompt edits together,
+rejecting any stale file before publication. The complete prompt edits are
+retained with the recovery draft. Edits allow 1 MiB of new prompt text.
+`GET /api/workflow-prompts` lists bounded local and global references. The
+workflow prompt read endpoint accepts `global:<file>` for read-only preview.
+
 ## Workflow language and local automation
 
 These owner routes use the same login and CSRF rules. Select a project with the

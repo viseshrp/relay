@@ -14,9 +14,58 @@ from relay.workflows.schema import ActionsJobNode
 from relay.workflows.validation import ValidatedWorkflow, validate_loaded_workflow
 
 
+def _static_action_prompts(workflow: ValidatedWorkflow, relay_root: Path) -> ValidatedWorkflow:
+    """Include literal prompt sources in the same file preview used before input binding."""
+    from relay.workflows.actions.language import load
+    from relay.workflows.actions.metadata import load_action
+    from relay.workflows.prompts import resolve_prompt
+    from relay.workflows.schema import GlobalPrompt, LocalPrompt
+
+    if not workflow.root.definition.actions:
+        return workflow
+    steps = [
+        step
+        for job in workflow.root.definition.actions["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    sources = next(iter(workflow.root.definition.nodes.values()))
+    if isinstance(sources, ActionsJobNode):
+        for name, text in sources.sources.items():
+            if name.startswith(".relay/workflows/"):
+                child = load(text)
+                steps.extend(
+                    step for job in child.value["jobs"].values() for step in job.get("steps", [])
+                )
+            elif name.endswith(("/action.yaml", "/action.yml")):
+                action = load_action(text)
+                steps.extend(action["runs"].get("steps", []))
+    prompts = []
+    for step in steps:
+        if step.get("uses") != "relay/agent@v1":
+            continue
+        references = str(step.get("with", {}).get("prompt-files", ""))
+        if "${{" in references:
+            continue
+        for reference in references.splitlines():
+            reference = reference.strip()
+            if reference:
+                target = (
+                    GlobalPrompt(global_=reference[7:])
+                    if reference.startswith("global:")
+                    else LocalPrompt(local=reference.removeprefix(".relay/"))
+                )
+                prompts.append(resolve_prompt(target, relay_root))
+    return replace(workflow, prompts=tuple(prompts))
+
+
 def load_launch_workflow(relay_root: Path, workflow_key: str) -> ValidatedWorkflow:
-    path = resolve_workflow_path(relay_root / "workflows", workflow_key)
-    return validate_loaded_workflow(load_workflow(path), relay_root)
+    from relay.workflows.source_bundle import source_lock
+
+    with source_lock(relay_root):
+        path = resolve_workflow_path(relay_root / "workflows", workflow_key)
+        return _static_action_prompts(
+            validate_loaded_workflow(load_workflow(path), relay_root), relay_root
+        )
 
 
 def launch_source_files(workflow: ValidatedWorkflow, repository: Path) -> frozenset[str]:

@@ -53,6 +53,8 @@ class WorkflowEditorStore(Protocol):
         yaml_text: str,
         base_hash: str,
         validation_state: DraftValidationState,
+        *,
+        prompts: dict[str, object] | None = None,
     ) -> dict[str, object]: ...
 
     def discard_draft(self, project_id: str, workflow_key: str) -> None: ...
@@ -103,14 +105,17 @@ def read_workflow_document(
     project_id: str,
     workflow_key: str,
 ) -> WorkflowDocument:
-    """Read the saved file and latest recovery draft without merging either."""
-    path = _path(relay_root, workflow_key)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        message = f"Workflow {workflow_key!r} could not be read as UTF-8."
-        raise WorkflowValidationError(message, context={"workflow": workflow_key}) from None
-    return WorkflowDocument(text, store.get_draft(project_id, workflow_key), _digest(text))
+    from .source_bundle import source_lock
+
+    with source_lock(relay_root):
+        """Read the saved file and latest recovery draft without merging either."""
+        path = _path(relay_root, workflow_key)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            message = f"Workflow {workflow_key!r} could not be read as UTF-8."
+            raise WorkflowValidationError(message, context={"workflow": workflow_key}) from None
+        return WorkflowDocument(text, store.get_draft(project_id, workflow_key), _digest(text))
 
 
 def list_workflow_documents(relay_root: Path) -> list[dict[str, str]]:
@@ -146,25 +151,28 @@ def create_workflow_document(
     yaml_text: str | None = None,
     name: str = "New workflow",
 ) -> WorkflowDocument:
-    """Validate and publish a new file without replacing an existing workflow."""
-    _require_portable_names(workflow_key_parts(workflow_key))
-    path = resolve_workflow_path(relay_root / "workflows", workflow_key)
-    text = (
-        yaml_text
-        if yaml_text is not None
-        # JSON quotes preserve a name such as "Review: API" as one YAML scalar.
-        else (
-            f"name: {json.dumps(name)}\non: workflow_dispatch\njobs:\n"
-            "  check:\n    steps:\n      - run: echo Ready\n"
-        )
-    )
-    from .actions.language import load
+    from .source_bundle import source_lock
 
-    load(text, source=path)
-    loaded = load_workflow_text(text, source=path)
-    validate_loaded_workflow(loaded, relay_root)
-    _atomic_create(path, text)
-    return read_workflow_document(store, relay_root, project_id, workflow_key)
+    with source_lock(relay_root):
+        """Validate and publish a new file without replacing an existing workflow."""
+        _require_portable_names(workflow_key_parts(workflow_key))
+        path = resolve_workflow_path(relay_root / "workflows", workflow_key)
+        text = (
+            yaml_text
+            if yaml_text is not None
+            # JSON quotes preserve a name such as "Review: API" as one YAML scalar.
+            else (
+                f"name: {json.dumps(name)}\non: workflow_dispatch\njobs:\n"
+                "  check:\n    steps:\n      - run: echo Ready\n"
+            )
+        )
+        from .actions.language import load
+
+        load(text, source=path)
+        loaded = load_workflow_text(text, source=path)
+        validate_loaded_workflow(loaded, relay_root)
+        _atomic_create(path, text)
+        return read_workflow_document(store, relay_root, project_id, workflow_key)
 
 
 def _atomic_create(path: Path, text: str | bytes) -> None:
@@ -195,20 +203,23 @@ def _atomic_create(path: Path, text: str | bytes) -> None:
 
 
 def read_prompt_document(relay_root: Path, reference: str) -> dict[str, str]:
-    """Read an editable local prompt within this project's prompts directory."""
-    path = safe_resolve(relay_root, reference)
-    path = safe_resolve(relay_root / "prompts", path)
-    try:
-        with path.open("rb") as stream:
-            content = stream.read(API_MAX_PAGE_BYTES + 1)
-        if len(content) > API_MAX_PAGE_BYTES:
-            message = "These instructions exceed the editor's size limit."
-            raise WorkflowValidationError(message)
-        text = content.decode("utf-8")
-    except (OSError, UnicodeError):
-        message = "The selected instructions could not be read as UTF-8."
-        raise WorkflowValidationError(message) from None
-    return {"text": text, "base_hash": _digest(text), "reference": reference}
+    from .source_bundle import source_lock
+
+    with source_lock(relay_root):
+        """Read an editable local prompt within this project's prompts directory."""
+        path = safe_resolve(relay_root, reference)
+        path = safe_resolve(relay_root / "prompts", path)
+        try:
+            with path.open("rb") as stream:
+                content = stream.read(API_MAX_PAGE_BYTES + 1)
+            if len(content) > API_MAX_PAGE_BYTES:
+                message = "These instructions exceed the editor's size limit."
+                raise WorkflowValidationError(message)
+            text = content.decode("utf-8")
+        except (OSError, UnicodeError):
+            message = "The selected instructions could not be read as UTF-8."
+            raise WorkflowValidationError(message) from None
+        return {"text": text, "base_hash": _digest(text), "reference": reference}
 
 
 def save_prompt_document(
@@ -217,22 +228,27 @@ def save_prompt_document(
     text: str,
     base_hash: str | None,
 ) -> dict[str, str]:
-    """Write local instructions only if the owner's loaded bytes still match."""
-    path = safe_resolve(relay_root, reference)
-    path = safe_resolve(relay_root / "prompts", path)
-    if path.exists():
-        saved = read_prompt_document(relay_root, reference)
-        if base_hash != saved["base_hash"]:
-            message = "These instructions changed after you loaded them."
-            raise PermissionFlowError(message, next_action="Reload the instructions before saving.")
-        _atomic_replace(path, text, resource="instructions")
-    else:
-        if base_hash is not None:
-            message = "The instructions file was removed after you loaded it."
-            raise PermissionFlowError(message)
-        _require_portable_names(path.relative_to(relay_root.resolve()).parts)
-        _atomic_create(path, text)
-    return read_prompt_document(relay_root, reference)
+    from .source_bundle import source_lock
+
+    with source_lock(relay_root):
+        """Write local instructions only if the owner's loaded bytes still match."""
+        path = safe_resolve(relay_root, reference)
+        path = safe_resolve(relay_root / "prompts", path)
+        if path.exists():
+            saved = read_prompt_document(relay_root, reference)
+            if base_hash != saved["base_hash"]:
+                message = "These instructions changed after you loaded them."
+                raise PermissionFlowError(
+                    message, next_action="Reload the instructions before saving."
+                )
+            _atomic_replace(path, text, resource="instructions")
+        else:
+            if base_hash is not None:
+                message = "The instructions file was removed after you loaded it."
+                raise PermissionFlowError(message)
+            _require_portable_names(path.relative_to(relay_root.resolve()).parts)
+            _atomic_create(path, text)
+        return read_prompt_document(relay_root, reference)
 
 
 def workflow_handoff_warnings(nodes: dict[str, NodeDefinition]) -> list[dict[str, str]]:
@@ -271,6 +287,8 @@ def autosave_workflow_draft(
     workflow_key: str,
     yaml_text: str,
     base_hash: str,
+    *,
+    prompts: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Keep invalid editor text recoverable while recording its validation state."""
     path = _path(relay_root, workflow_key)
@@ -289,6 +307,7 @@ def autosave_workflow_draft(
         yaml_text,
         base_hash,
         state,
+        **({"prompts": prompts} if prompts is not None else {}),
     )
 
 
@@ -324,27 +343,10 @@ def save_workflow_document(
     yaml_text: str,
     base_hash: str,
 ) -> None:
-    """Reject stale bases, validate the complete tree, then replace one YAML file."""
-    path = _path(relay_root, workflow_key)
-    try:
-        saved = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        message = f"Workflow {workflow_key!r} could not be read as UTF-8."
-        raise WorkflowValidationError(message, context={"workflow": workflow_key}) from None
-    if _digest(saved) != base_hash:
-        message = "The workflow changed after this editor loaded it."
-        raise PermissionFlowError(
-            message,
-            context={"workflow": workflow_key},
-            next_action="Reload the saved file and reconcile the recovery draft before saving.",
-        )
-    from .actions.language import load
+    """Save YAML through the same recoverable publication used by bundled prompts."""
+    from .source_bundle import save_source_bundle
 
-    load(yaml_text, source=path)
-    loaded = load_workflow_text(yaml_text, source=path)
-    validate_loaded_workflow(loaded, relay_root)
-    _atomic_replace(path, yaml_text)
-    store.discard_draft(project_id, workflow_key)
+    save_source_bundle(store, relay_root, project_id, workflow_key, yaml_text, base_hash, {})
 
 
 __all__ = [
