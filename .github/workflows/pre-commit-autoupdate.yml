@@ -33,7 +33,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Run pre-commit autoupdate
-        run: uv run pre-commit autoupdate
+        run: uv run python scripts/autoupdate_hooks.py
 
       - name: Run pre-commit checks
         run: make check
