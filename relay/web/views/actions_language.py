@@ -36,7 +36,9 @@ from . import api_errors, current_project, json_body, required_text
 @owner_required
 @require_GET
 def manifest(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(support_manifest())
+    from relay.execution.action_files import script_previews
+
+    return JsonResponse({**support_manifest(), "host_scripts": script_previews()})
 
 
 @api_errors
@@ -433,6 +435,7 @@ def download_product(request: HttpRequest, artifact_id: str) -> FileResponse:
 @require_GET
 def preview_product(request: HttpRequest, artifact_id: str) -> JsonResponse:
     """Preview one bounded retained file, verifying ownership and its recorded digest."""
+    import codecs
     import mimetypes
 
     from django.utils import timezone
@@ -467,7 +470,9 @@ def preview_product(request: HttpRequest, artifact_id: str) -> JsonResponse:
         data = source.read(128 * 1024 + 1)
     media = mimetypes.guess_type(selected["path"])[0] or "application/octet-stream"
     try:
-        text = data[: 128 * 1024].decode("utf-8")
+        text = codecs.getincrementaldecoder("utf-8")().decode(
+            data[: 128 * 1024], final=len(data) <= 128 * 1024
+        )
         previewable = "\x00" not in text
     except UnicodeDecodeError:
         text, previewable = "", False
@@ -475,7 +480,10 @@ def preview_product(request: HttpRequest, artifact_id: str) -> JsonResponse:
         {
             "files": [
                 {"path": item["path"], "bytes": item["bytes"]}
-                for item in manifest[offset : offset + 100]
+                for item in [
+                    *manifest[offset : offset + 100],
+                    *([] if selected in manifest[offset : offset + 100] else [selected]),
+                ]
             ],
             "next": offset + 100 if offset + 100 < len(manifest) else None,
             "path": selected["path"],

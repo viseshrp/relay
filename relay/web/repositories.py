@@ -1033,6 +1033,7 @@ def _node_record(
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
     scope = _string(node, "scope_path")
+    route = _effective_route(node, snapshot)
     # root.build#2.check + needs ["plan"] becomes root.build#2.plan, never root.plan.
     parent = scope.rsplit(".", 1)[0]
     needs = frozen.get("needs", [])
@@ -1090,6 +1091,11 @@ def _node_record(
         "step_id": str(frozen.get("step_id", "")),
         "matrix_index": frozen.get("matrix_index"),
         "status": _string(node, "status"),
+        **(
+            {"agent_id": route["selected_agent"], "model_value": route.get("model_value")}
+            if route.get("selected_agent")
+            else {}
+        ),
         "started_at": _datetime_text(_datetime_field(node, "latest_started_at")),
         "ended_at": _datetime_text(_datetime_field(node, "latest_ended_at")),
         "writes": _boolean(node, "writes"),
@@ -1154,6 +1160,21 @@ def _event_record(event: RunEvent) -> dict[str, object]:
         "ts": _datetime_text(_datetime_field(event, "ts")),
         "payload": _mapping(event, "payload"),
     }
+
+
+def _event_summary_record(event: RunEvent) -> dict[str, object]:
+    """Bound monitor summaries without changing retained event or job-log bytes."""
+    record = _event_record(event)
+    if len(json.dumps(record, ensure_ascii=False).encode("utf-8")) > 8192:
+        payload = _mapping(event, "payload")
+        record["payload"] = {
+            key: value[:256] if isinstance(value, str) else value
+            for key, value in payload.items()
+            if key in {"scope_path", "attempt_number", "status", "error_code", "message"}
+            and isinstance(value, (str, int, float, bool, type(None)))
+        }
+        record["summary_truncated"] = True
+    return record
 
 
 def _artifact_record(artifact: Artifact) -> dict[str, object]:
@@ -1733,11 +1754,16 @@ class DjangoReadStore:
         attempt_number: int | None = None,
         latest: bool = False,
         before: int | None = None,
+        summary: bool = False,
     ) -> tuple[list[dict[str, object]], int | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
             query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
+            if summary:
+                query = query.exclude(type__startswith="agent.").exclude(
+                    type__in=("command.stdout", "command.stderr", "actions.summary")
+                )
             if scope_path is not None:
                 parse_scope_path(scope_path)
                 query = query.filter(node_run__scope_path=scope_path)
@@ -1750,7 +1776,12 @@ class DjangoReadStore:
             if latest:
                 query = query.order_by("-id")
             rows = list(query[: bounded + 1])
-            events, more = _bounded_page(rows, bounded, _event_record)
+            events, more = _bounded_page(
+                rows,
+                min(bounded, 50) if summary else bounded,
+                _event_summary_record if summary else _event_record,
+                byte_budget=16_384 if summary else API_MAX_PAGE_BYTES,
+            )
             next_value = int(str(events[-1]["id"])) if more and events else None
             if latest:
                 events.reverse()
@@ -1879,19 +1910,23 @@ class DjangoReadStore:
         run_id: str,
         since: int,
         limit: int,
+        *,
+        visible_only: bool = False,
     ) -> tuple[list[dict[str, object]], int | None]:
         """Read retained artifact metadata by monotonic primary-key cursor."""
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
-            rows = list(
-                Artifact.objects.filter(
-                    attempt__node_run__run_id=run_id,
-                    pk__gt=since,
-                )
-                .select_related("attempt__node_run")
-                .order_by("pk")[: bounded + 1]
+            query = Artifact.objects.filter(
+                attempt__node_run__run_id=run_id,
+                pk__gt=since,
             )
+            if visible_only:
+                query = query.filter(preservation_state=PreservationState.PRESERVED.value).exclude(
+                    Q(declared_name="worktree_diff", bytes=0)
+                    | Q(declared_name__in=("commits", "commits.json"), bytes__lte=3)
+                )
+            rows = list(query.select_related("attempt__node_run").order_by("pk")[: bounded + 1])
             records, more = _bounded_page(rows, bounded, _artifact_record)
             next_value = int(str(records[-1]["id"])) if more and records else None
         except (ProjectDiscoveryError, PersistenceError):

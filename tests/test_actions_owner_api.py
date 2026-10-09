@@ -317,6 +317,47 @@ def test_trigger_api_requires_explicit_writer_decision_and_dispatch_object(
     assert post(owner, "/api/attempts/123/environment", {}).status_code == 400
 
 
+def test_named_artifact_preview_pages_keep_selected_files_and_utf8_boundaries(
+    owner: Client, project: RelayProject, tmp_path: Path
+) -> None:
+    project.write_workflow(
+        "preview-pages",
+        "jobs: {main: {steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "attempt-artifacts")
+    run_id = engine.launch(project, "preview-pages")
+    engine.drain(run_id)
+    attempt = NodeAttempt.objects.filter(node_run__run_id=run_id).last()
+    assert attempt is not None
+    source = tmp_path / "paged-products"
+    source.mkdir()
+    for index in range(102):
+        (source / f"file-{index:03d}.txt").write_text(f"File {index}", encoding="utf-8")
+    text = "a" * (128 * 1024 - 1) + "é" + "end"
+    (source / "file-101.txt").write_text(text, encoding="utf-8")
+    directory, manifest, size, digest = capture(source, ["**"], "artifacts", run_id)
+    artifact = ActionsArtifact.objects.create(
+        run_id=run_id,
+        attempt_id=attempt.pk,
+        name="paged",
+        directory=str(directory),
+        manifest=manifest,
+        bytes=size,
+        digest=digest,
+    )
+    url = f"/api/workflow-artifacts/{artifact.pk}/preview"
+    first = owner.get(url).json()
+    assert len(first["files"]) == 100 and first["next"] == 100
+    selected = owner.get(url, {"path": "file-101.txt"}).json()
+    assert len(selected["files"]) == 101
+    assert selected["files"][-1]["path"] == selected["path"] == "file-101.txt"
+    assert selected["previewable"] is True and selected["truncated"] is True
+    assert selected["text"] == "a" * (128 * 1024 - 1)
+    last = owner.get(url, {"offset": "100", "path": "file-000.txt"}).json()
+    assert len(last["files"]) == 3 and last["next"] is None
+    assert last["path"] == "file-000.txt" and last["text"] == "File 0"
+
+
 def test_named_products_download_exact_bytes_and_reject_expired_or_corrupt_data(
     owner: Client, project: RelayProject, tmp_path: Path
 ) -> None:

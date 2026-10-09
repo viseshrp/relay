@@ -406,6 +406,7 @@ def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
         scope_path=request.GET.get("job"),
         attempt_number=_attempt_parameter(request),
         latest=request.GET.get("latest") == "true",
+        summary=request.GET.get("summary") == "true",
         before=_nonnegative_int(
             request.GET.get("before"), field="before", default=0, maximum=DATABASE_INTEGER_MAX
         )
@@ -448,6 +449,7 @@ def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
         canonical_uuid(run_id, resource="run"),
         since,
         limit,
+        visible_only=request.GET.get("visible") == "true",
     )
     return JsonResponse({"artifacts": artifacts, "next": next_value})
 

@@ -1030,6 +1030,47 @@ def test_event_pages_have_a_cursor_for_remaining_history(owner: Client, finished
     assert first["events"][0]["id"] < second["events"][0]["id"]
 
 
+def test_monitor_summaries_bound_transfer_and_preserve_full_logs_and_evidence(
+    owner: Client, finished_run: str
+) -> None:
+    node = NodeRun.objects.get(run_id=finished_run, scope_path="root.a")
+    attempt = node.attempts.get()
+    text = "quoted output 王秀英\n" * 20_000
+    output = RunEvent.objects.create(
+        run_id=finished_run,
+        node_run=node,
+        attempt=attempt,
+        type="command.stdout",
+        source="node",
+        payload={"chunk": text},
+    )
+    RunEvent.objects.create(
+        run_id=finished_run,
+        node_run=node,
+        attempt=attempt,
+        type="node.failed",
+        source="node",
+        payload={"scope_path": "root.a", "status": "failed", "message": text},
+    )
+    url = f"/api/runs/{finished_run}/events?since={output.pk - 1}"
+    summary = owner.get(url + "&summary=true")
+    assert len(summary.content) < 16_384
+    assert [event["type"] for event in summary.json()["events"]] == ["node.failed"]
+    assert summary.json()["events"][0]["summary_truncated"] is True
+    full = owner.get(url + "&job=root.a&attempt=1").json()
+    assert full["events"][0]["payload"]["chunk"] == text
+    evidence = owner.get(f"/api/runs/{finished_run}/artifacts").json()["artifacts"]
+    visible = owner.get(f"/api/runs/{finished_run}/artifacts?visible=true").json()["artifacts"]
+    assert visible == [
+        item
+        for item in evidence
+        if item["preservation_state"] == "preserved"
+        and not (item["name"] == "worktree_diff" and item["bytes"] == 0)
+        and not (item["name"] in {"commits", "commits.json"} and item["bytes"] <= 3)
+    ]
+    assert Artifact.objects.filter(attempt__node_run__run_id=finished_run).count() == len(evidence)
+
+
 @pytest.mark.parametrize(
     "query",
     ["collection=edges", "since=-1", "since=x", "limit=0", f"since={DATABASE_INTEGER_MAX + 1}"],
@@ -1573,6 +1614,9 @@ jobs:
         )
     )
     served.write(".relay/prompts/owner.md", "Changed after launch\n")
+    monitor = owner.get(f"/api/runs/{run_id}").json()["run"]["nodes"]
+    selected = next(node for node in monitor if node["scope_path"] == "root.check.agent")
+    assert (selected["agent_id"], selected["model_value"]) == ("codex", "m1")
     for step, activity_type, display_name in (
         ("script", "command", "Named script"),
         ("command", "command", "command"),
