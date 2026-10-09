@@ -1,9 +1,9 @@
 import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, errorMessage } from "../api";
+import { api, csrfToken, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import { editorHolder } from "../editor-session";
-import { actionsGraph, editorYaml, editActions, moveActionStep, launchView, parseActions, type ActionStep } from "../actions-workflow";
+import { actionsGraph, editorYaml, editActions, moveActionStep, launchView, parseActions, type ActionStep, type ActionWorkflow } from "../actions-workflow";
 import type { AgentRecord, AgentsResponse, ProjectSettingsResponse, ProviderDefaults, WorkflowDocumentResponse, WorkflowDraft } from "../types";
 import type { WorkflowWorkspaceProps } from "./WorkflowWorkspace";
 import { FlowCanvas } from "./FlowCanvas";
@@ -37,7 +37,11 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [settings, setSettings] = useState(false); const [environments, setEnvironments] = useState<string[]>([]);
   const holder = useRef(editorHolder()); const writes = useRef(Promise.resolve());
   const currentDocument = useRef("");
-  const parsed = useMemo(() => parseActions(text), [text]); const graph = useMemo(() => actionsGraph(parsed.value), [parsed.value]);
+  const [lastValid, setLastValid] = useState<ActionWorkflow | null>(null);
+  const parsed = useMemo(() => parseActions(text), [text]);
+  const savedParsed = useMemo(() => parseActions(saved), [saved]);
+  const graph = useMemo(() => actionsGraph(valid ? parsed.value : lastValid ?? parsed.value), [parsed.value, lastValid, valid]);
+  useEffect(() => { if (valid && parsed.value) setLastValid(parsed.value); }, [valid, parsed.value]);
   const job = parsed.value?.jobs[jobId]; const step = job?.steps?.[index];
   const matchingJobs = Object.entries(parsed.value?.jobs || {}).filter(([id, item]) => `${id} ${item.name || ""}`.toLowerCase().includes(search.toLowerCase()));
   const withInput = (field: string, value: string) => change(["jobs", jobId, "steps", index, "with", field], value || undefined);
@@ -66,13 +70,13 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     const abort = new AbortController();
     let renew: number | undefined;
     setLease(false); setLeaseError(""); setError(""); setSearch(""); setNotice("");
-    setText(""); setSaved(""); setDraft(null); setLoadedDocument("");
+    setText(""); setSaved(""); setDraft(null); setLoadedDocument(""); setLastValid(null);
     const endpoint = projectPath(`/api/workflows/${encoded(key)}`, props.requestProject);
     const leaseEndpoint = projectPath(`/api/workflows/${encoded(key)}/lease`, props.requestProject);
     async function acquire() {
       try {
-        await api(leaseEndpoint, { method: "POST", signal: abort.signal, body: JSON.stringify({ holder: holder.current }) });
-        if (!abort.signal.aborted) { setLease(true); setLeaseError(""); }
+        const result = await api<{ lease: unknown; conflict?: { message: string } }>(leaseEndpoint, { method: "POST", signal: abort.signal, body: JSON.stringify({ holder: holder.current, soft_conflict: true }) });
+        if (!abort.signal.aborted) { setLease(Boolean(result.lease)); setLeaseError(result.conflict?.message ?? ""); }
       } catch (e) { if (!abort.signal.aborted) { setLease(false); setLeaseError(errorMessage(e)); } }
     }
     void api<WorkflowDocumentResponse>(endpoint, { signal: abort.signal }).then(async result => {
@@ -81,7 +85,11 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       await acquire();
       if (!abort.signal.aborted) { props.onWorkflowLoaded(key); renew = window.setInterval(() => { void acquire(); }, 30000); }
     }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); });
-    return () => { abort.abort(); window.clearInterval(renew); };
+    const release = () => {
+      navigator.sendBeacon(leaseEndpoint.replace(/\/lease(?=\?|$)/, "/lease/release"), new URLSearchParams({ holder: holder.current, csrfmiddlewaretoken: csrfToken() }));
+    };
+    window.addEventListener("pagehide", release);
+    return () => { abort.abort(); window.clearInterval(renew); window.removeEventListener("pagehide", release); release(); };
   }, [key, props.requestProject]);
   const flush = useCallback(async () => {
     if (!key || loadedDocument !== projectPath(`/api/workflows/${encoded(key)}`, props.requestProject) || text === (draft ? editorYaml(draft.yaml) : saved)) return;
@@ -112,10 +120,20 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   }
   async function restoreSaved() {
     const target = path("");
+    const previousDraft = draft;
     setText(saved);
-    try { await api(path("/draft"), { method: "POST", body: JSON.stringify({ yaml: saved, base_hash: base, holder: holder.current }) }); if (currentDocument.current === target) setDraft(null); }
+    try { if (previousDraft) await api(path("/draft/discard"), { method: "POST", body: JSON.stringify({ updated_at: previousDraft.updated_at }) }); if (currentDocument.current === target) { setDraft(null); setError(""); } }
     catch (e) { if (currentDocument.current === target) setError(errorMessage(e)); }
   }
+  async function takeOver() {
+    try { await api(path("/lease"), { method: "POST", body: JSON.stringify({ holder: holder.current, takeover: true }) }); setLease(true); setLeaseError(""); }
+    catch (e) { setError(errorMessage(e)); }
+  }
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (lease && valid) void save(); } }
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  });
   useEffect(() => { const abort = new AbortController(); setEnvironments([]); void api<{ environments: Array<{ name: string }> }>(projectPath("/api/workflow-environments", props.requestProject), { signal: abort.signal }).then(result => { if (!abort.signal.aborted) setEnvironments(result.environments.map(item => item.name)); }).catch(e => { if (!abort.signal.aborted) setError(errorMessage(e)); }); return () => abort.abort(); }, [props.requestProject]);
   function change(parts: Array<string | number>, value: unknown) { try { setText(editActions(text, parts, value)); } catch (e) { setError(errorMessage(e)); } }
   const editStep = (field: keyof ActionStep, value: unknown) => change(["jobs", jobId, "steps", index, field], value === "" ? undefined : value);
@@ -132,16 +150,16 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const events = parsed.value?.on && typeof parsed.value.on === "object" && !Array.isArray(parsed.value.on) ? Object.keys(parsed.value.on) : typeof parsed.value?.on === "string" ? [parsed.value.on] : [];
   return <Stack spacing={2}>
     <Stack component="section" aria-label="Workflow header" direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}><Typography variant="h5" sx={{ flex: "1 1 100%", overflowWrap: "anywhere" }}>{parsed.value?.name || inventory.find(item => item.key === key)?.name || "Choose a workflow"}</Typography><TextField select label="Workflow" value={key} onChange={async event => { try { await flush(); setKey(event.target.value); } catch(e) { setError(errorMessage(e)); } }} sx={{ minWidth: 220 }}>{inventory.map(item => <MenuItem key={item.key} value={item.key}>{item.name || item.key}</MenuItem>)}</TextField>
-      <Button onClick={() => setCreate(true)}>Create workflow</Button><Button onClick={() => void save()} disabled={!lease || !valid || text === saved}>Save</Button><Button variant="contained" onClick={() => setLaunch(true)} disabled={!valid || text !== saved}>Run workflow</Button></Stack>
+      <Button onClick={() => setCreate(true)}>Create workflow</Button><Button onClick={() => void save()} disabled={!lease || !valid || text === saved}>Save</Button><Button variant="contained" onClick={() => setLaunch(true)} disabled={!savedParsed.value}>Run workflow</Button></Stack>
     <Button onClick={() => setSettings(true)}>Variables, secrets, environments and library</Button>
     <WorkflowSettings open={settings} projectId={props.requestProject || props.project.id} yaml={text} onClose={() => setSettings(false)} onEnvironments={setEnvironments} />
     {lease && valid && <Typography>Ready to edit</Typography>}
     {notice && <Alert severity="success">{notice}</Alert>}
     {!key && <Typography variant="h6">No workflows yet</Typography>}
-    {leaseError && <Alert severity="error">{leaseError}</Alert>}{error && <Alert severity="error">{error}</Alert>}{draft && <Alert severity="info">Recovered draft loaded. Saving publishes the validated source.<Button disabled={!lease} onClick={() => void restoreSaved()}>Restore saved source</Button></Alert>}
+    {leaseError && <Alert severity="info" action={<Button onClick={() => void takeOver()}>Edit here instead</Button>}>{leaseError}</Alert>}{error && <Alert severity="error">{error}</Alert>}{(draft || text !== saved) && saved && <Alert severity="info">Your unsaved draft is not included when you run the saved workflow.<Button onClick={() => void restoreSaved()}>Restore saved source</Button><Box component="details"><Box component="summary">Compare draft with saved source</Box><Typography component="pre" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>Saved source:{"\n"}{saved}{"\n"}Draft:{"\n"}{text}</Typography></Box></Alert>}
     {diagnostics.map((item, i) => <Alert severity="error" key={i}>{item.context?.line ? `Line ${item.context.line}: ` : ""}{item.message}</Alert>)}
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "minmax(0, 1fr) minmax(0, 1fr)" }, gap: 2 }}>
-      <Paper sx={{ p: 2 }}><Stack spacing={2}><Typography variant="h6">Jobs and ordered steps</Typography><FlowCanvas key={key} focusRequest={focusRequest} selectedId={jobId || undefined} initialFocusId={graph.nodes[0]?.id} followSelection nodes={graph.nodes} edges={graph.edges} onSelect={setJobId} />
+      <Paper sx={{ p: 2 }}><Stack spacing={2}><Typography variant="h6">Jobs and ordered steps</Typography>{!valid && lastValid && <Alert severity="info">Showing the last valid version</Alert>}<Box sx={{ opacity: !valid && lastValid ? .6 : 1 }}><FlowCanvas key={key} focusRequest={focusRequest} selectedId={jobId || undefined} initialFocusId={graph.nodes[0]?.id} followSelection nodes={graph.nodes} edges={graph.edges} onSelect={setJobId} /></Box>
         <Stack component="nav" aria-label="Workflow job navigation"><TextField disabled={!parsed.value} label="Find a job" value={search} onChange={e => setSearch(e.target.value)} />{matchingJobs.map(([id, item]) => <Button key={id} aria-pressed={jobId === id} onClick={() => { setJobId(id); setFocusRequest(value => value + 1); }}>{item.name || id.replace(/_/g, " ").replace(/^./, letter => letter.toUpperCase())}</Button>)}{!matchingJobs.length && search && <Typography>No jobs match. Try another name.</Typography>}</Stack>
         <Button disabled={!parsed.value} onClick={() => { let number = 1; while (parsed.value?.jobs[`job_${number}`]) number++; const id = `job_${number}`; change(["jobs", id], { steps: [{ run: "echo Ready" }] }); setJobId(id); }}>Add job</Button>
         {job && <><Button onClick={() => change(["jobs", jobId], undefined)}>Remove job</Button><TextField label="Job name" value={job.name || ""} onChange={e => change(["jobs", jobId, "name"], e.target.value)} /><TextField label="Needs (comma separated)" value={typeof job.needs === "string" ? job.needs : (job.needs || []).join(", ")} onChange={e => change(["jobs", jobId, "needs"], e.target.value.split(",").map(x => x.trim()).filter(Boolean))} />
@@ -161,7 +179,7 @@ export function ActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
         {events.filter(event => ["schedule", "push", "workflow_run", "repository_dispatch"].includes(event)).map(event => { const enabled = triggerRows.some(row => row.workflow_key === key && row.event === event && row.enabled); return <Button key={event} onClick={() => enabled ? void toggleTrigger(event, false) : setActivation(event)}>{enabled ? "Disable" : "Activate"} {event}</Button>; })}</Paper>
     </Box>
     <CreateWorkflowDialog holder={holder.current} open={create} requestProject={props.requestProject} onClose={() => setCreate(false)} onCreated={async newKey => { setCreate(false); setKey(newKey); await refresh(); }} />
-    <LaunchPanel open={launch} workflowKey={key} workflow={launchView(parsed.value, environments)} project={props.project} requestProject={props.requestProject} modelOptions={[]} blockedReason={!valid ? "Fix validation errors." : text !== saved ? "Save this workflow before running." : null} saveError={error || null} onSave={() => void save()} onClose={() => { setLaunch(false); props.onLaunchClosed(); }} onExited={() => undefined} onRunLaunched={props.onRunLaunched} previousRun={null} />
+    <LaunchPanel open={launch} workflowKey={key} workflow={launchView(savedParsed.value, environments)} project={props.project} requestProject={props.requestProject} modelOptions={[]} blockedReason={!savedParsed.value ? "Choose a valid saved workflow." : null} saveError={null} draftNotice={text !== saved ? "Your unsaved draft is not included. This runs the saved workflow." : null} onClose={() => { setLaunch(false); props.onLaunchClosed(); }} onExited={() => undefined} onRunLaunched={props.onRunLaunched} previousRun={null} />
     <Dialog open={Boolean(activation)} onClose={() => { setActivation(null); setAuthorize(false); }}><DialogTitle>Activate {activation}</DialogTitle><DialogContent><FormControlLabel control={<Checkbox checked={authorize} onChange={e => setAuthorize(e.target.checked)} />} label="Allow this trigger to launch writing jobs automatically on this computer." /></DialogContent><DialogActions><Button onClick={() => setActivation(null)}>Cancel</Button><Button disabled={!authorize || text !== saved} onClick={() => { if (activation) void toggleTrigger(activation, true); }}>Activate trigger</Button></DialogActions></Dialog>
   </Stack>;
 }

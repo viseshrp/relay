@@ -29,6 +29,7 @@ export function YamlEditor({ value, onChange, onBlur }: YamlEditorProps) {
         extensions: [
           basicSetup,
           yaml(),
+          EditorView.contentAttributes.of({ "aria-label": "Workflow YAML" }),
           EditorView.lineWrapping,
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !applyingExternalValue.current) {

@@ -132,6 +132,18 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
+| `POST /api/workflows/{key}/lease/release` | `holder`; JSON or a CSRF-protected form beacon | Releases only this holder's lease |
+| `POST /api/workflows/{key}/draft/discard` | `updated_at` from the observed draft | Discards without a lease; rejects a newer draft |
+| `GET /api/workflows/{key}/commit` | none | Current `head` and validated untracked source `files`, including `path`, `hash`, and `text` |
+| `POST /api/workflows/{key}/commit` | `confirmed: true`, `head`, `hashes` mapping | Commits exactly the reviewed sources; rejects changed bytes, a changed head, or staged changes |
+
+Lease acquisition accepts `takeover: true` for an explicit move between tabs.
+`soft_conflict: true` returns a normal `200` response with `lease: null` and
+the conflict envelope when another holder is active. Ordinary contested
+acquisition keeps its `409` envelope. Takeover invalidates the old holder's
+writes; an old release cannot remove the new holder's lease.
+Language validation returns every independent field diagnostic up to 100,
+including source positions and suggestions for unsupported hosted syntax.
 
 `launch_source` is a fresh read of the selected project's Git branch and commit.
 `branch` is `null` for a detached checkout; `commit` is `null` before the first

@@ -2,9 +2,11 @@ import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 import { useState } from "react";
 import { errorMessage } from "../api";
 import type { LaunchCleanliness } from "../types";
+import { CommitWorkflowFiles } from "./CommitWorkflowFiles";
 
-export function LaunchPreflight({ result, error, onCheck }: {
+export function LaunchPreflight({ result, error, onCheck, workflowKey, project = null }: {
   result: LaunchCleanliness | null; error: string | null; onCheck: () => void;
+  workflowKey?: string | null; project?: string | null;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -30,6 +32,7 @@ export function LaunchPreflight({ result, error, onCheck }: {
         </Box>)}
       </Box>}
       {result.truncated && <Alert severity="info">Showing {result.files.length} changed files. The counts include every changed file. Run git status in your project folder to see the full list.</Alert>}
+      {workflowKey && result.files.some(file => !file.allowed && file.status === "??" && /(?:^|\/)\.relay\/(workflows|prompts)\//.test(file.path)) && <CommitWorkflowFiles workflowKey={workflowKey} project={project} onCommitted={onCheck} />}
       {!result.clean && <Box component="details" className="launch-guidance"><Box component="summary">How to resolve these changes</Box><Stack spacing={1}>
         <Typography variant="body2">Run a command in your project folder after choosing which changes to keep.</Typography>
         <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}><Box component="code">git commit</Box><Button aria-label="Copy git commit" onClick={() => void copy("git commit")}>Copy</Button></Stack>

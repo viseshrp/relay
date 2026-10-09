@@ -80,6 +80,21 @@ def _issue(path: str, message: str, *, unsupported: bool = False) -> WorkflowVal
     )
 
 
+def _unknown_field(path: str) -> WorkflowValidationError:
+    hints = {
+        "runs-on": "Relay runs on this computer. Remove runs-on; select an agent in the step.",
+        "permissions": "Authentication belongs to your installed tools. Remove permissions.",
+        "container": "Use a local script or command instead of a container.",
+        "services": "Start required services outside Relay before running this workflow.",
+        "max-parallel": "Local matrix jobs run serially. Remove max-parallel.",
+        "timeout": "Use timeout-minutes with a number, for example timeout-minutes: 10.",
+        "nodes": "Use jobs with ordered steps for a new workflow.",
+        "agents": "Select agent or agents in with on a relay/agent@v1 step.",
+    }
+    hint = hints.get(path.rsplit(".", 1)[-1])
+    return _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
+
+
 def _inspect_tree(
     node: Node,
     path: str,
@@ -215,7 +230,7 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         result = {}
         if "loose-key-type" not in definition:
             for key in record.keys() - properties.keys():
-                raise _issue(f"{path}.{key}", "Unknown workflow field.")
+                raise _unknown_field(f"{path}.{key}")
         for key, descriptor in properties.items():
             if isinstance(descriptor, Mapping) and descriptor.get("required") and key not in record:
                 message = f"{path}.{key}"
@@ -225,7 +240,7 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
             if descriptor is None:
                 if "loose-key-type" not in definition:
                     message = f"{path}.{key}"
-                    raise _issue(message, "Unknown workflow field.")
+                    raise _unknown_field(message)
                 _validate_type(str(definition["loose-key-type"]), key, f"{path}.{key}")
                 descriptor = definition["loose-value-type"]
             type_name = descriptor["type"] if isinstance(descriptor, Mapping) else descriptor
@@ -244,6 +259,9 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
             raise _issue(path, "Expected a scalar string.")
         result = expressions.string(value)
         descriptor = cast(dict[str, Any], base["string"])
+        maximum = descriptor.get("max-length")
+        if isinstance(maximum, int) and len(result) > maximum:
+            raise _issue(path, f"Use at most {maximum} characters.")
         if descriptor.get("require-non-empty") and not result:
             raise _issue(path, "String cannot be empty.")
         allowed = base.get("allowed-values") or (
@@ -551,8 +569,7 @@ def expand_matrix(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
-def load(text: str, *, source: Path | None = None) -> ActionsDocument:
-    source = source or Path("<memory>")
+def _read_document(text: str) -> tuple[Mapping[str, Any], dict[str, tuple[int, int]]]:
     if len(text.encode("utf-8")) > MAX_YAML_BYTES:
         message = "workflow"
         raise _issue(message, "Workflow exceeds 1 MiB.")
@@ -569,8 +586,38 @@ def load(text: str, *, source: Path | None = None) -> ActionsDocument:
     except Exception as error:
         mark = getattr(error, "problem_mark", None)
         context = {"line": mark.line + 1, "column": mark.column + 1} if mark else {}
-        message = "Invalid YAML document."
+        reason = str(getattr(error, "problem", "Check indentation and quotes."))[:500]
+        hint = "Check indentation; use spaces rather than tabs."
+        lower = reason.lower()
+        if "mapping values" in lower:
+            hint = "Quote a value that contains a colon followed by a space."
+        elif "expected" in lower and ("," in lower or "]" in lower or "}" in lower):
+            hint = "Close each bracket or brace and separate items with commas."
+        elif "quoted scalar" in lower:
+            hint = "Close the quoted value and check its escape sequences."
+        elif "alias" in lower:
+            hint = "Define the anchor before referencing it with an alias."
+        elif "document" in lower:
+            hint = "Keep one workflow document in each file."
+        message = f"Invalid YAML document: {reason}. {hint}"
         raise WorkflowValidationError(message, context=context) from None
+    return _mapping(document, "workflow"), locations
+
+
+def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
+    field = str(error.context.get("field", "workflow"))
+    location = locations.get(field) or locations.get("workflow." + field)
+    while location is None and "." in field:
+        field = field.rsplit(".", 1)[0]
+        location = locations.get(field) or locations.get("workflow." + field)
+    location = location or locations.get("workflow")
+    if location:
+        error.context.update({"line": str(location[0]), "column": str(location[1])})
+
+
+def load(text: str, *, source: Path | None = None) -> ActionsDocument:
+    source = source or Path("<memory>")
+    document, locations = _read_document(text)
     record = _mapping(document, "workflow")
     if "version" in record or "nodes" in record:
         message = "workflow"
@@ -583,14 +630,113 @@ def load(text: str, *, source: Path | None = None) -> ActionsDocument:
         value = cast(dict[str, Any], _validate_type("workflow-root", record, "workflow"))
         _validate_contracts(value)
     except WorkflowValidationError as error:
-        field = str(error.context.get("field", "workflow"))
-        location = (
-            locations.get(field) or locations.get("workflow." + field) or locations.get("workflow")
-        )
-        if location:
-            error.context.update({"line": str(location[0]), "column": str(location[1])})
+        _locate(error, locations)
         raise
     return ActionsDocument(text, source, document, value, locations)
+
+
+def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[WorkflowValidationError]:
+    """Report independent fields without executing or repairing the supplied source."""
+    try:
+        document, locations = _read_document(text)
+    except WorkflowValidationError as error:
+        return [error]
+    issues: list[WorkflowValidationError] = []
+    definitions = language_definitions()
+
+    def visit(name: str, value: object, path: str, inherited: Sequence[str] = ()) -> None:
+        if len(issues) >= 100:
+            return
+        base = definitions.get(name, {name: {}})
+        contexts = tuple(dict.fromkeys([*inherited, *base.get("context", [])]))
+        try:
+            _validate_type(name, value, path, inherited)
+        except WorkflowValidationError as original:
+            if "one-of" in base:
+                variant = (
+                    "workflow-job"
+                    if name == "job" and isinstance(value, Mapping) and "uses" in value
+                    else "job-factory"
+                    if name == "job" and isinstance(value, Mapping)
+                    else "regular-step"
+                    if name == "steps-item" and isinstance(value, Mapping) and "uses" in value
+                    else "run-step"
+                    if name == "steps-item" and isinstance(value, Mapping) and "run" in value
+                    else next(
+                        (
+                            item
+                            for item in base["one-of"]
+                            if (
+                                isinstance(value, Mapping)
+                                and "mapping" in definitions.get(item, {})
+                            )
+                            or (isinstance(value, list) and "sequence" in definitions.get(item, {}))
+                        ),
+                        None,
+                    )
+                )
+                if variant:
+                    visit(variant, value, path, contexts)
+                    return
+            if "mapping" in base and isinstance(value, Mapping):
+                mapping = base["mapping"]
+                properties = mapping.get("properties", {})
+                for key, descriptor in properties.items():
+                    if (
+                        isinstance(descriptor, Mapping)
+                        and descriptor.get("required")
+                        and key not in value
+                    ):
+                        issues.append(_issue(f"{path}.{key}", "Required field is missing."))
+                for key, item in value.items():
+                    descriptor = properties.get(key)
+                    if descriptor is None and "loose-key-type" not in mapping:
+                        issues.append(_unknown_field(f"{path}.{key}"))
+                        continue
+                    descriptor = descriptor or mapping.get("loose-value-type", "any")
+                    child = str(
+                        descriptor["type"] if isinstance(descriptor, Mapping) else descriptor
+                    )
+                    visit(child, item, f"{path}.{key}", contexts)
+                return
+            if "sequence" in base and isinstance(value, list):
+                for index, item in enumerate(value):
+                    visit(
+                        base["sequence"].get("item-type", "any"), item, f"{path}[{index}]", contexts
+                    )
+                return
+            issues.append(original)
+        else:
+            return
+
+    visit("workflow-root", document, "workflow")
+    jobs = document.get("jobs")
+    if isinstance(jobs, Mapping):
+        for job_id, job in jobs.items():
+            if not isinstance(job, Mapping) or not isinstance(job.get("steps"), list):
+                continue
+            for index, step in enumerate(job["steps"]):
+                if not isinstance(step, Mapping):
+                    continue
+                try:
+                    validate_steps([step], f"jobs.{job_id}.steps")
+                except (WorkflowValidationError, TypeError, ValueError) as error:
+                    if isinstance(error, WorkflowValidationError):
+                        path = f"workflow.jobs.{job_id}.steps[{index}]"
+                        error.context["field"] = str(error.context.get("field", path)).replace(
+                            "steps[0]", f"steps[{index}]"
+                        )
+                        issues.append(error)
+    if not issues:
+        try:
+            load(text, source=source)
+        except WorkflowValidationError as error:
+            issues.append(error)
+    unique: dict[tuple[str, str], WorkflowValidationError] = {}
+    for issue in issues[:100]:
+        _locate(issue, locations)
+        unique[(str(issue.context.get("field", "")), issue.message)] = issue
+    return list(unique.values())
 
 
 def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, str]:

@@ -7,7 +7,7 @@ import { api, errorMessage } from "../api";
 import { projectPath, stageLabel } from "../navigation";
 import type { LaunchCleanliness, OwnerSettings, PreviousRunInputs, ProjectLaunchSource, ProjectRecord } from "../types";
 import type { WorkflowValue } from "../workflow";
-import { LaunchInputs, type LaunchValues } from "./LaunchInputs";
+import { LaunchInputs, validateLaunchInputs, type LaunchValues } from "./LaunchInputs";
 import { LaunchPreflight } from "./LaunchPreflight";
 
 interface LaunchPanelProps {
@@ -24,9 +24,10 @@ interface LaunchPanelProps {
   onExited: () => void;
   onRunLaunched: (runId: string) => void;
   previousRun: PreviousRunInputs | null;
+  draftNotice?: string | null;
 }
 
-export function LaunchPanel({ open, workflowKey, workflow, project, requestProject, modelOptions, blockedReason, saveError, onSave, onClose, onExited, onRunLaunched, previousRun }: LaunchPanelProps) {
+export function LaunchPanel({ open, workflowKey, workflow, project, requestProject, modelOptions, blockedReason, saveError, onSave, onClose, onExited, onRunLaunched, previousRun, draftNotice }: LaunchPanelProps) {
   const [inputs, setInputs] = useState<LaunchValues>(previousRun?.inputs ?? {});
   const [model, setModel] = useState("");
   const [cleanup, setCleanup] = useState("");
@@ -39,6 +40,7 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
   const [launching, setLaunching] = useState(false);
   const [preflight, setPreflight] = useState<LaunchCleanliness | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
 
   useEffect(() => { setInputs(previousRun?.inputs ?? {}); }, [previousRun]);
 
@@ -77,6 +79,10 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
 
   async function launch(): Promise<void> {
     if (reason || workflowKey === null) return;
+    const errors = validateLaunchInputs(workflow?.inputs ?? {}, inputs);
+    setInputErrors(errors);
+    const first = Object.keys(errors)[0];
+    if (first) { document.getElementById(`launch-input-${first}`)?.focus(); return; }
     setLaunching(true);
     setLaunchError(null);
     try {
@@ -94,10 +100,11 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
   return <Dialog open={open} onClose={() => { if (!launching) onClose(); }} fullWidth maxWidth="sm"
     slotProps={{ transition: { onExited } }} aria-labelledby="launch-title">
     <DialogTitle id="launch-title">Run workflow</DialogTitle>
-    <form onSubmit={(event) => { event.preventDefault(); void launch(); }}>
+    <form noValidate onSubmit={(event) => { event.preventDefault(); void launch(); }}>
       <DialogContent><Stack spacing={2}>
         <Typography variant="h6">{workflow?.name ?? "Choose a workflow"}</Typography>
         {previousRun && <Alert severity="info">Previous inputs are prefilled. This creates a new run using the saved workflow, current branch, and fresh agent checks. Changed input definitions are validated again.</Alert>}
+        {draftNotice && <Alert severity="info">{draftNotice}</Alert>}
         {source?.commit && <Typography>Runs on a new branch from <strong>{source.branch ?? `commit ${source.commit.slice(0, 12)}`}</strong>.</Typography>}
         {(cleanup || defaultCleanup) === "merge_on_success" && <Alert severity="info">After every job succeeds, Relay will fast-forward {source?.branch ?? "the branch selected at launch"} and delete the run working copies. The checkout must stay completely clean and on that branch.</Alert>}
         {sourceError && <Alert severity="error">{sourceError}</Alert>}
@@ -105,8 +112,8 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
           : blockedReason && onSave ? <Button onClick={onSave}>Save</Button> : undefined}>{reason}</Alert>}
         {saveError && <Alert severity="error">{saveError}</Alert>}
         {launchError && <Alert severity="error">{launchError}</Alert>}
-        {!blockedReason && <LaunchPreflight result={preflight} error={preflightError} onCheck={() => setSourceRevision((value) => value + 1)} />}
-        <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} onChange={(name, value) => setInputs((current) => ({ ...current, [name]: value }))} />
+        {!blockedReason && <LaunchPreflight workflowKey={workflowKey} project={requestProject} result={preflight} error={preflightError} onCheck={() => setSourceRevision((value) => value + 1)} />}
+        <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} errors={inputErrors} onChange={(name, value) => { setInputs((current) => ({ ...current, [name]: value })); setInputErrors((current) => { const next = { ...current }; delete next[name]; return next; }); }} />
         <Accordion><AccordionSummary expandIcon={<ActionIcon name="down" />}>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
           <HelpTextField topic="model" label="Override model for this run" placeholder="Use workflow, project, and global defaults" value={model} onChange={(event) => setModel(event.target.value)} helperText="Leave blank to use the workflow, project, or global model. Values must match the provider exactly, including case." slotProps={{ htmlInput: { list: "launch-model-options" } }} />
           <datalist id="launch-model-options">{modelOptions.map((value) => <option key={value} value={value} />)}</datalist>

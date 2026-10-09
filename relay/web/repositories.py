@@ -482,11 +482,11 @@ def _require_artifact(artifact: Artifact | None) -> Artifact:
 
 
 def _reject_lease_holder(project_id: str, workflow_key: str) -> NoReturn:
-    message = "Another browser holds the workflow editor lease."
+    message = "This workflow is open in another tab or browser."
     raise PermissionFlowError(
         message,
         context={"project": project_id, "workflow": workflow_key},
-        next_action="Wait for the lease to expire or return to its open tab.",
+        next_action="Choose Edit here instead to move editing to this tab.",
     )
 
 
@@ -666,6 +666,8 @@ class DjangoWorkflowStore:
         project_id: str,
         workflow_key: str,
         holder: str,
+        *,
+        takeover: bool = False,
     ) -> dict[str, object]:
         try:
             with transaction.atomic():
@@ -679,7 +681,7 @@ class DjangoWorkflowStore:
                 )
                 if lease is not None and lease.expires_at > now:
                     current_holder = _string(lease, "holder")
-                    if current_holder != holder:
+                    if current_holder != holder and not takeover:
                         _reject_lease_holder(project_id, workflow_key)
                 if lease is None:
                     lease = EditorLease.objects.create(
@@ -703,6 +705,35 @@ class DjangoWorkflowStore:
             raise
         except (DatabaseError, IntegrityError):
             message = "Relay could not acquire the workflow editor lease."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def release_lease(self, project_id: str, workflow_key: str, holder: str) -> None:
+        """A closing or superseded tab can release only its own lease."""
+        try:
+            EditorLease.objects.filter(
+                project_id=project_id, workflow_key=workflow_key, holder=holder
+            ).delete()
+        except DatabaseError:
+            message = "Relay could not release the workflow editor."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def discard_recovery_draft(self, project_id: str, workflow_key: str, updated_at: str) -> None:
+        """Discard an observed draft without deleting another tab's newer edits."""
+        try:
+            with transaction.atomic():
+                row = (
+                    WorkflowDraft.objects.select_for_update()
+                    .filter(project_id=project_id, workflow_key=workflow_key)
+                    .first()
+                )
+                if row is None:
+                    return
+                if _datetime_text(row.updated_at) != updated_at:
+                    message = "The recovery draft changed in another tab."
+                    raise PermissionFlowError(message, next_action="Reload before discarding it.")
+                row.delete()
+        except DatabaseError:
+            message = "Relay could not discard the recovery draft."
             raise PersistenceError(message, context={"workflow": workflow_key}) from None
 
     def require_lease(self, project_id: str, workflow_key: str, holder: str) -> None:

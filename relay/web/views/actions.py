@@ -386,13 +386,77 @@ def save_workflow(request: HttpRequest, key: str) -> HttpResponse:
 
 @api_errors
 @owner_required
+def publish_workflow_sources(request: HttpRequest, key: str) -> HttpResponse:
+    from relay.workflows.publication import commit_workflow_sources, preview_workflow_commit
+
+    relay_root, _project = current_project(request)
+    if request.method == "GET":
+        return JsonResponse(preview_workflow_commit(relay_root, key))
+    if request.method != "POST":
+        return JsonResponse({"message": "Use GET or POST."}, status=405)
+    body = json_body(request)
+    hashes = required_object(body, "hashes")
+    if body.get("confirmed") is not True or any(
+        not isinstance(value, str) or not _SHA256.fullmatch(value) for value in hashes.values()
+    ):
+        message = "Confirm the reviewed workflow files and their hashes."
+        raise ConfigError(message)
+    head = commit_workflow_sources(
+        relay_root,
+        key,
+        required_text(body, "head"),
+        {name: str(value) for name, value in hashes.items()},
+    )
+    return JsonResponse({"head": head})
+
+
+@api_errors
+@owner_required
 @require_POST
 def acquire_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
-    _relay_root, project = current_project(request)
+    relay_root, project = current_project(request)
     body = json_body(request)
     holder = _lease_holder(body)
-    lease = DjangoWorkflowStore().acquire_lease(project.id, key, holder)
+    read_workflow_document(DjangoWorkflowStore(), relay_root, project.id, key)
+    if "takeover" in body and not isinstance(body["takeover"], bool):
+        message = "takeover must be a boolean."
+        raise ConfigError(message)
+    try:
+        lease = DjangoWorkflowStore().acquire_lease(
+            project.id, key, holder, takeover=body.get("takeover") is True
+        )
+    except PermissionFlowError as error:
+        if body.get("soft_conflict") is True:
+            return JsonResponse({"lease": None, "conflict": error.to_envelope()})
+        raise
     return JsonResponse({"lease": lease})
+
+
+@api_errors
+@owner_required
+@require_POST
+def release_workflow_lease(request: HttpRequest, key: str) -> HttpResponse:
+    """Accept CSRF-protected form beacons as well as ordinary JSON writes."""
+    _relay_root, project = current_project(request)
+    body = (
+        request.POST.dict()
+        if request.content_type in {"application/x-www-form-urlencoded", "multipart/form-data"}
+        else json_body(request)
+    )
+    DjangoWorkflowStore().release_lease(project.id, key, _lease_holder(body))
+    return JsonResponse({"ok": True})
+
+
+@api_errors
+@owner_required
+@require_POST
+def discard_workflow_draft(request: HttpRequest, key: str) -> HttpResponse:
+    relay_root, project = current_project(request)
+    body = json_body(request)
+    store = DjangoWorkflowStore()
+    read_workflow_document(store, relay_root, project.id, key)
+    store.discard_recovery_draft(project.id, key, required_text(body, "updated_at"))
+    return JsonResponse({"ok": True})
 
 
 @api_errors
@@ -404,7 +468,7 @@ def create_workflow(request: HttpRequest) -> HttpResponse:
     # "nested/review" becomes "nested/review.yaml", matching the inventory and its lease.
     key = "/".join(workflow_key_parts(required_text(body, "key")))
     store = DjangoWorkflowStore()
-    store.acquire_lease(project.id, key, _lease_holder(body))
+    holder = _lease_holder(body)
     template_id = optional_text(body, "template_id")
     if template_id is not None:
         if "yaml" in body:
@@ -420,6 +484,7 @@ def create_workflow(request: HttpRequest) -> HttpResponse:
             _yaml_text(body) if "yaml" in body else None,
             optional_text(body, "name") or "New workflow",
         )
+    store.acquire_lease(project.id, key, holder)
     return JsonResponse(
         {"key": key, "yaml": document.yaml, "base_hash": document.base_hash}, status=201
     )

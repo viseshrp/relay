@@ -250,7 +250,10 @@ See [Workflow language](workflows.md) for exact YAML keys and limits.
 Each browser tab gets an opaque holder ID in session storage. Loading a
 workflow acquires its 60-second editor lease; the tab renews the lease every 30
 seconds. Draft and Save requests must present that live holder ID. Another tab
-can read the file but cannot autosave or replace it until the lease expires.
+can read the file and run its saved source. **Edit here instead** takes over
+editing explicitly; the previous holder can no longer save. A closing tab
+releases only its own lease through a CSRF-protected beacon. Failed workflow
+creation does not acquire a lease.
 
 Changed editor text autosaves to the database after 600 milliseconds without
 changing the Git-owned workflow file. Invalid YAML is retained as an `invalid`
@@ -259,9 +262,9 @@ validation state.
 
 Switching views, workflows, or projects flushes the recovery draft first.
 Requests are serialized so an older draft cannot overwrite a newer one.
-**Discard changes** restores the saved YAML bytes and replaces the recovery
-draft without rewriting the workflow file. Restoring the saved text directly
-in the YAML editor also updates the recovery draft.
+**Restore saved source** discards the observed recovery draft without requiring
+the editing lease or rewriting the workflow file. A newer draft from another
+tab causes a conflict. The editor shows the saved source beside the draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
 Save validates the complete workflow, prompts, and subworkflows, then replaces
@@ -269,6 +272,9 @@ one file atomically. It also sends the SHA-256 hash of the exact bytes loaded by
 the tab. If another process changed the file, Relay returns a conflict and
 keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
 again. A successful Save clears the draft and refreshes the base hash.
+Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
+position, and a hint; independent invalid fields appear together. An invalid
+edit keeps the last valid graph visible with an explanation.
 
 ## Launch a run
 
@@ -285,11 +291,10 @@ and enums show their declared values. An untouched input stays omitted so the
 server applies its default or resolves an optional input to `null`. Edited
 values preserve their JSON types.
 
-The panel explains each blocked state beside **Run workflow**: loading or
-saving, no selected workflow, unsaved instructions, invalid YAML, unsaved
-workflow changes, an empty workflow, unavailable Git source, or a missing first
-commit. Unsaved workflow changes offer **Save** when this browser can save;
-lease conflicts and unsaved instructions explain what to fix in the editor.
+The panel runs the saved workflow even when an unsaved or invalid draft exists,
+and explains that the draft is excluded. Missing or invalid saved sources,
+unavailable Git source, and a missing first commit still block launch.
+Required inputs show inline errors; submitting focuses the first invalid field.
 Launch failures appear in the panel, and the owner can retry after fixing them.
 
 When the saved workflow is ready, **Project files** checks launch cleanliness
@@ -304,6 +309,12 @@ them in the project folder. Stashing with `-u` also removes untracked workflow
 files and reports until restored. The preview uses saved sources. After
 **Save**, the panel checks them again. A later file change can still block the
 server's launch check and appears as an error in the panel.
+
+When another untracked workflow blocks launch, **Commit workflow files** opens
+a bounded preview of validated workflow sources and their complete contents.
+An explicit confirmation commits exactly those reviewed paths. Changed bytes,
+a changed Git head, or a nonempty index reject the operation. Root reports and
+unrelated code remain untouched. The panel repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. Historical workflows can also expose **Start from job**.

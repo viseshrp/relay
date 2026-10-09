@@ -9,7 +9,12 @@ from django.http import FileResponse, HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from relay.errors import ConfigError, RelayError
-from relay.workflows.actions.language import capture_sources, load, support_manifest
+from relay.workflows.actions.language import (
+    capture_sources,
+    load,
+    support_manifest,
+    workflow_diagnostics,
+)
 
 from ..actions_bindings import put_binding, scopes
 from ..actions_repository import approve_environment
@@ -66,10 +71,15 @@ def library(request: HttpRequest) -> JsonResponse:
 def validate(request: HttpRequest) -> JsonResponse:
     body = json_body(request)
     root, _ = current_project(request)
-    try:
-        document = load(
-            required_text(body, "yaml"), source=Path(str(body.get("source", "workflow.yml")))
+    text = required_text(body, "yaml")
+    source = Path(str(body.get("source", "workflow.yml")))
+    diagnostics = workflow_diagnostics(text, source=source)
+    if diagnostics:
+        return JsonResponse(
+            {"valid": False, "diagnostics": [item.to_envelope() for item in diagnostics]}
         )
+    try:
+        document = load(text, source=source)
         sources = capture_sources(document, root.parent)
         return JsonResponse(
             {
