@@ -1,3 +1,5 @@
+import { ViewSkeleton } from "./ViewSkeleton";
+import { relativeTime } from "../count";
 import {
   Alert,
   Box,
@@ -35,6 +37,7 @@ export function RunHistory({
   waitingRuns,
   more,
   refreshing,
+  loading = false,
   onMore,
   onSelect,
   onRefresh,
@@ -48,6 +51,7 @@ export function RunHistory({
   waitingRuns: string[];
   more: boolean;
   refreshing: boolean;
+  loading?: boolean;
   onMore: () => void;
   onSelect: (id: string) => void;
   onRefresh: () => void;
@@ -214,10 +218,13 @@ export function RunHistory({
                     />
                   )}
                   <Box className="history-run-time">
-                    <Typography variant="body2">
-                      {new Date(
+                    <Typography
+                      variant="body2"
+                      title={new Date(
                         run.created_at ?? run.started_at ?? "",
                       ).toLocaleString()}
+                    >
+                      {relativeTime(run.created_at ?? run.started_at, now)}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       <ActionIcon name="clock" size={14} />{" "}
@@ -233,7 +240,10 @@ export function RunHistory({
               </ListItem>
             ))}
           </List>
-          {!runs.length && (
+          {!runs.length && loading && (
+            <ViewSkeleton view="runs" header={false} />
+          )}
+          {!runs.length && !loading && (
             <Typography color="text.secondary" sx={{ p: 4 }}>
               {filters.status || filters.query || filters.branch
                 ? "No runs match these filters."

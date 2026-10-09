@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 import { historicalPost as post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
@@ -169,7 +169,7 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
       await expect(banner.getByRole("alert")).toBeInViewport();
       const count = (await waiting(page)).waiting_count;
       await expect(
-        page.getByRole("tab", { name: `Runs (${count})`, exact: true }),
+        page.getByRole("link", { name: `Runs (${count})`, exact: true }),
       ).toBeVisible();
       await expect(page).toHaveTitle(`(${count}) Relay`);
       await expect(
@@ -181,18 +181,18 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
       await page
         .getByRole("button", { name: "Run history", exact: true })
         .click();
-      const historyRun = page.getByRole("button", {
+      const historyRun = page.getByRole("link", {
         name: new RegExp(`^${key} #`),
       });
       await expect(historyRun).toContainText("Waiting for you");
       await historyRun.click();
       await expect(page.getByText(/needs (your )?input/i)).toHaveCount(0);
-      await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+      await page.getByRole("link", { name: "Workflows", exact: true }).click();
       await expect(
-        page.getByRole("tab", { name: `Runs (${count})`, exact: true }),
+        page.getByRole("link", { name: `Runs (${count})`, exact: true }),
       ).toBeVisible();
       await page
-        .getByRole("tab", { name: `Runs (${count})`, exact: true })
+        .getByRole("link", { name: `Runs (${count})`, exact: true })
         .click();
       await banner
         .getByRole("button", { name: "Respond", exact: true })
@@ -234,8 +234,12 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
         .poll(async () => (await detail(page, id)).status)
         .toBe("succeeded");
       await expect(banner).toHaveCount(0);
+      await page
+        .getByRole("navigation", { name: "Jobs", exact: true })
+        .getByRole("link", { name: "Summary", exact: true })
+        .click();
       await expect(
-        page.getByText("Changes and documents", { exact: true }),
+        page.getByRole("heading", { name: "Artifacts", exact: true }),
       ).toBeVisible();
       await expect(page.getByText(/before sending your response/)).toHaveCount(
         0,
@@ -266,8 +270,8 @@ test("returning from Workflows keeps the selected run when several runs are wait
     await expect(
       page.getByRole("region", { name: "Waiting for you", exact: true }),
     ).toContainText("Answer this selected run.");
-    await page.getByRole("tab", { name: "Workflows", exact: true }).click();
-    await page.getByRole("tab", { name: /^Runs \(/ }).click();
+    await page.getByRole("link", { name: "Workflows", exact: true }).click();
+    await page.getByRole("link", { name: /^Runs \(/ }).click();
     await expect(page).toHaveURL(new RegExp(`run=${selected}`));
     await expect(
       page.getByRole("region", { name: "Waiting for you", exact: true }),
@@ -449,7 +453,7 @@ for (const support of ["denied", "unavailable"] as const)
     );
     const count = (await waiting(page)).waiting_count;
     await expect(
-      page.getByRole("tab", {
+      page.getByRole("link", {
         name: count ? `Runs (${count})` : "Runs",
         exact: true,
       }),

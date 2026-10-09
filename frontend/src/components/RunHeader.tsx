@@ -94,7 +94,7 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
       )}
       <Dialog open={fullTitle} onClose={() => setFullTitle(false)} fullWidth>
         <DialogTitle>Run title</DialogTitle>
-        <DialogContent>
+        <DialogContent tabIndex={0}>
           <Typography sx={{ overflowWrap: "anywhere" }}>
             {detail.title}
           </Typography>

@@ -246,7 +246,8 @@ Finished-run monitors use `events?summary=true`: at most 50 state events and
 16 KiB per page, excluding agent output, command output and step summaries.
 Oversized state payloads retain bounded identity/status/error fields and set
 `summary_truncated`. Ordinary event and job-log reads retain the original
-recorded payloads. Explicit full-history loading starts from the earliest recorded event.
+recorded payloads. Explicit full-history loading starts from the earliest
+recorded event.
 `artifacts?visible=true` omits empty internal commit/diff evidence from the
 presentation page without deleting retained artifact records or bytes.
 

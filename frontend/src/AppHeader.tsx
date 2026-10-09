@@ -37,6 +37,13 @@ export function AppHeader({ state }: { state: AppState }) {
     signingOut,
     logout,
   } = state;
+  const href = (view: "home" | "workflows" | "runs" | "settings") =>
+    viewHref(view, location.project, {
+      ...(location.workflow ? { workflow: location.workflow } : {}),
+      ...(location.run ? { run: location.run } : {}),
+      ...(location.job ? { job: location.job } : {}),
+      ...(location.interaction ? { interaction: location.interaction } : {}),
+    });
   return (
     <AppBar
       ref={header}
@@ -82,7 +89,7 @@ export function AppHeader({ state }: { state: AppState }) {
             <Button
               component="a"
               key={view}
-              href={viewHref(view, location.project)}
+              href={href(view)}
               aria-current={location.view === view ? "page" : undefined}
               data-tour={
                 view === "workflows"
@@ -101,12 +108,7 @@ export function AppHeader({ state }: { state: AppState }) {
                 )
                   return;
                 event.preventDefault();
-                void navigateSafely({
-                  view,
-                  run: null,
-                  job: null,
-                  interaction: null,
-                });
+                void navigateSafely({ view });
               }}
             >
               {view === "runs"
@@ -134,19 +136,14 @@ export function AppHeader({ state }: { state: AppState }) {
             <MenuItem
               component="a"
               key={view}
-              href={viewHref(view, location.project)}
+              href={href(view)}
               aria-current={view === location.view ? "page" : undefined}
               onClick={(event) => {
                 if (event.button !== 0 || event.metaKey || event.ctrlKey)
                   return;
                 event.preventDefault();
                 setMobileNav(null);
-                void navigateSafely({
-                  view,
-                  run: null,
-                  job: null,
-                  interaction: null,
-                });
+                void navigateSafely({ view });
               }}
             >
               {view === "home"

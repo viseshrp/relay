@@ -1,4 +1,5 @@
-import { Alert, Paper } from "@mui/material";
+import { ViewSkeleton } from "./ViewSkeleton";
+import { Alert, Button, Paper } from "@mui/material";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ansiSpans, commandLines } from "../job";
@@ -33,6 +34,7 @@ export function useJobWorkspace({
   const steps = nodes.filter(
     (node) => node.node_type === "actions_step" && node.parent_scope === scope,
   );
+  const [jobRevision, setJobRevision] = useState(0);
   const [job, setJob] = useState<RunJob | null>(null);
   const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
   const [attemptCursor, setAttemptCursor] = useState<number | null>(null);
@@ -40,6 +42,7 @@ export function useJobWorkspace({
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logRevision, setLogRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingJob, setLoadingJob] = useState(true);
   const [logsComplete, setLogsComplete] = useState(false);
@@ -87,6 +90,7 @@ export function useJobWorkspace({
     })
       .then((value) => {
         if (controller.signal.aborted) return;
+        setJobError(null);
         setJob((current) => ({
           ...value.job,
           attempts: Array.from(
@@ -100,13 +104,13 @@ export function useJobWorkspace({
         setAttemptCursor(value.next);
       })
       .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(errorMessage(caught));
+        if (!controller.signal.aborted) setJobError(errorMessage(caught));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoadingJob(false);
       });
     return () => controller.abort();
-  }, [runId, query, revision, refreshing]);
+  }, [runId, query, revision, refreshing, jobRevision]);
 
   async function openRetrySettings(): Promise<void> {
     setBusy(true);
@@ -208,8 +212,17 @@ export function useJobWorkspace({
   if (!job)
     return {
       fallback: (
-        <Paper className="section-card" aria-busy={!error}>
-          {error ? <Alert severity="error">{error}</Alert> : "Loading job…"}
+        <Paper className="section-card" aria-busy={!jobError && !error}>
+          {jobError || error ? (
+            <Alert severity="error">
+              {jobError || error}
+              <Button onClick={() => setJobRevision((value) => value + 1)}>
+                Retry job
+              </Button>
+            </Alert>
+          ) : (
+            <ViewSkeleton view="job" />
+          )}
         </Paper>
       ),
     };
@@ -251,7 +264,7 @@ export function useJobWorkspace({
     openRetrySettings,
     attemptCursor,
     moreAttempts,
-    error,
+    error: jobError || error,
     panels,
     setPanel,
     outputLabel,

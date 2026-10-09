@@ -123,7 +123,7 @@ export function RetrySettingsView({ state }: { state: RetrySettingsState }) {
                   Keep current effort ({currentEffort})
                 </MenuItem>
               )}
-              <MenuItem value={1}>Provider default</MenuItem>
+              <MenuItem value={1}>Agent’s default</MenuItem>
               {editable &&
                 selector?.choices.map((choice, index) => (
                   <MenuItem key={choice.value} value={index + 2}>
@@ -155,7 +155,7 @@ export function RetrySettingsView({ state }: { state: RetrySettingsState }) {
                   Keep current permission mode ({currentPermission})
                 </MenuItem>
               )}
-              <MenuItem value={1}>Provider default</MenuItem>
+              <MenuItem value={1}>Agent’s default</MenuItem>
               {configuration.permission_mode?.choices.map((choice, index) => (
                 <MenuItem key={choice.value} value={index + 2}>
                   {choice.name}

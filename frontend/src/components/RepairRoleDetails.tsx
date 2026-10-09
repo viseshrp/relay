@@ -1,4 +1,5 @@
 import { Box, Typography } from "@mui/material";
+import { Fragment } from "react";
 import { stageLabel } from "../navigation";
 import type { RetryConfiguration, RunNode } from "../types";
 
@@ -46,7 +47,7 @@ export function RepairRoleDetails({
         </Box>
         {saved.type === "agent" &&
           choices.map((choice) => (
-            <Box key={choice.agent}>
+            <Fragment key={choice.agent}>
               <Box className="data-row">
                 <Typography component="dt">Agent</Typography>
                 <Typography component="dd">
@@ -65,7 +66,7 @@ export function RepairRoleDetails({
                   {choice.permission ?? "Agent’s default"}
                 </Typography>
               </Box>
-            </Box>
+            </Fragment>
           ))}
       </Box>
       {saved.type === "agent" && (

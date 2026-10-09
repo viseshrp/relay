@@ -25,7 +25,19 @@ export default function HighlightedDiff({
     () => ({
       diffStyle: split ? "split" : "unified",
       overflow: wrap ? "wrap" : "scroll",
-      theme: "github-light",
+      theme: "github-light-high-contrast",
+      unsafeCSS: "[data-no-newline] span { color: #475569; opacity: 1; }",
+      onPostRender: (node) => {
+        for (const code of node.shadowRoot?.querySelectorAll("code") ?? []) {
+          code.tabIndex = 0;
+          code.setAttribute(
+            "aria-label",
+            code.hasAttribute("data-deletions")
+              ? "Previous file lines"
+              : "Updated file lines",
+          );
+        }
+      },
       themeType: "light",
       preferredHighlighter: "shiki-js",
       disableFileHeader: true,

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import { historicalPost as post } from "./setup-helpers";
@@ -87,7 +87,7 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   await expect(
     jobs.getByText("Waiting and failed jobs", { exact: true }),
   ).toBeVisible();
-  await jobs.getByRole("button", { name: /^Check / }).click();
+  await jobs.getByRole("link", { name: /^Check / }).click();
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(log.getByRole("alert")).toContainText("Final command error");
   await expect(log.getByRole("alert")).toBeInViewport();
@@ -129,7 +129,7 @@ test("a failed command opens its late error, exact attempt, and downloadable out
     .getByRole("option", { name: "Attempt 1 · Failed", exact: true })
     .click();
   await expect(log.getByRole("alert")).toContainText("Final command error");
-  await jobs.getByRole("button", { name: "Summary", exact: true }).click();
+  await jobs.getByRole("link", { name: "Summary", exact: true }).click();
   await expect(log).toHaveCount(0);
   await expect(page).not.toHaveURL(/job=/);
   await page.locator('.react-flow__node[data-id="root.check"]').click();
@@ -165,7 +165,7 @@ test("a failed agent shows its captured instruction and error without loading th
   await page.goto(`/?view=runs&run=${id}`);
   await page
     .getByRole("navigation", { name: "Jobs" })
-    .getByRole("button", { name: /^Inspect / })
+    .getByRole("link", { name: /^Inspect / })
     .click();
   const log = page.getByRole("region", { name: "Job log" });
   await expect(log.getByRole("alert")).toContainText(
@@ -236,7 +236,7 @@ test("loop iterations and nested workflow jobs have individual logs and stable l
   expect(await padding(child)).toBeGreaterThan(await padding(iteration));
   await expect(jobs).toContainText("Repeats (iteration 1)");
   await expect(jobs).toContainText("Repeats (iteration 2)");
-  await jobs.getByRole("button", { name: /^Check Complete/ }).click();
+  await jobs.getByRole("link", { name: /^Check Succeeded/ }).click();
   await expect(page).toHaveURL(/job=root.child.check/);
   await expect(
     log.getByRole("heading", { name: "Check", exact: true }),
@@ -283,7 +283,7 @@ test("a waiting job is pinned above completed work and opens from the keyboard",
   await expect(first).toHaveAttribute("data-job-scope", "root.approval");
   await expect(first).toContainText("Waiting");
   await expect(jobs.locator('[data-job-scope="root.before"]')).toContainText(
-    "Complete",
+    "Succeeded",
   );
   await first.focus();
   await page.keyboard.press("Enter");
@@ -403,12 +403,12 @@ test("terminal text keeps stream boundaries, ANSI colors, and inert escape seque
   expect(jobDuration("2026-10-07T12:00:00Z", "2026-10-07T12:01:05Z")).toBe(
     "1m 5s",
   );
-  expect(jobDuration(null)).toBe("Not started");
+  expect(jobDuration(null)).toBe("Queued");
   expect(jobDuration("invalid", "invalid")).toBe("Duration unavailable");
 });
 
 test("unstarted terminal jobs have no elapsed duration while pending jobs stay explicit", () => {
   for (const status of ["skipped", "canceled", "failed", "succeeded"])
     expect(jobDuration(null, null, 0, status)).toBe("—");
-  expect(jobDuration(null, null, 0, "pending")).toBe("Not started");
+  expect(jobDuration(null, null, 0, "pending")).toBe("Queued");
 });

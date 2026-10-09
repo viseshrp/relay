@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 import { post, currentWorkflow } from "./setup-helpers";
 

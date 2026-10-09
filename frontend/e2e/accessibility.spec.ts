@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import AxeBuilder from "@axe-core/playwright";
 import { post } from "./setup-helpers";
 

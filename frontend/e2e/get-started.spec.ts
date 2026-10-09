@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { post, runStarter } from "./setup-helpers";
 import type { AgentsResponse } from "../src/types";
 

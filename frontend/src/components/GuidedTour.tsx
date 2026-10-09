@@ -90,6 +90,17 @@ export function GuidedTour({
       stageRadius: 8,
       popoverClass: "relay-tour",
       overlayOpacity: 0.6,
+      onHighlighted: (element) => {
+        // Driver adds disclosure state to every target, including plain layout
+        // containers. Only interactive targets support aria-expanded.
+        if (
+          element &&
+          !element.matches(
+            'button, a, input, select, [role="button"], [role="combobox"], [role="link"], [role="treeitem"]',
+          )
+        )
+          element.removeAttribute("aria-expanded");
+      },
       onPopoverRender: (popover) => {
         // Keep the skip action visible, including for keyboard and touch users.
         popover.closeButton.textContent = "Skip";

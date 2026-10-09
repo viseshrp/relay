@@ -151,6 +151,13 @@ export function JobHeader({ state }: { state: JobWorkspaceState }) {
           </Button>
         )}
       </Stack>
+      {job.node_type === "actions_job" && !attempt && (
+        <Typography sx={{ mt: 2 }}>
+          {["canceled", "skipped"].includes(job.status)
+            ? "This job did not run."
+            : "No attempt has started yet."}
+        </Typography>
+      )}
     </Paper>
   );
 }

@@ -1,11 +1,5 @@
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Container,
-  Stack,
-} from "@mui/material";
+import { ViewSkeleton } from "./components/ViewSkeleton";
+import { Alert, Box, Button, Container, Stack } from "@mui/material";
 import { Suspense } from "react";
 import { WorkspaceBoundary } from "./components/WorkspaceBoundary";
 
@@ -62,6 +56,7 @@ export function AppMain({ state }: { state: AppState }) {
   return (
     <Container
       component="main"
+      aria-label={location.view === "home" ? "Relay home" : undefined}
       id="main-content"
       tabIndex={-1}
       maxWidth={false}
@@ -165,15 +160,11 @@ export function AppMain({ state }: { state: AppState }) {
       <WorkspaceBoundary>
         <Suspense
           fallback={
-            <Box className="loading-panel">
-              <CircularProgress />
-            </Box>
+            <ViewSkeleton view={location.run ? "summary" : location.view} />
           }
         >
           {!projectReady ? (
-            <Box className="loading-panel">
-              <CircularProgress aria-label="Loading projects" />
-            </Box>
+            <ViewSkeleton view={location.run ? "summary" : location.view} />
           ) : location.view === "home" ? (
             <HomeDashboard
               onOpenProject={() => setOpeningProject(true)}

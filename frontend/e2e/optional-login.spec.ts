@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { post, runStarter, openSettings } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
@@ -16,7 +16,7 @@ test("setup completes a starter run without login", async ({
   );
 });
 
-test("all three header tabs fit beside the logo without login", async ({
+test("header navigation stays reachable on phones and desktops without login", async ({
   page,
 }, info) => {
   for (const width of [390, 1440]) {
@@ -32,22 +32,43 @@ test("all three header tabs fit beside the logo without login", async ({
           content:
             ".app-header .MuiButtonBase-root { font-family: Arial, sans-serif; letter-spacing: 0.08em; }",
         });
-      const tabs = await header.getByRole("tablist").boundingBox();
-      if (!tabs)
-        throw new Error("The navigation tabs must have visible bounds.");
-      for (const name of ["Workflows", "Runs", "Settings"]) {
-        const control = header.getByRole("tab", { name, exact: true });
-        await expect(control).toBeEnabled();
-        await expect(control).toHaveCSS("opacity", "1");
-        await expect(control).toHaveCSS(
-          "color",
-          name === "Settings" ? "rgb(35, 61, 150)" : "rgb(49, 86, 211)",
-        );
-        const tab = await control.boundingBox();
-        if (!tab) throw new Error(`The ${name} tab must have visible bounds.`);
-        expect(tab.x).toBeGreaterThanOrEqual(tabs.x - 1);
-        expect(tab.x + tab.width).toBeLessThanOrEqual(tabs.x + tabs.width + 1);
-        expect(tab.width).toBeGreaterThanOrEqual(44);
+      if (width < 480) {
+        const navigate = header.getByRole("button", {
+          name: "Navigate",
+          exact: true,
+        });
+        await expect(navigate).toBeVisible();
+        const bounds = await navigate.boundingBox();
+        expect(
+          bounds && bounds.x >= 0 && bounds.x + bounds.width <= width,
+        ).toBeTruthy();
+        await navigate.click();
+        const menu = page.getByRole("menu");
+        for (const name of ["Workflows", "Runs", "Settings"])
+          await expect(
+            menu.getByRole("menuitem", { name, exact: true }),
+          ).toBeVisible();
+        await page.keyboard.press("Escape");
+      } else {
+        const navigation = header.getByRole("navigation", {
+          name: "Main navigation",
+          exact: true,
+        });
+        const bounds = await navigation.boundingBox();
+        if (!bounds) throw new Error("Navigation must have visible bounds.");
+        for (const name of ["Workflows", "Runs", "Settings"]) {
+          const control = navigation.getByRole("link", { name, exact: true });
+          await expect(control).toBeEnabled();
+          await expect(control).toHaveCSS("opacity", "1");
+          const link = await control.boundingBox();
+          if (!link)
+            throw new Error(`The ${name} link must have visible bounds.`);
+          expect(link.x).toBeGreaterThanOrEqual(bounds.x - 1);
+          expect(link.x + link.width).toBeLessThanOrEqual(
+            bounds.x + bounds.width + 1,
+          );
+          expect(link.width).toBeGreaterThanOrEqual(44);
+        }
       }
     }
     await header.screenshot({
@@ -138,10 +159,7 @@ test.describe("First-use introduction without login", () => {
     await page
       .getByRole("button", { name: "Skip introduction", exact: true })
       .click();
-    await page
-      .locator(".relay-tour")
-      .getByRole("button", { name: "Skip tour", exact: true })
-      .click();
+    await expect(page.locator(".relay-tour")).toHaveCount(0);
     await page.reload();
     await expect(
       page.getByRole("main", { name: "Relay home", exact: true }),

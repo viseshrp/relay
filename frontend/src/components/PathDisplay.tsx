@@ -30,7 +30,7 @@ export function PathDisplay({
   }
   return (
     <details className="path-display">
-      <summary title={path}>
+      <summary role="button" title={path} aria-label={`Full path for ${label}`}>
         <code>{display ?? shortenedPath(path)}</code>
         <span>Full path</span>
       </summary>
@@ -38,7 +38,7 @@ export function PathDisplay({
         <code>{path}</code>
         <Button
           onClick={() => void copy()}
-          aria-label={`Copy path for ${label}`}
+          aria-label={`Copy full path for ${label}`}
         >
           Copy path
         </Button>

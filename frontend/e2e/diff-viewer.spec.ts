@@ -1,5 +1,5 @@
 import { historicalPost as post } from "./setup-helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
 import { parseGitDiff } from "../src/diff";
@@ -145,7 +145,9 @@ async function review(
       })
     ).ok(),
   ).toBeTruthy();
-  expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
+  const reset = await post(page, "/__test__/reset");
+  expect(reset.ok()).toBeTruthy();
+  const { python } = await reset.json();
   await page.goto("/?view=workflows");
   await expect(
     page.getByRole("button", { name: "Add job", exact: true }),
@@ -162,8 +164,18 @@ async function review(
           version: 1,
           name: "Diff review",
           nodes: {
+            write: {
+              type: "command",
+              writes: true,
+              run: [
+                python,
+                "-c",
+                `from pathlib import Path; import subprocess; Path('diff-review.txt').write_text(${JSON.stringify(key)}); subprocess.run(['git','add','diff-review.txt'], check=True); subprocess.run(['git','commit','-m','Review fixture'], check=True)`,
+              ],
+            },
             review: {
               type: "human_wait",
+              needs: ["write"],
               prompt: "Inspect changes before responding.",
             },
           },

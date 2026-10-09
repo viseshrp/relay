@@ -1,9 +1,9 @@
+import { ViewSkeleton } from "./ViewSkeleton";
 import {
   Alert,
   Box,
   Button,
   Chip,
-  CircularProgress,
   Paper,
   Stack,
   TextField,
@@ -17,6 +17,7 @@ import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { GettingStartedHome } from "./GettingStartedHome";
 
 import type { HomeDashboardState } from "./useHomeDashboard";
+import { viewHref } from "../navigation";
 export function HomeDashboardView({ state }: { state: HomeDashboardState }) {
   const {
     busy,
@@ -66,11 +67,10 @@ export function HomeDashboardView({ state }: { state: HomeDashboardState }) {
         </Alert>
       )}
       {!data ? (
-        <div className="loading-panel">
-          {!error && <CircularProgress aria-label="Loading dashboard" />}
-        </div>
+        <div>{!error && <ViewSkeleton view="home" header={false} />}</div>
       ) : data.counts.projects === 0 ? (
         <GettingStartedHome
+          heading="h2"
           onOpenProject={onOpenProject}
           onShowWelcome={onShowWelcome}
         />
@@ -197,12 +197,42 @@ export function HomeDashboardView({ state }: { state: HomeDashboardState }) {
                   )}
                   <Stack direction="row" spacing={1}>
                     <Button
+                      component="a"
+                      href={viewHref("workflows", project.id)}
+                      aria-label={`Open ${project.display_name} workflows`}
                       variant="outlined"
-                      onClick={() => onNavigate(project, "workflows")}
+                      onClick={(event) => {
+                        if (
+                          event.button !== 0 ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey
+                        )
+                          return;
+                        event.preventDefault();
+                        onNavigate(project, "workflows");
+                      }}
                     >
                       Workflows
                     </Button>
-                    <Button onClick={() => onNavigate(project, "runs")}>
+                    <Button
+                      component="a"
+                      href={viewHref("runs", project.id)}
+                      aria-label={`Open ${project.display_name} runs`}
+                      onClick={(event) => {
+                        if (
+                          event.button !== 0 ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey
+                        )
+                          return;
+                        event.preventDefault();
+                        onNavigate(project, "runs");
+                      }}
+                    >
                       Runs
                     </Button>
                   </Stack>

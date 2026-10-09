@@ -1,3 +1,4 @@
+import { countLabel } from "../count";
 import { RunSettingsDetails } from "./RunSettingsDetails";
 import { RunDiagnostics } from "./RunDiagnostics";
 import { RunRepairDetails } from "./RunRepairDetails";
@@ -166,10 +167,12 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
             <Box className="graph-heading">
               <Typography variant="h6">{detail.workflow_key}</Typography>
               <Typography variant="body2" color="text.secondary">
-                Started manually · {visibleStages.length}{" "}
-                {visibleStages.length === 1 ? "job" : "jobs"}
+                Started manually · {countLabel(visibleStages.length, "job")}
               </Typography>
             </Box>
+            {!detail.nodes.length && (
+              <Typography>No jobs have been recorded for this run.</Typography>
+            )}
             <Box className="run-graph-viewport">
               <FlowCanvas
                 key={detail.id}
@@ -224,13 +227,27 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
                     key={node.id}
                     direction="row"
                     spacing={2}
-                    sx={{ mt: 1, alignItems: "center" }}
+                    sx={{
+                      mt: 1,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      rowGap: 1,
+                    }}
                   >
                     <StatusIcon status="failed" />
-                    <Typography sx={{ flex: 1 }}>
+                    <Typography
+                      sx={{
+                        flex: "1 1 160px",
+                        minWidth: 0,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
                       {stageLabel(node.scope_path)}
                     </Typography>
-                    <Button onClick={() => showStep(node.scope_path)}>
+                    <Button
+                      sx={{ flexShrink: 0 }}
+                      onClick={() => showStep(node.scope_path)}
+                    >
                       Open job log
                     </Button>
                   </Stack>
@@ -261,7 +278,7 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
               live={!TERMINAL_RUNS.has(detail.status)}
               hasMore={eventCursor !== null}
               onMore={async () => {
-                if (eventCursor !== null) await loadEvents(eventCursor);
+                if (eventCursor !== null) await loadEvents(eventCursor, true);
               }}
             />
           </Paper>

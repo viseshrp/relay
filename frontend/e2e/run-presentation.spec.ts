@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { activityMessages } from "../src/activity";
 import { capturedRunGraph } from "../src/graph";
 import type { RunEvent, RunNode } from "../src/types";

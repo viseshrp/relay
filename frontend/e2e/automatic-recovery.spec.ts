@@ -1,5 +1,10 @@
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
 import { historicalPost } from "./setup-helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
 
 async function post(page: Page, path: string, data: object = {}) {
@@ -137,13 +142,16 @@ test("agent recovery override survives source form save and reload", async ({
   ).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=workflow.yaml");
-  const input = page.getByLabel("Action inputs", { exact: true });
+  const input = await advancedField(page, "Action inputs");
   const value = JSON.parse(await input.inputValue());
   await input.fill(JSON.stringify({ ...value, "auto-retry": false }));
   await input.blur();
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
   await page.reload();
+  await advancedField(page, "Action inputs");
   await expect(input).toHaveValue(
     JSON.stringify({ ...value, "auto-retry": false }, null, 2),
   );

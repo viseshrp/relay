@@ -16,6 +16,7 @@ Execution happens locally through your installed coding agents and commands.
 
 A script and its dependencies use familiar syntax:
 
+<!-- relay-example: valid local-checks -->
 ```yaml
 name: Local checks
 on: workflow_dispatch
@@ -32,6 +33,7 @@ jobs:
 A coding agent is an explicit local action. Select an exact model advertised by
 that installed tool; Relay validates it before launch:
 
+<!-- relay-example: valid ask-local-agent -->
 ```yaml
 name: Ask an agent
 on:
@@ -49,6 +51,7 @@ jobs:
 
 An approval can offer buttons and pass its answer to later steps:
 
+<!-- relay-example: valid owner-approval -->
 ```yaml
 name: Review then continue
 on: workflow_dispatch

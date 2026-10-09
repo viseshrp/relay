@@ -1,8 +1,8 @@
+import { LoadingShell } from "./components/ViewSkeleton";
 import {
   Alert,
   Box,
   Button,
-  CircularProgress,
   FormControl,
   InputLabel,
   MenuItem,
@@ -78,6 +78,7 @@ export function useApp() {
   const [guide, setGuide] = useState<HelpGuide | null>(null);
   const [mobileNav, setMobileNav] = useState<HTMLElement | null>(null);
   const [setupForced, setSetupForced] = useState(false);
+  const focusLocation = useRef("");
   const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
   const helpButton = useRef<HTMLButtonElement>(null);
   const header = useRef<HTMLDivElement | null>(null);
@@ -320,7 +321,17 @@ export function useApp() {
   }, [setupForced]);
 
   useEffect(() => {
-    if (welcomeOpen || openingProject || setupForced) return;
+    const key = `${location.view}:${location.run}:${location.workflow}`;
+    const changed = focusLocation.current !== key;
+    focusLocation.current = key;
+    if (
+      !changed ||
+      welcomeOpen ||
+      openingProject ||
+      setupForced ||
+      tourRequested
+    )
+      return;
     const main = document.getElementById("main-content");
     main?.scrollIntoView({ block: "start" });
     main?.focus({ preventScroll: true });
@@ -331,6 +342,7 @@ export function useApp() {
     welcomeOpen,
     openingProject,
     setupForced,
+    tourRequested,
   ]);
 
   function dismissSetup(): void {
@@ -366,7 +378,7 @@ export function useApp() {
   if (auth === null) {
     return {
       fallback: (
-        <Box className="loading-shell">
+        <Box className={authError ? "loading-shell" : undefined}>
           {authError ? (
             <Stack spacing={2} sx={{ maxWidth: 600, p: 2 }}>
               <Alert severity="error">{authError}</Alert>
@@ -378,7 +390,7 @@ export function useApp() {
               </Button>
             </Stack>
           ) : (
-            <CircularProgress aria-label="Loading Relay" />
+            <LoadingShell view={location.run ? "summary" : location.view} />
           )}
         </Box>
       ),

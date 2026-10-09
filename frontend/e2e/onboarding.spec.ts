@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { post, openSettings, currentWorkflow } from "./setup-helpers";
 import { stringify } from "yaml";
 
@@ -58,7 +58,7 @@ test("welcome navigation and keyboard controls introduce features, then a skippe
     welcome.getByRole("heading", { name: "Make Relay your own" }),
   ).toBeVisible();
   await welcome
-    .getByRole("button", { name: "Show guided tour", exact: true })
+    .getByRole("button", { name: "Take the tour", exact: true })
     .click();
   const tour = page.locator(".relay-tour");
   await expect(tour).toBeVisible();
@@ -107,8 +107,9 @@ test("the full spotlight tour reaches each settings control without changing sav
       mutations.push(request.url());
   });
   await page.goto("/?view=workflows");
+  await page.getByRole("button", { name: /^Show slide 4/ }).click();
   await page
-    .getByRole("button", { name: "Skip introduction", exact: true })
+    .getByRole("button", { name: "Take the tour", exact: true })
     .click();
   const tour = page.locator(".relay-tour");
   const titles = [
@@ -180,8 +181,6 @@ test("onboarding can replay separately and reset from Settings, with Escape reme
     page.getByRole("dialog", { name: "Welcome to Relay", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".relay-tour")).toBeVisible();
-  await page.keyboard.press("Escape");
   await expect(page.locator(".relay-tour")).toBeHidden();
   await openSettings(page);
   await page
@@ -250,10 +249,7 @@ test("no projects shows a usable home and still offers global settings and onboa
   await page
     .getByRole("button", { name: "Skip introduction", exact: true })
     .click();
-  await page
-    .locator(".relay-tour")
-    .getByRole("button", { name: "Skip tour", exact: true })
-    .click();
+  await expect(page.locator(".relay-tour")).toHaveCount(0);
   const home = page.getByRole("region", {
     name: "Start using Relay",
     exact: true,
@@ -412,8 +408,9 @@ test("mobile welcome and tour remain usable and replay slides can start the tour
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
+  await welcome.getByRole("button", { name: /^Show slide 4/ }).click();
   await welcome
-    .getByRole("button", { name: "Skip introduction", exact: true })
+    .getByRole("button", { name: "Take the tour", exact: true })
     .click();
   const tour = page.locator(".relay-tour");
   await tour.getByRole("button", { name: "Next", exact: true }).click();
@@ -438,7 +435,7 @@ test("mobile welcome and tour remain usable and replay slides can start the tour
     .click();
   await welcome.getByRole("button", { name: /^Show slide 4/ }).click();
   await welcome
-    .getByRole("button", { name: "Show guided tour", exact: true })
+    .getByRole("button", { name: "Take the tour", exact: true })
     .click();
   await expect(tour).toBeVisible();
 });
@@ -455,7 +452,7 @@ test("an unavailable workspace bundle offers explicit reload instead of a blank 
   await expect(
     page.getByRole("heading", { name: "Global defaults", exact: true }),
   ).toBeVisible();
-  await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(
     page
       .getByRole("alert")
@@ -505,10 +502,7 @@ test("blocked browser storage allows dismissal and explains why reset cannot per
   await page
     .getByRole("button", { name: "Skip introduction", exact: true })
     .click();
-  await page
-    .locator(".relay-tour")
-    .getByRole("button", { name: "Skip tour", exact: true })
-    .click();
+  await expect(page.locator(".relay-tour")).toHaveCount(0);
   await openSettings(page);
   await page
     .getByRole("button", { name: "Welcome and guided tour", exact: true })

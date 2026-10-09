@@ -1,5 +1,5 @@
 import { historicalPost } from "./setup-helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
 async function post(page: Page, path: string, data: object = {}) {
@@ -121,7 +121,7 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   ).toBeEnabled();
   await expect(
     dialog.getByRole("combobox", { name: "Permission mode", exact: true }),
-  ).toContainText("Keep current permission mode (Provider default)");
+  ).toContainText("Keep current permission mode (Agent’s default)");
   await expect(dialog.getByRole("progressbar")).toHaveCount(0);
   expect(probes).toBe(0);
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -310,7 +310,7 @@ test("upcoming job choices are shared, failures retry before opening, and Resume
   const dialog = page.getByRole("dialog");
   await expect(
     dialog.getByRole("combobox", { name: "Permission mode", exact: true }),
-  ).toContainText("Keep current permission mode (Provider default)");
+  ).toContainText("Keep current permission mode (Agent’s default)");
   await expect(dialog.getByRole("progressbar")).toHaveCount(0);
   await dialog.press("Escape");
   await expect(edit).toBeFocused();

@@ -34,7 +34,7 @@ const slides: { title: string; text: string; image: IllustrationKind }[] = [
   },
   {
     title: "Make Relay your own",
-    text: "Settings holds global defaults, project overrides, and storage cleanup. Question-mark buttons explain controls. Next, a spotlight tour will show you around; you can skip it at any time.",
+    text: "Settings holds global defaults, project overrides, and storage cleanup. Question-mark buttons explain controls. Choose Take the tour to see each area, or Skip introduction to start working.",
     image: "settings",
   },
 ];
@@ -56,7 +56,7 @@ export function WelcomeCarousel({
     rememberSeen(WELCOME_SEEN);
   }, []);
   useEffect(() => {
-    // Finish Escape before opening the tour, whose keyboard handler uses keyup.
+    // Consume Escape once so dismissal does not reach another overlay.
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopImmediatePropagation();

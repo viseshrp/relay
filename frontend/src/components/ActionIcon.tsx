@@ -1,6 +1,10 @@
 import { statusPresentation } from "../status";
 
 export type ActionGlyph =
+  | "agent"
+  | "command"
+  | "loop"
+  | "human"
   | "folder"
   | "summary"
   | "workflow"
@@ -24,6 +28,10 @@ export type ActionGlyph =
   | "skip"
   | "circle";
 const paths: Record<ActionGlyph, string> = {
+  agent: "M8 3h8v4h4v14H4V7h4ZM8 12h.01M16 12h.01M8 17h8M12 3V1",
+  command: "m4 5 6 7-6 7M12 19h8",
+  loop: "M19 8a8 8 0 1 0 1 7M19 3v6h-6",
+  human: "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 22v-4c0-6 16-6 16 0v4",
   folder: "M3 7V4h6l3 3h9v13H3ZM3 7h18",
   summary: "M3 10 12 3l9 7v11h-6v-7H9v7H3Z",
   workflow: "M4 3h11l5 5v13H4ZM15 3v6h5M8 13h8M8 17h6",

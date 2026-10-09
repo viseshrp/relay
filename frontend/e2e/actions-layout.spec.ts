@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
 import { jobDuration } from "../src/job";
@@ -72,7 +72,7 @@ test("durations include hours, running time, and invalid or missing timestamps",
       Date.parse("2026-10-07T12:01:09Z"),
     ),
   ).toBe("1m 9s");
-  expect(jobDuration(null)).toBe("Not started");
+  expect(jobDuration(null)).toBe("Queued");
   expect(jobDuration("invalid")).toBe("Duration unavailable");
   expect(jobDuration("2026-10-07T12:00:00Z", "2026-10-07T11:00:00Z")).toBe(
     "0s",
@@ -454,7 +454,7 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
   await page.goto("/?view=runs");
   await page
     .getByRole("navigation", { name: "Workflow sidebar" })
-    .getByRole("button", { name: "Build and verify" })
+    .getByRole("link", { name: "Build and verify" })
     .click();
   await expect(
     page.getByRole("heading", { name: "Build and verify", exact: true }),
@@ -469,8 +469,8 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
     .getByRole("textbox", { name: "Filter workflow runs" })
     .fill(detail.source_commit.slice(0, 7));
   await expect(
-    page.getByRole("button", {
-      name: `Build and verify #${detail.number} · Complete`,
+    page.getByRole("link", {
+      name: `Build and verify #${detail.number} · Succeeded`,
       exact: true,
     }),
   ).toBeVisible();
@@ -479,8 +479,8 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
     animations: "disabled",
   });
   await page
-    .getByRole("button", {
-      name: `Build and verify #${detail.number} · Complete`,
+    .getByRole("link", {
+      name: `Build and verify #${detail.number} · Succeeded`,
       exact: true,
     })
     .click();

@@ -64,6 +64,7 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
       }}
       fullWidth
       maxWidth="sm"
+      transitionDuration={120}
       slotProps={{ transition: { onExited } }}
       aria-labelledby="launch-title"
     >

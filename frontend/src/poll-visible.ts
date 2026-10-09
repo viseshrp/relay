@@ -14,7 +14,7 @@ export function pollVisible(
     changedAt = Date.now();
   async function update() {
     clearTimeout(timer);
-    if (stopped || document.hidden) return;
+    if (stopped || document.visibilityState !== "visible") return;
     if (busy) {
       pending = true;
       return;
@@ -31,7 +31,7 @@ export function pollVisible(
         stopped = true;
     } finally {
       busy = false;
-      if (!stopped && !document.hidden) {
+      if (!stopped && document.visibilityState === "visible") {
         const delay =
           Date.now() - changedAt >= quietAfter
             ? Math.max(30000, interval)
@@ -46,7 +46,7 @@ export function pollVisible(
     void update();
   }
   function visibility() {
-    if (document.hidden) clearTimeout(timer);
+    if (document.visibilityState !== "visible") clearTimeout(timer);
     else refresh();
   }
   window.addEventListener("focus", refresh);

@@ -1,5 +1,10 @@
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
 import { historicalPost } from "./setup-helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
 import { capturedRunGraph, visibleRunStages } from "../src/graph";
 import type { RunNode } from "../src/types";
@@ -127,7 +132,7 @@ test("bounded repair loops save, reload and execute frozen local workflows", asy
   ).toBeTruthy();
   await page.goto("/?view=workflows&workflow=native-repairs.yaml");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
-  const input = page.getByLabel("Action inputs", { exact: true });
+  const input = await advancedField(page, "Action inputs");
   await input.fill(
     JSON.stringify({
       workflow: "./.relay/workflows/repair-child.yaml",
@@ -137,10 +142,15 @@ test("bounded repair loops save, reload and execute frozen local workflows", asy
   await input.blur();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
-    page.getByText("Workflow saved and validated.", { exact: true }),
+    page.getByText("Workflow and instructions saved and validated.", {
+      exact: true,
+    }),
   ).toBeVisible();
   await page.reload();
-  await expect(input).toHaveValue(/"max-iterations": 3/);
+  await advancedField(page, "Action inputs");
+  expect(JSON.parse(await input.inputValue())).toMatchObject({
+    "max-iterations": 3,
+  });
   const launch = await post(page, "/api/runs", {
     workflow_key: "native-repairs",
     inputs: {},
@@ -180,6 +190,7 @@ test("agent steps retain independent efforts and provider defaults across save",
   ).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await openJobSettings(page);
   await page.getByLabel("Agent", { exact: true }).click();
   await page.getByRole("option", { name: "Codex", exact: true }).click();
   await page
@@ -191,7 +202,7 @@ test("agent steps retain independent efforts and provider defaults across save",
   await page
     .getByLabel("Action reference", { exact: true })
     .fill("relay/agent@v1");
-  const input = page.getByLabel("Action inputs", { exact: true });
+  const input = await advancedField(page, "Action inputs");
   await input.fill(
     JSON.stringify({
       agent: "codex",
@@ -201,13 +212,15 @@ test("agent steps retain independent efforts and provider defaults across save",
   );
   await input.blur();
   await expect(page.getByLabel("Effort", { exact: true })).toContainText(
-    "Provider default",
+    "Use project and global defaults",
   );
   await expect(page.getByLabel("Permission mode", { exact: true })).toHaveCount(
     0,
   );
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
   await page.reload();
   const source = parse(
     (await (await page.request.get("/api/workflows/workflow")).json()).yaml,

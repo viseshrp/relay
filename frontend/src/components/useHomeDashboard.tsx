@@ -11,6 +11,7 @@ import type {
   ProjectRecord,
 } from "../types";
 import { useClock } from "../useClock";
+import { viewHref } from "../navigation";
 
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 
@@ -199,9 +200,20 @@ export function useHomeDashboard({
               />
               <div className="dashboard-run-body">
                 <Button
+                  component="a"
+                  href={viewHref("runs", run.project.id, {
+                    run: run.id,
+                    ...(run.request ? { interaction: run.request.id } : {}),
+                  })}
                   className="dashboard-run-link"
                   onClick={(event) => {
-                    if (event.button !== 0 || event.metaKey || event.ctrlKey)
+                    if (
+                      event.button !== 0 ||
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey
+                    )
                       return;
                     event.preventDefault();
                     onNavigate(run.project, "runs", run);
@@ -234,10 +246,21 @@ export function useHomeDashboard({
               </Typography>
               {run.request && (
                 <Button
+                  component="a"
+                  href={viewHref("runs", run.project.id, {
+                    run: run.id,
+                    interaction: run.request.id,
+                  })}
                   variant="outlined"
                   size="small"
                   onClick={(event) => {
-                    if (event.button !== 0 || event.metaKey || event.ctrlKey)
+                    if (
+                      event.button !== 0 ||
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey
+                    )
                       return;
                     event.preventDefault();
                     onNavigate(run.project, "runs", run);

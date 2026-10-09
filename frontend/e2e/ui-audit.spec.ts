@@ -1,4 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
+import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
 import { post, currentWorkflow, openSettings } from "./setup-helpers";
 
@@ -66,16 +71,16 @@ test("settings inspection leaves YAML untouched and restoring source replaces th
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeDisabled();
   expect((await document(page)).yaml).toBe(original.yaml);
+  await openJobSettings(page);
   await page.getByLabel("Step name", { exact: true }).fill("Changed draft");
+  await closeJobSettings(page);
   await expect
     .poll(async () => (await document(page)).draft?.yaml)
     .toContain("Changed draft");
   await page
     .getByRole("button", { name: "Restore saved source", exact: true })
     .click();
-  await expect
-    .poll(async () => (await document(page)).draft?.yaml)
-    .toBe(original.yaml);
+  await expect.poll(async () => (await document(page)).draft).toBeNull();
   const restored = await document(page);
   expect(restored.yaml).toBe(original.yaml);
   expect(restored.base_hash).toBe(original.base_hash);
@@ -93,7 +98,7 @@ test("restoring the saved YAML also replaces a previously stored recovery draft"
     page.getByRole("button", { name: "Add job", exact: true }),
   ).toBeEnabled();
   const original = await document(page);
-  const editor = page.locator(".cm-content");
+  const editor = page.locator('[aria-label="Workflow YAML"]');
   await editor.click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.insertText(
@@ -136,7 +141,7 @@ test("workflow history filters persist in the URL and Back restores run and job 
   ).toBeVisible();
   await page
     .getByRole("navigation", { name: "Workflow sidebar" })
-    .getByRole("button", { name: "All workflows", exact: true })
+    .getByRole("link", { name: "All workflows", exact: true })
     .click();
   await expect(page).not.toHaveURL(/workflow=/);
   await page.goBack();
@@ -151,11 +156,11 @@ test("workflow history filters persist in the URL and Back restores run and job 
   await expect(
     page.getByRole("heading", { name: "Audit A", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /^Audit.a #/i }).click();
+  await page.getByRole("link", { name: /^Audit.a #/i }).click();
   await expect(page).toHaveURL(new RegExp(`run=${id}`));
   await page
     .getByRole("navigation", { name: "Jobs", exact: true })
-    .getByRole("button", { name: /^check / })
+    .getByRole("link", { name: /^check / })
     .click();
   await expect(page).toHaveURL(/job=root/);
   await page.goBack();
@@ -188,9 +193,8 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
   ).toHaveCount(0);
   await page
     .getByRole("navigation", { name: "Jobs", exact: true })
-    .getByRole("button", { name: /^later / })
+    .getByRole("link", { name: /^later / })
     .click();
-  await log.getByRole("button", { name: "Job activity", exact: true }).click();
   await expect(
     log.getByText("No attempt has started yet.", { exact: true }),
   ).toBeVisible();
@@ -249,7 +253,7 @@ test("a named script step opens its terminal output", async ({ page }) => {
   ).toContainText("Captured terminal output");
 });
 
-test("Workflow file shows frozen source; artifact downloads identify job and attempt", async ({
+test("Workflow file shows frozen source and empty internal artifacts remain hidden", async ({
   page,
 }) => {
   await create(page, "audit-frozen", "Original source", {
@@ -284,26 +288,14 @@ test("Workflow file shows frozen source; artifact downloads identify job and att
   await expect(
     page.getByRole("button", { name: "Workflow file", exact: true }),
   ).toBeFocused();
-  const artifacts = page.getByRole("table", {
-    name: "Retained artifacts",
-    exact: true,
-  });
   await expect(
-    artifacts.getByRole("columnheader", { name: "Job", exact: true }),
-  ).toBeVisible();
+    page.getByRole("table", { name: "Retained artifacts", exact: true }),
+  ).toHaveCount(0);
   await expect(
-    artifacts.getByRole("row").filter({
-      has: page.getByRole("link", {
-        name: "Download commits, Check, attempt 1",
-        exact: true,
-      }),
-    }),
-  ).toContainText("Check");
-  await expect(
-    artifacts.getByRole("link", {
-      name: "Download commits, Check, attempt 1",
-      exact: true,
-    }),
+    page.getByText(
+      "No artifacts yet. Add relay/upload-artifact to a step to save a file.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Workflow file", exact: true })
@@ -381,6 +373,7 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
     });
     await page.goto(`/?view=workflows&workflow=${key}.yaml`);
     await page.getByRole("button", { name: "Add job", exact: true }).click();
+    await openJobSettings(page, type === "loop" ? "Steps" : "General");
     if (type === "condition")
       await page.getByLabel("Job condition", { exact: true }).fill("true");
     if (type === "subworkflow")
@@ -391,7 +384,7 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
       await page
         .getByLabel("Action reference", { exact: true })
         .fill("relay/loop@v1");
-      const inputs = page.getByLabel("Action inputs", { exact: true });
+      const inputs = await advancedField(page, "Action inputs");
       await inputs.fill(
         JSON.stringify({
           workflow: `./.relay/workflows/${childKey}.yaml`,
@@ -402,7 +395,9 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
     }
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
-      page.getByText("Workflow saved and validated.", { exact: true }),
+      page.getByText("Workflow and instructions saved and validated.", {
+        exact: true,
+      }),
     ).toBeVisible();
     const saved = parse((await document(page, `${key}.yaml`)).yaml);
     expect(saved.jobs.job_1).toBeDefined();

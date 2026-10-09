@@ -1011,3 +1011,31 @@ folders, and live Git validation. Initialize Git is an explicit action for
 a selected non-repository folder; it preserves the folder's existing files.
 Named artifact uploads show their job and creation time, offer verified
 text or Markdown previews, and join retained reports in Download all.
+
+### Authoring and monitor boundaries
+
+Script steps use a syntax-highlighted multiline editor and the host's selected
+shell. Expand **Process arguments** to inspect the interpreter vector from the
+execution planner. The private attempt-directory placeholder becomes an owned
+path at execution. Missing interpreters are reported; Relay does not switch an
+explicit shell. Named shared commands and exact argv remain separate choices.
+
+Loop and reusable-workflow cards expand a read-only child graph and link to the
+child source for editing. The initial editor viewport fits its nodes; selecting
+a job explicitly focuses it. Small graphs omit the minimap. Job deletion removes
+inbound dependencies in the same undoable source edit.
+
+Structured environment, output and input controls include an **Advanced JSON**
+option. The JSON editor applies valid values on blur and reports parse errors
+inline. Both the workflow header and the open job drawer invoke the same Save,
+which publishes the workflow and changed prompts together.
+
+Finished summaries request bounded state events and visible artifact metadata.
+They do not replay agent or command logs or open a live stream. Open a job for
+its complete paged log; explicitly load activity history to inspect the complete
+recorded event stream. Read failures in a job's metadata and output remain
+independent, so a successful metadata refresh cannot hide a failed log read.
+
+[Browser view states](ui-states.md) records loading, empty, error, success and
+access-denied behavior. [Backlog implementation](backlog-implementation.md)
+connects the remaining findings to their implementation and regression tests.

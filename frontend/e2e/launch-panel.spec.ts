@@ -1,4 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
 import type { WorkflowValue } from "../src/workflow";
@@ -228,10 +233,7 @@ test("edited inputs preserve JSON types and advanced cleanup choices stay explic
       "Work is complete. Review the saved documents and code changes below.",
     ),
   ).toBeVisible();
-  await page
-    .getByRole("region", { name: "Workflow run history" })
-    .getByRole("button", { name: "Run workflow", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Run workflow", exact: true }).click();
   const reopened = page.getByRole("dialog", {
     name: "Run workflow",
     exact: true,
@@ -247,18 +249,32 @@ test("edited inputs preserve JSON types and advanced cleanup choices stay explic
   ).toBeEnabled();
 });
 
-test("unsaved changes are saved before launch", async ({ page }) => {
+test("launch keeps using saved source until an explicit Save", async ({
+  page,
+}) => {
   await create(page, "save-launch");
-  const inputs = page.getByLabel("Action inputs", { exact: true });
+  const inputs = await advancedField(page, "Action inputs");
   await inputs.fill(JSON.stringify({ argv: '["git","status","--short"]' }));
   await inputs.blur();
+  await closeJobSettings(page);
   await expect(
     page
       .getByRole("region", { name: "Workflow header" })
       .getByRole("button", { name: "Run workflow" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
+  const savedLaunch = await open(page);
+  await expect(savedLaunch).toContainText("saved");
+  expect(
+    (await (await page.request.get("/api/workflows/save-launch.yaml")).json())
+      .yaml,
+  ).not.toContain("--short");
+  await savedLaunch
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
   const panel = await open(page);
   await expect(
     panel.getByRole("button", { name: "Run workflow", exact: true }),
@@ -269,14 +285,14 @@ test("unsaved changes are saved before launch", async ({ page }) => {
   ).toContain("--short");
 });
 
-test("invalid YAML remains a draft and blocks publication and launch", async ({
+test("invalid YAML remains a draft while saved source can still launch", async ({
   page,
 }) => {
   await create(page, "invalid-launch");
   const source = (
     await (await page.request.get("/api/workflows/invalid-launch.yaml")).json()
   ).yaml;
-  await page.locator(".cm-content").click();
+  await page.locator('[aria-label="Workflow YAML"]').click();
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.insertText("jobs: [");
   await expect(
@@ -289,7 +305,7 @@ test("invalid YAML remains a draft and blocks publication and launch", async ({
     page
       .getByRole("region", { name: "Workflow header" })
       .getByRole("button", { name: "Run workflow" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect
     .poll(
       async () =>

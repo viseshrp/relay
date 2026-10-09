@@ -11,6 +11,18 @@ export function runSummaryGraph(
 ): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
   const graph = capturedRunGraph(runJobs(records));
   const byScope = new Map(records.map((record) => [record.scope_path, record]));
+  const agents = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!record.agent_id) continue;
+    const scope = record.step_id
+      ? (record.parent_scope ?? record.scope_path)
+      : record.scope_path;
+    const choices = agents.get(scope) ?? new Set<string>();
+    choices.add(
+      [record.agent_id, record.model_value].filter(Boolean).join(" · "),
+    );
+    agents.set(scope, choices);
+  }
   const groups = new Map<string, Node<WorkflowNodeData>[]>();
   const incoming = new Map<string, string[]>();
   const outgoing = new Map<string, string[]>();
@@ -74,6 +86,7 @@ export function runSummaryGraph(
           data: {
             ...node.data,
             label: record?.display_name || node.data.label,
+            agent: [...(agents.get(node.id) ?? [])].join("; "),
             duration: record
               ? jobDuration(
                   record.started_at,

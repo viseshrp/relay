@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { parse } from "yaml";
-import { post } from "./setup-helpers";
+import { post, openJobSettings, closeJobSettings } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -301,11 +301,11 @@ test("validation, conflict, and loading errors retain settings and offer recover
   await panel
     .getByRole("textbox", { name: "Job timeout", exact: true })
     .fill("bad timeout");
-  await panel
-    .getByRole("button", { name: "Save global settings", exact: true })
-    .click();
   await expect(
-    panel.getByRole("alert").filter({ hasText: "Invalid workflow defaults" }),
+    panel.getByRole("button", { name: "Save global settings", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    panel.getByText("Use a duration such as 30s, 15m, or 2h.", { exact: true }),
   ).toBeVisible();
   await expect(
     panel.getByRole("textbox", { name: "Job timeout", exact: true }),
@@ -446,7 +446,7 @@ test("storage has no deletion selected, explains retained data, and notification
   ).toBeVisible();
 });
 
-test("unsaved project overrides survive a global save and narrow settings protect navigation", async ({
+test("narrow settings require saving or discarding changes before navigation", async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 900, height: 1000 });
@@ -471,6 +471,22 @@ test("unsaved project overrides survive a global save and narrow settings protec
   await nav
     .getByRole("button", { name: "Global defaults", exact: true })
     .click();
+  const warning = page.getByRole("dialog", {
+    name: "Unsaved settings",
+    exact: true,
+  });
+  await warning
+    .getByRole("button", { name: "Keep editing", exact: true })
+    .click();
+  await expect(
+    panel.getByRole("textbox", { name: "Job timeout", exact: true }),
+  ).toHaveValue("30m");
+  await nav
+    .getByRole("button", { name: "Global defaults", exact: true })
+    .click();
+  await warning
+    .getByRole("button", { name: "Discard changes", exact: true })
+    .click();
   const global = page.getByRole("region", {
     name: "Global defaults",
     exact: true,
@@ -491,8 +507,17 @@ test("unsaved project overrides survive a global save and narrow settings protec
     .click();
   await expect(
     panel.getByRole("textbox", { name: "Job timeout", exact: true }),
-  ).toHaveValue("30m");
-  await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+  ).toHaveValue("15m");
+  await panel
+    .getByRole("switch", {
+      name: "Override job timeout for this project",
+      exact: true,
+    })
+    .check();
+  await panel
+    .getByRole("textbox", { name: "Job timeout", exact: true })
+    .fill("30m");
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(
     page.getByText("Save or discard your settings before leaving.", {
       exact: true,
@@ -516,7 +541,7 @@ test("unsaved project overrides survive a global save and narrow settings protec
       exact: true,
     }),
   ).not.toBeChecked();
-  await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Project defaults", exact: true }),
   ).toHaveCount(0);
@@ -573,7 +598,15 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
     ).ok(),
   ).toBeTruthy();
   await page.goto("/?view=workflows&workflow=workflow.yaml");
-  await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
+  await openJobSettings(page);
+  const agentPicker = page.getByRole("combobox", {
+    name: "Agent",
+    exact: true,
+  });
+  if ((await agentPicker.textContent()) !== "Codex") {
+    await agentPicker.click();
+    await page.getByRole("option", { name: "Codex", exact: true }).click();
+  }
   const effort = page
     .getByRole("region", { name: "Codex configuration", exact: true })
     .getByRole("combobox", { name: "Effort", exact: true });
@@ -582,6 +615,7 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
   await page
     .getByRole("option", { name: "Agent’s default", exact: true })
     .click();
+  await closeJobSettings(page);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   const confirmation = page.getByRole("button", {
     name: "Save canonical YAML",
@@ -589,14 +623,16 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
   });
   if (await confirmation.isVisible()) await confirmation.click();
   await expect(
-    page.getByText("Workflow saved and validated.", { exact: true }),
+    page.getByText("Workflow and instructions saved and validated.", {
+      exact: true,
+    }),
   ).toBeVisible();
   const saved = await (
     await page.request.get("/api/workflows/workflow")
   ).json();
   expect(parse(saved.yaml).jobs.work.steps[0].with.effort).toBeNull();
   await page.reload();
-  await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
+  await openJobSettings(page);
   await expect(effort).toHaveText("Agent’s default");
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const launched = await post(page, "/api/runs", {

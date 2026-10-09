@@ -89,6 +89,7 @@ export function useRunWorkspace({
       setShowArtifacts(false);
     }
   }, [showArtifacts, selectedJob]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runCursor, setRunCursor] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -102,6 +103,7 @@ export function useRunWorkspace({
   const [linkedRequest, setLinkedRequest] = useState<RunInteraction | null>(
     null,
   );
+  const summaryOnly = useRef(true);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [eventCursor, setEventCursor] = useState<number | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -162,6 +164,7 @@ export function useRunWorkspace({
       historyRequest.current?.abort();
       const controller = new AbortController();
       historyRequest.current = controller;
+      setHistoryLoading(true);
       try {
         const response = await api<ReadResponse1>(
           `/api/runs?${query.toString()}`,
@@ -174,6 +177,8 @@ export function useRunWorkspace({
         setRunCursor(response.next);
       } catch (caught) {
         if (!controller.signal.aborted) throw caught;
+      } finally {
+        if (!controller.signal.aborted) setHistoryLoading(false);
       }
     },
     [project.id, filters],
@@ -227,7 +232,11 @@ export function useRunWorkspace({
   const loadArtifacts = useCallback(
     async (since: number, mode: PageMode): Promise<void> => {
       if (selectedRun === null) return;
-      const query = new URLSearchParams({ since: String(since), limit: "200" });
+      const query = new URLSearchParams({
+        since: String(since),
+        limit: "50",
+        visible: "true",
+      });
       const response = await api<ArtifactPage>(
         `/api/runs/${encodeURIComponent(selectedRun)}/artifacts?${query.toString()}`,
       );
@@ -321,11 +330,13 @@ export function useRunWorkspace({
   );
 
   const loadEvents = useCallback(
-    async (since = 0) => {
+    async (since = 0, full = false) => {
       if (selectedRun === null) return [];
+      const summary = summaryOnly.current && !full;
       const response = await api<ReadResponse2>(
-        `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=100`,
+        `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=${summary ? 50 : 100}${summary ? "&summary=true" : ""}`,
       );
+      if (full) summaryOnly.current = false;
       if (currentRun.current !== selectedRun) return [];
       eventAfter.current = Math.max(
         eventAfter.current,
@@ -334,17 +345,18 @@ export function useRunWorkspace({
       setEvents((current) =>
         since === 0 ? response.events : mergeEvents(current, response.events),
       );
-      setEventCursor(response.next);
+      setEventCursor(summary && since === 0 ? 0 : response.next);
       return response.events;
     },
     [selectedRun],
   );
 
   useEffect(() => {
+    if (selectedRun) return;
     void loadHistory().catch((caught: unknown) =>
       setError(errorMessage(caught)),
     );
-  }, [loadHistory]);
+  }, [loadHistory, selectedRun]);
 
   useEffect(() => {
     let disposed = false;
@@ -366,8 +378,12 @@ export function useRunWorkspace({
     setArtifactCursor(null);
     setEventCursor(null);
     if (selectedRun === null) return;
-    void Promise.all([refreshDetail(true), loadEvents()])
-      .then(([, history]) => {
+    void refreshDetail(true)
+      .then((run) => {
+        summaryOnly.current = Boolean(run && TERMINAL_RUNS.has(run.status));
+        return loadEvents();
+      })
+      .then((history) => {
         if (disposed) return;
         // A step may finish between the state read and the history response.
         // Apply those events before the stream starts after their final ID.
@@ -844,6 +860,7 @@ export function useRunWorkspace({
     onEditWorkflow,
     selectedRun,
     runs,
+    historyLoading,
     waitingRuns,
     runCursor,
     loadHistory,

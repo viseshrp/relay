@@ -231,6 +231,8 @@ export type DashboardResponse = Pick<DashboardData, "counts"> &
   Partial<Omit<DashboardData, "counts">>;
 
 export interface RunNode {
+  agent_id?: string;
+  model_value?: string;
   display_name?: string;
   matrix?: Record<string, JsonValue>;
   outcome?: string;

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import type { RunSummary } from "../src/types";
 import { historicalPost as post } from "./setup-helpers";
 
@@ -75,9 +75,6 @@ test("temporary cleanup lives in Storage and removes only the confirmed run's ma
       (await post(page, "/__test__/resource-remnant", { run_id: run.id })).ok(),
     ).toBeTruthy();
   await page.goto(`/?view=runs&project=${project}&run=${target.id}`);
-  await page
-    .getByText("Advanced diagnostics and saved files", { exact: true })
-    .click();
   await expect(
     page.getByRole("button", {
       name: /^(Retry temporary resource cleanup|Clean data|Review deletion)$/i,
@@ -114,7 +111,7 @@ test("temporary cleanup lives in Storage and removes only the confirmed run's ma
   await expect(page.getByRole("option")).toHaveCount(3);
   await page
     .getByRole("option", {
-      name: `#${target.number} Storage cleanup check Complete`,
+      name: `#${target.number} Storage cleanup check Succeeded`,
       exact: true,
     })
     .click();
@@ -217,7 +214,7 @@ test("Storage recovers failed reads and keeps server cleanup errors in the confi
     .click();
   await page
     .getByRole("option", {
-      name: `#${run.number} Storage cleanup check Complete`,
+      name: `#${run.number} Storage cleanup check Succeeded`,
       exact: true,
     })
     .click();
@@ -270,6 +267,7 @@ test("older completed runs load through bounded project-scoped pages", async ({
   };
   await page.route("**/api/runs?**", (route) => {
     const query = new URL(route.request().url()).searchParams;
+    if (query.get("limit") !== "20") return route.continue();
     expect(query.get("project")).toBe(project);
     expect(query.get("limit")).toBe("20");
     const succeeded = query.get("status") === "succeeded";
@@ -301,7 +299,7 @@ test("older completed runs load through bounded project-scoped pages", async ({
   await expect(page.getByRole("option")).toHaveCount(3);
   await page
     .getByRole("option", {
-      name: "#1 Older completed run Complete",
+      name: "#1 Older completed run Succeeded",
       exact: true,
     })
     .click();

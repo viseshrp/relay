@@ -4,9 +4,11 @@ import { OnboardingIllustration } from "./OnboardingIllustration";
 export function GettingStartedHome({
   onOpenProject,
   onShowWelcome,
+  heading = "h1",
 }: {
   onOpenProject: () => void;
   onShowWelcome: () => void;
+  heading?: "h1" | "h2";
 }) {
   return (
     <Paper
@@ -16,7 +18,7 @@ export function GettingStartedHome({
       className="getting-started-home"
     >
       <Stack spacing={2}>
-        <Typography component="h1" variant="h4">
+        <Typography component={heading} variant="h4">
           Your first workflow starts here
         </Typography>
         <Typography>

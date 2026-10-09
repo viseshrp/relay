@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 import { runActions } from "../src/components/RunActions";
 import { historicalPost as post, currentWorkflow } from "./setup-helpers";
@@ -343,7 +343,10 @@ test("switching runs while repeat options load drops the previous request", asyn
     await page
       .getByRole("button", { name: "Run history", exact: true })
       .click();
-    await page.getByRole("button", { name: /^other-actions #/ }).click();
+    await page
+      .getByRole("link", { name: "All workflows", exact: true })
+      .click();
+    await page.getByRole("link", { name: /^other-actions #/ }).click();
     await expect(page).toHaveURL(new RegExp(`run=${other}`));
   } finally {
     release?.();

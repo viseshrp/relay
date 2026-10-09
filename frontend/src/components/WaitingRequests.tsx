@@ -68,7 +68,12 @@ export function WaitingRequests({
         </Alert>
       ))}
       {shown && (
-        <Box ref={form} sx={{ scrollMarginTop: 90 }}>
+        <Box
+          ref={form}
+          sx={{
+            scrollMarginTop: "calc(var(--relay-header-height, 76px) + 16px)",
+          }}
+        >
           <ReviewRequest
             key={shown.id}
             interaction={shown}

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
 
 test.afterEach(async ({ page }) => {
@@ -117,7 +117,7 @@ for (const automatic of [false, true])
       await expect(page).toHaveURL(/job=root.review/);
       await page
         .getByRole("navigation", { name: "Jobs" })
-        .getByRole("button", { name: "Summary", exact: true })
+        .getByRole("link", { name: "Summary", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Open job log", exact: true })
@@ -125,7 +125,7 @@ for (const automatic of [false, true])
       await expect(log.getByRole("alert")).toBeInViewport();
       await page
         .getByRole("navigation", { name: "Jobs" })
-        .getByRole("button", { name: "Summary", exact: true })
+        .getByRole("link", { name: "Summary", exact: true })
         .click();
     }
     if (automatic) {
@@ -525,7 +525,7 @@ for (const native of [false, true])
       exact: true,
     });
     await expect(permission).toBeEnabled();
-    await expect(permission).toHaveText("Provider default");
+    await expect(permission).toHaveText("Agent’s default");
     const handoff = dialog.getByRole("textbox", {
       name: "Handoff instructions",
       exact: true,

@@ -1,6 +1,7 @@
+import { ViewSkeleton } from "./ViewSkeleton";
 import { settingsErrors } from "../settings-validation";
 
-import { Alert, Box, Button, CircularProgress, Stack } from "@mui/material";
+import { Alert, Box, Button, Stack } from "@mui/material";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
@@ -260,11 +261,7 @@ export function useSettingsPage({
 
   if (loading)
     return {
-      fallback: (
-        <Box className="loading-panel">
-          <CircularProgress aria-label="Loading settings" />
-        </Box>
-      ),
+      fallback: <ViewSkeleton view="settings" />,
     };
   if (!response || !draft)
     return {

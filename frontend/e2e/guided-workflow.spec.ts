@@ -1,5 +1,10 @@
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
 import { historicalPost, currentWorkflow } from "./setup-helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
 async function post(page: Page, path: string, data: object = {}) {
@@ -13,7 +18,9 @@ async function save(page: Page) {
     exact: true,
   });
   if (await confirmation.isVisible()) await confirmation.click();
-  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -48,13 +55,21 @@ test("create a workflow, inspect connected progress, reload its review, and expl
     page.getByRole("heading", { name: "Guided browser flow", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await openJobSettings(page, "General");
   await page.getByLabel("Job name", { exact: true }).fill("Check project");
+  await openJobSettings(page);
   await page.getByLabel("Script", { exact: true }).fill("git status --short");
+  await closeJobSettings(page);
   await page.getByRole("button", { name: "Add job", exact: true }).click();
+  await openJobSettings(page, "General");
   await page.getByLabel("Job name", { exact: true }).fill("Owner review");
-  await page.getByLabel("Needs (comma separated)").fill("check");
+  await page
+    .getByRole("combobox", { name: "Start after", exact: true })
+    .click();
+  await page.getByRole("option", { name: "check", exact: true }).click();
+  await openJobSettings(page);
   await page.getByLabel("Action reference").fill("relay/human-wait@v1");
-  const input = page.getByLabel("Action inputs", { exact: true });
+  const input = await advancedField(page, "Action inputs");
   await input.fill(
     JSON.stringify({
       prompt: "Review the command result. Type AGREE to continue.",
@@ -92,7 +107,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await expect(
     page.locator('.react-flow__edge[data-id="root.check:root.job_1"]'),
   ).toHaveCount(1);
-  await expect(page.locator(".react-flow__edge")).toHaveCount(6);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
   await expect(
     page.getByRole("button", { name: "Send response and continue" }),
   ).toBeDisabled();
@@ -109,7 +124,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await expect(
     page
       .getByRole("navigation", { name: "Jobs", exact: true })
-      .getByRole("button", { name: /^Owner review Waiting/ })
+      .getByRole("link", { name: /^Owner review Waiting/ })
       .first(),
   ).toBeVisible();
   const detail = (
@@ -172,7 +187,7 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await expect(
     page
       .getByRole("navigation", { name: "Jobs", exact: true })
-      .getByRole("button", { name: /^Owner review Waiting/ })
+      .getByRole("link", { name: /^Owner review Waiting/ })
       .first(),
   ).toBeVisible();
   await page.unroute(stream);
@@ -197,12 +212,14 @@ test("create a workflow, inspect connected progress, reload its review, and expl
     page.getByRole("heading", { name: /Guided browser flow #/ }),
   ).toBeVisible();
   await expect(
-    page.getByText("Complete", { exact: true }).first(),
+    page.getByText("Succeeded", { exact: true }).first(),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Open changes and documents" })
-    .click();
-  await expect(page.getByText("No committed code changes yet.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open changes and documents" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("No artifacts yet.", { exact: false }),
+  ).toBeVisible();
   await page
     .getByText("Advanced diagnostics and saved files", { exact: true })
     .click();
@@ -247,12 +264,14 @@ test("report handoffs explain retention and review material is readable beside t
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=retained-review.yaml");
+  await openJobSettings(page);
   await expect(
     page.getByLabel("Action reference", { exact: true }),
   ).toHaveValue("relay/validate-report@v1");
-  await expect(page.getByLabel("Action inputs", { exact: true })).toContainText(
+  await expect(await advancedField(page, "Action inputs")).toContainText(
     "REVIEW.md",
   );
+  await closeJobSettings(page);
   await page
     .getByRole("region", { name: "Workflow header" })
     .getByRole("button", { name: "Run workflow", exact: true })
@@ -270,6 +289,9 @@ test("report handoffs explain retention and review material is readable beside t
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Review material" }).click();
   await page.getByRole("option", { name: "REVIEW.md", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open review material", exact: true })
+    .click();
   await expect(page.locator(".review-preview")).toContainText("Ready: Yes");
   await expect(page.locator(".review-preview")).toContainText(
     "Read this report before approving.",
@@ -291,7 +313,7 @@ test("report handoffs explain retention and review material is readable beside t
     page.getByRole("heading", { name: /Retained review #/ }),
   ).toBeVisible();
   await expect(
-    page.getByText("Stopped", { exact: true }).first(),
+    page.getByText("Cancelled", { exact: true }).first(),
   ).toBeVisible();
 });
 
@@ -433,6 +455,8 @@ test("a review completed during initial loading updates progress before the stre
     await route.continue();
   });
   await page.goto(`/?view=runs&run=${runId}`);
+  await captured;
+  releaseDetails();
   await expect(
     page.getByText(
       "Work is complete. Review the saved documents and code changes below.",
@@ -442,7 +466,7 @@ test("a review completed during initial loading updates progress before the stre
     page
       .getByRole("navigation", { name: "Jobs", exact: true })
       .locator('[data-job-scope="root.review"]'),
-  ).toContainText("Complete");
+  ).toContainText("Succeeded");
   await expect(
     page.getByRole("heading", { name: "Your review is needed" }),
   ).toBeHidden();

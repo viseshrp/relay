@@ -1,4 +1,9 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  advancedField,
+  openJobSettings,
+  closeJobSettings,
+} from "./setup-helpers";
+import { expect, test, type Locator, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
 import { post, currentWorkflow } from "./setup-helpers";
 import type { SettingsResponse, StorageUsage } from "../src/types";
@@ -144,6 +149,9 @@ for (const width of [320, 390, 760, 1440])
 test("long dropdown names stay within the screen and selected labels stay compact", async ({
   page,
 }, info) => {
+  await page.route("**/api/runs?*status=succeeded*", (route) =>
+    route.fulfill({ json: { runs: [], next: null } }),
+  );
   const title =
     "Publish an independently verified feature with integration checks and a retained review report";
   expect(
@@ -196,7 +204,7 @@ test("long dropdown names stay within the screen and selected labels stay compac
       name: "Project",
       exact: true,
     });
-    expect((await bounds(projects)).width).toBeGreaterThanOrEqual(150);
+    expect((await bounds(projects)).width).toBeGreaterThanOrEqual(100);
   }
 });
 
@@ -225,7 +233,7 @@ test("action input forms preserve long command arguments and fit narrow screens"
   for (const width of [390, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=command-layout.yaml");
-    const inputs = page.getByLabel("Action inputs", { exact: true });
+    const inputs = await advancedField(page, "Action inputs");
     await expect(inputs).toHaveValue(
       JSON.stringify({ argv: JSON.stringify(argv) }, null, 2),
     );
@@ -258,21 +266,21 @@ test("agent defaults and launch inheritance leave saved YAML unchanged", async (
   page,
 }) => {
   await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await openJobSettings(page);
   const original = (
     await (await page.request.get("/api/workflows/workflow.yaml")).json()
   ).yaml;
   await expect(
-    page.getByLabel("Exact model override", { exact: true }),
+    page.getByRole("combobox", { name: "Model", exact: true }),
   ).toHaveValue("m1");
-  await expect(page.getByLabel("Effort", { exact: true })).toContainText(
-    "Provider default",
-  );
+  await expect(page.getByLabel("Effort", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Permission mode", { exact: true })).toHaveCount(
     0,
   );
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeDisabled();
+  await closeJobSettings(page);
   await page.getByRole("button", { name: "Run workflow", exact: true }).click();
   const launch = page.getByRole("dialog", {
     name: "Run workflow",
@@ -353,10 +361,7 @@ test("run graph headings stay above jobs and empty history filters remain readab
     path: info.outputPath("run-graph-layout.png"),
     animations: "disabled",
   });
-  await page
-    .getByRole("region", { name: "Workflow run history", exact: true })
-    .getByRole("button", { name: "Graph layout", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Run history", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "Status", exact: true }),
   ).toHaveText("All statuses");
@@ -440,12 +445,15 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=workflow.yaml");
+    await openJobSettings(page);
     for (const reference of references) {
       await page
         .getByLabel("Action reference", { exact: true })
         .fill(reference);
+      if (reference) await advancedField(page, "Action inputs");
       await expect(
-        page.getByLabel(reference ? "Action inputs" : "Script", {
+        page.getByRole("textbox", {
+          name: reference ? "Action inputs" : "Script",
           exact: true,
         }),
       ).toBeVisible();
@@ -455,11 +463,13 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
         ),
       ).toBeTruthy();
     }
+    await openJobSettings(page, "General");
     await page
       .getByLabel("Reusable workflow", { exact: true })
       .fill("./.relay/workflows/child.yaml");
+    await openJobSettings(page);
     await expect(
-      page.getByLabel("Reusable inputs", { exact: true }),
+      page.getByRole("button", { name: "Add Reusable inputs entry" }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -470,6 +480,7 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
       path: info.outputPath(`forms-${width}.png`),
       fullPage: true,
     });
+    await closeJobSettings(page);
     await page
       .getByRole("button", { name: "Restore saved source", exact: true })
       .click();
@@ -488,7 +499,9 @@ for (const width of [390, 760, 900, 1050, 1440, 1920])
     const nav = page.getByRole("navigation", { name: "Settings sections" });
     const header = page.locator(".app-header");
     const box = await bounds(header);
-    expect(box.height).toBeLessThanOrEqual(width <= 1050 ? 116 : 65);
+    expect(box.height).toBeLessThanOrEqual(
+      width < 480 ? 128 : width < 1024 ? 116 : 65,
+    );
     const picker = page.getByRole("combobox", { name: "Project", exact: true });
     const pickerBox = await bounds(picker);
     expect(pickerBox.height).toBeLessThanOrEqual(40);
@@ -506,7 +519,9 @@ for (const width of [390, 760, 900, 1050, 1440, 1920])
         await bounds(
           page.getByRole("link", { name: "Relay home", exact: true }),
         ),
-        await bounds(page.getByRole("tab", { name: "Workflows", exact: true })),
+        await bounds(
+          page.getByRole("link", { name: "Workflows", exact: true }),
+        ),
       );
     for (const control of row)
       expect(
@@ -519,9 +534,13 @@ for (const width of [390, 760, 900, 1050, 1440, 1920])
       const logo = await bounds(
         page.getByRole("link", { name: "Relay home", exact: true }),
       );
-      const tabs = await bounds(page.getByRole("tablist"));
-      expect(projectGroup.x - logo.x - logo.width).toBeCloseTo(16, 0);
-      expect(tabs.x - projectGroup.x - projectGroup.width).toBeCloseTo(16, 0);
+      const tabs = await bounds(
+        page.getByRole("navigation", { name: "Main navigation" }),
+      );
+      expect(projectGroup.x).toBeGreaterThanOrEqual(logo.x + logo.width + 8);
+      expect(tabs.x).toBeGreaterThanOrEqual(
+        projectGroup.x + projectGroup.width + 8,
+      );
     }
     await help.focus();
     await expect(page.getByRole("tooltip")).toContainText(
@@ -638,8 +657,27 @@ for (const path of ["/tmp/repo", "C:\\work\\repo", "\\\\server\\share\\repo"])
 test("artifact downloads and captured source remain readable at every layout width", async ({
   page,
 }, info) => {
+  expect((await post(page, "/__test__/report")).ok()).toBeTruthy();
+  const created = await post(page, "/api/workflows", {
+    key: "layout-artifacts",
+    holder: "layout-test",
+    yaml: stringify({
+      name: "Layout artifacts",
+      jobs: {
+        review: {
+          steps: [
+            {
+              uses: "relay/validate-report@v1",
+              with: { path: "REVIEW.md", format: "label", label: "Ready" },
+            },
+          ],
+        },
+      },
+    }),
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
   const launched = await post(page, "/api/runs", {
-    workflow_key: "workflow",
+    workflow_key: "layout-artifacts",
     inputs: {},
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
 import {
   openSettings,
@@ -93,8 +93,8 @@ test("Home shows real project results and logo navigation keeps workspace drafts
     home.getByRole("region", { name: "Recent results", exact: true }),
   ).toContainText("Dashboard check");
   await expect(
-    page.getByRole("tab", { name: "Settings", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("link", { name: "Settings", exact: true }),
+  ).toHaveCount(1);
   await expect(page.getByText("Login disabled", { exact: true })).toHaveCount(
     0,
   );
@@ -105,13 +105,13 @@ test("Home shows real project results and logo navigation keeps workspace drafts
   });
   await home
     .getByRole("region", { name: "Recent results", exact: true })
-    .getByRole("button", { name: /^Dashboard check/ })
+    .getByRole("link", { name: /^Dashboard check/ })
     .click();
   await expect(page).toHaveURL(new RegExp(`run=${run}`));
   await expect(page.locator(".run-header")).toContainText("Dashboard check");
   await page.getByRole("link", { name: "Relay home", exact: true }).click();
   await expect(home).toBeVisible();
-  await page.getByRole("tab", { name: "Workflows", exact: true }).click();
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page
     .getByRole("option", { name: "Dashboard check", exact: true })
@@ -207,9 +207,9 @@ test("waiting cards open the exact human request and disappear after an answer",
     .locator(".dashboard-run")
     .filter({ hasText: "Review the change" });
   await expect(
-    row.getByRole("button", { name: "Open request", exact: true }),
+    row.getByRole("link", { name: "Open request", exact: true }),
   ).toBeVisible();
-  await row.getByRole("button", { name: "Open request", exact: true }).click();
+  await row.getByRole("link", { name: "Open request", exact: true }).click();
   await expect(page).toHaveURL(/interaction=/);
   await expect(
     page.getByRole("heading", { name: "Your review is needed", exact: true }),
@@ -328,7 +328,7 @@ test("compact recent results reveal loaded records and still page to older runs"
     name: "Recent results",
     exact: true,
   });
-  const rows = results.getByRole("button", { name: /^Completed result / });
+  const rows = results.getByRole("link", { name: /^Completed result / });
   await expect(rows).toHaveCount(5);
   await results
     .getByRole("button", { name: "Show more recent results", exact: true })
@@ -339,7 +339,7 @@ test("compact recent results reveal loaded records and still page to older runs"
     .click();
   await expect(rows).toHaveCount(11);
   await expect(
-    results.getByRole("button", { name: /^Completed result 11/ }),
+    results.getByRole("link", { name: /^Completed result 11/ }),
   ).toBeVisible();
   await expect(
     results.getByRole("button", {

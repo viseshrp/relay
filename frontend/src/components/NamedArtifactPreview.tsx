@@ -49,7 +49,24 @@ export function NamedArtifactPreview({
     void api<Preview>(`${endpoint}&path=${encodeURIComponent(path)}`, {
       signal: controller.signal,
     })
-      .then(setPreview)
+      .then((next) =>
+        setPreview((current) =>
+          current
+            ? {
+                ...next,
+                next: current.next,
+                files: Array.from(
+                  new Map(
+                    [...current.files, ...next.files].map((item) => [
+                      item.path,
+                      item,
+                    ]),
+                  ).values(),
+                ),
+              }
+            : next,
+        ),
+      )
       .catch((caught) => {
         if (!controller.signal.aborted) setError(errorMessage(caught));
       });
@@ -61,7 +78,19 @@ export function NamedArtifactPreview({
         `${endpoint}&offset=${preview?.next}&path=${encodeURIComponent(path)}`,
       );
       setPreview((current) =>
-        current ? { ...next, files: [...current.files, ...next.files] } : next,
+        current
+          ? {
+              ...next,
+              files: Array.from(
+                new Map(
+                  [...current.files, ...next.files].map((item) => [
+                    item.path,
+                    item,
+                  ]),
+                ).values(),
+              ),
+            }
+          : next,
       );
     } catch (caught) {
       setError(errorMessage(caught));

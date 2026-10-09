@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
 import { historicalPost as post } from "./setup-helpers";
 
