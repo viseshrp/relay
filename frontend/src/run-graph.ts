@@ -18,14 +18,15 @@ export function runSummaryGraph(records: RunNode[], now: number): { nodes: Node<
   const nodes: Node<WorkflowNodeData>[] = [];
   for (const group of groups.values()) {
     if (group.length > 5 && group.every((node) => byScope.has(node.id))) {
-      const id = `parallel:${group[0].id}`;
+      const serial = group.every(node => byScope.get(node.id)?.node_type.startsWith("actions_"));
+      const id = `${serial ? "serial" : "parallel"}:${group[0].id}`;
       for (const node of group) replacements.set(node.id, id);
       const statuses = group.map((node) => node.data.status ?? "pending");
       const status = ["failed", "repair_stopped", "waiting", "running", "repairing", "pending", "dispatched", "ready", "canceled", "skipped"].find((value) => statuses.includes(value)) ?? "succeeded";
-      nodes.push({ id, type: "runJob", position: { x: 0, y: 0 }, data: { label: `${group.length} parallel jobs`, kind: "group", status, members: group.map((node) => node.id), duration: `${statuses.filter((value) => value === "succeeded").length} completed` } });
+      nodes.push({ id, type: "runJob", position: { x: 0, y: 0 }, data: { label: `${group.length} ${serial ? "serial" : "parallel"} jobs`, kind: "group", status, members: group.map((node) => node.id), duration: `${statuses.filter((value) => value === "succeeded").length} completed` } });
     } else for (const node of group) {
       const record = byScope.get(node.id);
-      nodes.push({ ...node, type: "runJob", className: undefined, data: { ...node.data, duration: record ? jobDuration(record.started_at, record.ended_at, now, record.status) : "" } });
+      nodes.push({ ...node, type: "runJob", className: undefined, data: { ...node.data, label: record?.display_name || node.data.label, duration: record ? jobDuration(record.started_at, record.ended_at, now, record.status) : "" } });
     }
   }
   const edges = Array.from(new Map(graph.edges.map((edge) => {

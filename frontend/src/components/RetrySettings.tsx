@@ -1,7 +1,5 @@
-import {
-  Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, InputLabel, LinearProgress, MenuItem, Select, Stack, TextField, Typography,
-} from "@mui/material";
+import { HelpSelectField, HelpTextField } from "./HelpTip";
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, MenuItem, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
@@ -133,56 +131,44 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
             ? "Choose settings for this upcoming job. Saving keeps the run paused. Completed work and captured instructions stay saved."
             : "Choose the tool and model for this step's new attempts. Completed steps, prompts, and earlier attempts stay saved. Automatic retries keep your choice."}
         </Typography>
-        <FormControl fullWidth disabled={!agents || submitting}>
-          <InputLabel id="retry-agent-label">Tool</InputLabel>
-          <Select labelId="retry-agent-label" label="Tool" value={agentId}
+        <HelpSelectField topic="retry" label="Tool" fullWidth disabled={!agents || submitting} value={agentId}
             onChange={(event) => changeAgent(event.target.value)}>
             {!agents && <MenuItem value={problem.agent_id}>{stageLabel(problem.agent_id)}</MenuItem>}
             {agents?.agents.map((agent) => <MenuItem key={agent.id} value={agent.id} disabled={!agent.installed}>
               {agent.display_name}{agent.installed ? "" : " (not installed)"}
             </MenuItem>)}
-          </Select>
-        </FormControl>
-        <FormControl fullWidth disabled={models?.agentId !== agentId || submitting}>
-          <InputLabel id="retry-model-label">Model</InputLabel>
-          <Select labelId="retry-model-label" label="Model" value={model}
+          </HelpSelectField>
+        <HelpSelectField topic="model" label="Model" placeholder="Choose a model" fullWidth disabled={models?.agentId !== agentId || submitting} value={model}
             onChange={(event) => changeModel(event.target.value)}>
             {model && !choices.some((choice) => choice.value === model) && <MenuItem value={model}>{model}</MenuItem>}
             {choices.map((choice) => <MenuItem key={choice.value} value={choice.value}>{choice.name}</MenuItem>)}
-          </Select>
-        </FormControl>
+          </HelpSelectField>
         {!configuration && !error && <LinearProgress aria-label="Loading effort choices" />}
         {error && <Alert severity="error">{error}</Alert>}
-        {configuration && <FormControl fullWidth disabled={!editable || submitting}>
-          <InputLabel id="retry-effort-label">Effort</InputLabel>
-          <Select<number> labelId="retry-effort-label" label="Effort" value={selection}
+        {configuration && <HelpSelectField<number> topic="effort" label="Effort" fullWidth disabled={!editable || submitting} value={selection}
             onChange={(event) => setSelection(Number(event.target.value))}>
             {!changed && <MenuItem value={0}>Keep current effort ({currentEffort})</MenuItem>}
             <MenuItem value={1}>Provider default</MenuItem>
             {editable && selector.choices.map((choice, index) => <MenuItem key={choice.value} value={index + 2}>
               {choice.name}
             </MenuItem>)}
-          </Select>
-        </FormControl>}
+          </HelpSelectField>}
         {configuration && !editable && <Typography variant="body2" color="text.secondary">
           {selector?.transport === "native" ? `Effort is ${selector.current_value}, included in this model.`
             : "This model does not offer a separate effort setting."}
         </Typography>}
-        {configuration && <FormControl fullWidth disabled={!configuration.permission_mode || submitting}>
-          <InputLabel id="retry-permission-label">Permission mode</InputLabel>
-          <Select<number> labelId="retry-permission-label" label="Permission mode" value={permissionSelection}
+        {configuration && <HelpSelectField<number> topic="permissions" label="Permission mode" fullWidth disabled={!configuration.permission_mode || submitting} value={permissionSelection}
             onChange={(event) => setPermissionSelection(Number(event.target.value))}>
             {!changed && <MenuItem value={0}>Keep current permission mode ({currentPermission})</MenuItem>}
             <MenuItem value={1}>Provider default</MenuItem>
             {configuration.permission_mode?.choices.map((choice, index) => <MenuItem key={choice.value} value={index + 2}>{choice.name}</MenuItem>)}
-          </Select>
-        </FormControl>}
+          </HelpSelectField>}
         {changed && <>
-          <TextField label="Handoff instructions" multiline minRows={4} value={handoff} disabled={submitting}
+          <HelpTextField topic="instructions" label="Handoff instructions" multiline minRows={4} maxRows={8} value={handoff} disabled={submitting}
             error={handoffTooLong}
             helperText={handoffTooLong ? `Use at most ${problem.handoff_prompt_max_bytes} UTF-8 bytes.`
               : "These instructions follow this step's original prompts. Edit them to tell the new model how to continue."}
-            onChange={(event) => setHandoff(event.target.value)} />
+            onChange={(event) => setHandoff(event.target.value)}  />
           <Button disabled={submitting} onClick={() => setHandoff(problem.default_handoff_prompt ?? "")}>Use default handoff</Button>
         </>}
       </Stack>

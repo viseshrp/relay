@@ -1,9 +1,9 @@
+import { historicalPost } from "./setup-helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
 async function post(page: Page, path: string, data: object = {}) {
-  const csrf = (await page.context().cookies()).find((item) => item.name === "relay_csrftoken");
-  return page.request.post(path, { data, headers: { "X-CSRFToken": csrf?.value ?? "" } });
+  return historicalPost(page, path, data);
 }
 
 test("pause active work, save a new reviewer, reload, and explicitly resume", async ({ page }, testInfo) => {
@@ -13,8 +13,8 @@ test("pause active work, save a new reviewer, reload, and explicitly resume", as
   })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   expect((await post(page, "/__test__/feedback-provider")).ok()).toBeTruthy();
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await page.goto("/?view=workflows");
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   const created = await post(page, "/api/workflows", { key: "pause-review", holder, yaml: stringify({
     version: 1, name: "Pause review", model: "m1", agents: ["codex"],
@@ -109,8 +109,8 @@ test("upcoming job choices are shared, failures retry before opening, and Resume
   })).ok()).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   expect((await post(page, "/__test__/feedback-provider")).ok()).toBeTruthy();
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Add stage", exact: true })).toBeEnabled();
+  await page.goto("/?view=workflows");
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
   expect((await post(page, "/api/workflows", { key: "pause-choices", holder, yaml: stringify({
     version: 1, name: "Pause choices", model: "m1", agents: ["codex"],

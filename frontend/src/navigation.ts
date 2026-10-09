@@ -1,6 +1,6 @@
 import { statusPresentation } from "./status";
 export interface LocationState {
-  view: "workflows" | "runs" | "settings";
+  view: "home" | "workflows" | "runs" | "settings";
   project: string | null;
   workflow: string | null;
   run: string | null;
@@ -11,15 +11,16 @@ export interface LocationState {
 const LOCATION_KEY = "relay.location";
 
 export function readLocation(): LocationState {
-  // ?view=runs&run=abc&interaction=42 opens that request; a plain reload uses the saved selection.
+  // Explicit workspace links remain authoritative; the bare root opens Home.
   let stored = "";
   try { stored = localStorage.getItem(LOCATION_KEY) ?? ""; }
   catch { /* Navigation remains available when browser storage is disabled. */ }
-  const query = window.location.search || stored;
+  const query = window.location.search;
   const parameters = new URLSearchParams(query);
+  const remembered = new URLSearchParams(stored);
   return {
-    view: parameters.get("view") === "settings" ? "settings" : parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
-    project: parameters.get("project"),
+    view: parameters.get("view") === "home" || !query ? "home" : parameters.get("view") === "settings" ? "settings" : parameters.get("view") === "runs" || parameters.has("run") ? "runs" : "workflows",
+    project: parameters.get("project") ?? (!query ? remembered.get("project") : null),
     workflow: parameters.get("workflow"),
     run: parameters.get("run"),
     interaction: parameters.get("interaction"),

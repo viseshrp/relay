@@ -1,4 +1,6 @@
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormHelperText, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
+import { ActionIcon } from "./ActionIcon";
+import { HelpTextField, HelpSelectField } from "./HelpTip";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
@@ -99,28 +101,22 @@ export function LaunchPanel({ open, workflowKey, workflow, project, requestProje
         {source?.commit && <Typography>Runs on a new branch from <strong>{source.branch ?? `commit ${source.commit.slice(0, 12)}`}</strong>.</Typography>}
         {(cleanup || defaultCleanup) === "merge_on_success" && <Alert severity="info">After every job succeeds, Relay will fast-forward {source?.branch ?? "the branch selected at launch"} and delete the run working copies. The checkout must stay completely clean and on that branch.</Alert>}
         {sourceError && <Alert severity="error">{sourceError}</Alert>}
-        {reason && <Alert severity="info" action={onSave ? <Button onClick={onSave}>Save</Button>
-          : sourceError ? <Button onClick={() => setSourceRevision((value) => value + 1)}>Check again</Button> : undefined}>{reason}</Alert>}
+        {reason && <Alert severity="info" action={sourceError ? <Button onClick={() => setSourceRevision((value) => value + 1)}>Check again</Button>
+          : blockedReason && onSave ? <Button onClick={onSave}>Save</Button> : undefined}>{reason}</Alert>}
         {saveError && <Alert severity="error">{saveError}</Alert>}
         {launchError && <Alert severity="error">{launchError}</Alert>}
         {!blockedReason && <LaunchPreflight result={preflight} error={preflightError} onCheck={() => setSourceRevision((value) => value + 1)} />}
         <LaunchInputs definitions={workflow?.inputs ?? {}} values={inputs} onChange={(name, value) => setInputs((current) => ({ ...current, [name]: value }))} />
-        <Accordion><AccordionSummary>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
-          <TextField label="Override model for this run" value={model} onChange={(event) => setModel(event.target.value)}
-            helperText="Leave blank to use the workflow, project, or global model. Values must match the provider exactly, including case."
-            slotProps={{ htmlInput: { list: "launch-model-options" } }} />
+        <Accordion><AccordionSummary expandIcon={<ActionIcon name="down" />}>Advanced options</AccordionSummary><AccordionDetails><Stack spacing={2}>
+          <HelpTextField topic="model" label="Override model for this run" placeholder="Use workflow, project, and global defaults" value={model} onChange={(event) => setModel(event.target.value)} helperText="Leave blank to use the workflow, project, or global model. Values must match the provider exactly, including case." slotProps={{ htmlInput: { list: "launch-model-options" } }} />
           <datalist id="launch-model-options">{modelOptions.map((value) => <option key={value} value={value} />)}</datalist>
-          <FormControl fullWidth><InputLabel id="launch-cleanup">After a successful run</InputLabel>
-            <Select labelId="launch-cleanup" label="After a successful run" value={cleanup} onChange={(event) => setCleanup(event.target.value)}>
+          <HelpSelectField topic="cleanup" label="After a successful run" fullWidth value={cleanup} onChange={(event) => setCleanup(event.target.value)} helperText={<> {cleanup === "merge_on_success" ? "Fast-forwards the branch shown above after every job succeeds. Commit all workflow, report, and code changes first. Dirty, switched, or diverged branches fail and keep the run working copy." : "Saved reports and committed changes remain available after the working copy is deleted."} </>}>
               <MenuItem value="">Use project and global defaults</MenuItem><MenuItem value="clean_on_success">Delete the working copy</MenuItem><MenuItem value="retain">Keep the working copy</MenuItem><MenuItem value="merge_on_success">Merge into the active branch, then delete working copies</MenuItem>
-            </Select><FormHelperText>{cleanup === "merge_on_success" ? "Fast-forwards the branch shown above after every job succeeds. Commit all workflow, report, and code changes first. Dirty, switched, or diverged branches fail and keep the run working copy." : "Saved reports and committed changes remain available after the working copy is deleted."}</FormHelperText>
-          </FormControl>
-          <FormControl fullWidth><InputLabel id="launch-entry">Start from job</InputLabel>
-            <Select labelId="launch-entry" label="Start from job" value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)}>
+            </HelpSelectField>
+          {!Object.values(workflow?.nodes || {}).some(node => node.type === "actions_job") && <HelpSelectField topic="entry" label="Start from job" fullWidth value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)} helperText={<> Only jobs declared as start points are listed. Relay checks their required inputs and saved reports before starting. </>}>
               <MenuItem value="">Start at the beginning</MenuItem>
               {(workflow?.entrypoints ?? []).map((entry) => <MenuItem key={entry.scope_path} value={entry.scope_path}>{stageLabel(entry.scope_path)}</MenuItem>)}
-            </Select><FormHelperText>Only jobs declared as start points are listed. Relay checks their required inputs and saved reports before starting.</FormHelperText>
-          </FormControl>
+            </HelpSelectField>}
         </Stack></AccordionDetails></Accordion>
       </Stack></DialogContent>
       <DialogActions><Button onClick={onClose} disabled={launching}>Cancel</Button>

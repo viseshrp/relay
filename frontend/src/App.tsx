@@ -1,30 +1,20 @@
 import {
-  AppBar,
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Menu,
-  Select,
-  Stack,
-  Tab,
-  Tabs,
-  TextField,
-  Toolbar,
-  Typography,
-} from "@mui/material";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+  AppBar, Alert, Box, Button, CircularProgress, Container, Dialog,
+  DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputLabel, MenuItem, Menu,
+  Select, Stack, Tab, Tabs, Toolbar, Typography } from "@mui/material";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
+import { WorkspaceBoundary } from "./components/WorkspaceBoundary";
 
 import { api, errorMessage } from "./api";
+import { useFrontendUpdate } from "./frontend-update";
 import { useAttention } from "./attention";
+import { hasSeen, TOUR_SEEN, WELCOME_SEEN, resetOnboarding, type SettingsSection } from "./onboarding";
+import { HelpTextField, HelpTip } from "./components/HelpTip";
+import { WelcomeCarousel } from "./components/WelcomeCarousel";
+import { GuidedTour, type TourDestination } from "./components/GuidedTour";
+import { GettingStartedHome } from "./components/GettingStartedHome";
+import { HomeDashboard } from "./components/HomeDashboard";
+import { ActionIcon } from "./components/ActionIcon";
 import { AuthView } from "./components/AuthView";
 import { GetStarted } from "./components/GetStarted";
 import { FolderPicker } from "./components/FolderPicker";
@@ -52,6 +42,13 @@ function readSetupDismissed(): boolean {
 }
 
 export function App() {
+  const updatedFrontend = useFrontendUpdate();
+  const [reloading, setReloading] = useState(false);
+  const projectPickerId = useId();
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeen(WELCOME_SEEN));
+  const [tourRequested, setTourRequested] = useState(() => !hasSeen(TOUR_SEEN));
+  const [tourSection, setTourSection] = useState<SettingsSection | null>(null);
+  const tourReturn = useRef<LocationState | null>(null);
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [location, setLocation] = useState(readLocation);
   const lastSelectedRun = useRef<{ id: string; project: string | null } | null>(null);
@@ -73,6 +70,16 @@ export function App() {
   const [setupForced, setSetupForced] = useState(false);
   const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
   const helpButton = useRef<HTMLButtonElement>(null);
+  const header = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const measure = () => document.documentElement.style.setProperty("--relay-header-height", `${element.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [auth]);
   const setupWasOpen = useRef(false);
   const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
   const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
@@ -96,6 +103,32 @@ export function App() {
     try { await beforeLeave.current?.(); navigate(patch); }
     catch (caught) { setProjectError(errorMessage(caught)); }
   }, [navigate]);
+  const reloadSafely = useCallback(async () => {
+    setReloading(true);
+    try { await beforeLeave.current?.(); window.location.reload(); }
+    catch (caught) { setProjectError(errorMessage(caught)); setReloading(false); }
+  }, []);
+  const showWelcome = useCallback(async () => {
+    try { await beforeLeave.current?.(); setWelcomeOpen(true); }
+    catch (caught) { setProjectError(errorMessage(caught)); }
+  }, []);
+  const showTour = useCallback(async () => {
+    try { await beforeLeave.current?.(); tourReturn.current = currentLocation.current; setTourRequested(true); }
+    catch (caught) { setProjectError(errorMessage(caught)); }
+  }, []);
+  const tourDestination = useCallback((destination: TourDestination) => {
+    if (tourReturn.current === null) tourReturn.current = currentLocation.current;
+    if (destination.section) {
+      setTourSection(destination.section);
+      if (currentLocation.current.view !== "settings") void navigateSafely({ view: "settings" });
+    }
+  }, [navigateSafely]);
+  const closeTour = useCallback(() => {
+    setTourRequested(false); setTourSection(null);
+    const target = tourReturn.current; tourReturn.current = null;
+    if (target) void navigateSafely(target);
+    helpButton.current?.focus();
+  }, [navigateSafely]);
   const selectRun = useCallback((run: string | null) => {
     navigationRevision.current += 1;
     historyIntent.current = "push";
@@ -151,7 +184,8 @@ export function App() {
       setProjects(Array.from(records.values()));
       setServedProject(context?.project.id ?? null);
       setLocation((current) => {
-        const next = { ...current, project: linkedRun?.run.project.id ?? current.project ?? context?.project.id ?? inventory.projects[0]?.id ?? null };
+        const remembered = current.view === "home" && current.project && !records.has(current.project) ? null : current.project;
+        const next = { ...current, project: linkedRun?.run.project.id ?? remembered ?? context?.project.id ?? inventory.projects[0]?.id ?? null };
         return next;
       });
       setProjectReady(true);
@@ -242,12 +276,15 @@ export function App() {
 
   return (
     <Box sx={{ minHeight: "100vh" }}>
-      <AppBar position="sticky" color="inherit" elevation={0} className="app-header">
+      <AppBar ref={header} position="sticky" color="inherit" elevation={0} className="app-header">
         <Toolbar>
-          <Typography variant="h5" color="primary" sx={{ mr: 2 }}>Relay</Typography>
+          <Button component="a" href="/?view=home" aria-label="Relay home" className="relay-home-link" onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); void navigateSafely({ view: "home", workflow: null, run: null, job: null, interaction: null });
+          }}>Relay</Button>
           {renderProjectContext()}
           <Tabs
-            value={location.view}
+            value={location.view === "home" || (loginRequired && location.view === "settings") ? false : location.view}
             onChange={(_event, value: LocationState["view"]) => {
               const previousRun = lastSelectedRun.current?.project === location.project ? lastSelectedRun.current.id : null;
               const selected = location.run ?? previousRun;
@@ -257,29 +294,30 @@ export function App() {
             }}
             sx={{ flex: 1, minWidth: 270 }}
           >
-            <Tab value="settings" label="Settings" sx={{ order: 3 }} />
-            <Tab value="workflows" label="Workflows" />
-            <Tab value="runs" label={attention.attention.waiting_count ? `Runs (${attention.attention.waiting_count})` : "Runs"} />
+            {!loginRequired && <Tab data-tour="settings-tab" value="settings" label="Settings" sx={{ order: 3 }} />}
+            <Tab data-tour="workflow-tab" value="workflows" label="Workflows" />
+            <Tab data-tour="runs-tab" value="runs" label={attention.attention.waiting_count ? `Runs (${attention.attention.waiting_count})` : "Runs"} />
           </Tabs>
-          <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
-            {loginRequired ? auth.username : "Login disabled"}
-          </Typography>
-          {loginRequired && (
-            <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Sign out</Button>
-          )}
-          <Button ref={helpButton} aria-haspopup="menu" aria-expanded={helpAnchor !== null} onClick={(event) => setHelpAnchor(event.currentTarget)}>Help</Button>
+          <Button ref={helpButton} aria-label={loginRequired ? `Account menu for ${auth.username}` : "Help"} aria-haspopup="menu" aria-expanded={helpAnchor !== null} endIcon={<ActionIcon name="down" />} onClick={(event) => setHelpAnchor(event.currentTarget)}>{loginRequired ? auth.username : "Help"}</Button>
           <Menu anchorEl={helpAnchor} open={helpAnchor !== null} onClose={() => setHelpAnchor(null)}>
-            <MenuItem onClick={openSetup}>Get started</MenuItem>
+            {loginRequired && <MenuItem onClick={() => { setHelpAnchor(null); void navigateSafely({ view: "settings", run: null, job: null, interaction: null }); }}>Settings</MenuItem>}
+            {loginRequired && <Divider />}
+            <MenuItem onClick={selectedProject ? openSetup : () => { setHelpAnchor(null); setOpeningProject(true); }}>Get started</MenuItem>
+            <MenuItem onClick={() => { setHelpAnchor(null); void showWelcome(); }}>Welcome slides</MenuItem>
+            <MenuItem onClick={() => { setHelpAnchor(null); void showTour(); }}>Guided tour</MenuItem>
             <MenuItem onClick={() => { void attention.toggleNotifications(); setHelpAnchor(null); }}>{attention.notifications ? "Disable desktop notifications" : "Enable desktop notifications"}</MenuItem>
+            {loginRequired && <Divider />}
+            {loginRequired && <MenuItem disabled={signingOut} onClick={() => { setHelpAnchor(null); void logout(); }}>Sign out</MenuItem>}
           </Menu>
         </Toolbar>
       </AppBar>
       <Container maxWidth={false} className="app-content">
 
+        {updatedFrontend && <Alert severity="info" sx={{ mb: 2 }} action={<Button disabled={reloading} onClick={() => void reloadSafely()}>Reload Relay</Button>}>Relay was updated. Reload to use the current version.</Alert>}
         {attention.error && <Alert severity="warning" sx={{ mb: 2 }}>{attention.error}</Alert>}
         {projectError && !openingProject && <Alert severity="error" sx={{ mb: 2 }}>{projectError}</Alert>}
-        {!setupDismissed && <Alert severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={
-          <Stack direction="row" spacing={1}>
+        {!setupDismissed && <Alert className="setup-banner" severity="info" role="region" aria-label="Welcome to Relay" sx={{ mb: 2 }} action={
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button onClick={openSetup} disabled={!projectReady || !selectedProject}>Get started</Button>
             <Button onClick={dismissSetup}>Dismiss welcome</Button>
           </Stack>
@@ -296,9 +334,14 @@ export function App() {
             <Button color="inherit" onClick={() => void logout()} disabled={signingOut}>Retry</Button>
           }>{logoutError}</Alert>
         )}
-        <Suspense fallback={<Box className="loading-panel"><CircularProgress /></Box>}>
+        <WorkspaceBoundary><Suspense fallback={<Box className="loading-panel"><CircularProgress /></Box>}>
           {!projectReady ? <Box className="loading-panel"><CircularProgress aria-label="Loading projects" /></Box>
-          : location.view === "settings" ? <SettingsPage project={selectedProject} requestProject={requestProject} notifications={attention.notifications} onToggleNotifications={attention.toggleNotifications} onNavigationReady={registerNavigation} />
+          : location.view === "home" ? <HomeDashboard onOpenProject={() => setOpeningProject(true)} onShowWelcome={() => void showWelcome()} onNavigate={(project, view, run) => {
+            setProjects((current) => [...current.filter((value) => value.id !== project.id), project]);
+            void navigateSafely({ project: project.id, view, workflow: null, run: run?.id ?? null, job: null, interaction: run?.request?.id ?? null });
+          }} />
+          : location.view === "settings" ? <SettingsPage tourSection={tourSection} onShowWelcome={() => void showWelcome()} onShowTour={() => void showTour()} onResetOnboarding={resetOnboarding} project={selectedProject} requestProject={requestProject} notifications={attention.notifications} onToggleNotifications={attention.toggleNotifications} onNavigationReady={registerNavigation} />
+          : projects.length === 0 && !projectError ? <GettingStartedHome onOpenProject={() => setOpeningProject(true)} onShowWelcome={() => void showWelcome()} />
           : !selectedProject ? <Alert severity="info">Choose a project above, or open a Git repository to begin.</Alert>
           : location.view === "workflows" ? (
             <WorkflowWorkspace
@@ -335,13 +378,15 @@ export function App() {
               }}
             />
           )}
-        </Suspense>
+        </Suspense></WorkspaceBoundary>
       </Container>
+      {projectReady && welcomeOpen && <WelcomeCarousel onClose={() => { dismissSetup(); setWelcomeOpen(false); helpButton.current?.focus(); }} onShowTour={() => { dismissSetup(); setWelcomeOpen(false); void showTour(); }} />}
+      {projectReady && !welcomeOpen && !openingProject && !setupForced && tourRequested && <GuidedTour onDestination={tourDestination} onClose={closeTour} />}
       <Dialog open={openingProject} onClose={() => !projectBusy && setOpeningProject(false)} fullWidth>
         <DialogTitle>Open a project</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>Choose a Git repository on this computer. Relay adds a blank workflow folder if one is missing. Your code and Git branch stay in place.</Typography>
-          <TextField fullWidth label="Repository folder" value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project" />
+          <HelpTextField topic="project" label="Repository folder" fullWidth value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/path/to/project"  />
           <Box sx={{ mt: 2 }}><FolderPicker disabled={projectBusy} onSelect={setProjectPath} /></Box>
           {projectError && <Alert severity="error" sx={{ mt: 2 }}>{projectError}</Alert>}
         </DialogContent>
@@ -351,14 +396,14 @@ export function App() {
   );
 
   function renderProjectContext() {
-    return <Stack className="project-context" direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mr: 2, alignItems: "center" }}>
-      <FormControl size="small" sx={{ minWidth: 200 }}>
-        <InputLabel id="current-project">Project</InputLabel>
-        <Select labelId="current-project" label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, workflow: null, run: null, interaction: null, job: null })}>
+    return <Stack data-tour="project" className="project-context" direction="row" spacing={1} useFlexGap>
+      {projects.length > 0 && <Box className="project-picker"><FormControl fullWidth size="small">
+        <InputLabel id={`${projectPickerId}-label`}>Project</InputLabel>
+        <Select id={projectPickerId} labelId={`${projectPickerId}-label`} label="Project" value={selectedProject?.id ?? ""} onChange={(event) => void navigateSafely({ project: event.target.value, view: location.view === "home" ? "workflows" : location.view, workflow: null, run: null, interaction: null, job: null })}>
           {projects.map((project) => <MenuItem key={project.id} value={project.id}>{project.display_name}</MenuItem>)}
         </Select>
-      </FormControl>
-      <Button onClick={() => setOpeningProject(true)}>Open another project</Button>
+      </FormControl><HelpTip topic="project" /></Box>}
+      <Button onClick={() => setOpeningProject(true)}>{projects.length ? "Open another project" : "Open a project"}</Button>
     </Stack>;
   }
 }

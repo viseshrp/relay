@@ -8,6 +8,10 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4174",
     browserName: "chromium",
+    // Existing behavior specs start after onboarding; its own specs use fresh storage.
+    storageState: { cookies: [], origins: [{ origin: "http://127.0.0.1:4174", localStorage: [
+      { name: "relay.welcome-seen", value: "true" }, { name: "relay.tour-seen", value: "true" },
+    ] }] },
     trace: "retain-on-failure",
   },
   webServer: {

@@ -40,6 +40,80 @@ cookie value in `X-CSRFToken`. A missing or expired token gets
 `403 csrf_failed`. For example, if the cookie is `relay_csrftoken=abc`, the
 request header is `X-CSRFToken: abc`.
 
+## Workflow language and local automation
+
+These owner routes use the same login and CSRF rules. Select a project with the
+normal `project` query parameter. Public create, save, preflight, and launch
+accept the Actions jobs/steps dialect. Historical snapshots remain readable.
+
+| Method and path | Purpose and body |
+| --- | --- |
+| `GET /api/workflow-language` | Pinned language revision, supported fields, and limits |
+| `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
+| `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
+| `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
+| `POST /api/attempts/<id>/environment` | Approve the exact waiting environment attempt |
+| `GET, POST /api/workflow-library` | Inventory/export with `id`, or import `{metadata, yaml, sources}`; `include_project_sources` captures local sources |
+| `GET, POST /api/workflow-triggers` | List or activate `{key, event, enabled, allow_writers}` |
+| `POST /api/repository-dispatch` | Deliver an activated local `{event_type, client_payload, idempotency_key}` |
+| `GET /api/runs/<uuid>/products` | Named artifacts, queue records, and resolved environment links for that run |
+| `GET /api/workflow-artifacts/<uuid>/download` | Verified ZIP of a named artifact from the selected project |
+
+Request scopes are `installation`, `project`, or `environment`; environment
+writes also provide `environment: <name>`. Saved scope identifiers include the
+project identity. Kinds are `variable` and `secret`. Variables are
+returned; secret values are write-only. Secret sources are explicit
+`environment` or `credential-store`; missing native storage has no plaintext fallback.
+Scopes allow 100 bindings of each kind. Names are bounded; values allow 48 KiB.
+Environment policies allow 100 names per project, 100 branch patterns each,
+waits from 0 to 43200 minutes, and optional HTTP(S) URLs.
+
+Artifact downloads require same-project access and verify retained ownership,
+file sizes, and hashes before returning bytes. Expired optional artifacts are
+unavailable; required report evidence retains its existing preservation rules.
+Automatic activation is an owner operation. Deliveries remain deduplicated in
+SQLite, and writing triggers never activate merely by saving YAML.
+
+See [Workflow language](workflows.md) and the
+[compatibility record](workflow-language-compatibility.md) for event semantics,
+credential references, frozen source rules, and expression contexts.
+
+## Home dashboard
+
+`GET /api/dashboard` reads activity across every registered project. It uses
+saved database records and neither probes Git or providers nor changes runs.
+The normal owner-session requirement, optional no-login access, and public
+error envelopes apply.
+
+The response contains `counts` and four pages: `projects`, `waiting`, `active`,
+and `recent`. Each page has `items` and `next_cursor`, which is `null` at the
+end. Counts are global: registered `projects`, distinct `waiting` runs with
+pending requests on waiting attempts, nonterminal `unfinished` runs, and
+nonterminal `paused` runs with dispatch paused. Several requests on one run
+count as one waiting run. These use the same actionable-request rule as
+`GET /api/attention`.
+
+Project items extend the existing project record with `unfinished_count`,
+`waiting_count`, and `latest_run`, an existing run summary or `null`. Run
+items extend the existing run summary with `project` and `request`. A waiting
+item's request contains only `id`, `kind`, and `scope_path`, for opening its
+first actionable request. Other pages return `request: null`. Private request
+payloads, prompts, and provider output are omitted.
+
+Waiting lists actionable runs. Active lists nonterminal runs without an
+actionable request, including paused runs. Recent lists terminal runs ordered
+by completion time, falling back to creation time. Project names sort
+alphabetically; waiting and active runs sort newest first. Stable IDs break
+ties. A run cursor remains usable if that run leaves the requested list.
+
+Query options are `limit` (default 10, maximum 200), `section` (`projects`,
+`waiting`, `active`, or `recent`), and `cursor` (the preceding page's UUID).
+With a section, the response contains counts and only that page. A cursor
+requires a section. `query` filters project names and paths, up to 1,024
+characters; run lists and counts remain global. Initial page payloads share a
+1 MiB byte budget. Section-only pages have that full budget. Existing project,
+run, and attention endpoints keep their payloads unchanged.
+
 ## Projects and workflows
 
 | Method and path | Request | Success |
@@ -276,7 +350,11 @@ as UTC timestamps, or null before that attempt starts or finishes.
 `GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job
 contains its `scope_path`, `node_type`, `status`, `writes`, captured `command`
 or human-wait `prompt`, `instructions`, current declared `outputs`, and a
-bounded `attempts` page. Each instruction contains its local or global
+bounded `attempts` page. `activity_type` identifies command, agent, and human
+review steps within the Actions execution nodes. `display_name` retains the
+resolved job or step name; historical views use their existing scope labels.
+Agent instructions include the frozen prompt files and captured inline prompt.
+Each instruction contains its local or global
 `reference`, captured `text`, and `truncated` flag. The combined instruction
 preview is limited to 256 KiB. It reads the launch snapshot, never current
 prompt files.
@@ -661,7 +739,8 @@ Every JSON failure has this Relay-owned envelope:
 
 `next_action` is optional. Third-party exception names, tracebacks, and private
 provider fields do not cross the HTTP boundary. Request bodies are limited to
-1 MiB. Control payloads are limited to 64 KiB. Reads and event frames are also
+1 MiB, except library imports, which accept at most 10 MiB and 100 source files.
+Control payloads are limited to 64 KiB. Reads and event frames are also
 bounded so one browser request cannot load unbounded history. Unknown API paths
 and unsupported methods also return JSON envelopes rather than the SPA or an
 HTML error page.

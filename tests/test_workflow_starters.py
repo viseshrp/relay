@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -155,10 +156,16 @@ def test_fix_tests_starter_uses_real_verdicts_and_a_bounded_repair_budget(
     monkeypatch.setenv("STARTER_TEST_COUNTER", str(counter))
     monkeypatch.setenv("STARTER_TEST_PASSES_ON", str(passes_on))
     fake_agents.install("codex", mode="configuration")
+    fake_agents.allow_commands(sys.executable)
+    # Windows execv returns control before the replacement finishes. Keep this
+    # shim alive so the owned job can retain pytest and report its real verdict.
     fake_executable(
         fake_agents.directory,
         "python",
-        ("import os, sys\nos.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"),
+        (
+            "import subprocess, sys\n"
+            "sys.exit(subprocess.call([sys.executable, *sys.argv[1:]], shell=False))\n"
+        ),
     )
     project.write(".gitignore", "__pycache__/\n.pytest_cache/\n")
     project.write(

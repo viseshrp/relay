@@ -63,7 +63,29 @@ The run branch remains after success, failure, cancellation, and worktree
 cleanup. By default, the owner decides whether and how to inspect, merge, or
 delete it. The opt-in integration policy can merge successful run commits.
 
-## Reader and writer admission
+## Actions job boundaries
+
+Current workflows execute one job at a time across the installation. Every
+step in a physical job uses its primary run worktree, including agents,
+scripts, composites, and owner waits. Steps can leave code edits for later
+tests and commits. At job success, code changes require a clean descendant
+commit; a clean no-op is valid. Report exemptions remain unchanged.
+
+Accepted commits advance the protected run head cumulatively. Failed jobs
+retain commits, diffs, untracked bytes, and reports. Before another job
+continues, Relay verifies that evidence, records continuation intent, moves
+the rejected checkout into a retained detached worktree, and recreates the
+primary at the protected head. A journal resumes interrupted continuation
+without discarding rejected bytes or resetting the owner's checkout.
+
+Matrix and reusable jobs use the same serial admission. Tolerating a failure
+changes dependency conclusions without accepting rejected code. Optional
+named artifact expiry and cache eviction never delete required evidence.
+
+## Historical reader and writer admission
+
+The following admission contract applies to captured legacy `nodes` runs.
+Current source uses [jobs and ordered steps](workflows.md).
 
 A writing attempt holds the run's exclusive database lock while it uses the
 primary worktree. No reader or second writer can start until that lock is

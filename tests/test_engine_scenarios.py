@@ -487,9 +487,9 @@ def test_command_output_is_durable_before_exit_and_survives_stopping(
             "import socket,sys; "
             f"peer=socket.create_connection(('127.0.0.1',{port}),timeout=5); "
             "sys.stdout.buffer.write(b'A\\xe2\\x82'); sys.stdout.flush(); "
-            "sys.stderr.write('warning\\n'); sys.stderr.flush(); peer.recv(1); "
+            "sys.stderr.buffer.write(b'warning\\n'); sys.stderr.flush(); peer.recv(1); "
             "sys.stdout.buffer.write(b'\\xac\\n'+b'line\\n'*20000); sys.stdout.flush(); "
-            "sys.stderr.write('done\\n'); sys.stderr.flush()"
+            "sys.stderr.buffer.write(b'done\\n'); sys.stderr.flush()"
         )
         from yaml import safe_dump
 

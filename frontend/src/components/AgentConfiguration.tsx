@@ -1,14 +1,11 @@
-import {
-  Alert, Box, Button, FormControl, FormHelperText, InputLabel, MenuItem,
-  Select, Stack, Typography,
-} from "@mui/material";
+import { HelpSelectField } from "./HelpTip";
+import { Alert, Box, Button, MenuItem, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type {
-  AgentConfiguration as Configuration, AgentOptions, AgentRecord, ConfigurationSelector,
-} from "../types";
+  AgentConfiguration as Configuration, AgentOptions, AgentRecord, ConfigurationSelector } from "../types";
 
 interface AgentConfigurationProps {
   agent: AgentRecord;
@@ -20,9 +17,10 @@ interface AgentConfigurationProps {
   defaultLabel?: string;
   inheritDefaults?: boolean;
   labels?: Record<keyof AgentOptions, string>;
+  fields?: Array<keyof AgentOptions>;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false, fields = ["effort", "permission_mode"] }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;
@@ -73,29 +71,15 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
         ? "Effort is included in this exact model. Choose another model to change it."
       : selected?.description ?? (raw ? `Use ${selected?.name ?? raw} for this tool.`
         : inheritDefaults && raw === undefined ? "Use the saved defaults for this exact model." : `${defaultLabel} leaves this override unset.`);
-    const labelId = `${agent.id}-${field}-label`;
     return (
-      <FormControl size="small" error={!available && !loading && !error}>
-        <InputLabel id={labelId} shrink>{label}</InputLabel>
-        <Select
-          labelId={labelId}
-          label={label}
-          displayEmpty
-          notched
-          renderValue={(selectedValue) => selectedValue === "inherit" ? (inheritDefaults ? "Use project and global defaults" : defaultLabel)
+      <HelpSelectField topic={field === "effort" ? "effort" : "permissions"} label={label} fullWidth size="small" error={!available && !loading && !error} displayEmpty renderValue={(selectedValue) => selectedValue === "inherit" ? (inheritDefaults ? "Use project and global defaults" : defaultLabel)
             : selectedValue === "agent-default" ? "Agent’s default"
-            : choices.find((choice) => choice.value === selectedValue.slice(7))?.name ?? selectedValue.slice(7)}
-          value={value}
-          disabled={disabled || loading || (!supported && raw === undefined)}
-          onChange={(event) => onChange(field, event.target.value === "agent-default" ? null : event.target.value === "inherit" ? "" : event.target.value.slice(7))}
-        >
+            : choices.find((choice) => choice.value === selectedValue.slice(7))?.name ?? selectedValue.slice(7)} value={value} disabled={disabled || loading || (!supported && raw === undefined)} onChange={(event) => onChange(field, event.target.value === "agent-default" ? null : event.target.value === "inherit" ? "" : event.target.value.slice(7))} helperText={<> {message} </>}>
           <MenuItem value="inherit">{inheritDefaults ? "Use project and global defaults" : defaultLabel}</MenuItem>
           {(inheritDefaults || options[field] === null) && <MenuItem value="agent-default">Agent’s default</MenuItem>}
           {!available && <MenuItem value={value} disabled>{raw} (unavailable)</MenuItem>}
           {choices.map((choice) => <MenuItem key={choice.value} value={`choice:${choice.value}`}>{choice.name}</MenuItem>)}
-        </Select>
-        <FormHelperText>{message}</FormHelperText>
-      </FormControl>
+        </HelpSelectField>
     );
   }
 
@@ -104,8 +88,8 @@ export function AgentConfiguration({ agent, model, options, onChange, project, d
       <Typography variant="subtitle2">{agent.display_name}</Typography>
       {error && <Alert severity="error" action={<Button disabled={disabled} onClick={() => setRefresh((current) => current + 1)}>Retry</Button>}>{error}</Alert>}
       <Box className="field-grid">
-        {selector("effort", labels?.effort ?? "Effort", configuration?.effort ?? null)}
-        {selector("permission_mode", labels?.permission_mode ?? "Permission mode", configuration?.permission_mode ?? null)}
+        {fields.includes("effort") && selector("effort", labels?.effort ?? "Effort", configuration?.effort ?? null)}
+        {fields.includes("permission_mode") && selector("permission_mode", labels?.permission_mode ?? "Permission mode", configuration?.permission_mode ?? null)}
       </Box>
     </Stack>
   );

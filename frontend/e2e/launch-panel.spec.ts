@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
 import type { WorkflowValue } from "../src/workflow";
-import { post } from "./setup-helpers";
+import { post, currentWorkflow } from "./setup-helpers";
 
 const longTask = "Describe the intended result and check its behavior. ".repeat(4);
 const inputs: WorkflowValue["inputs"] = {
@@ -16,9 +16,9 @@ const inputs: WorkflowValue["inputs"] = {
 
 async function create(page: Page, key: string, value: Partial<WorkflowValue> = {}): Promise<void> {
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
-  const response = await post(page, "/api/workflows", { key, holder, yaml: stringify({
+  const response = await post(page, "/api/workflows", { key, holder, yaml: stringify(currentWorkflow({
     version: 1, name: key, nodes: { check: { type: "command", run: ["git", "status"] } }, ...value,
-  }) });
+  })) });
   expect(response.ok(), await response.text()).toBeTruthy();
   await page.goto(`/?view=author&workflow=${key}.yaml`);
   await expect(page.getByRole("region", { name: "Workflow header" }).getByRole("heading", { name: key, exact: true })).toBeVisible();
@@ -47,7 +47,7 @@ test.beforeEach(async ({ page }) => {
 
 test("the header is reachable on a long workflow and Escape returns focus", async ({ page }) => {
   await create(page, "long-launch", { nodes: Object.fromEntries(Array.from({ length: 24 }, (_, i) => [`check_${i}`, { type: "command", run: ["git", "status"] }])) });
-  const trigger = page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" });
+  const trigger = page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true });
   await expect(trigger).toBeInViewport();
   const source = (await (await page.request.get("/api/projects/current")).json()).launch_source;
   const panel = await open(page);
@@ -75,7 +75,7 @@ test("typed defaults and descriptions stay visible and untouched inputs are omit
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
 });
 
-test("edited inputs preserve JSON types and advanced options use declared start points", async ({ page }) => {
+test("edited inputs preserve JSON types and advanced cleanup choices stay explicit", async ({ page }) => {
   await create(page, "typed-launch", { inputs, entrypoints: [{ scope_path: "root.check" }] });
   const panel = await open(page);
   await panel.getByRole("textbox", { name: "Task" }).fill("First line\nSecond line");
@@ -88,68 +88,53 @@ test("edited inputs preserve JSON types and advanced options use declared start 
   await panel.getByLabel("Override model for this run", { exact: true }).fill("m1");
   await panel.getByRole("combobox", { name: "After a successful run", exact: true }).click();
   await page.getByRole("option", { name: "Keep the working copy", exact: true }).click();
-  await panel.getByRole("combobox", { name: "Start from job", exact: true }).click();
-  await expect(page.getByRole("option")).toHaveCount(2);
-  await page.getByRole("option", { name: "Check", exact: true }).click();
+  await expect(panel.getByRole("combobox", { name: "Start from job", exact: true })).toHaveCount(0);
   const created = page.waitForResponse((r) => r.url().endsWith("/api/runs") && r.request().method() === "POST");
   await panel.getByRole("button", { name: "Run workflow", exact: true }).click();
   const response = await created;
   expect(response.request().postDataJSON()).toMatchObject({
-    workflow_key: "typed-launch.yaml", model: "m1", cleanup_policy: "retain", entry_point: "root.check",
-    inputs: { task: "First line\nSecond line", count: 0, ratio: 0.25, approved: false, mode: false },
+    workflow_key: "typed-launch.yaml", model: "m1", cleanup_policy: "retain",
+    inputs: { task: "First line\nSecond line", count: 0, ratio: 0.25, approved: false, mode: "false" },
   });
   expect(response.status(), await response.text()).toBe(201);
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
-  await page.getByRole("region", { name: "Workflow run history" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow run history" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const reopened = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await expect(reopened.getByRole("heading", { name: "typed-launch", exact: true })).toBeVisible();
   await expect(reopened.getByRole("textbox", { name: "Task" })).toHaveValue(longTask);
   await expect(reopened.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
 });
 
-test("unsaved workflow changes have a Save action in the panel", async ({ page }) => {
+test("unsaved changes are saved before launch", async ({ page }) => {
   await create(page, "save-launch");
-  await page.getByRole("navigation", { name: "Workflow stage navigation" }).getByRole("button", { name: "Check", exact: true }).click();
-  await page.getByLabel("Arguments (one per line)").fill("status\n--short");
+  const inputs = page.getByLabel("Action inputs", { exact: true });
+  await inputs.fill(JSON.stringify({ argv: '["git","status","--short"]' }));
+  await inputs.blur();
+  await expect(page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" })).toBeDisabled();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Workflow saved and validated.")).toBeVisible();
   const panel = await open(page);
-  await expect(panel.getByText("Save your changes first.", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await panel.getByRole("button", { name: "Save", exact: true }).click();
-  const confirmation = page.getByRole("button", { name: "Save canonical YAML", exact: true });
-  if (await confirmation.isVisible()) await confirmation.click();
-  await expect(panel.getByText("Save your changes first.", { exact: true })).toBeHidden();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
-  const saved = (await (await page.request.get("/api/workflows/save-launch.yaml")).json()).yaml;
-  expect(saved).toContain("--short");
+  expect((await (await page.request.get("/api/workflows/save-launch.yaml")).json()).yaml).toContain("--short");
 });
 
-test("dirty instructions and empty or invalid workflows explain their blockers", async ({ page }) => {
-  await page.getByRole("navigation", { name: "Workflow stage navigation" }).getByRole("button", { name: "Work", exact: true }).click();
-  await page.getByLabel("What should the agent do?", { exact: true }).fill("Unsaved instructions");
-  let panel = await open(page);
-  await expect(panel.getByText("Save the job's instructions in the editor first.", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await panel.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByLabel("What should the agent do?", { exact: true }).fill("");
-  await create(page, "empty-launch", { nodes: {} });
-  panel = await open(page);
-  await expect(panel.getByText("Add a job to this empty workflow before running it.", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await panel.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByText("Advanced workflow settings and YAML", { exact: true }).click();
+test("invalid YAML remains a draft and blocks publication and launch", async ({ page }) => {
+  await create(page, "invalid-launch");
+  const source = (await (await page.request.get("/api/workflows/invalid-launch.yaml")).json()).yaml;
   await page.locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText("nodes: [");
-  await expect(page.getByRole("alert").filter({ hasText: "Flow sequence" })).toBeVisible();
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
-  await expect(panel.getByText("Fix the YAML errors in the editor before running this workflow.", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
+  await page.keyboard.insertText("jobs: [");
+  await expect(page.getByRole("alert").filter({ hasText: "Invalid YAML" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" })).toBeDisabled();
+  await expect.poll(async () => (await (await page.request.get("/api/workflows/invalid-launch.yaml")).json()).draft?.yaml).toBe("jobs: [");
+  expect((await (await page.request.get("/api/workflows/invalid-launch.yaml")).json()).yaml).toBe(source);
 });
 
 test("an unavailable Git source can be checked again and an unborn branch explains the required commit", async ({ page }) => {
   await create(page, "source-launch");
   await page.route("**/api/projects/current", (route) => route.fulfill({ status: 503, json: { code: "git_error", message: "Git is unavailable.", context: {} } }));
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "Run workflow", exact: true });
   await expect(panel.getByText("Relay could not check the current branch. Check again before running.", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
@@ -158,7 +143,7 @@ test("an unavailable Git source can be checked again and an unborn branch explai
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeEnabled();
   await panel.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.route("**/api/projects/current", (route) => route.fulfill({ json: { launch_source: { branch: "main", commit: null } } }));
-  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow" }).click();
+  await page.getByRole("region", { name: "Workflow header" }).getByRole("button", { name: "Run workflow", exact: true }).click();
   await expect(panel.getByText("Create the first Git commit in this project before running a workflow.", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
 });
@@ -188,11 +173,12 @@ test("file blockers and exemptions appear before launch and copied fixes leave G
   await expect(files).toContainText("staged, modified");
   await expect(files).toContainText("untracked code.py");
   await expect(panel.getByRole("button", { name: "Run workflow", exact: true })).toBeDisabled();
-  await files.locator("summary").click();
+  await files.locator("summary").first().click();
   await expect(files).toContainText("REVIEW.md");
   await expect(files).toContainText("Root workflow report");
   await expect(files).toContainText(".relay/workflows/file-launch.yaml");
   await expect(files).toContainText("Captured workflow source");
+  await files.getByText("How to resolve these changes", { exact: true }).click();
   for (const command of ["git commit", "git stash -u"]) {
     await files.getByRole("button", { name: `Copy ${command}`, exact: true }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);

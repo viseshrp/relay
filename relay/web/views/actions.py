@@ -493,6 +493,11 @@ def launch_run(request: HttpRequest) -> HttpResponse:
         message = "cleanup_policy must be clean_on_success, retain, or merge_on_success."
         raise ConfigError(message)
     launcher = owner_username(request)
+    from relay.workflows.actions.language import load as load_actions
+    from relay.workflows.loader import load_workflow, resolve_workflow_path
+
+    source = resolve_workflow_path(relay_root / "workflows", required_text(body, "workflow_key"))
+    load_actions(load_workflow(source).text, source=source)
     result = launch_workflow(
         DjangoExecutionStore(),
         relay_root,

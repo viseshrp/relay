@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from functools import lru_cache
 from hashlib import sha256
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 import shutil
 import tempfile
-from typing import NamedTuple, NoReturn, TypeVar
+from typing import Any, NamedTuple, NoReturn, TypeVar, cast
 import uuid
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -98,6 +98,7 @@ from relay.execution.scheduler import (
 )
 from relay.execution.state import (
     TERMINAL_NODE_STATUSES,
+    TERMINAL_RUN_STATUSES,
     AttemptStatus,
     AttemptStopReason,
     CleanupPolicy,
@@ -142,7 +143,7 @@ from relay.vcs.worktree import (
 )
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
-from relay.workflows.schema import NodeDefinition, RecoveryPolicy
+from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
 from relay.workflows.scope import (
     enclosing_scope,
     node_scope,
@@ -232,6 +233,9 @@ class _ClaimContext(NamedTuple):
 def _compiled_run_graph(run_id: str) -> CompiledGraph:
     """Compile each immutable snapshot once while its run stays in the cache."""
     snapshot = RunSnapshot.objects.get(run_id=run_id)
+    resolved = _mapping(snapshot, "resolved_definition")
+    if resolved:
+        return compile_graph(WorkflowDefinition.model_validate(resolved).nodes)
     loaded = load_workflow_text(
         _string(snapshot, "workflow_yaml"), source=Path(f"snapshot:{run_id}")
     )
@@ -559,7 +563,11 @@ def _run_worktree_paths(run: Run) -> tuple[Path, ...]:
         node_run__node_type__in=(NodeType.AGENT.value, NodeType.COMMAND.value),
     ).values_list("pk", flat=True)
     readers = tuple(reader_worktree_path(primary, str(attempt_id)) for attempt_id in reader_ids)
-    return (*readers, primary)
+    continued = tuple(
+        safe_resolve(worktrees_dir(), path)
+        for path in cast(list[str], _mapping(run, "actions_state").get("continuations", []))
+    )
+    return (*readers, *continued, primary)
 
 
 def _derived_control_key(namespace: str, *parts: str) -> str:
@@ -739,6 +747,26 @@ def _run_record(run: Run) -> dict[str, object]:
         "dispatch_paused": _boolean(run, "dispatch_paused"),
         "waiting_count": _integer(run, "read_waiting_count"),
     }
+
+
+def _waiting_filter(prefix: str = "") -> Q:
+    """Keep attention counts tied to requests whose attempts can accept an answer."""
+    return Q(
+        **{
+            f"{prefix}status": InteractionStatus.PENDING.value,
+            f"{prefix}attempt__status": AttemptStatus.WAITING.value,
+        }
+    )
+
+
+def _dashboard_identifier(instance: models.Model, name: str) -> str | None:
+    value = getattr(instance, name)
+    if value is None:
+        return None
+    if isinstance(value, (uuid.UUID, int, str)) and not isinstance(value, bool):
+        return str(value)
+    message = f"Stored field {name} is not a record identifier."
+    raise PersistenceError(message)
 
 
 def _provider_failure_message(attempt: NodeAttempt) -> tuple[str | None, bool]:
@@ -953,7 +981,16 @@ def _node_record(
         "id": _identifier(node),
         "scope_path": _string(node, "scope_path"),
         "node_id": _string(node, "node_id"),
+        "display_name": cast(
+            dict, _mapping(_related(node, "run", Run), "actions_state").get("display_names", {})
+        ).get(scope, _string(node, "node_id")),
+        "matrix": frozen.get("matrix", {}),
         "node_type": _string(node, "node_type"),
+        "outcome": _string(node, "outcome"),
+        "conclusion": _string(node, "conclusion"),
+        "job_id": str(frozen.get("job_id", "")),
+        "step_id": str(frozen.get("step_id", "")),
+        "matrix_index": frozen.get("matrix_index"),
         "status": _string(node, "status"),
         "started_at": _datetime_text(_datetime_field(node, "latest_started_at")),
         "ended_at": _datetime_text(_datetime_field(node, "latest_ended_at")),
@@ -1095,6 +1132,178 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
 class DjangoReadStore:
     """Bounded, presentation-neutral reads for the authenticated browser."""
 
+    def dashboard(
+        self, *, section: str | None, cursor: str | None, limit: int, query_text: str
+    ) -> dict[str, object]:
+        """Read project activity without probing Git, providers, or saved run content."""
+        sections = ("projects", "waiting", "active", "recent")
+        if section is not None and section not in sections:
+            message = "section must be projects, waiting, active, or recent."
+            raise ConfigError(message)
+        if cursor is not None and section is None:
+            message = "A dashboard cursor requires a section."
+            raise ConfigError(message)
+        if len(query_text) > 1024:
+            message = "Project search must not exceed 1024 characters."
+            raise ConfigError(message)
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        try:
+            with transaction.atomic():
+                runs = Run.objects.select_related("project").annotate(
+                    read_waiting_count=models.Count(
+                        "interactions", filter=_waiting_filter("interactions__")
+                    ),
+                    dashboard_request_id=models.Subquery(
+                        HumanInteraction.objects.filter(
+                            _waiting_filter(), run_id=models.OuterRef("pk")
+                        )
+                        .order_by("created_at", "pk")
+                        .values("pk")[:1]
+                    ),
+                )
+                unfinished = runs.exclude(status__in=TERMINAL_RUN_STATUSES)
+                pending = HumanInteraction.objects.filter(_waiting_filter())
+                counts = {
+                    "projects": Project.objects.count(),
+                    "waiting": pending.values("run_id").distinct().count(),
+                    "unfinished": unfinished.count(),
+                    "paused": unfinished.filter(dispatch_paused=True).count(),
+                }
+                result: dict[str, object] = {"counts": counts}
+                for name in (section,) if section else sections:
+                    page = self._dashboard_page(
+                        name,
+                        cursor,
+                        bounded,
+                        query_text,
+                        runs,
+                        byte_budget=API_MAX_PAGE_BYTES // (1 if section else 4),
+                    )
+                    result[name] = page
+                return result
+        except DatabaseError:
+            message = "Relay could not read the dashboard."
+            raise PersistenceError(message) from None
+
+    def _dashboard_page(
+        self,
+        section: str,
+        cursor: str | None,
+        limit: int,
+        query_text: str,
+        runs: models.QuerySet,
+        *,
+        byte_budget: int,
+    ) -> dict[str, object]:
+        if section == "projects":
+            projects = Project.objects.annotate(
+                unfinished_count=models.Count(
+                    "runs",
+                    filter=~Q(runs__status__in=TERMINAL_RUN_STATUSES),
+                    distinct=True,
+                ),
+                waiting_count=models.Count(
+                    "runs",
+                    filter=_waiting_filter("runs__interactions__"),
+                    distinct=True,
+                ),
+                latest_run_id=models.Subquery(
+                    Run.objects.filter(project_id=models.OuterRef("pk"))
+                    .order_by("-created_at", "-pk")
+                    .values("pk")[:1]
+                ),
+            ).order_by("display_name", "pk")
+            if query_text:
+                projects = projects.filter(
+                    Q(display_name__icontains=query_text) | Q(canonical_path__icontains=query_text)
+                )
+            if cursor:
+                anchor = Project.objects.filter(pk=cursor).first()
+                if anchor is None:
+                    message = "The dashboard project cursor no longer exists."
+                    raise ConfigError(message)
+                title = _string(anchor, "display_name")
+                projects = projects.filter(
+                    Q(display_name__gt=title) | Q(display_name=title, pk__gt=anchor.pk)
+                )
+            rows = list(projects[: limit + 1])
+            latest = {
+                _identifier(run): _run_record(run)
+                for run in runs.filter(
+                    pk__in=[_dashboard_identifier(project, "latest_run_id") for project in rows]
+                )
+            }
+
+            def project_record(project: Project) -> dict[str, object]:
+                return {
+                    **asdict(_record(project)),
+                    "unfinished_count": _integer(project, "unfinished_count"),
+                    "waiting_count": _integer(project, "waiting_count"),
+                    "latest_run": latest.get(str(_dashboard_identifier(project, "latest_run_id"))),
+                }
+
+            records, more = _bounded_page(rows, limit, project_record, byte_budget=byte_budget)
+        else:
+            selected = runs
+            if section == "waiting":
+                selected = selected.filter(read_waiting_count__gt=0)
+            elif section == "active":
+                selected = selected.exclude(status__in=TERMINAL_RUN_STATUSES).filter(
+                    read_waiting_count=0
+                )
+            else:
+                selected = selected.filter(status__in=TERMINAL_RUN_STATUSES)
+            field = "ended_at" if section == "recent" else "created_at"
+            selected = selected.annotate(dashboard_order=Coalesce(field, "created_at"))
+            selected = selected.order_by("-dashboard_order", "-pk")
+            if cursor:
+                anchor = (
+                    runs.annotate(dashboard_order=Coalesce(field, "created_at"))
+                    .filter(pk=cursor)
+                    .first()
+                )
+                if anchor is None:
+                    message = "The dashboard run cursor no longer exists."
+                    raise ConfigError(message)
+                when = _datetime_field(anchor, "dashboard_order")
+                selected = selected.filter(
+                    Q(dashboard_order__lt=when) | Q(dashboard_order=when, pk__lt=anchor.pk)
+                )
+            run_rows = list(selected[: limit + 1])
+            requests: dict[str, HumanInteraction] = {}
+            if section == "waiting":
+                for request in (
+                    HumanInteraction.objects.filter(
+                        _waiting_filter(),
+                        pk__in=[
+                            _dashboard_identifier(run, "dashboard_request_id") for run in run_rows
+                        ],
+                    )
+                    .select_related("node_run")
+                    .order_by("created_at", "pk")
+                ):
+                    requests.setdefault(_foreign_key_text(request, "run"), request)
+
+            def run_record(run: Run) -> dict[str, object]:
+                request = requests.get(_identifier(run))
+                return {
+                    **_run_record(run),
+                    "project": asdict(_record(_related(run, "project", Project))),
+                    "request": {
+                        "id": _identifier(request),
+                        "kind": _string(request, "kind"),
+                        "scope_path": _string(_related(request, "node_run", NodeRun), "scope_path"),
+                    }
+                    if request
+                    else None,
+                }
+
+            records, more = _bounded_page(run_rows, limit, run_record, byte_budget=byte_budget)
+        return {
+            "items": records,
+            "next_cursor": str(records[-1]["id"]) if more and records else None,
+        }
+
     def previous_run_inputs(self, run_id: str) -> PreviousRunInputs:
         """Read launch input values without returning prompts or provider routes."""
         try:
@@ -1118,10 +1327,7 @@ class DjangoReadStore:
         """Read owner requests and new completion facts without event payloads."""
         try:
             with transaction.atomic():
-                pending = HumanInteraction.objects.filter(
-                    status=InteractionStatus.PENDING.value,
-                    attempt__status=AttemptStatus.WAITING.value,
-                )
+                pending = HumanInteraction.objects.filter(_waiting_filter())
                 waiting_runs = pending.values_list("run_id", flat=True).distinct()
                 latest = RunEvent.objects.order_by("-id").first()
                 cursor = _integer(latest, "id") if latest is not None else 0
@@ -1473,8 +1679,22 @@ class DjangoReadStore:
                 )
                 frozen = _mapping(node, "frozen_def")
                 snapshot = _related(run, "snapshot", RunSnapshot)
-                references = frozen.get("prompts", [])
-                contents = _resolved_prompt_contents(snapshot, frozen)
+                bound_agent = frozen.get("bound_agent")
+                instruction_source = bound_agent if isinstance(bound_agent, dict) else frozen
+                references = instruction_source.get("prompts", [])
+                contents = _resolved_prompt_contents(snapshot, instruction_source)
+                step = frozen.get("step", {})
+                activity_type = _string(node, "node_type")
+                if activity_type == NodeType.ACTIONS_STEP.value and isinstance(step, dict):
+                    activity_type = (
+                        "command"
+                        if "run" in step
+                        else {
+                            "relay/command@v1": "command",
+                            "relay/agent@v1": "agent",
+                            "relay/human-wait@v1": "human_wait",
+                        }.get(step.get("uses"), activity_type)
+                    )
                 instructions: list[dict[str, object]] = []
                 remaining = API_MAX_PAGE_BYTES // 4
                 for index, content in enumerate(contents):
@@ -1494,6 +1714,10 @@ class DjangoReadStore:
                     "scope_path": scope_path,
                     "working_folder": _string(run, "worktree_path"),
                     "node_type": _string(node, "node_type"),
+                    "activity_type": activity_type,
+                    "display_name": cast(
+                        dict, _mapping(run, "actions_state").get("display_names", {})
+                    ).get(scope_path, _string(node, "node_id")),
                     "status": _string(node, "status"),
                     "writes": _boolean(node, "writes"),
                     "command": frozen.get("run"),
@@ -1503,7 +1727,11 @@ class DjangoReadStore:
                         and _string(node, "status") == NodeStatus.FAILED.value
                         else None
                     ),
-                    "prompt": frozen.get("prompt"),
+                    "prompt": (
+                        step.get("with", {}).get("prompt")
+                        if activity_type == "agent" and isinstance(step, dict) and step
+                        else frozen.get("prompt")
+                    ),
                     "instructions": instructions,
                     "outputs": _mapping(node, "outputs"),
                     "attempts": records,
@@ -1603,6 +1831,9 @@ def _append_event(
     attempt: NodeAttempt | None = None,
     sensitivity: EventSensitivity = EventSensitivity.NORMAL,
 ) -> RunEvent:
+    from relay.execution.masking import redactor
+
+    payload = cast(Mapping[str, object], redactor(_identifier(run)).payload(payload))
     key = payload.get("idempotency_key")
     return RunEvent.objects.create(
         run=run,
@@ -1702,6 +1933,10 @@ def _interaction_accepts_payload(
     interaction: HumanInteraction,
 ) -> bool:
     """Validate an answer against the exact pending interaction it targets."""
+    if kind == ControlKind.WAIT_ANSWER.value and _mapping(interaction, "request_payload").get(
+        "environment"
+    ):
+        return False
     if "interaction_id" in payload and payload["interaction_id"] != _identifier(interaction):
         return False
     if "feedback" in payload:
@@ -1919,7 +2154,12 @@ class DjangoExecutionStore(DjangoAgentStore):
             # Human waits and yielded structural scopes have no worker to lose.
             attempts = attempts.exclude(node_run__node_type=NodeType.HUMAN_WAIT.value).exclude(
                 status=AttemptStatus.WAITING.value,
-                node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                node_run__node_type__in=(
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                ),
             )
         attempt_ids = list(attempts.order_by("started_at", "pk").values_list("pk", flat=True))
         stopped = 0
@@ -2014,7 +2254,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                     project=project,
                     workflow_key=request.workflow_key,
                     number=number,
-                    title=policy.definition.name,
+                    title=cast(dict, snapshot.launch_defaults.get("actions_context", {})).get(
+                        "run_name", policy.definition.name
+                    ),
                     source_branch=request.source_branch,
                     status=run_transition.status,
                     source_commit=source_commit,
@@ -2206,6 +2448,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     "run_branch": _string(run, "run_branch"),
                     "status": _string(run, "status"),
                     "dispatch_paused": _boolean(run, "dispatch_paused"),
+                    **cast(dict, _mapping(snapshot, "launch_defaults").get("actions_context", {})),
                 },
                 run.entry_point if isinstance(run.entry_point, str) else None,
             )
@@ -2453,6 +2696,9 @@ class DjangoExecutionStore(DjangoAgentStore):
             return removed
 
     def _cleanup_terminal_resources(self, run_id: str) -> None:
+        from relay.execution.masking import release_redactor
+
+        release_redactor(run_id)
         try:
             self.clean_run_resources(run_id)
         except RelayError:
@@ -2736,7 +2982,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                 raise PersistenceError(message, context={"node": scope_path})
             metadata["loop_index"] = loop_index
         route = _effective_route(node, snapshot)
-        prompts = _resolved_prompt_contents(snapshot, frozen)
+        agent = frozen.get("bound_agent")
+        prompts = _resolved_prompt_contents(snapshot, agent if isinstance(agent, dict) else frozen)
         if parent_scope is not None and _string(node, "node_id") in {"fix", "verify"}:
             # root.relay_repair_review#2 -> root.relay_repair_review. Only an
             # explicitly marked coordinator can add repair instructions.
@@ -2805,7 +3052,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                 run = _related(node, "run", Run)
                 resuming = _string(node, "status") == NodeStatus.WAITING.value and _string(
                     node, "node_type"
-                ) in {NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                ) in {
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 if _string(node, "status") in {
                     NodeStatus.RUNNING.value,
                     NodeStatus.SUCCEEDED.value,
@@ -2905,20 +3157,85 @@ class DjangoExecutionStore(DjangoAgentStore):
                 run = Run.objects.select_for_update().get(pk=related_run.pk)
                 project = _related(run, "project", Project)
                 snapshot = _related(run, "snapshot", RunSnapshot)
-                if _string(run, "status") not in {
-                    RunStatus.RUNNING.value,
-                    RunStatus.PAUSED_WAIT.value,
-                }:
+                cleanup_resume = (
+                    _string(run, "status") == RunStatus.CANCELING.value
+                    and _string(node, "node_type")
+                    in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}
+                    and isinstance(claim.attempt, NodeAttempt)
+                    and _string(claim.attempt, "status") == AttemptStatus.WAITING.value
+                )
+                if (
+                    _string(run, "status")
+                    not in {
+                        RunStatus.RUNNING.value,
+                        RunStatus.PAUSED_WAIT.value,
+                    }
+                    and not cleanup_resume
+                ):
                     return ClaimResult(ClaimDisposition.IGNORED)
                 if _string(node, "status") != NodeStatus.DISPATCHED.value:
                     return ClaimResult(ClaimDisposition.IGNORED)
-                if _boolean(run, "dispatch_paused"):
+                if _boolean(run, "dispatch_paused") and not cleanup_resume:
                     # An already queued token can arrive after the owner's pause.
                     # Keep its intent and defer admission; the active attempt is untouched.
                     defer_dispatch(_identifier(run), claim_token)
                     return ClaimResult(ClaimDisposition.BUSY)
 
                 node_type = _string(node, "node_type")
+                frozen = _mapping(node, "frozen_def")
+                if node_type == NodeType.ACTIONS_JOB.value and not cleanup_resume:
+                    from .actions_automation import admit_queue
+                    from .actions_repository import node_context
+
+                    launch_context = node_context(node)
+                    launch_context["inputs"] = (
+                        frozen.get("caller_inputs") or launch_context["inputs"]
+                    )
+                    launch_context["matrix"] = frozen.get("matrix", {})
+                    launch_context["strategy"] = {"max-parallel": 1}
+                    try:
+                        with transaction.atomic():
+                            admitted = admit_queue(node, launch_context)
+                    except ConfigError as error:
+                        changed = transition_node(_string(node, "status"), "admission_failed")
+                        NodeRun.objects.filter(pk=node.pk).update(
+                            status=changed.status, outcome="failure", conclusion="failure"
+                        )
+                        DispatchClaim.objects.filter(pk=claim.pk).update(
+                            state=DispatchState.CONSUMED.value, consumed_at=timezone.now()
+                        )
+                        _append_event(
+                            run,
+                            changed.event,
+                            EventSource.NODE,
+                            {
+                                "scope_path": node.scope_path,
+                                "status": changed.status,
+                                "error": error.to_envelope(),
+                            },
+                            node=node,
+                        )
+                        self._finish_run_if_terminal(run)
+                        return ClaimResult(ClaimDisposition.IGNORED)
+                    if not admitted:
+                        defer_dispatch(_identifier(run), claim_token)
+                        return ClaimResult(ClaimDisposition.BUSY)
+                from .actions_repository import claim_job_lease
+
+                if not claim_job_lease(node):
+                    defer_dispatch(_identifier(run), claim_token)
+                    return ClaimResult(ClaimDisposition.BUSY)
+                if (
+                    node_type == NodeType.ACTIONS_JOB.value
+                    and not cleanup_resume
+                    and not admit_queue(
+                        node,
+                        launch_context,
+                        activate=True,
+                    )
+                ):
+                    message = "Queue ownership changed inside atomic job admission."
+                    raise PersistenceError(message)  # noqa: TRY301 - abort atomic admission
                 needs_lock = node_type in {NodeType.AGENT.value, NodeType.COMMAND.value}
                 writes = _boolean(node, "writes")
                 decision = decide_admission(
@@ -2940,7 +3257,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     message = "The snapshotted agent route is malformed."
                     raise PersistenceError(message, context={"node": scope_path})  # noqa: TRY301
                 driver_kind = None
-                if node_type == NodeType.AGENT.value:
+                if node_type == NodeType.AGENT.value or (
+                    node_type == NodeType.ACTIONS_STEP.value
+                    and isinstance(frozen.get("bound_agent"), dict)
+                ):
                     driver_kind = (
                         DriverKind.ANTIGRAVITY.value
                         if selected_agent == "antigravity"
@@ -3500,6 +3820,13 @@ class DjangoExecutionStore(DjangoAgentStore):
                 structural = _string(node, "node_type") in {
                     NodeType.LOOP.value,
                     NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    *(
+                        [NodeType.ACTIONS_STEP.value]
+                        if cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
+                        != "relay/human-wait@v1"
+                        else []
+                    ),
                 }
                 transition = transition_node(
                     _string(node, "status"),
@@ -3530,31 +3857,60 @@ class DjangoExecutionStore(DjangoAgentStore):
                         descendants = NodeRun.objects.filter(
                             run=run, scope_path__startswith=_string(node, "scope_path") + "#"
                         ).exclude(node_type=NodeType.LOOP.value, attempts__isnull=True)
-                    if not descendants.filter(
-                        status__in=(
-                            NodeStatus.RUNNING.value,
-                            NodeStatus.WAITING.value,
-                            NodeStatus.DISPATCHED.value,
-                        )
-                    ).exists():
+                    if (
+                        not HumanInteraction.objects.filter(
+                            attempt=attempt, status="pending"
+                        ).exists()
+                        and not UsageRetry.objects.filter(
+                            run=run, state="scheduled", reset_at__gt=timezone.now()
+                        ).exists()
+                        and not descendants.filter(
+                            status__in=(
+                                NodeStatus.RUNNING.value,
+                                NodeStatus.WAITING.value,
+                                NodeStatus.DISPATCHED.value,
+                            )
+                        ).exists()
+                    ):
                         token = self.create_dispatch(_identifier(node))
                         if token is not None:
                             transaction.on_commit(lambda: notify_dispatch(token))
                     return
-                prompt = _mapping(node, "frozen_def").get("prompt", "Owner input required.")
-                interaction = HumanInteraction.objects.create(
-                    run=run,
-                    node_run=node,
+                frozen = _mapping(node, "frozen_def")
+                prompt = (
+                    cast(dict[str, Any], frozen.get("step", {}))
+                    .get("with", {})
+                    .get("prompt", "Owner input required.")
+                    if _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                    else frozen.get("prompt", "Owner input required.")
+                )
+                wait_deadline = (
+                    timezone.now() + timedelta(seconds=timeout_seconds)
+                    if timeout_seconds is not None
+                    else None
+                )
+                if _string(node, "node_type") == NodeType.ACTIONS_STEP.value and isinstance(
+                    attempt.deadline_at, datetime
+                ):
+                    wait_deadline = (
+                        min(wait_deadline, attempt.deadline_at)
+                        if wait_deadline is not None
+                        else attempt.deadline_at
+                    )
+                interaction, _created = HumanInteraction.objects.get_or_create(
                     attempt=attempt,
                     kind=InteractionKind.WAIT.value,
-                    request_payload={"prompt": prompt if isinstance(prompt, str) else str(prompt)},
                     status=InteractionStatus.PENDING.value,
-                    deadline=(
-                        timezone.now() + timedelta(seconds=timeout_seconds)
-                        if timeout_seconds is not None
-                        else None
-                    ),
+                    defaults={
+                        "run": run,
+                        "node_run": node,
+                        "request_payload": {
+                            "prompt": prompt if isinstance(prompt, str) else str(prompt)
+                        },
+                        "deadline": wait_deadline,
+                    },
                 )
+                prompt = _mapping(interaction, "request_payload").get("prompt", prompt)
                 _append_event(
                     run,
                     "wait.requested",
@@ -3732,8 +4088,13 @@ class DjangoExecutionStore(DjangoAgentStore):
         owner_request: bool = False,
     ) -> None:
         policy = _recovery_policy(run)
+        frozen = _mapping(node, "frozen_def")
+        actions_agent = _string(node, "node_type") == NodeType.ACTIONS_STEP.value and isinstance(
+            frozen.get("bound_agent"), dict
+        )
+        explicit_retry = cast(dict, frozen.get("step", {})).get("with", {}).get("auto-retry")
         existing = AutomaticRetry.objects.filter(attempt=attempt).first()
-        if not policy.enabled:
+        if not policy.enabled and not (actions_agent and explicit_retry in (True, "true")):
             return
         if existing is not None and not (
             owner_request and _string(existing, "state") == "canceled"
@@ -3748,9 +4109,13 @@ class DjangoExecutionStore(DjangoAgentStore):
         used = AutomaticRetry.objects.filter(attempt__node_run=node, state="resumed").count()
         state = "scheduled"
         reason = ""
-        if _string(node, "node_type") != NodeType.AGENT.value:
+        if _string(node, "node_type") != NodeType.AGENT.value and not actions_agent:
             state, reason = "blocked", "This failed step has no assigned recovery agent."
-        elif _mapping(node, "frozen_def").get("auto_retry", True) is False:
+        elif (
+            cast(dict, frozen.get("bound_agent", {})).get("auto_retry", True)
+            if actions_agent
+            else frozen.get("auto_retry", True)
+        ) is False:
             state, reason = "blocked", "Automatic recovery is disabled for this agent step."
         elif error_code not in RECOVERABLE_ERRORS or _string(attempt, "stop_reason") in {
             AttemptStopReason.CANCELED.value,
@@ -3790,7 +4155,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         ):
             transition = transition_node(_string(node, "status"), "timeout_routed")
             reason = AttemptStopReason.TIMEOUT.value
-        elif outcome.kind is OutcomeKind.SUCCEEDED:
+        elif outcome.kind is OutcomeKind.SUCCEEDED or outcome.conclusion == "success":
             transition = transition_node(_string(node, "status"), "complete")
             reason = (outcome.stop_reason or AttemptStopReason.COMPLETED).value
         elif outcome.stop_reason == AttemptStopReason.CANCELED:
@@ -3893,11 +4258,59 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def _finish_run_if_terminal(self, run: Run) -> None:
         status = _string(run, "status")
+        if status == RunStatus.CANCELING.value:
+            # Historical loop iteration markers own no attempt. Settle them only
+            # after their canceled coordinator and every child have drained.
+            summaries = NodeRun.objects.filter(
+                run=run,
+                node_type=NodeType.LOOP.value,
+                attempts__isnull=True,
+                status__in=(NodeStatus.RUNNING.value, NodeStatus.WAITING.value),
+            )
+            for summary in summaries:
+                scope = _string(summary, "scope_path")
+                coordinator = scope.rsplit("#", maxsplit=1)[0]
+                if (
+                    coordinator == scope
+                    or not NodeRun.objects.filter(
+                        run=run, scope_path=coordinator, status=NodeStatus.CANCELED.value
+                    ).exists()
+                ):
+                    continue
+                if (
+                    NodeRun.objects.filter(run=run, scope_path__startswith=scope + ".")
+                    .exclude(status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES))
+                    .exists()
+                ):
+                    continue
+                changed = transition_node(_string(summary, "status"), "cancel")
+                _set_model_field(summary, "status", changed.status)
+                summary.save(update_fields=("status",))
+                _append_event(
+                    run,
+                    changed.event,
+                    EventSource.NODE,
+                    {
+                        "scope_path": scope,
+                        "node_type": NodeType.LOOP.value,
+                        "status": NodeStatus.CANCELED.value,
+                    },
+                    node=summary,
+                )
+        actions = (
+            _string(_related(run, "snapshot", RunSnapshot), "semantics_revision") != "relay-v1"
+        )
         active = NodeRun.objects.filter(run=run).exclude(
             status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES)
         )
         if active.exists():
             return
+        if actions and status == RunStatus.PAUSED_WAIT.value:
+            resumed = transition_run(status, "jobs_settled")
+            status = resumed.status
+            _set_model_field(run, "status", status)
+            run.save(update_fields=("status",))
+            _append_event(run, resumed.event, EventSource.RUN, {"status": status})
         if status == RunStatus.CANCELING.value:
             action = (
                 "failure_drain_complete"
@@ -3905,20 +4318,29 @@ class DjangoExecutionStore(DjangoAgentStore):
                 else "cancel_drain_complete"
             )
         elif status == RunStatus.RUNNING.value:
-            failed_node = (
-                NodeRun.objects.filter(run=run, status=NodeStatus.FAILED.value)
-                .order_by("scope_path", "pk")
-                .first()
-            )
+            failure_rows = NodeRun.objects.filter(run=run, status=NodeStatus.FAILED.value)
+            if actions:
+                failure_rows = failure_rows.filter(parent_scope_path__isnull=True)
+            failed_node = failure_rows.order_by("scope_path", "pk").first()
             if failed_node is None:
+                canceled_jobs = (
+                    actions
+                    and NodeRun.objects.filter(
+                        run=run, parent_scope_path__isnull=True, status=NodeStatus.CANCELED.value
+                    ).exists()
+                )
                 # Canceled nodes cannot satisfy the run's all-success guard.
                 if (
-                    NodeRun.objects.filter(run=run)
+                    (
+                        NodeRun.objects.filter(run=run, parent_scope_path__isnull=True)
+                        if actions
+                        else NodeRun.objects.filter(run=run)
+                    )
                     .exclude(status__in=(NodeStatus.SUCCEEDED.value, NodeStatus.SKIPPED.value))
                     .exists()
-                ):
+                ) and not canceled_jobs:
                     return
-                action = "all_succeeded"
+                action = "jobs_canceled" if canceled_jobs else "all_succeeded"
             else:
                 latest_error = (
                     NodeAttempt.objects.filter(node_run=failed_node)
@@ -4006,6 +4428,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     return
                 node = _related(attempt, "node_run", NodeRun)
                 run = _related(node, "run", Run)
+                actions_node = _string(node, "node_type") in {
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 # Shutdown interruptions must not reopen canceled work. Preserve
                 # completed results, including a successful writer's protected head.
                 if (
@@ -4026,6 +4452,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     if outcome.error_message is not None
                     else None
                 )
+                if actions_node and failure_message:
+                    from relay.execution.masking import redactor
+
+                    failure_message = redactor(_identifier(run)).text(failure_message)
                 now = timezone.now()
                 _set_model_field(attempt, "status", AttemptStatus.TERMINAL.value)
                 _set_model_field(attempt, "ending_head", ending_head)
@@ -4049,8 +4479,47 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _set_model_field(node, "status", node_status)
                 _set_model_field(node, "selected_branch", outcome.selected_branch)
                 _set_model_field(node, "outputs", dict(outcome.outputs))
-                node.save(update_fields=("status", "selected_branch", "outputs"))
-                if outcome.kind is OutcomeKind.SUCCEEDED and _boolean(node, "writes"):
+                if actions_node:
+                    raw = outcome.raw_outcome or (
+                        "cancelled"
+                        if outcome.stop_reason is AttemptStopReason.CANCELED
+                        else "success"
+                        if outcome.kind is OutcomeKind.SUCCEEDED
+                        else "failure"
+                    )
+                    _set_model_field(node, "outcome", raw)
+                    _set_model_field(node, "conclusion", outcome.conclusion or raw)
+                node.save(
+                    update_fields=("status", "selected_branch", "outputs", "outcome", "conclusion")
+                )
+                if (
+                    actions_node
+                    and _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                    and outcome.kind is OutcomeKind.FAILED
+                ):
+                    if (
+                        outcome.usage_limit is not None
+                        and outcome.usage_limit.reset_at is not None
+                        and outcome.usage_limit.reset_at > now
+                    ):
+                        UsageRetry.objects.update_or_create(
+                            run=run,
+                            defaults={
+                                "attempt": attempt,
+                                "reset_at": outcome.usage_limit.reset_at,
+                                "state": "scheduled",
+                                "error_message": None,
+                            },
+                        )
+                    else:
+                        self._schedule_automatic_retry(
+                            run, node, attempt, failure_message or outcome.error_code or stop_reason
+                        )
+                if (
+                    outcome.kind is OutcomeKind.SUCCEEDED
+                    and _boolean(node, "writes")
+                    and not _mapping(node, "frozen_def").get("coordinator")
+                ):
                     _set_model_field(run, "recorded_head", ending_head)
                     run.save(update_fields=("recorded_head",))
                 _append_event(
@@ -4084,10 +4553,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                     node=node,
                     attempt=attempt,
                 )
-                if outcome.kind is OutcomeKind.FAILED and stop_reason not in {
-                    AttemptStopReason.CANCELED.value,
-                    AttemptStopReason.INTERRUPTED.value,
-                }:
+                if (
+                    not actions_node
+                    and outcome.kind is OutcomeKind.FAILED
+                    and stop_reason
+                    not in {
+                        AttemptStopReason.CANCELED.value,
+                        AttemptStopReason.INTERRUPTED.value,
+                    }
+                ):
                     run_status = _string(run, "status")
                     if run_status in {
                         RunStatus.RUNNING.value,
@@ -4155,6 +4629,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                 self._resume_run_after_waits(run)
                 self._finish_run_if_terminal(run)
                 self._wake_enclosing_scope(node, run)
+                if actions_node:
+                    from .actions_repository import release_job_lease
+
+                    release_job_lease(node)
         except PersistenceError:
             raise
         except (DatabaseError, IntegrityError):
@@ -4182,7 +4660,11 @@ class DjangoExecutionStore(DjangoAgentStore):
         connections.close_all()
 
     def _wake_enclosing_scope(self, node: NodeRun, run: Run) -> None:
-        if _string(run, "status") not in {RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value}:
+        if _string(run, "status") not in {
+            RunStatus.RUNNING.value,
+            RunStatus.PAUSED_WAIT.value,
+            RunStatus.CANCELING.value,
+        }:
             return
         parent_scope = _string(node, "scope_path").rsplit(".", maxsplit=1)[0]
         if parent_scope == "root":
@@ -4196,9 +4678,18 @@ class DjangoExecutionStore(DjangoAgentStore):
             run=run,
             scope_path=parent_scope,
             status=NodeStatus.WAITING.value,
-            node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+            node_type__in=(
+                NodeType.LOOP.value,
+                NodeType.SUBWORKFLOW.value,
+                NodeType.ACTIONS_JOB.value,
+                NodeType.ACTIONS_STEP.value,
+            ),
         ).first()
         if parent is not None:
+            if _string(run, "status") == RunStatus.CANCELING.value and _string(
+                parent, "node_type"
+            ) not in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}:
+                return
             token = self.create_dispatch(_identifier(parent))
             if token is not None:
                 transaction.on_commit(lambda: notify_dispatch(token))
@@ -4489,6 +4980,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         NodeType.HUMAN_WAIT.value,
                         NodeType.LOOP.value,
                         NodeType.SUBWORKFLOW.value,
+                        NodeType.ACTIONS_STEP.value,
+                        NodeType.ACTIONS_JOB.value,
                     ),
                 )
                 .order_by("created_at")
@@ -4501,6 +4994,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                 control = self.claim_next_control(str(attempt_id), worker_id)
                 if control is None or not self.apply_control(control.request_id, worker_id):
                     continue
+                node = _related(attempt, "node_run", NodeRun)
+                if control.kind == ControlKind.CANCEL.value and (
+                    _string(node, "node_type") == NodeType.ACTIONS_JOB.value
+                    or (
+                        _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+                        and cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
+                        != "relay/human-wait@v1"
+                    )
+                ):
+                    # The exact yielded attempt resumes after its child settles;
+                    # its executor owns registered cleanup and Git preservation.
+                    applied += 1
+                    continue
                 outcome = (
                     ExecutionOutcome(
                         OutcomeKind.FAILED,
@@ -4512,6 +5018,15 @@ class DjangoExecutionStore(DjangoAgentStore):
                 )
                 if control.kind == ControlKind.CANCEL.value:
                     self._discard_attempt_mailbox(attempt)
+                from .actions_repository import human_wait_result
+
+                outputs = human_wait_result(
+                    str(attempt_id),
+                    control.payload,
+                    failed=control.kind == ControlKind.CANCEL.value,
+                    canceled=control.kind == ControlKind.CANCEL.value,
+                )
+                outcome = replace(outcome, outputs=outputs)
                 self.finish_attempt(str(attempt_id), outcome, _string(attempt, "starting_head"))
                 self.release_attempt_lock(str(attempt_id))
                 applied += 1
@@ -4532,7 +5047,11 @@ class DjangoExecutionStore(DjangoAgentStore):
                     status=InteractionStatus.PENDING.value,
                     kind=InteractionKind.WAIT.value,
                     deadline__lte=now,
-                    node_run__node_type=NodeType.HUMAN_WAIT.value,
+                    node_run__node_type__in=(
+                        NodeType.HUMAN_WAIT.value,
+                        NodeType.ACTIONS_STEP.value,
+                        NodeType.ACTIONS_JOB.value,
+                    ),
                 )
                 .order_by("deadline")
                 .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
@@ -4570,6 +5089,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                             stop_reason=AttemptStopReason.TIMEOUT,
                             error_code="node_timeout",
                         )
+                    if _string(node, "node_type") == NodeType.ACTIONS_STEP.value:
+                        from .actions_repository import human_wait_result
+
+                        human_wait_result(_identifier(attempt), {}, failed=True)
                     self.finish_attempt(
                         _identifier(attempt), outcome, _string(attempt, "starting_head")
                     )
@@ -4607,7 +5130,12 @@ class DjangoExecutionStore(DjangoAgentStore):
                     NodeAttempt.objects.select_for_update()
                     .filter(
                         status=AttemptStatus.WAITING.value,
-                        node_run__node_type__in=(NodeType.LOOP.value, NodeType.SUBWORKFLOW.value),
+                        node_run__node_type__in=(
+                            NodeType.LOOP.value,
+                            NodeType.SUBWORKFLOW.value,
+                            NodeType.ACTIONS_JOB.value,
+                            NodeType.ACTIONS_STEP.value,
+                        ),
                         deadline_at__lte=timezone.now(),
                     )
                     .order_by("deadline_at")[:RECONCILE_MAX_ITEMS]
@@ -4694,7 +5222,13 @@ class DjangoExecutionStore(DjangoAgentStore):
             if (
                 not orderly_shutdown
                 and _string(node, "node_type")
-                in {NodeType.HUMAN_WAIT.value, NodeType.LOOP.value, NodeType.SUBWORKFLOW.value}
+                in {
+                    NodeType.HUMAN_WAIT.value,
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }
                 and _string(attempt, "status") == AttemptStatus.WAITING.value
             ):
                 return None

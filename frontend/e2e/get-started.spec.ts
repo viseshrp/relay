@@ -7,7 +7,7 @@ test("account creation explains the password rules before submission", async ({ 
     authenticated: false, owner_created: false, username: null, login_required: true,
     password_rules: ["Use at least 12 characters.", "Avoid common passwords."],
   } }));
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByText("Create a password for this computer's Relay. Only people who can use this computer can reach it.")).toBeVisible();
   await expect(page.getByRole("listitem")).toHaveText([
     "Use at least 12 characters.", "Avoid common passwords.",
@@ -21,7 +21,7 @@ test("account creation explains the password rules before submission", async ({ 
 });
 
 test("returning users see sign-in without account creation rules", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   await expect(page.getByText("Sign in to Relay on this computer.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   await expect(page.getByText("Choose a password that follows these rules:")).toHaveCount(0);
@@ -57,7 +57,7 @@ for (const readyCount of [0, 5]) {
         models: readyCount ? ["m1"] : [], login_command: "codex login", login_guidance: "Sign in in your terminal.",
       })) } });
     });
-    await page.goto("/");
+    await page.goto("/?view=workflows");
     await page.getByRole("button", { name: "Get started", exact: true }).click();
     const setup = page.getByRole("region", { name: "Get started", exact: true });
     await expect(setup.getByRole("article")).toHaveCount(5);

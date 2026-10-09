@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { post, currentWorkflow } from "./setup-helpers";
 
 const option = "Merge into the active branch, then delete working copies";
 
@@ -12,15 +12,15 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => { await post(page, "/__test__/reset"); });
 
 async function create(page: Page, key: string, wait = false) {
-  await page.goto("/?view=workflows&workflow=workflow");
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
-  const response = await post(page, "/api/workflows", { key, holder, yaml: stringify({
+  const response = await post(page, "/api/workflows", { key, holder, yaml: stringify(currentWorkflow({
     version: 1, name: "Merge result", nodes: {
       write: { type: "command", writes: true, run: ["git", "commit", "--allow-empty", "-q", "-m", "Run result"] },
       ...(wait ? { approve: { type: "human_wait", needs: ["write"], prompt: "Continue?" } } : {}),
     },
-  }) });
+  })) });
   expect(response.ok(), await response.text()).toBeTruthy();
   await page.goto(`/?view=workflows&workflow=${key}.yaml`);
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();

@@ -2,7 +2,8 @@
 
 Relay publishes one Python source distribution and one wheel. The wheel
 contains the compiled browser application, so an installed `relay up` never
-needs Node.js or npm.
+needs Node.js or npm to serve it. Opt-in local JavaScript actions require
+their declared installed Node 20 or 24 runtime.
 
 ## Locked build tools
 
@@ -32,7 +33,7 @@ these argument vectors with `shell=False` from `frontend/`:
 
 ```text
 [resolved npm executable, "ci"]
-[resolved npm executable, "run", "build"]
+[resolved npm executable, "run", "build:dist"]
 ```
 
 The hook fails if the build does not create both `index.html` and an asset
@@ -89,3 +90,18 @@ Install the wheel into a fresh virtual environment, remove Node from `PATH`,
 and run `relay up --no-browser`. A successful readiness response from
 `GET /api/auth` proves the installed Python package can serve its compiled
 assets without an end-user Node runtime.
+
+## Updating an editable frontend
+
+`npm --prefix frontend run build` checks types and builds into a temporary
+staging directory beside the served asset directory, preserving relative
+source-map paths. It publishes assets first, then atomically replaces
+`index.html`. Earlier hashed assets remain available for open tabs that have
+not yet loaded every workspace. A failed asset copy leaves the previous entry
+page in place. This updates only compiled frontend files; the running server
+and durable state stay in place.
+
+Wheel builds use `npm run build:dist`, which cleans the asset output before
+building. Releases therefore contain one build, without older checkout chunks.
+`npm --prefix frontend run test:build` checks publication failure and a browser
+tab loading an earlier lazy chunk after publication.

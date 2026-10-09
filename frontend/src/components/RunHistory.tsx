@@ -41,7 +41,7 @@ export function RunHistory({ project, runs, waitingRuns, more, refreshing, onMor
       <Paper variant="outlined" className="run-history" aria-label="Run history">
         <Stack direction="row" spacing={1} className="history-filters">
           <TextField size="small" label="Filter workflow runs" value={filters.query} onChange={(event) => onFilters({ ...filters, query: event.target.value })} />
-          <FormControl size="small" sx={{ minWidth: 170 }}><InputLabel id="run-status-filter">Status</InputLabel><Select labelId="run-status-filter" label="Status" value={filters.status} onChange={(event) => onFilters({ ...filters, status: event.target.value })}>
+          <FormControl size="small" sx={{ minWidth: 170 }}><InputLabel id="run-status-filter" shrink>Status</InputLabel><Select displayEmpty labelId="run-status-filter" label="Status" value={filters.status} onChange={(event) => onFilters({ ...filters, status: event.target.value })}>
             <MenuItem value="">All statuses</MenuItem>{["pending", "running", "paused_wait", "succeeded", "failed", "canceled"].map((status) => <MenuItem key={status} value={status}>{statusLabel(status)}</MenuItem>)}
           </Select></FormControl>
           <TextField size="small" label="Branch" value={filters.branch} onChange={(event) => onFilters({ ...filters, branch: event.target.value })} />

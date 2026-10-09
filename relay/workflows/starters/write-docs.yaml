@@ -1,15 +1,18 @@
-version: 1
 name: Write docs for a change
-agents: [codex, claude, copilot, cursor, antigravity]
-inputs:
-  task:
-    type: string
-    description: What behavior or change should the docs explain?
-    default: Explain how to run this repository's tests in the README.
-    required: true
-nodes:
-  docs:
-    type: agent
-    prompts: [{local: prompts/write-docs.md}]
-    writes: true
-    allow_no_commit: true
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What behavior or change should the docs explain?
+        required: true
+        default: Explain how to run this repository's tests in the README.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/write-docs.md
+        prompt: ${{ inputs.task }}

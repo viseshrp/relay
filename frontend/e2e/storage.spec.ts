@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { RunSummary } from "../src/types";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -61,7 +61,7 @@ test("temporary cleanup lives in Storage and removes only the confirmed run's ma
   await picker.focus();
   await picker.press("Enter");
   await expect(page.getByRole("option")).toHaveCount(3);
-  await page.getByRole("option").filter({ hasText: `#${target.number} Storage cleanup check` }).click();
+  await page.getByRole("option", { name: `#${target.number} Storage cleanup check Complete`, exact: true }).click();
   await button.click();
   const dialog = page.getByRole("dialog", { name: `Retry temporary cleanup for run #${target.number}?`, exact: true });
   await expect(dialog).toContainText("Reports, code, run history, credentials, and personal browser profiles stay in place.");
@@ -98,7 +98,7 @@ test("Storage recovers failed reads and keeps server cleanup errors in the confi
   await panel.getByRole("button", { name: "Reload completed runs", exact: true }).click();
   await expect(panel.getByRole("combobox", { name: "Completed run", exact: true })).toBeEnabled();
   await panel.getByRole("combobox", { name: "Completed run", exact: true }).click();
-  await page.getByRole("option").filter({ hasText: `#${run.number} Storage cleanup check` }).click();
+  await page.getByRole("option", { name: `#${run.number} Storage cleanup check Complete`, exact: true }).click();
   const path = `**/api/runs/${run.id}/resources/clean`;
   await page.route(path, (route) => route.fulfill({ status: 409, json: { code: "permission_flow_error", message: "Temporary resources cannot be cleaned while this run is active.", context: {} } }));
   await button.click();
@@ -131,7 +131,7 @@ test("older completed runs load through bounded project-scoped pages", async ({ 
   await expect(panel.getByRole("button", { name: "Load older completed runs", exact: true })).toHaveCount(0);
   await panel.getByRole("combobox", { name: "Completed run", exact: true }).click();
   await expect(page.getByRole("option")).toHaveCount(3);
-  await page.getByRole("option").filter({ hasText: "#1 Older completed run" }).click();
+  await page.getByRole("option", { name: "#1 Older completed run Complete", exact: true }).click();
   await panel.getByRole("button", { name: "Retry temporary resource cleanup", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Retry temporary cleanup for run #1?", exact: true })).toContainText("Older completed run");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
 import type { RunDetail } from "../src/types";
 
@@ -148,10 +148,10 @@ test("desktop notifications require opt-in and announce new waits and completion
     }
     Object.defineProperty(window, "Notification", { value: TestNotification });
   });
-  await page.goto("/");
+  await page.goto("/?view=workflows");
   expect(calls).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem("relay.notifications"))).toBeNull();
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Enable desktop notifications", exact: true }).click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem("relay.notifications"))).toBe("true");
   await create(page, "notify-wait", { approval: { type: "human_wait", prompt: "Approve this run." } });
@@ -164,7 +164,7 @@ test("desktop notifications require opt-in and announce new waits and completion
   await page.getByRole("textbox", { name: "Your response", exact: true }).fill("YES");
   await page.getByRole("button", { name: "Send response and continue", exact: true }).click();
   await expect.poll(() => calls).toContain("Relay run complete");
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Disable desktop notifications", exact: true }).click();
   expect(await page.evaluate(() => localStorage.getItem("relay.notifications"))).toBeNull();
 });
@@ -180,8 +180,8 @@ for (const support of ["denied", "unavailable"] as const) test(`notification per
       Object.defineProperty(window, "Notification", { value: DeniedNotification });
     }
   }, support);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.goto("/?view=workflows");
+  await page.getByRole("button", { name: /^(Help|Account menu for owner)$/ }).click();
   await page.getByRole("menuitem", { name: "Enable desktop notifications", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: support === "denied" ? "notifications are blocked" : "does not support desktop notifications" })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("relay.notifications"))).toBeNull();

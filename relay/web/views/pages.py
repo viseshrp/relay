@@ -128,6 +128,27 @@ def attention(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def dashboard(request: HttpRequest) -> HttpResponse:
+    cursor = request.GET.get("cursor")
+    if cursor is not None:
+        cursor = canonical_uuid(cursor, resource="dashboard cursor")
+    limit = _nonnegative_int(request.GET.get("limit"), field="limit", default=10)
+    if limit == 0:
+        message = "limit must be at least 1."
+        raise ConfigError(message)
+    return JsonResponse(
+        DjangoReadStore().dashboard(
+            section=request.GET.get("section"),
+            cursor=cursor,
+            limit=limit,
+            query_text=request.GET.get("query", ""),
+        )
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def project_context(request: HttpRequest) -> HttpResponse:
     _root, project = current_project(request)
     return JsonResponse(
@@ -162,6 +183,11 @@ def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
         }
     ).cleanup_policy
     strict = policy == CleanupPolicy.MERGE_ON_SUCCESS.value
+    from relay.workflows.actions.language import load as load_actions
+    from relay.workflows.loader import load_workflow, resolve_workflow_path
+
+    source = resolve_workflow_path(relay_root / "workflows", key)
+    load_actions(load_workflow(source).text, source=source)
     preview = inspect_launch_cleanliness(relay_root, key, merge_on_success=strict)
     return JsonResponse(asdict(preview))
 

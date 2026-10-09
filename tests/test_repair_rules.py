@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 
 from django.db import connections
-from django.test import Client
 import pytest
 from ruamel.yaml import YAML
 
@@ -16,7 +15,7 @@ from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.scheduler import dispatch_ready_nodes
-from relay.web.models import Artifact, AutomaticRetry, NodeAttempt, NodeRun, Run, RunSnapshot
+from relay.web.models import Artifact, AutomaticRetry, NodeAttempt, NodeRun, RunSnapshot
 from relay.web.repositories import DjangoReadStore
 from relay.workflows.graph import compile_graph
 from relay.workflows.loader import load_workflow_text
@@ -390,80 +389,6 @@ def test_native_repair_metadata_is_explicit_in_run_pages(
     assert rows["root.review"]["repair_for"] is None
 
 
-def test_legacy_grouping_changes_only_presentation_and_requires_a_paused_run(
-    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
-    owner = Client()
-    response = owner.post(
-        "/api/auth/onboard",
-        json.dumps(
-            {
-                "username": "owner",
-                "password": "Relay-Repair-Test-2026!",
-            }
-        ),
-        content_type="application/json",
-    )
-    assert response.status_code == 201
-    project.write_workflow(
-        "legacy",
-        """version: 1
-name: Legacy
-nodes:
-  review: {type: human_wait, prompt: Continue?}
-  repairs:
-    type: loop
-    needs: [review]
-    max_iterations: 2
-    until: "${{ True }}"
-    exhausted: stopped
-    body:
-      fix: {type: command, run: [git, status]}
-  stopped: {type: command, needs: [repairs], run: [git, status]}
-  other_repairs:
-    type: loop
-    needs: [review]
-    max_iterations: 1
-    exhausted: other_stopped
-    body:
-      fix: {type: command, run: [git, status]}
-  other_stopped: {type: command, needs: [other_repairs], run: [git, status]}
-""",
-    )
-    run_id = engine.launch(project, "legacy")
-    engine.drain(run_id)
-    snapshot = RunSnapshot.objects.get(run_id=run_id)
-    original = (snapshot.workflow_yaml, snapshot.hashes, snapshot.route_table)
-    node_rows = list(NodeRun.objects.filter(run_id=run_id).values("pk", "status", "frozen_def"))
-    body = {"groups": {"root.repairs": "root.review"}, "idempotency_key": "group-1"}
-    path = f"/api/runs/{run_id}/repairs"
-    assert owner.post(path, json.dumps(body), content_type="application/json").status_code == 409
-    engine.store.configure_dispatch_pause(run_id, True, "pause")
-    duplicate = {
-        "groups": {"root.repairs": "root.review", "root.other_repairs": "root.review"},
-        "idempotency_key": "duplicate-source",
-    }
-    assert (
-        owner.post(path, json.dumps(duplicate), content_type="application/json").status_code == 422
-    )
-    assert owner.post(path, json.dumps(body), content_type="application/json").status_code == 202
-    assert owner.post(path, json.dumps(body), content_type="application/json").json() == {
-        "result": "already_applied"
-    }
-    assert (
-        list(NodeRun.objects.filter(run_id=run_id).values("pk", "status", "frozen_def"))
-        == node_rows
-    )
-    snapshot.refresh_from_db()
-    assert (snapshot.workflow_yaml, snapshot.hashes, snapshot.route_table) == original
-    assert Run.objects.get(pk=run_id).dispatch_paused is True
-    rows = {n["scope_path"]: n for n in owner.get(f"/api/runs/{run_id}").json()["run"]["nodes"]}
-    assert rows["root.repairs"]["repair_for"] == "root.review"
-    assert rows["root.stopped"]["repair_for"] == "root.review"
-    assert rows["root.stopped"]["repair_settings"] is None
-
-
 @pytest.mark.parametrize(
     "groups",
     [
@@ -473,7 +398,7 @@ nodes:
         {"root.absent": "root.review"},
     ],
 )
-def test_legacy_classification_cannot_hide_an_arbitrary_or_native_stage(
+def test_repair_classification_cannot_hide_an_arbitrary_or_native_stage(
     project: RelayProject, engine: InlineEngine, groups: dict[str, str]
 ) -> None:
     project.write_workflow("repair", repair_workflow())

@@ -10,6 +10,7 @@ from relay.constants import API_MAX_PAGE, API_MAX_PAGE_BYTES
 from relay.projects.discovery import git_root
 from relay.vcs.cleanliness import RepositoryChange, execution_status
 from relay.workflows.loader import load_workflow, resolve_workflow_path
+from relay.workflows.schema import ActionsJobNode
 from relay.workflows.validation import ValidatedWorkflow, validate_loaded_workflow
 
 
@@ -21,6 +22,9 @@ def load_launch_workflow(relay_root: Path, workflow_key: str) -> ValidatedWorkfl
 def launch_source_files(workflow: ValidatedWorkflow, repository: Path) -> frozenset[str]:
     captured = [workflow.root.path, *(item.path for item in workflow.subworkflows.values())]
     captured.extend(Path(prompt.path) for prompt in workflow.prompts if prompt.source == "local")
+    for node in workflow.root.definition.nodes.values():
+        if isinstance(node, ActionsJobNode):
+            captured.extend(repository / key for key in node.sources)
     source_root = git_root(repository)
     return frozenset(path.relative_to(source_root).as_posix() for path in captured)
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from threading import Barrier, Lock
+from types import SimpleNamespace
 from urllib.error import URLError
 
 from acp import RequestError, schema
@@ -285,6 +288,101 @@ def test_a_fresh_registry_cache_prevents_another_network_fetch(
     assert fetched.agents == cached.agents
     assert registry_network.requests == [REGISTRY_URL]
     assert not cached.stale
+
+
+def test_simultaneous_registry_refreshes_publish_complete_independent_files(
+    registry_network: RegistryNetwork, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = Barrier(2)
+    replace = Path.replace
+    cache_root = tmp_path / "registry"
+    sources: set[Path] = set()
+    lock = Lock()
+
+    def coordinated_replace(source: Path, target: Path) -> Path:
+        if source.parent == cache_root and target.name == "registry.json":
+            with lock:
+                first = source not in sources
+                sources.add(source)
+            if first:
+                ready.wait(timeout=10)
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", coordinated_replace)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(load_registry, cache_root=cache_root, now=NOW) for _ in range(2)]
+        results = [future.result() for future in futures]
+    assert results[0].agents == results[1].agents
+    assert len(registry_network.requests) == 2
+    assert load_registry(cache_root=cache_root, now=NOW).agents == results[0].agents
+    assert list(cache_root.iterdir()) == [cache_root / "registry.json"]
+
+
+@pytest.mark.parametrize("failures", [1, 5, 6])
+def test_registry_windows_sharing_retries_are_bounded_and_preserve_cache(
+    registry_network: RegistryNetwork,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failures: int,
+) -> None:
+    from relay.agents import registry
+
+    cache_root = tmp_path / "cache"
+    original = load_registry(cache_root=cache_root, now=NOW)
+    cache = cache_root / "registry.json"
+    before = cache.read_bytes()
+    replace = Path.replace
+    attempts = 0
+    delays: list[float] = []
+
+    def sharing_conflict(source: Path, target: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= failures:
+            error = PermissionError("Windows sharing conflict")
+            error.winerror = 32
+            raise error
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", sharing_conflict)
+    monkeypatch.setattr(registry, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(registry, "time", SimpleNamespace(sleep=delays.append))
+    later = NOW + timedelta(seconds=REGISTRY_CACHE_TTL_SECONDS + 1)
+    refreshed = load_registry(cache_root=cache_root, now=later)
+    assert refreshed.agents == original.agents
+    assert attempts == min(failures + 1, 6)
+    assert len(delays) == min(failures, 5)
+    assert sum(delays) <= 0.32
+    assert refreshed.stale == (failures == 6)
+    assert (cache.read_bytes() == before) == (failures == 6)
+    assert list(cache_root.iterdir()) == [cache]
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_registry_write_failure_preserves_cache_and_removes_its_staging_file(
+    registry_network: RegistryNetwork, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cached: bool
+) -> None:
+    cache_root = tmp_path / "registry"
+    before = load_registry(cache_root=cache_root, now=NOW) if cached else None
+    cache = cache_root / "registry.json"
+    original = cache.read_bytes() if cached else None
+
+    def failed_replace(source: Path, target: Path) -> Path:
+        message = "private filesystem detail"
+        raise PermissionError(message)
+
+    monkeypatch.setattr(Path, "replace", failed_replace)
+    later = NOW + timedelta(seconds=REGISTRY_CACHE_TTL_SECONDS + 1)
+    if before:
+        result = load_registry(cache_root=cache_root, now=later)
+        assert result.stale and result.agents == before.agents
+        assert cache.read_bytes() == original
+    else:
+        with pytest.raises(AgentDiscoveryError, match="could not save") as caught:
+            load_registry(cache_root=cache_root, now=later)
+        assert "private" not in caught.value.message
+    assert list(cache_root.iterdir()) == ([cache] if cached else [])
+    assert len(registry_network.requests) == (2 if cached else 1)
 
 
 def test_a_stale_registry_is_refreshed(registry_network: RegistryNetwork, tmp_path: Path) -> None:

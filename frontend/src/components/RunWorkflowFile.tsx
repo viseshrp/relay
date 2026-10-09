@@ -1,6 +1,7 @@
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api";
+import { readableWorkflowYaml } from "../source-format";
 import type { CapturedRunWorkflow } from "../types";
 
 export function RunWorkflowFile({ runId, onClose, onEdit }: {
@@ -8,10 +9,11 @@ export function RunWorkflowFile({ runId, onClose, onEdit }: {
 }) {
   const [workflow, setWorkflow] = useState<CapturedRunWorkflow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const displayed = useMemo(() => workflow && !workflow.truncated ? readableWorkflowYaml(workflow.yaml) : workflow?.yaml ?? "", [workflow]);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    setError(null);
+    setError(null); setWorkflow(null);
     void api<CapturedRunWorkflow>(`/api/runs/${encodeURIComponent(runId)}/workflow`, { signal: controller.signal })
       .then((response) => { if (!controller.signal.aborted) setWorkflow(response); })
       .catch((caught: unknown) => { if (!controller.signal.aborted) setError(errorMessage(caught)); });
@@ -27,7 +29,7 @@ export function RunWorkflowFile({ runId, onClose, onEdit }: {
         <Typography variant="subtitle2">{workflow.workflow_key}</Typography>
         <Typography variant="caption" className="mono-wrap">SHA-256: {workflow.sha256}</Typography>
         {workflow.truncated && <Alert severity="info">This workflow exceeds the preview limit. The hash covers the full captured workflow.</Alert>}
-        <Box component="pre" aria-label="Captured workflow YAML" className="activity-text" sx={{ overflow: "auto", maxHeight: "65vh" }}>{workflow.yaml}</Box>
+        <Box component="pre" aria-label="Captured workflow YAML" className="captured-source" sx={{ overflow: "auto", maxHeight: "65vh" }}>{displayed}</Box>
       </>}
     </Stack></DialogContent>
     <DialogActions>

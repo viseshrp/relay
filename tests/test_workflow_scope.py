@@ -29,7 +29,7 @@ def test_parsing_and_rendering_round_trip_a_nested_scope() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["build", "root", "node.build", "root.build#0", "root.build#x", "root.Build", "root.b#"],
+    ["build", "root", "node.build", "root.build#0", "root.build#x", "root.1Build", "root.b#"],
 )
 def test_an_invalid_scope_path_is_rejected(path: str) -> None:
     with pytest.raises(WorkflowValidationError):
@@ -70,7 +70,7 @@ def test_a_loop_iteration_scope_appends_its_one_based_index(
 
 @pytest.mark.parametrize(
     "build",
-    [partial(loop_iteration_scope, None, "loop", 0), partial(node_scope, None, "Bad")],
+    [partial(loop_iteration_scope, None, "loop", 0), partial(node_scope, None, "1Bad")],
 )
 def test_scopes_reject_a_zero_iteration_or_an_invalid_node_id(build: Callable[[], str]) -> None:
     with pytest.raises(WorkflowValidationError):

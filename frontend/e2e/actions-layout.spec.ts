@@ -5,7 +5,7 @@ import { jobDuration } from "../src/job";
 import { logMatches, logRows, rawLog } from "../src/log";
 import { runSummaryGraph } from "../src/run-graph";
 import type { RunEvent, RunNode } from "../src/types";
-import { post } from "./setup-helpers";
+import { historicalPost as post } from "./setup-helpers";
 
 function event(id: number, type: string, chunk: string): RunEvent {
   return { id, type, source: "command", version: 1, ts: "2026-10-07T12:00:00Z", payload: { chunk } };
@@ -99,6 +99,7 @@ test("long command logs stay searchable and downloadable with numbered virtual r
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Job logs" })).toBeVisible();
   await expect(dialog.locator(".active-match")).toContainText("2999 target");
+  await expect(dialog.locator(".active-match")).toBeInViewport();
   const fullscreenSearch = dialog.getByRole("textbox", { name: "Search logs" });
   await fullscreenSearch.focus();
   await fullscreenSearch.press("End");
@@ -109,6 +110,21 @@ test("long command logs stay searchable and downloadable with numbered virtual r
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(log).toBeFocused();
+  await expect(log.locator(".active-match")).toBeInViewport();
+  await log.getByRole("textbox", { name: "Search logs" }).fill("");
+  const viewport = log.getByRole("region", { name: "Command output lines" });
+  await viewport.evaluate((element) => { element.scrollTop = 2600; });
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(2600);
+  await log.getByRole("button", { name: "Log options" }).click();
+  await page.getByRole("menuitem", { name: "Show full screen (Shift+F)", exact: true }).click();
+  const expandedViewport = dialog.getByRole("region", { name: "Command output lines" });
+  await expect.poll(() => expandedViewport.evaluate((element) => element.scrollTop)).toBe(2600);
+  await expect(expandedViewport.locator('[data-log-row="100"]')).toBeInViewport();
+  await page.screenshot({ path: info.outputPath("actions-fullscreen-log.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(2600);
+  await expect(viewport.locator('[data-log-row="100"]')).toBeInViewport();
   await log.getByRole("button", { name: "Log options" }).click();
   const downloading = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: "Download logs", exact: true }).click();
@@ -147,6 +163,12 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
   await expect(log.getByText("Saved message 0", { exact: true })).toBeAttached();
   await log.getByRole("textbox", { name: "Search logs" }).fill("hidden searchable");
   await expect(log.getByText("Hidden searchable thought", { exact: true })).toBeVisible();
+  await log.getByRole("button", { name: "Log options" }).click();
+  await page.getByRole("menuitem", { name: "Show full screen (Shift+F)", exact: true }).click();
+  await expect(page.getByRole("dialog").getByText("Hidden searchable thought", { exact: true })).toBeInViewport();
+  await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(log.getByText("Hidden searchable thought", { exact: true })).toBeInViewport();
   const viewport = log.getByRole("region", { name: "Human review log" });
   const top = await viewport.evaluate((element) => element.scrollTop);
   await append(page, id, "New streamed message");
@@ -166,7 +188,7 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
   await page.setViewportSize({ width: 1440, height: 900 });
   const checks = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`check_${index}`, { type: "command", run: ["git", "status"], needs: ["prepare"] }]));
   const id = await launch(page, "actions-layout", { prepare: { type: "command", run: ["git", "status"] }, ...checks, finish: { type: "command", needs: Object.keys(checks), run: ["git", "status"] } }, "Build and verify");
-  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status, { timeout: 15000 }).toBe("succeeded");
   const detail = (await (await page.request.get(`/api/runs/${id}`)).json()).run;
   await page.goto("/?view=runs");
   await page.getByRole("navigation", { name: "Workflow sidebar" }).getByRole("button", { name: "Build and verify" }).click();

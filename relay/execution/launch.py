@@ -53,6 +53,7 @@ class LaunchRequest:
     launcher: str
     source_branch: str | None = None
     defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
+    event_context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,10 +205,79 @@ def launch_workflow(
 ) -> LaunchResult:
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
     workflow = load_launch_workflow(relay_root, request.workflow_key)
+    actions_context = {}
+    if workflow.root.definition.actions:
+        from relay.web.actions_bindings import freeze_bindings
+        from relay.workflows.actions.compiler import bind_routes, validate_commands
+        from relay.workflows.actions.language import resolve_inputs as actions_inputs
+        from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
+
+        actions_context = freeze_bindings(project_id)
+        from relay.workflows.schema import ActionsJobNode
+
+        node = next(iter(workflow.root.definition.nodes.values()))
+        if isinstance(node, ActionsJobNode):
+            validate_commands(
+                workflow.root.definition.actions, node.sources, request.defaults.commands
+            )
+        typed_inputs = actions_inputs(
+            workflow.root.definition.actions,
+            request.inputs,
+            environments=tuple(actions_context["environments"]),
+        )
+        source = project_launch_source(relay_root.parent)
+        actions_context["github"] = {
+            "workflow": workflow.root.definition.name,
+            "actor": request.launcher,
+            "repository": relay_root.parent.name,
+            "event_name": "workflow_dispatch",
+            "ref": f"refs/heads/{source.branch}" if source.branch else "",
+            "ref_name": source.branch or "",
+            "sha": source.commit,
+            **request.event_context,
+        }
+        if request.event_context.get("event_name") == "push" and (
+            request.event_context.get("sha") != source.commit
+            or (
+                not str(request.event_context.get("ref", "")).startswith("refs/tags/")
+                and request.event_context.get("ref") != f"refs/heads/{source.branch}"
+            )
+        ):
+            message = "The observed Git ref is not the current owner checkout source."
+            raise WorkflowValidationError(message)
+        from relay.workflows.actions import expressions
+
+        actions_context["run_name"] = expressions.string(
+            expressions.interpolate(
+                workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
+                {
+                    "github": actions_context["github"],
+                    "inputs": typed_inputs,
+                    "vars": actions_context["vars"],
+                },
+            )
+        )
+        workflow = bind_routes(
+            workflow,
+            {
+                "inputs": typed_inputs,
+                "vars": actions_context["vars"],
+                "github": actions_context["github"],
+            },
+        )
+        workflow = replace(
+            workflow,
+            prompts=tuple(
+                resolve_prompt(reference, relay_root)
+                for agent in iter_agent_nodes(workflow.root.definition.nodes)
+                for reference in agent.prompts
+            ),
+        )
+    else:
+        typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     workflow = apply_workflow_defaults(
         workflow, request.defaults, tuple(request.owner_agents), request.model
     )
-    typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     repository = relay_root.parent.resolve()
     snapshot_files = launch_source_files(workflow, repository)
     require_launch_clean(repository, snapshot_files)
@@ -253,6 +323,7 @@ def launch_workflow(
         launch_defaults={
             "workflow_defaults": request.defaults.model_dump(mode="json"),
             "recovery": workflow.root.definition.recovery.model_dump(mode="json"),
+            **({"actions_context": actions_context} if actions_context else {}),
         },
     )
     source_commit = current_head(repository)

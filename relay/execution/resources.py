@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,7 @@ class AttemptResources:
     run_id: str
     attempt_id: str
     token: str
+    overrides: Mapping[str, str] = field(default_factory=dict)
 
     def environment(self) -> dict[str, str]:
         """Point child temporary storage at this attempt, preserving other environment values."""
@@ -63,6 +65,7 @@ class AttemptResources:
                 "RELAY_ATTEMPT_ID": self.attempt_id,
             }
         )
+        result.update(self.overrides)
         return result
 
     def cleanup(self) -> None:

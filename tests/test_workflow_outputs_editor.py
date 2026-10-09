@@ -134,7 +134,7 @@ def test_an_artifact_that_is_not_utf8_fails_output_validation(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     ("text", "state"),
-    [("nodes: [", DraftValidationState.INVALID), (VALID, DraftValidationState.VALID)],
+    [("nodes: [", DraftValidationState.INVALID), (VALID, DraftValidationState.INVALID)],
 )
 def test_an_autosaved_draft_is_labeled_by_validity_and_read_back(
     relay_root: Path, text: str, state: DraftValidationState
@@ -151,7 +151,7 @@ def test_saving_replaces_the_file_and_discards_the_draft(relay_root: Path) -> No
     store = _MemoryDrafts()
     autosave_workflow_draft(store, relay_root, "p1", "main", "nodes: [", "h")
     base = read_workflow_document(store, relay_root, "p1", "main").base_hash
-    updated = "version: 1\nname: Updated\nnodes: {}\n"
+    updated = "name: Updated\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
 
     save_workflow_document(store, relay_root, "p1", "main", updated, base)
 

@@ -15,7 +15,7 @@ const paths: Record<ActionGlyph, string> = {
   pause: "M9 8v8m6-8v8", skip: "m5 19 14-14", circle: "",
 };
 export function ActionIcon({ name, size = 18 }: { name: ActionGlyph; size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+  return <svg style={{ flexShrink: 0 }} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
     {name === "clock" && <circle cx="12" cy="12" r="9" />}<path d={paths[name]} />
   </svg>;
 }

@@ -13,6 +13,7 @@ dependencies = [
     "click>=8.5.0",
     "Django==5.2.17",
     "huey==3.4.0",
+    "keyring>=25,<26",
     "platformdirs==4.11.8",
     "pydantic==2.13.5",
     "ruamel.yaml==0.19.1",
@@ -256,8 +257,9 @@ exclude = ["venv/", ".venv/"]
 [tool.deptry]
 # Tox installs third-party source into generated environments.
 exclude = ["venv/.*", ".venv/.*", "tests/.*", '^\.tox/']
-# Uvicorn is deliberately launched as `python -m uvicorn` by the supervisor.
-per_rule_ignores = { DEP002 = ["uvicorn"], DEP003 = ["hatchling"] }
+# Uvicorn is launched as a module. Native credentials dynamically load the
+# selected keyring.backends module in a bounded helper process.
+per_rule_ignores = { DEP002 = ["uvicorn", "keyring"], DEP003 = ["hatchling"] }
 
 [tool.liccheck]
 authorized_licenses = [
@@ -271,6 +273,7 @@ authorized_licenses = [
     "isc license",
     "mit",
     "mit license",
+    "mit-0", # cffi's verified MIT No Attribution license on Linux.
     "python software foundation license",
     "psf-2.0", # SPDX name for the already-authorized Python Software Foundation license.
 ]

@@ -64,9 +64,10 @@ button. A failed sign-out request also shows its error and can be retried.
 ### Open without a login
 
 Start with `relay up --no-login` to skip both onboarding and sign-in. The app
-opens directly and shows **Login disabled** instead of an account name and
-Sign out button. Anyone who can reach this computer's loopback service can
-use its project, run, and cleanup controls. Browser actions still require the
+opens directly, with **Settings** and **Help** in the header. It shows no
+account name or Sign out action. Anyone who can reach this computer's
+loopback service can use its project, run, and cleanup controls. Browser
+actions still require the
 CSRF cookie and header; host checks and the loopback-only bind remain in place.
 
 To keep this choice for later starts, set `"login_required": false` in the
@@ -76,7 +77,74 @@ restores the existing owner login, or onboarding if no owner was created.
 Disabling login leaves stored passwords, sessions, projects, and runs intact.
 Actions started without a login are attributed to `local`.
 
+## Home and navigation
+
+Opening `/` or `?view=home` shows activity across all registered projects.
+The Relay logo opens this Home dashboard. Workflow recovery drafts are saved
+before leaving an editor, including when returning through browser history.
+If Home remembers a project that no longer exists, it selects the served
+project or another registered project for the workspace controls.
+Existing workflow, run, job, interaction, and settings links remain valid;
+`view=author` still redirects to `view=workflows`.
+
+Home puts **Waiting for you** first, with **Open request** links to the exact
+request. It also shows active and paused runs, recent results with status and
+duration, and searchable project cards with workflow and run links. Counts
+cover every project. Project search filters only the cards. Large lists offer
+**Show more**; the dashboard uses bounded reads from `GET /api/dashboard`.
+It refreshes every five seconds while visible and on focus. **Refresh** reads
+immediately. A failed refresh keeps the last results and displays a warning.
+
+With login required, the username menu contains **Settings**, help actions,
+and **Sign out**. Without login, Settings and Help remain in the header.
+Account ownership, authentication, CLI storage, and browser-local first-use
+preferences keep their existing behavior.
+
 ## Get started
+
+After sign-in, or immediately with login disabled, a new browser shows four
+welcome slides: projects, workflow editing, run inspection, and settings.
+Embla Carousel provides slide navigation and swipe support. Real screenshots
+from the isolated browser fixture highlight the relevant controls in blue.
+They contain example data, never owner projects or provider output. Screenshots
+and explanations sit beside each other on desktop and stack below 800 pixels.
+Regenerate the images and measured highlights with
+`npm --prefix frontend run capture:welcome`, then rebuild the frontend.
+Use **Next**, **Back**, numbered slide buttons, or the arrow keys. **Skip
+introduction**, Escape, or clicking outside closes the introduction.
+
+A Driver.js spotlight tour follows the first introduction. It explains the
+navigation and each settings group, including model and permission defaults,
+commands, variables, recovery, repair rules, server options, and storage. Use
+**Next**, **Back**, **Finish**, or **Skip**; Escape also dismisses it. Tour
+controls retain keyboard focus, and highlighted settings cannot be edited.
+The tour opens settings sections as needed, then restores the starting view.
+It does not launch jobs, probe agent sessions, or save settings.
+
+Each introduction is marked seen when opened. Skipping, finishing, reloading,
+and switching projects do not repeat it. These choices are local to the
+browser and installation address. The username menu, or **Help** without a
+login, can replay either introduction.
+**Settings > Welcome and guided tour** also provides replay buttons and
+**Reset onboarding**, which makes both appear on the next opening or reload.
+When browser storage is blocked, dismissal lasts for the current app session;
+reset reports the storage limitation instead of claiming it was saved.
+Closing the welcome slides also hides the older setup welcome prompt; the
+agent checklist remains available from **Help > Get started**.
+
+When the project inventory is empty, the workspace shows a **Start using
+Relay** homepage with setup steps and **Open your first project**. Global
+settings remain accessible. A registered project with no workflows uses the
+normal workspace layout, so changing repositories does not change the UI.
+
+Question-mark buttons beside settings and workflow controls explain their
+meaning, inheritance, and effects on future runs. Open a tooltip by clicking,
+hovering, or focusing its button; Escape or clicking elsewhere dismisses it.
+Help remains available beside disabled controls. Text and select controls have
+a label and help button directly above the field. Switch help stays beside its
+text; action help stays beside its button, including when rows wrap. Controls
+and their help have separate accessible names and keyboard targets. Tooltips
+use readable spacing and stay inside the viewport.
 
 Every project uses the same workflow and run workspace, including projects
 with no previous runs. After sign-in, or immediately with login disabled, a
@@ -84,12 +152,13 @@ small welcome prompt offers **Get started**. Opening the checklist or choosing
 **Dismiss welcome** hides this prompt across all projects in that browser,
 including after a reload. This choice does not change project settings.
 
-The checklist opens in a dialog from the welcome prompt or **Help › Get
+The checklist opens in a dialog from the welcome prompt or the help menu’s **Get
 started**, including on the settings page. It shows the selected project,
 all five supported agents, workflow choices, and first-run controls. Close it
 at any time with **Close checklist**, Escape, or a click outside the dialog;
-focus returns to **Help**. Opening the checklist starts a bounded agent
-connection check; switching projects with it closed does not probe agents.
+focus returns to the help or username menu button. Opening the checklist
+starts a bounded agent connection check; switching projects with it closed
+does not probe agents.
 Launching a workflow closes it and opens the run page.
 
 Agent cards show **Ready to connect**, **Sign in required**, **Check failed**,
@@ -124,78 +193,57 @@ in **Settings > Storage**.
 card shows its purpose, job graph preview, required agent, and input types.
 Selection copies sources into `.relay/workflows/` and `.relay/prompts/` without
 overwriting owner files. The editor and launch use those copies. A blank
-workflow still accepts a name and opens with an empty canvas.
+workflow accepts a name and opens with one safe echo job.
 
 ## Author workflows
 
-Choose a saved workflow from the menu, or use **New workflow** to create one
-in the selected project. **Add stage** asks for a name and an action. Commands,
-agent work, and human reviews have ordinary form fields. The new stage starts
-after the previous one; **Start after** changes its dependencies. An empty
-workflow explains how to add the first stage.
+Choose a saved workflow or **Create workflow**. New sources use `jobs` and
+ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
+six-starter gallery copies selected sources without overwriting owner files.
 
-The stage list stays readable beside the canvas. Use **Find a stage** to
-filter it by name, then choose a stage to center it at a readable scale and
-open its settings below. Keyboard selection also brings the canvas into view
-and moves focus there. Choose the same stage again to restore its view after
-panning or zooming. **Fit View** provides an overview; the list lets you return
-to an individual stage without finding its small label in that overview.
+**Add job** adds a local job. Select its graph node to edit its name,
+dependencies, condition, timeout, environment, matrix, outputs, concurrency,
+cache mode, and failure tolerance. **Ordered step** selects a step. Steps can
+be added, moved, or removed. Scripts expose shell and working-directory fields;
+action steps expose their local action reference and input mapping. Agent steps
+provide an exact model override, prompt files, runtime prompt, and the selected
+provider's current effort choices. Permission modes are owner settings.
 
-Loading another workflow clears the search and starts the canvas at its first
-stage, with fresh positions and zoom. Navigation does not edit the workflow
-or its instructions. Unsaved agent instructions must be saved before choosing
-another stage.
+The CodeMirror YAML editor remains visible. Form edits and YAML edits share one
+CST document. Comments and unrelated fields survive edits; editing an alias
+detaches that occurrence. Server validation reports invalid fields before Save
+or Run. Pure validation never executes a command or probes an agent.
 
-Advanced workflow settings expose the YAML editor and workflow key. `review`
-and `review.yaml` both refer
-to `review.yaml`, and nested keys use `/`. Empty segments, backslashes, `.`,
-and `..` are rejected. The canvas and CodeMirror edit one eemeli `yaml`
-document. Typing valid YAML redraws the graph. Adding, deleting, or configuring
-a canvas node rewrites that same document instead of maintaining a second graph
-model.
+Drafts autosave after editing and before navigation. A renewed editing lease and
+saved-file hash protect publication. A recovered draft can be inspected or
+replaced with the saved source. Saving validates and publishes only that
+workflow. Saved sources and drafts use the current jobs-and-steps format.
+Historical run snapshots remain inspectable.
 
-The stage panel covers all six node types. Dependencies are selected by stage
-name. Commands have a Program field and one argument per line. For example,
-program `git` with arguments `status\n--short` saves
-`run: [git, status, --short]`; a line `a b` stays one argument. Relay does not
-invoke a shell. An optional advanced field accepts an explicit JSON argument
-array. Invalid JSON stays in that field and is not applied.
+JSON-formatted current workflow sources appear as block YAML in the editor and
+captured workflow viewer. Unchanged form fields do not create recovery drafts.
+Canceled requests cannot report errors in a different workflow or project.
+When the served frontend changes, an informational banner offers **Reload Relay**.
+Reload follows the normal navigation checks before opening the current version.
+Enabled tabs, sidebar navigation, and icon actions use the action color; gray
+controls indicate unavailable actions.
 
-Agent instructions can be written and saved in the stage panel. They live in
-the selected project's `.relay/prompts` folder. Saving checks the loaded file
-hash and requires the workflow's editing lease. Unsaved instructions block
-stage and project changes, workflow saving, and launch until they are saved.
-Use the model menu to select an advertised exact value; **Load available
-models** refreshes installed tools. A model read never grants permissions or
-changes provider defaults. The exact-value field remains available for a
-provider value already known to the owner.
+**Variables, secrets, environments and library** opens project and installation
+bindings, environment policies, and owner templates. Secret forms accept an
+explicit process-environment reference or native credential-store write. Saved
+secret values are never returned. Environment policies control approval, wait
+timers, allowed branches, and optional links. Library import/export preserves
+metadata and local sources; selecting a template publishes a project copy.
 
-Workflow reads warn about `exists` report outputs in root, loop, and child
-workflows. **Retain the report** explains file-retaining selectors and verdict
-checks. Warnings never rewrite outputs or answer a human review.
+Declared automatic events expose **Activate** buttons. Activation requires a
+saved source and explicit authorization for automatic writing jobs. The server
+freezes the activation revision and blocks changed sources until reactivation.
+Queue state, named artifacts, summaries, and annotations appear in run products.
+Environment approval uses its own attempt-specific control; a generic human
+answer cannot bypass it. Job failure tolerance retains the raw outcome beside
+the effective conclusion.
 
-Agent nodes show the effective tools from node, workflow, and owner preferences.
-The Agent tools field adds node preferences in selection order. Each tool has
-an Effort dropdown for the selected exact model and a Permission mode dropdown.
-Both start at **Provider default**, leaving the override absent from YAML and
-provider requests. Choosing a value saves it under the node's per-tool
-`agent_options`; choosing Provider default removes it.
-
-Choices come from a fresh disposable tool session after model selection. While
-loading, the dropdowns are disabled. A failed read shows an error and Retry.
-Changing the node's model override resets effort and loads its new choices.
-Unsupported saved values stay visible for correction and fail launch preflight.
-A tool without a separate selector offers only Provider default. Native
-Antigravity effort is included in the exact model slug; choose another exact
-model to change it. See [Coding agents](agents.md#effort-and-permission-modes).
-
-Canvas changes use canonical YAML formatting. Explicit Save compares the
-canonical text with the editor text and asks before normalizing collection
-style or spacing. For example, `nodes: {}` stays a valid compact empty mapping,
-while structurally edited mappings use block formatting. Comments and scalar
-values remain part of the parsed document. The dialog warns about formatting
-changes because round-trip libraries cannot preserve every presentation choice
-after structural canvas edits.
+See [Workflow language](workflows.md) for exact YAML keys and limits.
 
 ## Drafts, leases, and conflicts
 
@@ -257,13 +305,14 @@ files and reports until restored. The preview uses saved sources. After
 **Save**, the panel checks them again. A later file change can still block the
 server's launch check and appears as an error in the panel.
 
-**Advanced options** explains **Override model for this run**, **After a
-successful run**, and **Start from job**. Cached models are suggestions; Relay
+**Advanced options** explains **Override model for this run** and **After a
+successful run**. Historical workflows can also expose **Start from job**.
+Cached models are suggestions; Relay
 sends the exact entered value. Working copies can be deleted on success or
 kept; saved reports and commits remain available. Start points list only jobs
 declared in `entrypoints`. The server validates their required inputs and
-artifact evidence. **Automatic recovery** is a workflow setting in
-**Advanced workflow settings and YAML** and requires saving the workflow.
+artifact evidence. Current jobs start through their ordered steps. Configure
+bounded agent recovery through the action inputs and save the workflow.
 
 The server repeats validation, clean-Git, artifact, and exact-model preflight
 before it creates a run.
@@ -625,21 +674,11 @@ confirmed schedule. Automatic recovery never answers a declared human wait.
 
 ## Stage repairs
 
-Select an agent or command stage in the editor and open **Repairs**. Opening
-this dialog does not edit the workflow. New rules start disabled. **Done**
-applies the settings to the YAML document; **Cancel**, Escape, and the
-backdrop leave the document unchanged. Enable
-automatic repairs, choose the verdict output and accepted value, and set the
-number of fix-and-verify rounds. Configure the **Fixer** and **Verifier** with
-their own tools, exact models, effort, permissions, and instructions. Agent
-settings start at the provider defaults. Report fields choose the retained
-file and selector without requiring YAML edits.
-
-Save unsaved prompt text before changing settings or closing the dialog. **Done**
-returns to the workflow editor; **Save** validates and persists the policy.
-Deleting a stage or choosing an action that cannot use repairs removes its
-rule. Agent and command stages require the configured result output. See
-[Stage repair rules](workflows.md#stage-repair-rules) for defaults and bounds.
+Current workflows express bounded repair work with `relay/loop@v1` and a local
+reusable workflow. Agent recovery settings live in the agent action's inputs.
+Retained legacy runs expose their captured repair rounds and policies. See
+[Stage repair rules](workflows.md#stage-repair-rules) for the current action
+contract and historical compatibility.
 
 The run map and stage list show the main stages. **Repairing** and **Repairs
 stopped** identify a source stage whose repair work is active or failed. Open
@@ -766,9 +805,11 @@ Selecting a search match opens its collapsed thought or tool details.
 
 **Log options** offers timestamps, full screen, raw logs, copying, and a text
 download. Full screen also responds to Shift+F while the log has focus; Escape
-closes it. Downloads wait for complete history and preserve the command's
-original output bytes, including ANSI codes. Search, scrolling away from the
-bottom, or **Stop following** pauses automatic scrolling. **Jump to latest**
+closes it. Entering and leaving full screen preserves the reading position;
+an active search match stays visible. Downloads wait for complete history and
+preserve the command's original output bytes, including ANSI codes. Search,
+scrolling away from the bottom, or **Stop following** pauses automatic
+scrolling. **Jump to latest**
 returns to the newest output and resumes following. Logs scroll within their
 panel. Active run and job durations update each second and freeze at the
 recorded end time; durations over an hour display hours, minutes, and seconds.
@@ -777,8 +818,55 @@ recorded end time; durations over an hour display hours, minutes, and seconds.
 
 The header's **Settings** tab opens `view=settings`. Its sidebar contains
 **Global defaults**, **Project defaults**, **Server and account**,
-**Notifications**, and **Storage**, using the same colors and typography as
+**Notifications**, **Storage**, and **Welcome and guided tour**, using the
+same colors and typography as
 the workflow and run views. The setup checklist stays hidden here.
+
+Settings rows leave space between switches, labels, and help buttons. Long
+agent and workflow names wrap while their icons retain a fixed width. The
+save controls follow the form rather than floating over fields. Expanded
+groups have visible chevrons, and narrow screens stack adjacent fields.
+Closed agent-settings groups do not initialize configuration probes. Open a
+group to load the choices for its selected model.
+
+Desktop inputs are 36 pixels tall and buttons are 32 pixels tall. Touch
+controls keep 44-pixel targets. Numeric inputs and timeouts are 144 pixels
+wide; their labels and guidance can use more space. Ordinary choices use
+320 pixels, exact models and paths use 480, and multiline content uses 640,
+all capped by the available width. Related controls have an 8-pixel gap;
+fields use 16 pixels and sections use 24.
+
+The header uses one row where space permits and two rows below 1,050 pixels.
+The project picker uses a floating label, with help beside it. Project actions,
+navigation tabs, and the logo share a vertical center on desktop; the project
+group stays aligned on the second row on smaller screens. Related project
+controls have an 8-pixel gap, with 16 pixels between header groups.
+Sidebar positions and section anchors follow its measured height. Changing
+Settings sections brings the new heading below that header and focuses it.
+Project overrides distinguish the override switch, inherited state, and actual
+value. Save stays disabled until the form changes.
+
+Menus scroll internally within 320 pixels or the available viewport height.
+Closed selectors show one line and an explicit empty or inherited choice.
+Workflow and job navigation uses ellipsis; accessible names and hover titles
+retain full labels. Selecting a workflow stage brings its settings into view.
+Command editors and condition branches occupy a complete form row. Long
+instructions and arguments scroll after eight lines without changing their
+text. On small screens, welcome banner actions sit below its message.
+
+Storage uses labeled rows for counts and available sizes. Extended explanations
+are disclosures. Displayed absolute paths are abbreviated, including short
+POSIX, Windows drive, and network paths. Full-path disclosures and copy actions
+retain exact values; editable paths and captured output stay complete. Artifact
+rows stack in narrow panels so download links remain accessible. Captured
+workflow source uses a monospace view. Only real nested scopes add graph
+completion junctions; the top-level scope adds none.
+
+Frontend builds publish new assets before replacing the entry page and keep
+older hashed chunks for open tabs. If a workspace still cannot load, Relay
+shows **Reload Relay** instead of a blank page. Reload is explicit so a failed
+load never silently discards editing state. Browser workflow recovery drafts
+remain available after reloading.
 
 Global defaults cover ordered agents, exact shared and per-agent models,
 thinking effort, agent permissions, job timeouts, retry participation,
@@ -808,6 +896,13 @@ Changes to login, loopback address, port, and workers show a restart notice;
 startup flags still override saved choices. Notifications retain the existing
 browser-specific permission and preference. Storage shows installation paths
 and the selected project's sizes, counts, and confirmed cleanup controls.
+Installation folders use separate label and value columns. Long paths show
+their final two components; **Full path** reveals the exact value and
+**Copy path** copies it. Project cards, the setup checklist, and the folder
+browser use the same disclosure. Editable repository and file paths retain
+their complete values. Storage counts have distinct labels, totals, sizes,
+and explanations. An empty completed-run selector reads **No completed runs**
+and stays disabled.
 All cleanup actions live in Storage, including retries for temporary run
 resources. Run summaries, job logs, and advanced diagnostics have no cleanup
 controls. Failed cleanup keeps its confirmation open with the Relay error;
@@ -821,16 +916,11 @@ project/global defaults to apply. Job effort and permission menus offer
 option. Existing YAML editing, leases, prompts, and launch validation remain
 the source of workflow edits.
 
-Command job forms, including fixer and verifier roles, offer **Command source**:
-**Program and arguments** or **Shared command from Settings**. Shared commands
-show their saved arguments. A missing name remains visible as **not configured**
-and blocks launch. **Use inherited environment variables** and variable rows
-edit the job's `inherit_env` and `env` in the same YAML document.
-**Advanced workflow settings and YAML** has workflow variable rows and
-**Use project and global environment variables**. YAML edits populate these
-controls, and form edits update YAML. Arguments keep their literal boundaries;
-no shell syntax is expanded. Settings changes affect future launches; existing
-runs retain their resolved arguments and variables.
+Current argv steps use `relay/command@v1` with `argv` or a saved command name
+in `with.command`. Scripts use `run`, `shell`, and `working-directory`. Workflow,
+job, and step `env` mappings follow Actions precedence over frozen owner defaults.
+Owner command changes affect future launches; existing runs retain resolved
+arguments. Historical forms and run snapshots use their captured v1 rules.
 
 An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested

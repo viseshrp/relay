@@ -1,3 +1,4 @@
+import { PathDisplay } from "./PathDisplay";
 import {
   Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, InputLabel, Link, MenuItem, Paper, Select, Stack, TextField, Typography,
@@ -95,7 +96,7 @@ export function GetStarted({ project, requestProject, runSucceeded, onWorkflowCr
           <Box>
             <Typography variant="h6">1. Project ✓</Typography>
             <Typography>{project.display_name}</Typography>
-            <Typography variant="body2" color="text.secondary">{project.canonical_path}</Typography>
+            <PathDisplay path={project.canonical_path} label={project.display_name} />
             <Button onClick={onOpenProject}>Choose another project</Button>
           </Box>
           <Box>

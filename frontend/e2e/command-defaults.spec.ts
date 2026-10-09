@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { parse, stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { post, currentWorkflow } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -71,68 +71,46 @@ test("shared command and variable settings validate, reload, replace project map
   await expect(project.getByText("Project defaults saved. Future runs inherit these choices.")).toBeVisible();
 });
 
-test("command forms and workflow variables edit the YAML and launch their captured values", async ({ page }, info) => {
+test("command action inputs and scoped environment values save and execute", async ({ page }, info) => {
   const current = await (await page.request.get("/api/settings")).json();
   expect((await post(page, "/api/settings", { revision: current.revision, settings: { workflow_defaults: { commands: { test: ["git", "var", "GIT_AUTHOR_IDENT"] }, env: { GIT_AUTHOR_NAME: "Global Author" } } } })).ok()).toBeTruthy();
-  expect((await post(page, "/api/workflows", { key: "shared-command", holder: "create-command", yaml: stringify({ version: 1, name: "Shared command", nodes: { check: { type: "command", run: ["git", "status"] } } }) })).ok()).toBeTruthy();
-  await page.route("**/api/agents*", (route) => route.fulfill({ status: 503, json: { code: "agent_discovery_error", message: "Agent discovery unavailable.", context: {} } }));
+  const yaml = stringify({ name: "Shared command", env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { argv: '["git","status"]' } }] } } });
+  expect((await post(page, "/api/workflows", { key: "shared-command", holder: "create-command", yaml })).ok()).toBeTruthy();
+  await page.route("**/api/agents*", route => route.fulfill({ status: 503, json: { code: "agent_discovery_error", message: "Agent discovery unavailable.", context: {} } }));
   await page.goto("/?view=workflows&workflow=shared-command");
-  await page.locator(".react-flow__node").filter({ hasText: "check" }).click();
-  await page.getByRole("combobox", { name: "Command source", exact: true }).click();
-  await page.getByRole("option", { name: "Shared command from Settings", exact: true }).click();
-  await page.getByRole("combobox", { name: "Shared command", exact: true }).click();
-  await page.getByRole("option", { name: "test", exact: true }).click();
-  await page.getByRole("button", { name: "Add environment variable", exact: true }).click();
-  const job = page.getByRole("region", { name: "Environment variable 1", exact: true });
-  await job.getByRole("textbox", { name: "Variable name", exact: true }).fill("GIT_AUTHOR_NAME");
-  await job.getByRole("textbox", { name: "Value", exact: true }).fill("Command Job");
-  await page.getByRole("button", { name: "Advanced workflow settings and YAML", exact: true }).click();
-  const workflow = page.getByRole("region", { name: "Workflow environment", exact: true });
-  await workflow.getByRole("button", { name: "Add environment variable", exact: true }).click();
-  await workflow.getByRole("textbox", { name: "Variable name", exact: true }).fill("GIT_AUTHOR_NAME");
-  await workflow.getByRole("textbox", { name: "Value", exact: true }).fill("Workflow Author");
-  await workflow.getByRole("switch", { name: "Use project and global environment variables", exact: true }).uncheck();
+  const inputs = page.getByLabel("Action inputs", { exact: true });
+  await inputs.fill(JSON.stringify({ command: "test" })); await inputs.blur();
+  const env = page.getByLabel("Step environment variables", { exact: true });
+  await env.fill(JSON.stringify({ GIT_AUTHOR_NAME: "Command Job" })); await env.blur();
   await saveWorkflow(page);
-  const saved = (await (await page.request.get("/api/workflows/shared-command")).json()).yaml;
-  expect(parse(saved)).toMatchObject({ env: { GIT_AUTHOR_NAME: "Workflow Author" }, inherit_env: false, nodes: { check: { run: { command: "test" }, env: { GIT_AUTHOR_NAME: "Command Job" } } } });
+  expect(parse((await (await page.request.get("/api/workflows/shared-command")).json()).yaml)).toMatchObject({ env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { steps: [{ with: { command: "test" }, env: { GIT_AUTHOR_NAME: "Command Job" } }] } } });
   await page.reload();
-  await page.locator(".react-flow__node").filter({ hasText: "check" }).click();
-  await expect(page.getByRole("combobox", { name: "Shared command", exact: true })).toHaveText("test");
-  await expect(page.getByRole("textbox", { name: "Value", exact: true })).toHaveValue("Command Job");
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: info.outputPath("command-editor.png"), fullPage: true, animations: "disabled" });
-  const launch = await post(page, "/api/runs", { workflow_key: "shared-command", inputs: {} });
-  expect(launch.ok(), await launch.text()).toBeTruthy();
-  const { run_id: id } = await launch.json();
-  await expect.poll(async () => ["succeeded", "failed"].includes((await (await page.request.get(`/api/runs/${id}`)).json()).run.status)).toBeTruthy();
-  expect((await (await page.request.get(`/api/runs/${id}`)).json()).run.status, JSON.stringify(await (await page.request.get(`/api/runs/${id}/events`)).json())).toBe("succeeded");
-  await page.goto(`/?view=runs&run=${id}&job=root.check`);
+  await expect(inputs).toHaveValue(JSON.stringify({ command: "test" }, null, 2));
+  await expect(env).toContainText("Command Job");
+  await page.screenshot({ path: info.outputPath("command-editor.png"), fullPage: true });
+  const response = await post(page, "/api/runs", { workflow_key: "shared-command", inputs: {} });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const { run_id: id } = await response.json();
+  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  await page.goto(`/?view=runs&run=${id}&job=root.check.step_1`);
   await expect(page.getByRole("region", { name: "Job log", exact: true })).toContainText("Command Job");
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: info.outputPath("command-run.png"), fullPage: true, animations: "disabled" });
 });
 
-test("YAML edits populate command controls and unresolved names stay visible", async ({ page }) => {
-  const document = { version: 1, name: "Portable command", env: { WORKFLOW_VAR: "workflow" }, inherit_env: false, nodes: { check: { type: "command", run: { command: "missing" }, env: { JOB_VAR: "job" }, inherit_env: false } } };
+test("YAML edits populate action inputs and an unresolved command fails before launch", async ({ page }) => {
+  const document = { name: "Portable command", env: { WORKFLOW_VAR: "workflow" }, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { command: "missing" }, env: { JOB_VAR: "job" } }] } } };
   expect((await post(page, "/api/workflows", { key: "portable-command", holder: "create-portable", yaml: stringify(document) })).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=portable-command");
-  await page.locator(".react-flow__node").filter({ hasText: "check" }).click();
-  await expect(page.getByRole("combobox", { name: "Shared command", exact: true })).toHaveText("missing (not configured)");
-  await expect(page.getByRole("switch", { name: "Use inherited environment variables", exact: true })).not.toBeChecked();
-  await page.getByRole("button", { name: "Advanced workflow settings and YAML", exact: true }).click();
-  const workflow = page.getByRole("region", { name: "Workflow environment", exact: true });
-  await expect(workflow.getByRole("textbox", { name: "Value", exact: true })).toHaveValue("workflow");
-  const yaml = page.locator(".cm-content");
-  await yaml.click();
-  await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText(stringify({ ...document, nodes: { check: { type: "command", run: ["git", "log", "--oneline"], env: { JOB_VAR: "changed" } } } }));
-  await expect(page.getByRole("textbox", { name: "Program", exact: true })).toHaveValue("git");
-  await expect(page.getByRole("textbox", { name: "Arguments (one per line)", exact: true })).toHaveValue("log\n--oneline");
-  const jobVariables = page.getByRole("region", { name: "Environment variables", exact: true }).filter({ has: page.locator('input[value="JOB_VAR"]') });
-  await expect(jobVariables.getByRole("textbox", { name: "Value", exact: true })).toHaveValue("changed");
-  await expect(page.getByRole("switch", { name: "Use inherited environment variables", exact: true })).toBeChecked();
+  const inputs = page.getByLabel("Action inputs", { exact: true });
+  await expect(inputs).toHaveValue(JSON.stringify({ command: "missing" }, null, 2));
+  const invalid = await post(page, "/api/runs", { workflow_key: "portable-command", inputs: {} });
+  expect(invalid.status()).toBe(422);
+  const editor = page.locator(".cm-content");
+  await editor.click(); await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText(stringify({ ...document, jobs: { check: { "runs-on": "self-hosted", steps: [{ uses: "relay/command@v1", with: { argv: '["git","log","--oneline"]' }, env: { JOB_VAR: "changed" } }] } } }));
+  await expect(inputs).toHaveValue(JSON.stringify({ argv: '["git","log","--oneline"]' }, null, 2));
+  await expect(page.getByLabel("Step environment variables", { exact: true })).toHaveValue(JSON.stringify({ JOB_VAR: "changed" }, null, 2));
   await saveWorkflow(page);
-  expect(parse((await (await page.request.get("/api/workflows/portable-command")).json()).yaml)).toMatchObject({ nodes: { check: { run: ["git", "log", "--oneline"], env: { JOB_VAR: "changed" } } } });
+  expect(parse((await (await page.request.get("/api/workflows/portable-command")).json()).yaml).jobs.check.steps[0].with.argv).toBe('["git","log","--oneline"]');
 });
 
 test("advanced shared arguments and multiline variables preserve exact strings", async ({ page }) => {

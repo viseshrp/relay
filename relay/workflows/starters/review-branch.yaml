@@ -1,17 +1,22 @@
-version: 1
 name: Review my branch
-agents: [codex, claude, copilot, cursor, antigravity]
-inputs:
-  task:
-    type: string
-    description: What should the review focus on?
-    default: Review this branch for bugs and missing tests.
-    required: true
-nodes:
-  review:
-    type: agent
-    prompts: [{local: prompts/review-branch.md}]
-    writes: true
-    allow_no_commit: true
-    outputs:
-      ready: {label: {artifact: REVIEW.md, label: Ready}}
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What should the review focus on?
+        required: true
+        default: Review this branch for bugs and missing tests.
+        type: string
+jobs:
+  main:
+    runs-on: self-hosted
+    steps:
+    - uses: relay/agent@v1
+      with:
+        agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
+        prompt-files: prompts/review-branch.md
+        prompt: ${{ inputs.task }}
+    - uses: relay/validate-report@v1
+      with:
+        report: REVIEW.md
+        label: Ready
