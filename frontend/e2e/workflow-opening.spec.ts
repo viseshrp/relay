@@ -11,7 +11,7 @@ test("opening current JSON displays YAML without creating a recovery draft", asy
   await page.goto("/?view=workflows");
   await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeEnabled();
   const holder = await page.evaluate(() => sessionStorage.getItem("relay.editor-holder"));
-  const json = JSON.stringify({ name: "Current JSON", jobs: { work: { "runs-on": "self-hosted", steps: [{ run: "git status" }] } } }, null, 2);
+  const json = JSON.stringify({ name: "Current JSON", jobs: { work: { steps: [{ run: "git status" }] } } }, null, 2);
   expect((await post(page, "/api/workflows", { key: "current-json", holder, yaml: json })).ok()).toBeTruthy();
   const before = await (await page.request.get("/api/workflows/current-json.yaml")).json();
   await page.goto("/?view=workflows&workflow=current-json.yaml");
@@ -31,4 +31,26 @@ test("malformed source retains validation errors", async ({ page }) => {
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   await page.locator(".cm-content").fill("jobs: [\n");
   await expect(page.locator(".MuiAlert-colorError")).not.toHaveCount(0);
+});
+
+test("new workflows and added jobs use the local language without runner fields", async ({ page }) => {
+  await page.goto("/?view=workflows");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await expect(page.locator(".cm-content")).not.toContainText("runs-on");
+  await page.getByRole("button", { name: "Add job", exact: true }).click();
+  await expect(page.locator(".cm-content")).toContainText("job_1:");
+  await expect(page.locator(".cm-content")).not.toContainText("runs-on");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(page.locator(".MuiAlert-colorError")).toHaveCount(0);
+});
+
+test("removed platform syntax blocks saving and clears when removed", async ({ page }) => {
+  await page.goto("/?view=workflows");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page.locator(".cm-content").fill("jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n");
+  await expect(page.getByText(/runs-on: Unknown workflow field/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.locator(".cm-content").fill("jobs: {check: {steps: [{run: echo Ready}]}}\n");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(page.locator(".MuiAlert-colorError")).toHaveCount(0);
 });

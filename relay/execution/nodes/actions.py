@@ -127,21 +127,40 @@ def _export_outputs(context: AttemptContext, outputs: Mapping[str, str]) -> dict
     return accepted
 
 
+def _host_values(directory: Path | None) -> dict[str, str]:
+    machine = platform.machine().lower()
+    return {
+        "os": {"Darwin": "macOS", "Windows": "Windows"}.get(platform.system(), "Linux"),
+        "arch": {"arm64": "ARM64", "aarch64": "ARM64", "x86_64": "X64", "amd64": "X64"}.get(
+            machine, machine
+        ),
+        "name": platform.node(),
+        "temp": str(directory / "temp") if directory else "",
+    }
+
+
+def _environment(raw: object, values: Mapping[str, Any]) -> dict[str, str]:
+    resolved = expressions.interpolate(raw, values)
+    if not isinstance(resolved, Mapping):
+        message = "An environment expression must produce a mapping."
+        raise NodeExecutionError(message)
+    return {key: expressions.string(value) for key, value in resolved.items()}
+
+
 def _step_values(
     context: AttemptContext, node: ActionsStepNode, state: Mapping[str, Any]
 ) -> dict[str, Any]:
     base = _repository().execution_context(context.attempt.attempt_id)
     from relay.web.actions_bindings import job_secrets
 
-    values = {name: base[name] for name in ("github", "inputs", "vars", "needs")}
+    values = {name: base[name] for name in ("relay", "inputs", "vars", "needs")}
     values["inputs"] = node.caller_inputs or values["inputs"]
     values.update(
         {
             "env": dict(state.get("env", {})),
             "matrix": node.matrix,
             "strategy": {
-                "fail-fast": node.job.get("strategy", {}).get("fail-fast", True),
-                "max-parallel": 1,
+                "fail-fast": base["strategy"]["fail-fast"],
                 "job-index": state.get("matrix_index", 0),
                 "job-total": state.get("matrix_total", 1),
             },
@@ -158,15 +177,7 @@ def _step_values(
                 or "failure" in state.get("anonymous_statuses", {}).values()
                 else "success"
             },
-            "runner": {
-                "os": {"Darwin": "macOS", "Windows": "Windows"}.get(platform.system(), "Linux"),
-                "arch": "ARM64" if platform.machine().lower() in {"arm64", "aarch64"} else "X64",
-                "name": platform.node(),
-                "environment": "self-hosted",
-                "temp": str(context.resources.directory / "temp") if context.resources else "",
-                "tool_cache": "",
-                "debug": "",
-            },
+            "host": _host_values(context.resources.directory if context.resources else None),
             "secrets": job_secrets(
                 context.attempt.run_id, node.state_scope, state.get("environment_name")
             ),
@@ -174,8 +185,8 @@ def _step_values(
         }
     )
     values["vars"] = state.get("vars", values["vars"])
-    values["github"] = {
-        **values["github"],
+    values["relay"] = {
+        **values["relay"],
         "job": node.job_id,
         "action": node.step_id,
         "action_path": node.action_path,
@@ -288,7 +299,11 @@ def _children(
             if (
                 isinstance(node, ActionsJobNode)
                 and node.matrix_index is not None
-                and node.job.get("strategy", {}).get("fail-fast", True)
+                and expressions.truthy(
+                    _repository().execution_context(context.attempt.attempt_id)["strategy"][
+                        "fail-fast"
+                    ]
+                )
             ):
                 for other_key, other in records.items():
                     if other_key != key and other.status == "pending":
@@ -336,12 +351,6 @@ class ActionsJobExecutor:
                     message = "The matrix expression must produce a mapping."
                     raise NodeExecutionError(message)
                 variants = expand_matrix(resolved)
-            maximum = expressions.interpolate(
-                node.job.get("strategy", {}).get("max-parallel", 1), values
-            )
-            if maximum != 1:
-                message = "Relay executes one matrix variant at a time."
-                raise NodeExecutionError(message)
             _repository().set_matrix_manifest(context.attempt.node_run_id, variants)
             children = {
                 f"variant_{index + 1}": node.model_copy(
@@ -429,7 +438,7 @@ class ActionsJobExecutor:
             }
             state.update(
                 {
-                    "env": expressions.interpolate(environment, values),
+                    "env": _environment(environment, values),
                     "initialized": True,
                     "matrix_index": node.matrix_index or 0,
                     "environment_name": environment_name,
@@ -485,9 +494,9 @@ class ActionsJobExecutor:
                 if key.rsplit(".", 1)[0] == context.attempt.scope_path
             },
             "env": state["env"],
-            "runner": {},
+            "host": _host_values(resource.directory),
             "job": {"status": "failure" if kind is OutcomeKind.FAILED else "success"},
-            "strategy": {"max-parallel": 1},
+            "strategy": values["strategy"],
             "secrets": secrets,
         }
         outputs = {
@@ -741,26 +750,27 @@ class ActionsStepExecutor:
             message = "The step has no owned private resources."
             raise NodeExecutionError(message)
         paths = step_files(resources.directory)
-        artifact_list = resources.directory / "github-artifacts-list.json"
+        artifact_list = resources.directory / "relay-artifacts-list.json"
         artifact_list.write_text(
             json.dumps({"version": 1, "subjects": state["subjects"]}), encoding="utf-8"
         )
+        step_environment = _environment(node.step.get("env", {}), values)
         environment = {
             **{key: expressions.string(value) for key, value in state["env"].items()},
-            **cast(dict[str, Any], expressions.interpolate(node.step.get("env", {}), values)),
+            **step_environment,
             **{key: str(value) for key, value in paths.items()},
-            "GITHUB_ARTIFACTS_LIST": str(artifact_list),
-            "GITHUB_WORKSPACE": str(context.worktree),
-            "GITHUB_SHA": values["github"]["sha"],
-            "GITHUB_REF": values["github"]["ref"],
-            "GITHUB_RUN_ID": context.attempt.run_id,
-            "GITHUB_RUN_NUMBER": str(values["github"]["run_number"]),
-            "GITHUB_ACTION": node.step_id,
-            "GITHUB_ACTION_PATH": node.action_path,
-            "GITHUB_JOB": node.job_id,
-            "RUNNER_TEMP": str(resources.directory / "temp"),
-            "RUNNER_OS": values["runner"]["os"],
-            "RUNNER_ARCH": values["runner"]["arch"],
+            "RELAY_ARTIFACTS_LIST": str(artifact_list),
+            "RELAY_WORKSPACE": str(context.worktree),
+            "RELAY_SHA": values["relay"]["sha"],
+            "RELAY_REF": values["relay"]["ref"],
+            "RELAY_RUN_ID": context.attempt.run_id,
+            "RELAY_RUN_NUMBER": str(values["relay"]["run_number"]),
+            "RELAY_ACTION": node.step_id,
+            "RELAY_ACTION_PATH": node.action_path,
+            "RELAY_JOB": node.job_id,
+            "RELAY_HOST_TEMP": str(resources.directory / "temp"),
+            "RELAY_HOST_OS": values["host"]["os"],
+            "RELAY_HOST_ARCH": values["host"]["arch"],
         }
         if state["path"]:
             environment["PATH"] = os.pathsep.join(
@@ -768,7 +778,7 @@ class ActionsStepExecutor:
             )
         values["env"] = {
             **values["env"],
-            **cast(dict[str, Any], expressions.interpolate(node.step.get("env", {}), values)),
+            **step_environment,
         }
         log = CommandLog(context.runtime, context.attempt.attempt_id, masks)
         proxy = cast(RunnerStore, ActionRuntime(context.runtime, log, masks))
@@ -1201,7 +1211,7 @@ class ActionsStepExecutor:
                 for name, value in inputs.items()
             }
         )
-        environment["GITHUB_ACTION_PATH"] = str(directory)
+        environment["RELAY_ACTION_PATH"] = str(directory)
         if "post" in runs:
             state = read_state(state_path)
             state["posts"].append(
@@ -1212,8 +1222,8 @@ class ActionsStepExecutor:
                     "completed": False,
                     "condition": runs.get("post-if", "always()"),
                     "values": {
-                        "github": values["github"],
-                        "runner": values["runner"],
+                        "relay": values["relay"],
+                        "host": values["host"],
                         "inputs": dict(inputs),
                     },
                 }
@@ -1222,7 +1232,7 @@ class ActionsStepExecutor:
             post_dir = state_path.parent / f"post-{context.attempt.attempt_id}"
             shutil.copytree(directory, post_dir)
             state["posts"][-1]["argv"][1] = str(safe_resolve(post_dir, runs["post"]))
-            state["posts"][-1]["env"] = {**environment, "GITHUB_ACTION_PATH": str(post_dir)}
+            state["posts"][-1]["env"] = {**environment, "RELAY_ACTION_PATH": str(post_dir)}
             atomic_state(state_path, state)
         command = CommandNode(
             type="command",
@@ -1235,6 +1245,6 @@ class ActionsStepExecutor:
         outcome = CommandExecutor().execute(replace(context, attempt=attempt))
         if "post" in runs:
             state = read_state(state_path)
-            state["posts"][-1]["state"] = key_values(file_text(paths["GITHUB_STATE"]))
+            state["posts"][-1]["state"] = key_values(file_text(paths["RELAY_STATE"]))
             atomic_state(state_path, state)
         return outcome

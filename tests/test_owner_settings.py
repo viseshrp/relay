@@ -273,14 +273,11 @@ def test_launch_freezes_defaults_and_nested_jobs_without_rewriting_sources(
     fake_agents.install("codex", mode="configuration")
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     source = (
-        "name: Defaults\njobs:\n  wait:\n    runs-on: self-hosted\n"
+        "name: Defaults\njobs:\n  wait:\n"
         "    steps: [{uses: relay/human-wait@v1, with: {prompt: Approve}}]\n"
         "  child: {uses: ./.relay/workflows/child.yaml, needs: wait}\n"
     )
-    child = (
-        "name: Child\non: workflow_call\njobs:\n  work:\n    runs-on: self-hosted\n"
-        "    steps: [{uses: relay/agent@v1}]\n"
-    )
+    child = "name: Child\non: workflow_call\njobs:\n  work:\n    steps: [{uses: relay/agent@v1}]\n"
     served.write_workflow("parent", source)
     served.write_workflow("child", child)
     save_global(
@@ -376,7 +373,7 @@ def test_invalid_saved_provider_choices_fail_fresh_launch_proof_without_creating
     fake_agents.install("codex", mode="configuration")
     served.write_workflow(
         "defaults",
-        "name: Defaults\njobs: {work: {runs-on: self-hosted, steps: [{uses: relay/agent@v1}]}}\n",
+        "name: Defaults\njobs: {work: {steps: [{uses: relay/agent@v1}]}}\n",
     )
     save_global(
         {"agent_preferences": ["codex"], "workflow_defaults": {"providers": {"codex": option}}}

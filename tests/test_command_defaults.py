@@ -149,8 +149,7 @@ def test_missing_shared_command_rejects_launch_before_creating_run(
 ) -> None:
     served.write_workflow(
         "missing",
-        "name: Missing\njobs: {work: {runs-on: self-hosted, steps: "
-        "[{uses: relay/command@v1, with: {command: test}}]}}\n",
+        "name: Missing\njobs: {work: {steps: [{uses: relay/command@v1, with: {command: test}}]}}\n",
     )
     response = post(owner, "/api/runs", {"workflow_key": "missing", "inputs": {}})
     assert response.status_code == 422
@@ -170,13 +169,13 @@ def test_launch_freezes_literal_arguments_and_environment_through_child_dispatch
     monkeypatch.setenv("RELAY_TEST_BASE", "worker")
     save_defaults({"commands": {"test": arguments}, "env": {"RELAY_TEST_MODE": "global"}})
     source = (
-        "name: Frozen\njobs:\n  wait:\n    runs-on: self-hosted\n"
+        "name: Frozen\njobs:\n  wait:\n"
         "    steps: [{uses: relay/human-wait@v1, with: {prompt: Continue}}]\n"
         "  child: {uses: ./.relay/workflows/child.yaml, needs: wait}\n"
     )
     child = (
         "name: Child\non: workflow_call\nenv: {RELAY_TEST_MODE: workflow}\njobs:\n"
-        "  work:\n    runs-on: self-hosted\n    env: {RELAY_TEST_MODE: job}\n"
+        "  work:\n    env: {RELAY_TEST_MODE: job}\n"
         "    steps: [{uses: relay/command@v1, with: {command: test}}]\n"
     )
     served.write_workflow("parent", source)

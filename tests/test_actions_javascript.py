@@ -58,8 +58,8 @@ runs:
         "const marker = process.env['INPUT_MARKER-NAME'];\n"
         "if (!marker) throw new Error('missing exact input');\n"
         "fs.appendFileSync('main.txt', marker + '\\n');\n"
-        "fs.appendFileSync(process.env.GITHUB_OUTPUT, 'marker=' + marker + '\\n');\n"
-        "fs.appendFileSync(process.env.GITHUB_STATE, 'marker=' + marker + '\\n');\n",
+        "fs.appendFileSync(process.env.RELAY_OUTPUT, 'marker=' + marker + '\\n');\n"
+        "fs.appendFileSync(process.env.RELAY_STATE, 'marker=' + marker + '\\n');\n",
     )
     project.write(
         ".relay/actions/stateful/post.js",
@@ -80,7 +80,6 @@ def test_javascript_state_outputs_and_lifo_cleanup(
         "javascript",
         """jobs:
   main:
-    runs-on: self-hosted
     outputs:
       result: ${{ steps.first.outputs.marker }}-${{ steps.second.outputs.marker }}
     steps:
@@ -119,7 +118,6 @@ def test_javascript_cleanup_runs_after_a_waiting_job_is_canceled(
         "javascript-cancel",
         """jobs:
   main:
-    runs-on: self-hosted
     steps:
       - uses: ./.relay/actions/stateful
         with: {marker-name: canceled}
@@ -156,15 +154,14 @@ def test_failed_javascript_post_retains_summary_and_fails_job(
     project.write(
         ".relay/actions/stateful/post.js",
         "const fs = require('node:fs');\n"
-        "fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, 'Cleanup failed\\n');\n"
+        "fs.appendFileSync(process.env.RELAY_STEP_SUMMARY, 'Cleanup failed\\n');\n"
         "fs.writeFileSync('cleanup.txt', 'retained failure');\n"
         "process.exitCode = 1;\n",
     )
     project.commit("Add rejected cleanup proof")
     project.write_workflow(
         "javascript-post-failure",
-        "jobs: {main: {runs-on: self-hosted, steps: [{uses: ./.relay/actions/stateful, "
-        "with: {marker-name: first}}]}}\n",
+        "jobs: {main: {steps: [{uses: ./.relay/actions/stateful, with: {marker-name: first}}]}}\n",
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "javascript-post-failure")
@@ -192,7 +189,7 @@ def test_javascript_post_condition_uses_the_job_result_and_action_inputs(
     project.commit("Add conditional cleanup")
     project.write_workflow(
         "javascript-condition",
-        "jobs: {main: {runs-on: self-hosted, steps: [{uses: ./.relay/actions/stateful, "
+        "jobs: {main: {steps: [{uses: ./.relay/actions/stateful, "
         "with: {marker-name: first}}, {run: exit 1}]}}\n",
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
@@ -218,7 +215,7 @@ def test_expired_job_wait_runs_registered_cleanup_without_starting_new_steps(
     action(project, major)
     project.write_workflow(
         "javascript-expired",
-        "jobs: {main: {runs-on: self-hosted, timeout-minutes: 5, steps: "
+        "jobs: {main: {timeout-minutes: 5, steps: "
         "[{uses: ./.relay/actions/stateful, with: {marker-name: expired}}, "
         "{uses: relay/human-wait@v1, with: {prompt: Continue?}}, "
         "{run: echo never > never.txt}]}}\n",

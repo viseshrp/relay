@@ -16,7 +16,7 @@ from .identity import ProjectIdentity, canonical_path, identify_project
 
 _BLANK_WORKFLOW = (
     "name: Blank workflow\non: workflow_dispatch\njobs:\n"
-    "  main:\n    runs-on: self-hosted\n    steps:\n      - run: echo Ready\n"
+    "  main:\n    steps:\n      - run: echo Ready\n"
 )
 INITIAL_PROJECT_FILES = (
     ("workflows/workflow.yaml", _BLANK_WORKFLOW),

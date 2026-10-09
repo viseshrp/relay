@@ -48,7 +48,7 @@ accept the Actions jobs/steps dialect. Historical snapshots remain readable.
 
 | Method and path | Purpose and body |
 | --- | --- |
-| `GET /api/workflow-language` | Pinned language revision, supported fields, and limits |
+| `GET /api/workflow-language` | Relay schema, local contexts/properties, supported fields, and limits |
 | `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
@@ -75,7 +75,7 @@ Automatic activation is an owner operation. Deliveries remain deduplicated in
 SQLite, and writing triggers never activate merely by saving YAML.
 
 See [Workflow language](workflows.md) and the
-[compatibility record](workflow-language-compatibility.md) for event semantics,
+[local language audit](workflow-language-compatibility.md) for event semantics,
 credential references, frozen source rules, and expression contexts.
 
 ## Home dashboard

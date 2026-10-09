@@ -1,0 +1,1026 @@
+{
+  "version": "relay-local-1",
+  "derived_from": "actions/languageservices@4043eda158e16579cc5fb1b0b07a4bce2a76f0b5 (MIT; see LICENSE)",
+  "definitions": {
+    "workflow-root": {
+      "mapping": {
+        "properties": {
+          "on": "on",
+          "name": "workflow-name",
+          "description": "workflow-description",
+          "run-name": "run-name",
+          "defaults": "workflow-defaults",
+          "env": "workflow-env",
+          "concurrency": "workflow-concurrency",
+          "jobs": {
+            "type": "jobs",
+            "required": true
+          },
+          "cache-mode": "cache-mode"
+        }
+      },
+      "description": "Relay workflow: local jobs and ordered steps."
+    },
+    "workflow-name": {
+      "string": {}
+    },
+    "workflow-description": {
+      "string": {}
+    },
+    "run-name": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars"
+      ],
+      "string": {}
+    },
+    "on": {
+      "one-of": [
+        "local-event",
+        "local-events",
+        "on-mapping"
+      ],
+      "description": "Local manual inputs, reuse contracts, or explicitly activated automation."
+    },
+    "on-mapping": {
+      "mapping": {
+        "properties": {
+          "workflow_dispatch": "workflow-dispatch",
+          "workflow_call": "workflow-call",
+          "schedule": "schedule",
+          "push": "push",
+          "repository_dispatch": "repository-dispatch",
+          "workflow_run": "workflow-run"
+        }
+      }
+    },
+    "push": {
+      "one-of": [
+        "null",
+        "push-mapping"
+      ]
+    },
+    "push-mapping": {
+      "mapping": {
+        "properties": {
+          "branches": "event-branches",
+          "branches-ignore": "event-branches-ignore",
+          "tags": "event-tags",
+          "tags-ignore": "event-tags-ignore",
+          "paths": "event-paths",
+          "paths-ignore": "event-paths-ignore"
+        }
+      }
+    },
+    "schedule": {
+      "sequence": {
+        "item-type": "cron-mapping"
+      }
+    },
+    "workflow-run": {
+      "one-of": [
+        "null",
+        "workflow-run-mapping"
+      ]
+    },
+    "workflow-run-mapping": {
+      "mapping": {
+        "properties": {
+          "workflows": "workflow-run-workflows",
+          "branches": "event-branches",
+          "branches-ignore": "event-branches-ignore",
+          "conclusions": "local-conclusions"
+        }
+      }
+    },
+    "workflow-run-workflows": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-branches": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-branches-ignore": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-tags": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-tags-ignore": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-paths": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "event-paths-ignore": {
+      "one-of": [
+        "non-empty-string",
+        "sequence-of-non-empty-string"
+      ]
+    },
+    "repository-dispatch": {
+      "one-of": [
+        "null",
+        "repository-dispatch-mapping"
+      ]
+    },
+    "repository-dispatch-mapping": {
+      "mapping": {
+        "properties": {
+          "types": "sequence-of-non-empty-string"
+        }
+      }
+    },
+    "workflow-call": {
+      "one-of": [
+        "null",
+        "workflow-call-mapping"
+      ]
+    },
+    "workflow-call-mapping": {
+      "mapping": {
+        "properties": {
+          "inputs": "workflow-call-inputs",
+          "secrets": "workflow-call-secrets",
+          "outputs": "workflow-call-outputs"
+        }
+      }
+    },
+    "workflow-call-inputs": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "workflow-call-input-definition"
+      }
+    },
+    "workflow-call-input-definition": {
+      "mapping": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "workflow-call-input-type",
+            "required": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "default": "workflow-call-input-default"
+        }
+      }
+    },
+    "workflow-call-input-type": {
+      "one-of": [
+        "input-type-string",
+        "input-type-boolean",
+        "input-type-number"
+      ]
+    },
+    "input-type-string": {
+      "string": {
+        "constant": "string"
+      }
+    },
+    "input-type-boolean": {
+      "string": {
+        "constant": "boolean"
+      }
+    },
+    "input-type-number": {
+      "string": {
+        "constant": "number"
+      }
+    },
+    "input-type-choice": {
+      "string": {
+        "constant": "choice"
+      }
+    },
+    "input-type-environment": {
+      "string": {
+        "constant": "environment"
+      }
+    },
+    "workflow-call-input-default": {
+      "one-of": [
+        "string",
+        "boolean",
+        "number"
+      ]
+    },
+    "workflow-call-secrets": {
+      "mapping": {
+        "loose-key-type": "workflow-call-secret-name",
+        "loose-value-type": "workflow-call-secret-definition"
+      }
+    },
+    "workflow-call-secret-name": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "workflow-call-secret-definition": {
+      "one-of": [
+        "null",
+        "workflow-call-secret-mapping-definition"
+      ]
+    },
+    "workflow-call-secret-mapping-definition": {
+      "mapping": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "workflow-call-outputs": {
+      "mapping": {
+        "loose-key-type": "workflow-call-output-name",
+        "loose-value-type": "workflow-call-output-definition"
+      }
+    },
+    "workflow-call-output-name": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "workflow-call-output-definition": {
+      "mapping": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "value": {
+            "type": "workflow-output-context",
+            "required": true
+          }
+        }
+      }
+    },
+    "workflow-output-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "jobs"
+      ],
+      "string": {}
+    },
+    "workflow-dispatch": {
+      "one-of": [
+        "null",
+        "workflow-dispatch-mapping"
+      ]
+    },
+    "workflow-dispatch-mapping": {
+      "mapping": {
+        "properties": {
+          "inputs": "workflow-dispatch-inputs"
+        }
+      }
+    },
+    "workflow-dispatch-inputs": {
+      "mapping": {
+        "loose-key-type": "workflow-dispatch-input-name",
+        "loose-value-type": "workflow-dispatch-input"
+      }
+    },
+    "workflow-dispatch-input-name": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "workflow-dispatch-input": {
+      "mapping": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "workflow-dispatch-input-type"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "default": "workflow-dispatch-input-default",
+          "options": {
+            "type": "sequence-of-string"
+          }
+        }
+      }
+    },
+    "workflow-dispatch-input-type": {
+      "one-of": [
+        "input-type-string",
+        "input-type-boolean",
+        "input-type-number",
+        "input-type-environment",
+        "input-type-choice"
+      ]
+    },
+    "workflow-dispatch-input-default": {
+      "one-of": [
+        "string",
+        "boolean",
+        "number"
+      ]
+    },
+    "workflow-defaults": {
+      "mapping": {
+        "properties": {
+          "run": "workflow-defaults-run"
+        }
+      }
+    },
+    "workflow-defaults-run": {
+      "mapping": {
+        "properties": {
+          "shell": "shell",
+          "working-directory": "working-directory"
+        }
+      }
+    },
+    "workflow-env": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "secrets"
+      ],
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "string"
+      }
+    },
+    "jobs": {
+      "mapping": {
+        "loose-key-type": "job-id",
+        "loose-value-type": "job"
+      }
+    },
+    "job-id": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "job": {
+      "one-of": [
+        "job-factory",
+        "workflow-job"
+      ]
+    },
+    "job-factory": {
+      "mapping": {
+        "properties": {
+          "needs": "needs",
+          "if": "job-if",
+          "strategy": "strategy",
+          "name": {
+            "type": "string-strategy-context"
+          },
+          "timeout-minutes": {
+            "type": "number-strategy-context"
+          },
+          "continue-on-error": {
+            "type": "boolean-strategy-context"
+          },
+          "env": "job-env",
+          "environment": "job-environment",
+          "concurrency": "job-concurrency",
+          "outputs": "job-outputs",
+          "defaults": "job-defaults",
+          "steps": {
+            "type": "steps",
+            "required": true
+          },
+          "cache-mode": "cache-mode"
+        }
+      }
+    },
+    "workflow-job": {
+      "mapping": {
+        "properties": {
+          "name": {
+            "type": "string-strategy-context"
+          },
+          "uses": {
+            "type": "non-empty-string",
+            "required": true
+          },
+          "with": "workflow-job-with",
+          "secrets": "workflow-job-secrets",
+          "needs": "needs",
+          "if": "job-if",
+          "concurrency": "job-concurrency",
+          "strategy": "strategy",
+          "cache-mode": "cache-mode"
+        }
+      }
+    },
+    "workflow-job-with": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "scalar-needs-context"
+      }
+    },
+    "workflow-job-secrets": {
+      "one-of": [
+        "workflow-job-secrets-mapping",
+        "workflow-job-secrets-inherit"
+      ]
+    },
+    "workflow-job-secrets-mapping": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "scalar-needs-context-with-secrets"
+      }
+    },
+    "workflow-job-secrets-inherit": {
+      "string": {
+        "constant": "inherit"
+      }
+    },
+    "needs": {
+      "one-of": [
+        "sequence-of-non-empty-string",
+        "non-empty-string"
+      ]
+    },
+    "job-if": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "always(0,0)",
+        "failure(0,MAX)",
+        "cancelled(0,0)",
+        "success(0,MAX)"
+      ],
+      "string": {}
+    },
+    "strategy": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs"
+      ],
+      "mapping": {
+        "properties": {
+          "fail-fast": {
+            "type": "boolean"
+          },
+          "matrix": {
+            "type": "matrix",
+            "required": true
+          }
+        }
+      },
+      "description": "Serial local matrix expansion, bounded to 256 variants."
+    },
+    "matrix": {
+      "mapping": {
+        "properties": {
+          "include": {
+            "type": "matrix-filter"
+          },
+          "exclude": {
+            "type": "matrix-filter"
+          }
+        },
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "sequence"
+      }
+    },
+    "matrix-filter": {
+      "sequence": {
+        "item-type": "matrix-filter-item"
+      }
+    },
+    "matrix-filter-item": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "any"
+      }
+    },
+    "job-env": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets"
+      ],
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "string"
+      }
+    },
+    "workflow-concurrency": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars"
+      ],
+      "one-of": [
+        "string",
+        "concurrency-mapping"
+      ]
+    },
+    "job-concurrency": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "one-of": [
+        "non-empty-string",
+        "concurrency-mapping"
+      ]
+    },
+    "concurrency-mapping": {
+      "mapping": {
+        "properties": {
+          "group": {
+            "type": "non-empty-string",
+            "required": true
+          },
+          "cancel-in-progress": {
+            "type": "boolean"
+          },
+          "queue": {
+            "type": "concurrency-queue"
+          }
+        }
+      }
+    },
+    "concurrency-queue": {
+      "allowed-values": [
+        "single",
+        "max"
+      ],
+      "string": {}
+    },
+    "job-environment": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "one-of": [
+        "string",
+        "job-environment-mapping"
+      ]
+    },
+    "job-environment-mapping": {
+      "mapping": {
+        "properties": {
+          "name": {
+            "type": "job-environment-name",
+            "required": true
+          },
+          "url": {
+            "type": "string-host-context-no-secrets",
+            "description": "Local run link resolved after job completion."
+          }
+        }
+      }
+    },
+    "job-environment-name": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "string": {}
+    },
+    "job-defaults": {
+      "mapping": {
+        "properties": {
+          "run": "job-defaults-run"
+        }
+      }
+    },
+    "job-defaults-run": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "strategy",
+        "matrix",
+        "needs",
+        "env"
+      ],
+      "mapping": {
+        "properties": {
+          "shell": "shell",
+          "working-directory": "working-directory"
+        }
+      }
+    },
+    "job-outputs": {
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "string-host-context"
+      }
+    },
+    "steps": {
+      "sequence": {
+        "item-type": "steps-item"
+      },
+      "description": "Ordered scripts, built-in Relay actions, or frozen local actions."
+    },
+    "steps-item": {
+      "one-of": [
+        "run-step",
+        "regular-step"
+      ]
+    },
+    "run-step": {
+      "mapping": {
+        "properties": {
+          "name": "step-name",
+          "id": "step-id",
+          "if": "step-if",
+          "timeout-minutes": "step-timeout-minutes",
+          "run": {
+            "type": "string-steps-context",
+            "required": true
+          },
+          "continue-on-error": "step-continue-on-error",
+          "env": "step-env",
+          "working-directory": "string-steps-context",
+          "shell": "shell"
+        }
+      }
+    },
+    "regular-step": {
+      "mapping": {
+        "properties": {
+          "name": "step-name",
+          "id": "step-id",
+          "if": "step-if",
+          "continue-on-error": "step-continue-on-error",
+          "timeout-minutes": "step-timeout-minutes",
+          "uses": {
+            "type": "step-uses",
+            "required": true
+          },
+          "with": "step-with",
+          "env": "step-env"
+        }
+      }
+    },
+    "step-uses": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "step-continue-on-error": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "boolean": {}
+    },
+    "step-id": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "step-if": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "always(0,0)",
+        "failure(0,0)",
+        "cancelled(0,0)",
+        "success(0,0)",
+        "hashFiles(1,255)"
+      ],
+      "string": {}
+    },
+    "step-env": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "string"
+      }
+    },
+    "step-name": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "string": {}
+    },
+    "step-timeout-minutes": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "number": {}
+    },
+    "step-with": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "mapping": {
+        "loose-key-type": "non-empty-string",
+        "loose-value-type": "string"
+      }
+    },
+    "non-empty-string": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "sequence-of-non-empty-string": {
+      "sequence": {
+        "item-type": "non-empty-string"
+      }
+    },
+    "sequence-of-string": {
+      "sequence": {
+        "item-type": "string"
+      }
+    },
+    "scalar-needs-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "one-of": [
+        "string",
+        "boolean",
+        "number"
+      ]
+    },
+    "scalar-needs-context-with-secrets": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "secrets",
+        "strategy",
+        "matrix"
+      ],
+      "one-of": [
+        "string",
+        "boolean",
+        "number"
+      ]
+    },
+    "boolean-strategy-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "boolean": {}
+    },
+    "number-strategy-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "number": {}
+    },
+    "string-strategy-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "string": {}
+    },
+    "string-host-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env"
+      ],
+      "string": {}
+    },
+    "string-host-context-no-secrets": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "steps",
+        "job",
+        "host",
+        "env"
+      ],
+      "string": {}
+    },
+    "string-steps-context": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix",
+        "secrets",
+        "steps",
+        "job",
+        "host",
+        "env",
+        "hashFiles(1,255)"
+      ],
+      "string": {}
+    },
+    "shell": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "working-directory": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "cron-mapping": {
+      "mapping": {
+        "properties": {
+          "cron": {
+            "type": "cron-pattern",
+            "required": true
+          },
+          "timezone": "timezone-string"
+        }
+      }
+    },
+    "cron-pattern": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "timezone-string": {
+      "string": {
+        "require-non-empty": true
+      }
+    },
+    "cache-mode": {
+      "string": {},
+      "allowed-values": [
+        "none",
+        "read",
+        "write",
+        "write-only"
+      ]
+    },
+    "local-conclusions": {
+      "sequence": {
+        "item-type": "local-conclusion"
+      }
+    },
+    "local-conclusion": {
+      "allowed-values": [
+        "success",
+        "failure",
+        "cancelled"
+      ],
+      "string": {}
+    },
+    "local-event": {
+      "string": {},
+      "allowed-values": [
+        "workflow_dispatch",
+        "workflow_call",
+        "schedule",
+        "push",
+        "repository_dispatch",
+        "workflow_run"
+      ]
+    },
+    "local-events": {
+      "sequence": {
+        "item-type": "local-event"
+      }
+    }
+  }
+}

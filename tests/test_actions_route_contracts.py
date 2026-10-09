@@ -77,8 +77,8 @@ def test_input_compilation_preserves_public_types_defaults_and_topological_order
       mode: {type: choice, options: [a, b], default: a}
       target: {type: environment}
 jobs:
-  second: {needs: first, runs-on: self-hosted, steps: [{run: echo second}]}
-  first: {runs-on: self-hosted, timeout-minutes: 1.5, steps: [{run: echo first}]}
+  second: {needs: first, steps: [{run: echo second}]}
+  first: {timeout-minutes: 1.5, steps: [{run: echo first}]}
 """)
     )
     assert list(compiled.nodes) == ["first", "second"]
@@ -94,7 +94,7 @@ jobs:
 
 @pytest.mark.parametrize("timeout", [361, "12", True])
 def test_invalid_literal_job_deadlines_reject_compilation(timeout: object) -> None:
-    document = load("jobs: {main: {runs-on: self-hosted, steps: [{run: echo}]}}")
+    document = load("jobs: {main: {steps: [{run: echo}]}}")
     document.value["jobs"]["main"]["timeout-minutes"] = timeout
     with pytest.raises(WorkflowValidationError, match="at most 360"):
         definition(document)
@@ -103,8 +103,7 @@ def test_invalid_literal_job_deadlines_reject_compilation(timeout: object) -> No
 def test_command_preflight_traverses_reusable_and_composite_sources() -> None:
     sources = {
         ".relay/workflows/child.yaml": (
-            "jobs: {main: {runs-on: self-hosted, "
-            "steps: [{uses: relay/command@v1, with: {command: checked}}]}}"
+            "jobs: {main: {steps: [{uses: relay/command@v1, with: {command: checked}}]}}"
         ),
         ".relay/actions/local/action.yaml": (
             "name: Local\ndescription: Preflight\n"

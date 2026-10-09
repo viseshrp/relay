@@ -144,7 +144,7 @@ test("editing another project acquires and renews its lease before autosaving", 
     window.setInterval = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => interval(handler, delay === 30000 ? 1000 : delay, ...args)) as typeof window.setInterval;
   }, holder);
   const { project_id: projectId }: { project_id: string } = await (await post(page, "/__test__/storage-project")).json();
-  const source = "name: Cross project\njobs: {main: {runs-on: self-hosted, steps: [{run: echo original}]}}\n";
+  const source = "name: Cross project\njobs: {main: {steps: [{run: echo original}]}}\n";
   const created = await post(page, `/api/workflows?project=${projectId}`, { key: "cross-project", holder, yaml: source });
   expect(created.status(), await created.text()).toBe(201);
   const leases: number[] = [];

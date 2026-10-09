@@ -98,7 +98,7 @@ export function currentWorkflow(value: Record<string, any>) {
     else if (node.type === "agent") step = { uses: "relay/agent@v1", with: { agent: node.agents?.[0] || value.agents?.[0] || "codex", model: node.model || value.model || "m1" } };
     else if (node.type === "human_wait") step = { uses: "relay/human-wait@v1", with: { prompt: node.prompt } };
     else throw new Error("Use explicit Actions source for this fixture's control flow.");
-    jobs[id] = { "runs-on": "self-hosted", ...(node.needs?.length ? { needs: node.needs } : {}), ...(node.env ? { env: node.env } : {}), steps: [step] };
+    jobs[id] = { ...(node.needs?.length ? { needs: node.needs } : {}), ...(node.env ? { env: node.env } : {}), steps: [step] };
   }
   return { name: value.name, on: { workflow_dispatch: { inputs: definitions } }, ...(value.env ? { env: value.env } : {}), jobs };
 }

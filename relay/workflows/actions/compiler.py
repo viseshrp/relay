@@ -94,7 +94,7 @@ def _timeout(value: object, *, default: int | None = None) -> str | None:
 
 def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
     raw = step.get("with", {})
-    route_values = {name: values.get(name, {}) for name in ("inputs", "vars", "matrix", "github")}
+    route_values = {name: values.get(name, {}) for name in ("inputs", "vars", "matrix", "relay")}
     route = {}
     for field in ("agent", "agents", "model", "effort", "prompt-files"):
         if field in raw:
@@ -102,6 +102,7 @@ def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
                 for segment in expressions.segments(raw[field]):
                     if segment[0]:
                         tree = expressions.parse(segment[1])
+                        expressions.check_launch_context(tree)
 
                         def check(item: object) -> None:
                             if not isinstance(item, tuple) or not item:
@@ -116,7 +117,7 @@ def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
                                 return
                             if item[0] == "context" and str(item[1]).lower() not in route_values:
                                 message = (
-                                    "Agent routing must use launch-static inputs, vars, github, "
+                                    "Agent routing must use launch-static inputs, vars, relay, "
                                     "or a static matrix."
                                 )
                                 raise WorkflowValidationError(message)
@@ -211,7 +212,7 @@ def bind_routes(workflow: ValidatedWorkflow, values: Mapping[str, Any]) -> Valid
                 if item[0] == "context":
                     name = str(item[1]).lower()
                     return (
-                        name not in {"inputs", "vars", "matrix", "github"}
+                        name not in {"inputs", "vars", "matrix", "relay"}
                         or (name == "matrix" and bool(context.get("_dynamic_matrix")))
                         or (name == "inputs" and bool(context.get("_dynamic_inputs")))
                     )

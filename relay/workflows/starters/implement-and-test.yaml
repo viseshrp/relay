@@ -17,7 +17,6 @@ on:
         - npm
 jobs:
   main:
-    runs-on: self-hosted
     steps:
     - uses: relay/agent@v1
       with:

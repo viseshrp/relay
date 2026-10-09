@@ -217,7 +217,7 @@ def reconcile() -> None:
                     source_context = (
                         dict(run.snapshot.launch_defaults)
                         .get("actions_context", {})
-                        .get("github", {})
+                        .get("relay", {})
                     )
                     chain = source_context.get("chain", [])
                     if (
@@ -274,7 +274,7 @@ def reconcile() -> None:
         state="launching", created_at__lt=now - timedelta(minutes=5)
     )[:100]:
         recovered = Run.objects.filter(
-            snapshot__launch_defaults__actions_context__github__delivery_id=str(uncertain.pk)
+            snapshot__launch_defaults__actions_context__relay__delivery_id=str(uncertain.pk)
         ).first()
         TriggerDelivery.objects.filter(pk=uncertain.pk, state="launching").update(
             state="launched" if recovered else "blocked",

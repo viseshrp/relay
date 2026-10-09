@@ -95,7 +95,7 @@ def evaluate_eligibility(
         }
         needs = cast(dict, expression_context.get("needs", {}))
         values = {
-            "github": cast(dict, expression_context.get("run", {})).get("github", {}),
+            "relay": cast(dict, expression_context.get("run", {})).get("relay", {}),
             "inputs": expression_context.get("inputs", {}),
             "vars": cast(dict, expression_context.get("run", {})).get("vars", {}),
             "needs": {

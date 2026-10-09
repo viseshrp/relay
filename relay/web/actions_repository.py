@@ -20,6 +20,7 @@ from relay.paths import data_dir, safe_resolve, worktrees_dir
 from relay.vcs.commits import current_head, is_ancestor
 from relay.vcs.git import run_git
 from relay.vcs.worktree import require_project_worktree
+from relay.workflows.actions import expressions
 
 from .models import (
     ActionsJobLease,
@@ -304,32 +305,22 @@ def node_context(node: NodeRun, attempt_number: int = 1) -> dict[str, Any]:
     snapshot = RunSnapshot.objects.get(run=run)
     launch = cast(dict[str, Any], snapshot.launch_defaults)
     context = cast(dict[str, Any], launch.get("actions_context", {}))
-    github = {
+    relay_context = {
         "actor": cast(str, run.launcher),
         "repository": cast(str, project.display_name),
-        "repository_owner": "local",
         "workspace": cast(str, run.worktree_path),
         "workflow": cast(str, run.title),
         "workflow_ref": cast(str, run.workflow_key),
         "run_id": str(run.pk),
         "run_number": cast(int, run.number),
-        "run_attempt": attempt_number,
+        "attempt_number": attempt_number,
         "sha": cast(str, run.source_commit),
         "ref": f"refs/heads/{run.source_branch}" if run.source_branch else "",
         "ref_name": cast(str, run.source_branch) or "",
         "ref_type": "branch",
         "event_name": "workflow_dispatch",
-        "event": {
-            "inputs": {
-                name: "true" if value is True else "false" if value is False else str(value)
-                for name, value in cast(dict, snapshot.typed_inputs).items()
-            }
-        },
-        "server_url": "",
-        "api_url": "",
-        "graphql_url": "",
-        "token": "",
-        **cast(dict, context.get("github", {})),
+        "event": {"inputs": dict(snapshot.typed_inputs)},
+        **cast(dict, context.get("relay", {})),
     }
     needs = {}
     frozen = cast(dict[str, Any], node.frozen_def)
@@ -338,6 +329,7 @@ def node_context(node: NodeRun, attempt_number: int = 1) -> dict[str, Any]:
         owner = NodeRun.objects.get(run=run, scope_path=frozen["state_scope"])
         frozen = cast(dict[str, Any], owner.frozen_def)
         parent = cast(str | None, owner.parent_scope_path)
+    job_frozen = frozen
     if frozen.get("matrix_index") is not None:
         coordinator = NodeRun.objects.get(run=run, scope_path=parent)
         frozen = cast(dict[str, Any], coordinator.frozen_def)
@@ -351,8 +343,8 @@ def node_context(node: NodeRun, attempt_number: int = 1) -> dict[str, Any]:
             "skipped": "skipped",
         }.get(cast(str, dependency.status), "")
         needs[needed] = {"outputs": cast(dict, dependency.outputs), "result": result}
-    return {
-        "github": github,
+    values = {
+        "relay": relay_context,
         "inputs": cast(dict, node.scope_inputs) if parent else cast(dict, snapshot.typed_inputs),
         "vars": cast(dict, context.get("vars", {})),
         "needs": needs,
@@ -368,6 +360,15 @@ def node_context(node: NodeRun, attempt_number: int = 1) -> dict[str, Any]:
         "_launch": launch,
         "_context": context,
     }
+    values["matrix"] = job_frozen.get("matrix", {})
+    values["strategy"] = {
+        "fail-fast": expressions.interpolate(
+            job_frozen.get("job", {}).get("strategy", {}).get("fail-fast", True), values
+        ),
+        "job-index": job_frozen.get("matrix_index") or 0,
+        "job-total": len(matrix_manifest(str(run.pk), cast(str, node.scope_path))) or 1,
+    }
+    return values
 
 
 def scope_context(run_id: str, scope: str) -> dict[str, Any]:
@@ -380,7 +381,6 @@ def scope_context(run_id: str, scope: str) -> dict[str, Any]:
     frozen = cast(dict[str, Any], node.frozen_def)
     values["inputs"] = frozen.get("caller_inputs") or values["inputs"]
     values["matrix"] = frozen.get("matrix", {})
-    values["strategy"] = {"max-parallel": 1}
     return values
 
 
@@ -680,7 +680,7 @@ def environment_gate(attempt_id: str, environment: str, values: Mapping[str, Any
         message = f"Environment {environment!r} is not configured."
         raise PersistenceError(message)
     branches = configuration["branches"]
-    if branches and not matches(values["github"]["ref_name"], branches):
+    if branches and not matches(values["relay"]["ref_name"], branches):
         message = "The launch branch is not allowed by this environment."
         raise PersistenceError(message)
     record = NodeAttempt.objects.select_related("node_run__run").get(pk=attempt_id)

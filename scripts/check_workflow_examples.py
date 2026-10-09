@@ -27,7 +27,6 @@ on:
         required: true
 jobs:
   check:
-    runs-on: self-hosted
     steps:
       - uses: relay/command@v1
         with:

@@ -77,12 +77,12 @@ def test_command_file_utf8_bom_and_empty_lines(tmp_path: Path) -> None:
 def test_output_limits_use_utf16_and_environment_values_reject_nul(tmp_path: Path) -> None:
     files = action_files.step_files(tmp_path)
     state = action_files.read_state(tmp_path / "state")
-    files["GITHUB_OUTPUT"].write_bytes(b"v=" + b"x" * (action_files.MAX_FILE // 2))
+    files["RELAY_OUTPUT"].write_bytes(b"v=" + b"x" * (action_files.MAX_FILE // 2))
     with pytest.raises(NodeExecutionError, match="output limit"):
         action_files.consume(state, "attempt", files, tmp_path)
     assert state["consumed"] == []
-    files["GITHUB_OUTPUT"].write_bytes(b"")
-    files["GITHUB_ENV"].write_bytes(b"VALUE=bad\0")
+    files["RELAY_OUTPUT"].write_bytes(b"")
+    files["RELAY_ENV"].write_bytes(b"VALUE=bad\0")
     with pytest.raises(NodeExecutionError):
         action_files.consume(state, "attempt", files, tmp_path)
     assert state["env"] == {}
@@ -91,13 +91,13 @@ def test_output_limits_use_utf16_and_environment_values_reject_nul(tmp_path: Pat
 def test_declared_subjects_reject_missing_conflicting_and_excessive_reports(tmp_path: Path) -> None:
     with pytest.raises(PathSafetyError, match="regular workspace file"):
         action_files.declared_subjects("missing", tmp_path, [])
-    reference = "oci://registry.example/image@sha512:" + "a" * 128
-    previous = [{"name": "registry.example/image", "digest": "sha512:" + "b" * 128, "kind": "oci"}]
+    (tmp_path / "result.txt").write_text("bytes", encoding="utf-8")
+    previous = [{"name": "result.txt", "digest": "sha256:" + "b" * 64, "kind": "file"}]
     with pytest.raises(NodeExecutionError, match="Conflicting"):
-        action_files.declared_subjects(reference, tmp_path, previous)
-    text = "\n".join(
-        "oci://registry.example/image" + str(i) + "@sha256:" + "a" * 64 for i in range(501)
-    )
+        action_files.declared_subjects("result.txt", tmp_path, previous)
+    for index in range(501):
+        (tmp_path / f"result-{index}.txt").write_text("bytes", encoding="utf-8")
+    text = "\n".join(f"result-{index}.txt" for index in range(501))
     with pytest.raises(NodeExecutionError, match="500"):
         action_files.declared_subjects(text, tmp_path, [])
 

@@ -17,8 +17,8 @@ from .language import (
     _inspect_tree,
     _issue,
     _mapping,
-    _unsupported,
     _validate_type,
+    validate_steps,
 )
 
 
@@ -41,11 +41,9 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
     unknown = value.keys() - {
         "name",
         "description",
-        "author",
         "inputs",
         "outputs",
         "runs",
-        "branding",
     }
     if unknown or any(
         not isinstance(value.get(field), str) or not value[field]
@@ -72,25 +70,6 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
                     raise _issue(f"action.{kind}.{name}.{field}", "Expected string.")
             if not isinstance(item.get("description"), str):
                 raise _issue(f"action.{kind}.{name}.description", "Expected string description.")
-    if "author" in value and not isinstance(value["author"], str):
-        raise _issue("action.author", "Expected string.")
-    if "branding" in value:
-        branding = _mapping(value["branding"], "action.branding")
-        if branding.keys() - {"icon", "color"} or any(
-            not isinstance(item, str) for item in branding.values()
-        ):
-            raise _issue("action.branding", "Use string icon and color fields.")
-        if branding.get("color", "white") not in {
-            "white",
-            "yellow",
-            "blue",
-            "green",
-            "orange",
-            "red",
-            "purple",
-            "gray-dark",
-        }:
-            raise _issue("action.branding.color", "Unsupported branding color.")
     runs = _mapping(value.get("runs"), "action.runs")
     using = runs.get("using")
     if using == "composite":
@@ -99,8 +78,8 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
         steps = runs.get("steps")
         if not isinstance(steps, list) or not steps:
             raise _issue("action.runs.steps", "Composite actions require ordered steps.")
-        _unsupported({"jobs": {"composite": {"steps": steps}}}, "workflow")
         runs["steps"] = _validate_type("steps", steps, "action.runs.steps", ("inputs",))
+        validate_steps(runs["steps"], "action.runs.steps")
         for step in cast(list[Mapping[str, Any]], runs["steps"]):
             from .builtins import CONTRACTS, validate_inputs
 
@@ -130,15 +109,17 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
             if field in runs and (not isinstance(runs[field], str) or "${{" in runs[field]):
                 raise _issue(f"action.runs.{field}", "Use a static local script path.")
         if "post-if" in runs:
+            if "post" not in runs:
+                raise _issue("action.runs.post-if", "A post condition requires a post hook.")
             _expression_check(
                 runs["post-if"],
                 "step-if",
                 (
-                    "github",
+                    "relay",
                     "inputs",
                     "env",
                     "job",
-                    "runner",
+                    "host",
                     "always()",
                     "cancelled()",
                     "success()",
@@ -146,6 +127,12 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
                 ),
                 "action.runs.post-if",
             )
+        for name, item in value.get("outputs", {}).items():
+            if "value" in item:
+                raise _issue(
+                    f"action.outputs.{name}.value",
+                    "JavaScript outputs use RELAY_OUTPUT; value is for composites.",
+                )
     else:
         raise _issue(
             "action.runs.using",

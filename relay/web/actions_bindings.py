@@ -32,7 +32,7 @@ def put_binding(
     if (
         not NAME.fullmatch(name)
         or len(name) > 100
-        or name.startswith(("GITHUB_", "RUNNER_"))
+        or name.startswith("RELAY_")
         or kind not in {"variable", "secret"}
     ):
         message = "Invalid variable or secret name."

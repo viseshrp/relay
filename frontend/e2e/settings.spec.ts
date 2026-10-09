@@ -32,7 +32,7 @@ test("global models and thinking defaults save, survive reload, and launch with 
   await panel.getByRole("button", { name: /^Codex/ }).click();
   await expect(configuration.getByRole("combobox", { name: "Thinking effort", exact: true })).toHaveText("Low");
   await page.screenshot({ path: info.outputPath("settings-global.png"), fullPage: true, animations: "disabled" });
-  const created = await post(page, "/api/workflows", { key: "global-agent", holder: "global-agent", yaml: "name: Global agent\njobs:\n  work:\n    runs-on: self-hosted\n    steps:\n      - id: agent\n        uses: relay/agent@v1\n        with: {agent: codex}\n" });
+  const created = await post(page, "/api/workflows", { key: "global-agent", holder: "global-agent", yaml: "name: Global agent\njobs:\n  work:\n    steps:\n      - id: agent\n        uses: relay/agent@v1\n        with: {agent: codex}\n" });
   expect(created.ok(), await created.text()).toBeTruthy();
   const launch = await post(page, "/api/runs", { workflow_key: "global-agent", inputs: {} });
   expect(launch.ok(), await launch.text()).toBeTruthy();

@@ -26,16 +26,16 @@ def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path:
     output = tmp_path / "output"
     output.write_text("", encoding="utf-8")
     source = (
-        '[System.IO.File]::WriteAllText($env:GITHUB_OUTPUT, "value=ready`n", '
+        '[System.IO.File]::WriteAllText($env:RELAY_OUTPUT, "value=ready`n", '
         "[System.Text.UTF8Encoding]::new($false))"
         if os.name == "nt"
-        else 'printf "value=ready\\n" > "$GITHUB_OUTPUT"'
+        else 'printf "value=ready\\n" > "$RELAY_OUTPUT"'
     )
     arguments = shell_script(tmp_path, source, None)
     assert Path(arguments[0]).stem.lower() in ({"pwsh"} if os.name == "nt" else {"bash", "sh"})
     subprocess.run(  # noqa: S603 - owned test script with the platform's default interpreter
         arguments,
-        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        env={**os.environ, "RELAY_OUTPUT": str(output)},
         check=True,
         capture_output=True,
         timeout=15,
@@ -60,37 +60,37 @@ def test_invalid_file_commands_are_rejected(text: str) -> None:
 def test_step_files_are_consumed_once_and_env_is_visible_to_later_steps(tmp_path: Path) -> None:
     state = read_state(tmp_path / "state")
     paths = step_files(tmp_path)
-    paths["GITHUB_ENV"].write_text("CUSTOM=next\n", encoding="utf-8")
-    paths["GITHUB_OUTPUT"].write_text("value=42\n", encoding="utf-8")
-    paths["GITHUB_PATH"].write_text(str(tmp_path) + "\n", encoding="utf-8")
+    paths["RELAY_ENV"].write_text("CUSTOM=next\n", encoding="utf-8")
+    paths["RELAY_OUTPUT"].write_text("value=42\n", encoding="utf-8")
+    paths["RELAY_PATH"].write_text(str(tmp_path) + "\n", encoding="utf-8")
     assert consume(state, "attempt", paths, tmp_path)[0] == {"value": "42"}
     assert state["env"] == {"CUSTOM": "next"}
     assert state["path"] == [str(tmp_path)]
-    paths["GITHUB_ENV"].write_text("CUSTOM=changed\n", encoding="utf-8")
+    paths["RELAY_ENV"].write_text("CUSTOM=changed\n", encoding="utf-8")
     assert consume(state, "attempt", paths, tmp_path)[0] == {}
     assert state["env"]["CUSTOM"] == "next"
 
 
-@pytest.mark.parametrize("name", ["GITHUB_SHA", "RUNNER_OS", "NODE_OPTIONS"])
+@pytest.mark.parametrize("name", ["RELAY_SHA", "RELAY_HOST_OS", "NODE_OPTIONS"])
 def test_file_commands_cannot_overwrite_protected_environment(name: str, tmp_path: Path) -> None:
     paths = step_files(tmp_path)
-    paths["GITHUB_ENV"].write_text(f"{name}=unsafe\n", encoding="utf-8")
+    paths["RELAY_ENV"].write_text(f"{name}=unsafe\n", encoding="utf-8")
     with pytest.raises(NodeExecutionError):
         consume(read_state(tmp_path / "state"), "attempt", paths, tmp_path)
 
 
-def test_artifact_subjects_hash_files_and_accept_full_oci_digests(tmp_path: Path) -> None:
+def test_artifact_subjects_hash_and_retain_only_local_files(tmp_path: Path) -> None:
     (tmp_path / "result.txt").write_text("bytes", encoding="utf-8")
-    subjects, retained = declared_subjects(
-        "# comment\nresult.txt\noci://registry.example/image@sha256:" + "a" * 64,
-        tmp_path,
-        [],
-    )
-    assert [item["kind"] for item in subjects] == ["oci", "file"]
+    subjects, retained = declared_subjects("# comment\nresult.txt", tmp_path, [])
+    assert [item["kind"] for item in subjects] == ["file"]
     assert retained == {"subject:result.txt": "result.txt"}
     assert declared_subjects("result.txt", tmp_path, subjects)[0] == subjects
-    with pytest.raises(NodeExecutionError):
-        declared_subjects("registry.example/image@sha256:ab", tmp_path, [])
+    for reference in (
+        "oci://registry.example/image@sha256:" + "a" * 64,
+        "registry.example/image@sha256:ab",
+    ):
+        with pytest.raises(NodeExecutionError, match="local artifact file"):
+            declared_subjects(reference, tmp_path, [])
 
 
 @pytest.mark.parametrize("relative", ["../outside", ".git/config", "/outside"])

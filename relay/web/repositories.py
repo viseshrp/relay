@@ -3192,7 +3192,6 @@ class DjangoExecutionStore(DjangoAgentStore):
                         frozen.get("caller_inputs") or launch_context["inputs"]
                     )
                     launch_context["matrix"] = frozen.get("matrix", {})
-                    launch_context["strategy"] = {"max-parallel": 1}
                     try:
                         with transaction.atomic():
                             admitted = admit_queue(node, launch_context)

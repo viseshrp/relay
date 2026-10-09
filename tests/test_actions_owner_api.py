@@ -18,7 +18,7 @@ from relay.execution.nodes import node_executors
 from relay.web.models import ActionsArtifact, NodeAttempt, WorkflowBinding, WorkflowEnvironment
 from tests.support import InlineEngine, RelayProject
 
-BASE = "name: Owner source\njobs: {main: {runs-on: self-hosted, steps: [{run: echo ready}]}}\n"
+BASE = "name: Owner source\njobs: {main: {steps: [{run: echo ready}]}}\n"
 
 
 def post(client: Client, url: str, body: dict[str, Any]) -> HttpResponse:
@@ -63,10 +63,7 @@ def test_library_import_export_captures_project_prompts_and_transitive_actions(
         "name: Local\ndescription: Frozen\nruns: {using: node20, main: main.js}\n",
     )
     project.write(".relay/actions/local/main.js", "process.stdout.write('ready');\n")
-    source = (
-        "# Preserve me\njobs: {main: {runs-on: self-hosted, "
-        "steps: [{uses: ./.relay/actions/local}]}}\n"
-    )
+    source = "# Preserve me\njobs: {main: {steps: [{uses: ./.relay/actions/local}]}}\n"
     response = post(
         owner,
         "/api/workflow-library",
@@ -203,7 +200,7 @@ def test_scoped_bindings_round_trip_revision_delete_and_secret_redaction(
         {"value": 1},
         {"source": []},
         {"reference": False},
-        {"name": "GITHUB_TOKEN"},
+        {"name": "RELAY_TOKEN"},
         {"name": "bad.name"},
         {"name": "x" * 101},
         {"kind": "other"},
@@ -325,8 +322,7 @@ def test_named_products_download_exact_bytes_and_reject_expired_or_corrupt_data(
 ) -> None:
     project.write_workflow(
         "products",
-        "jobs: {main: {runs-on: self-hosted, steps: "
-        "[{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}",
+        "jobs: {main: {steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]}}",
     )
     engine = InlineEngine(node_executors(), tmp_path / "attempt-artifacts")
     run_id = engine.launch(project, "products")

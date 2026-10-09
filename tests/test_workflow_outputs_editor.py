@@ -151,7 +151,7 @@ def test_saving_replaces_the_file_and_discards_the_draft(relay_root: Path) -> No
     store = _MemoryDrafts()
     autosave_workflow_draft(store, relay_root, "p1", "main", "nodes: [", "h")
     base = read_workflow_document(store, relay_root, "p1", "main").base_hash
-    updated = "name: Updated\njobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n"
+    updated = "name: Updated\njobs: {check: {steps: [{run: echo Ready}]}}\n"
 
     save_workflow_document(store, relay_root, "p1", "main", updated, base)
 
