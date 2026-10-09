@@ -4,141 +4,451 @@ import { post, currentWorkflow } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
-  expect((await post(page, "/api/auth/login", { username: "owner", password: "Relay-Test-Passphrase-2026!" })).ok()).toBeTruthy();
+  expect(
+    (
+      await post(page, "/api/auth/login", {
+        username: "owner",
+        password: "Relay-Test-Passphrase-2026!",
+      })
+    ).ok(),
+  ).toBeTruthy();
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
 });
-test.afterEach(async ({ page }) => { await post(page, "/__test__/reset"); });
+test.afterEach(async ({ page }) => {
+  await post(page, "/__test__/reset");
+});
 
 async function saveWorkflow(page: Page) {
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  const confirmation = page.getByRole("button", { name: "Save canonical YAML", exact: true });
+  const confirmation = page.getByRole("button", {
+    name: "Save canonical YAML",
+    exact: true,
+  });
   if (await confirmation.isVisible()) await confirmation.click();
-  await expect(page.getByText("Workflow saved and validated.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Workflow saved and validated.", { exact: true }),
+  ).toBeVisible();
 }
 
-test("shared command and variable settings validate, reload, replace project maps, and reset", async ({ page }, info) => {
+test("shared command and variable settings validate, reload, replace project maps, and reset", async ({
+  page,
+}, info) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/?view=settings");
-  const global = page.getByRole("region", { name: "Global defaults", exact: true });
-  const commands = global.getByRole("region", { name: "Shared commands", exact: true });
+  const global = page.getByRole("region", {
+    name: "Global defaults",
+    exact: true,
+  });
+  const commands = global.getByRole("region", {
+    name: "Shared commands",
+    exact: true,
+  });
   await expect(commands.getByText("No shared commands saved.")).toBeVisible();
-  await commands.getByRole("button", { name: "Add shared command", exact: true }).click();
-  const command = commands.getByRole("region", { name: "Shared command 1", exact: true });
-  await command.getByRole("textbox", { name: "Command name", exact: true }).fill("test");
-  await global.getByRole("button", { name: "Save global settings", exact: true }).click();
-  await expect(global.getByRole("alert").filter({ hasText: "Shared commands need a program" })).toBeVisible();
-  await command.getByRole("textbox", { name: "Program", exact: true }).fill("git");
-  await command.getByRole("textbox", { name: "Arguments (one per line)", exact: true }).fill("var\nGIT_AUTHOR_IDENT");
-  const variables = global.getByRole("region", { name: "Environment variables", exact: true });
-  await variables.getByRole("button", { name: "Add environment variable", exact: true }).click();
-  const variable = variables.getByRole("region", { name: "Environment variable 1", exact: true });
-  await variable.getByRole("textbox", { name: "Variable name", exact: true }).fill("GIT_AUTHOR_NAME");
-  await variable.getByRole("textbox", { name: "Value", exact: true }).fill("Global Author");
-  await variables.getByRole("button", { name: "Add environment variable", exact: true }).click();
-  const duplicate = variables.getByRole("region", { name: "Environment variable 2", exact: true });
-  await duplicate.getByRole("textbox", { name: "Variable name", exact: true }).fill("GIT_AUTHOR_NAME");
-  await expect(variables.getByRole("alert")).toHaveText("That variable name is already in this list.");
-  await duplicate.getByRole("button", { name: /Remove environment variable/ }).click();
-  await global.getByRole("button", { name: "Save global settings", exact: true }).click();
-  await expect(global.getByText("Global defaults saved. Future runs inherit these choices.")).toBeVisible();
+  await commands
+    .getByRole("button", { name: "Add shared command", exact: true })
+    .click();
+  const command = commands.getByRole("region", {
+    name: "Shared command 1",
+    exact: true,
+  });
+  await command
+    .getByRole("textbox", { name: "Command name", exact: true })
+    .fill("test");
+  await global
+    .getByRole("button", { name: "Save global settings", exact: true })
+    .click();
+  await expect(
+    global
+      .getByRole("alert")
+      .filter({ hasText: "Shared commands need a program" }),
+  ).toBeVisible();
+  await command
+    .getByRole("textbox", { name: "Program", exact: true })
+    .fill("git");
+  await command
+    .getByRole("textbox", { name: "Arguments (one per line)", exact: true })
+    .fill("var\nGIT_AUTHOR_IDENT");
+  const variables = global.getByRole("region", {
+    name: "Environment variables",
+    exact: true,
+  });
+  await variables
+    .getByRole("button", { name: "Add environment variable", exact: true })
+    .click();
+  const variable = variables.getByRole("region", {
+    name: "Environment variable 1",
+    exact: true,
+  });
+  await variable
+    .getByRole("textbox", { name: "Variable name", exact: true })
+    .fill("GIT_AUTHOR_NAME");
+  await variable
+    .getByRole("textbox", { name: "Value", exact: true })
+    .fill("Global Author");
+  await variables
+    .getByRole("button", { name: "Add environment variable", exact: true })
+    .click();
+  const duplicate = variables.getByRole("region", {
+    name: "Environment variable 2",
+    exact: true,
+  });
+  await duplicate
+    .getByRole("textbox", { name: "Variable name", exact: true })
+    .fill("GIT_AUTHOR_NAME");
+  await expect(variables.getByRole("alert")).toHaveText(
+    "That variable name is already in this list.",
+  );
+  await duplicate
+    .getByRole("button", { name: /Remove environment variable/ })
+    .click();
+  await global
+    .getByRole("button", { name: "Save global settings", exact: true })
+    .click();
+  await expect(
+    global.getByText(
+      "Global defaults saved. Future runs inherit these choices.",
+    ),
+  ).toBeVisible();
   await page.reload();
-  await expect(command.getByRole("textbox", { name: "Program", exact: true })).toHaveValue("git");
-  await expect(variable.getByRole("textbox", { name: "Value", exact: true })).toHaveValue("Global Author");
+  await expect(
+    command.getByRole("textbox", { name: "Program", exact: true }),
+  ).toHaveValue("git");
+  await expect(
+    variable.getByRole("textbox", { name: "Value", exact: true }),
+  ).toHaveValue("Global Author");
   await page.evaluate(() => window.scrollTo(0, 0));
   const viewport = page.viewportSize();
-  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  const height = await page.evaluate(
+    () => document.documentElement.scrollHeight,
+  );
   await page.setViewportSize({ width: viewport?.width ?? 1440, height });
-  await page.screenshot({ path: info.outputPath("commands-global.png"), fullPage: true, animations: "disabled" });
+  await page.screenshot({
+    path: info.outputPath("commands-global.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
   if (viewport) await page.setViewportSize(viewport);
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Project defaults", exact: true }).click();
-  const project = page.getByRole("region", { name: "Project defaults", exact: true });
-  await expect(project.getByRole("textbox", { name: "Program", exact: true })).toBeDisabled();
-  await project.getByRole("switch", { name: "Override shared commands for this project", exact: true }).check();
-  await project.getByRole("textbox", { name: "Program", exact: true }).fill("project-program");
-  await project.getByRole("switch", { name: "Override environment variables for this project", exact: true }).check();
-  await project.getByRole("button", { name: "Remove environment variable GIT_AUTHOR_NAME", exact: true }).click();
-  await project.getByRole("button", { name: "Save project defaults", exact: true }).click();
-  await expect(project.getByText("Project defaults saved. Future runs inherit these choices.")).toBeVisible();
-  const effective = (await (await page.request.get("/api/projects/defaults")).json()).effective.workflow_defaults;
-  expect(effective.commands).toEqual({ test: ["project-program", "var", "GIT_AUTHOR_IDENT"] });
+  await page
+    .getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Project defaults", exact: true })
+    .click();
+  const project = page.getByRole("region", {
+    name: "Project defaults",
+    exact: true,
+  });
+  await expect(
+    project.getByRole("textbox", { name: "Program", exact: true }),
+  ).toBeDisabled();
+  await project
+    .getByRole("switch", {
+      name: "Override shared commands for this project",
+      exact: true,
+    })
+    .check();
+  await project
+    .getByRole("textbox", { name: "Program", exact: true })
+    .fill("project-program");
+  await project
+    .getByRole("switch", {
+      name: "Override environment variables for this project",
+      exact: true,
+    })
+    .check();
+  await project
+    .getByRole("button", {
+      name: "Remove environment variable GIT_AUTHOR_NAME",
+      exact: true,
+    })
+    .click();
+  await project
+    .getByRole("button", { name: "Save project defaults", exact: true })
+    .click();
+  await expect(
+    project.getByText(
+      "Project defaults saved. Future runs inherit these choices.",
+    ),
+  ).toBeVisible();
+  const effective = (
+    await (await page.request.get("/api/projects/defaults")).json()
+  ).effective.workflow_defaults;
+  expect(effective.commands).toEqual({
+    test: ["project-program", "var", "GIT_AUTHOR_IDENT"],
+  });
   expect(effective.env).toEqual({});
-  expect((await (await page.request.get("/api/settings")).json()).settings.workflow_defaults.env).toEqual({ GIT_AUTHOR_NAME: "Global Author" });
-  await project.getByRole("switch", { name: "Override shared commands for this project", exact: true }).uncheck();
-  await project.getByRole("switch", { name: "Override environment variables for this project", exact: true }).uncheck();
-  await expect(project.getByRole("textbox", { name: "Program", exact: true })).toHaveValue("git");
-  await expect(project.getByRole("textbox", { name: "Value", exact: true })).toHaveValue("Global Author");
-  await project.getByRole("button", { name: "Save project defaults", exact: true }).click();
-  await expect(project.getByText("Project defaults saved. Future runs inherit these choices.")).toBeVisible();
+  expect(
+    (await (await page.request.get("/api/settings")).json()).settings
+      .workflow_defaults.env,
+  ).toEqual({ GIT_AUTHOR_NAME: "Global Author" });
+  await project
+    .getByRole("switch", {
+      name: "Override shared commands for this project",
+      exact: true,
+    })
+    .uncheck();
+  await project
+    .getByRole("switch", {
+      name: "Override environment variables for this project",
+      exact: true,
+    })
+    .uncheck();
+  await expect(
+    project.getByRole("textbox", { name: "Program", exact: true }),
+  ).toHaveValue("git");
+  await expect(
+    project.getByRole("textbox", { name: "Value", exact: true }),
+  ).toHaveValue("Global Author");
+  await project
+    .getByRole("button", { name: "Save project defaults", exact: true })
+    .click();
+  await expect(
+    project.getByText(
+      "Project defaults saved. Future runs inherit these choices.",
+    ),
+  ).toBeVisible();
 });
 
-test("command action inputs and scoped environment values save and execute", async ({ page }, info) => {
+test("command action inputs and scoped environment values save and execute", async ({
+  page,
+}, info) => {
   const current = await (await page.request.get("/api/settings")).json();
-  expect((await post(page, "/api/settings", { revision: current.revision, settings: { workflow_defaults: { commands: { test: ["git", "var", "GIT_AUTHOR_IDENT"] }, env: { GIT_AUTHOR_NAME: "Global Author" } } } })).ok()).toBeTruthy();
-  const yaml = stringify({ name: "Shared command", env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { argv: '["git","status"]' } }] } } });
-  expect((await post(page, "/api/workflows", { key: "shared-command", holder: "create-command", yaml })).ok()).toBeTruthy();
-  await page.route("**/api/agents*", route => route.fulfill({ status: 503, json: { code: "agent_discovery_error", message: "Agent discovery unavailable.", context: {} } }));
+  expect(
+    (
+      await post(page, "/api/settings", {
+        revision: current.revision,
+        settings: {
+          workflow_defaults: {
+            commands: { test: ["git", "var", "GIT_AUTHOR_IDENT"] },
+            env: { GIT_AUTHOR_NAME: "Global Author" },
+          },
+        },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const yaml = stringify({
+    name: "Shared command",
+    env: { GIT_AUTHOR_NAME: "Workflow Author" },
+    jobs: {
+      check: {
+        steps: [
+          { uses: "relay/command@v1", with: { argv: '["git","status"]' } },
+        ],
+      },
+    },
+  });
+  expect(
+    (
+      await post(page, "/api/workflows", {
+        key: "shared-command",
+        holder: "create-command",
+        yaml,
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.route("**/api/agents*", (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        code: "agent_discovery_error",
+        message: "Agent discovery unavailable.",
+        context: {},
+      },
+    }),
+  );
   await page.goto("/?view=workflows&workflow=shared-command");
   const inputs = page.getByLabel("Action inputs", { exact: true });
-  await inputs.fill(JSON.stringify({ command: "test" })); await inputs.blur();
+  await inputs.fill(JSON.stringify({ command: "test" }));
+  await inputs.blur();
   const env = page.getByLabel("Step environment variables", { exact: true });
-  await env.fill(JSON.stringify({ GIT_AUTHOR_NAME: "Command Job" })); await env.blur();
+  await env.fill(JSON.stringify({ GIT_AUTHOR_NAME: "Command Job" }));
+  await env.blur();
   await saveWorkflow(page);
-  expect(parse((await (await page.request.get("/api/workflows/shared-command")).json()).yaml)).toMatchObject({ env: { GIT_AUTHOR_NAME: "Workflow Author" }, jobs: { check: { steps: [{ with: { command: "test" }, env: { GIT_AUTHOR_NAME: "Command Job" } }] } } });
+  expect(
+    parse(
+      (await (await page.request.get("/api/workflows/shared-command")).json())
+        .yaml,
+    ),
+  ).toMatchObject({
+    env: { GIT_AUTHOR_NAME: "Workflow Author" },
+    jobs: {
+      check: {
+        steps: [
+          {
+            with: { command: "test" },
+            env: { GIT_AUTHOR_NAME: "Command Job" },
+          },
+        ],
+      },
+    },
+  });
   await page.reload();
-  await expect(inputs).toHaveValue(JSON.stringify({ command: "test" }, null, 2));
+  await expect(inputs).toHaveValue(
+    JSON.stringify({ command: "test" }, null, 2),
+  );
   await expect(env).toContainText("Command Job");
-  await page.screenshot({ path: info.outputPath("command-editor.png"), fullPage: true });
-  const response = await post(page, "/api/runs", { workflow_key: "shared-command", inputs: {} });
+  await page.screenshot({
+    path: info.outputPath("command-editor.png"),
+    fullPage: true,
+  });
+  const response = await post(page, "/api/runs", {
+    workflow_key: "shared-command",
+    inputs: {},
+  });
   expect(response.ok(), await response.text()).toBeTruthy();
   const { run_id: id } = await response.json();
-  await expect.poll(async () => (await (await page.request.get(`/api/runs/${id}`)).json()).run.status).toBe("succeeded");
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
+    )
+    .toBe("succeeded");
   await page.goto(`/?view=runs&run=${id}&job=root.check.step_1`);
-  await expect(page.getByRole("region", { name: "Job log", exact: true })).toContainText("Command Job");
+  await expect(
+    page.getByRole("region", { name: "Job log", exact: true }),
+  ).toContainText("Command Job");
 });
 
-test("YAML edits populate action inputs and an unresolved command fails before launch", async ({ page }) => {
-  const document = { name: "Portable command", env: { WORKFLOW_VAR: "workflow" }, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { command: "missing" }, env: { JOB_VAR: "job" } }] } } };
-  expect((await post(page, "/api/workflows", { key: "portable-command", holder: "create-portable", yaml: stringify(document) })).ok()).toBeTruthy();
+test("YAML edits populate action inputs and an unresolved command fails before launch", async ({
+  page,
+}) => {
+  const document = {
+    name: "Portable command",
+    env: { WORKFLOW_VAR: "workflow" },
+    jobs: {
+      check: {
+        steps: [
+          {
+            uses: "relay/command@v1",
+            with: { command: "missing" },
+            env: { JOB_VAR: "job" },
+          },
+        ],
+      },
+    },
+  };
+  expect(
+    (
+      await post(page, "/api/workflows", {
+        key: "portable-command",
+        holder: "create-portable",
+        yaml: stringify(document),
+      })
+    ).ok(),
+  ).toBeTruthy();
   await page.goto("/?view=workflows&workflow=portable-command");
   const inputs = page.getByLabel("Action inputs", { exact: true });
-  await expect(inputs).toHaveValue(JSON.stringify({ command: "missing" }, null, 2));
-  const invalid = await post(page, "/api/runs", { workflow_key: "portable-command", inputs: {} });
+  await expect(inputs).toHaveValue(
+    JSON.stringify({ command: "missing" }, null, 2),
+  );
+  const invalid = await post(page, "/api/runs", {
+    workflow_key: "portable-command",
+    inputs: {},
+  });
   expect(invalid.status()).toBe(422);
   const editor = page.locator(".cm-content");
-  await editor.click(); await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText(stringify({ ...document, jobs: { check: { steps: [{ uses: "relay/command@v1", with: { argv: '["git","log","--oneline"]' }, env: { JOB_VAR: "changed" } }] } } }));
-  await expect(inputs).toHaveValue(JSON.stringify({ argv: '["git","log","--oneline"]' }, null, 2));
-  await expect(page.getByLabel("Step environment variables", { exact: true })).toHaveValue(JSON.stringify({ JOB_VAR: "changed" }, null, 2));
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText(
+    stringify({
+      ...document,
+      jobs: {
+        check: {
+          steps: [
+            {
+              uses: "relay/command@v1",
+              with: { argv: '["git","log","--oneline"]' },
+              env: { JOB_VAR: "changed" },
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await expect(inputs).toHaveValue(
+    JSON.stringify({ argv: '["git","log","--oneline"]' }, null, 2),
+  );
+  await expect(
+    page.getByLabel("Step environment variables", { exact: true }),
+  ).toHaveValue(JSON.stringify({ JOB_VAR: "changed" }, null, 2));
   await saveWorkflow(page);
-  expect(parse((await (await page.request.get("/api/workflows/portable-command")).json()).yaml).jobs.check.steps[0].with.argv).toBe('["git","log","--oneline"]');
+  expect(
+    parse(
+      (await (await page.request.get("/api/workflows/portable-command")).json())
+        .yaml,
+    ).jobs.check.steps[0].with.argv,
+  ).toBe('["git","log","--oneline"]');
 });
 
-test("advanced shared arguments and multiline variables preserve exact strings", async ({ page }) => {
+test("advanced shared arguments and multiline variables preserve exact strings", async ({
+  page,
+}) => {
   await page.goto("/?view=settings");
-  const panel = page.getByRole("region", { name: "Global defaults", exact: true });
-  await panel.getByRole("button", { name: "Add shared command", exact: true }).click();
-  const command = panel.getByRole("region", { name: "Shared command 1", exact: true });
-  await command.getByRole("textbox", { name: "Command name", exact: true }).fill("test");
-  await command.getByRole("button", { name: "Advanced command arguments", exact: true }).click();
-  const vector = command.getByRole("textbox", { name: "Argument vector as JSON", exact: true });
+  const panel = page.getByRole("region", {
+    name: "Global defaults",
+    exact: true,
+  });
+  await panel
+    .getByRole("button", { name: "Add shared command", exact: true })
+    .click();
+  const command = panel.getByRole("region", {
+    name: "Shared command 1",
+    exact: true,
+  });
+  await command
+    .getByRole("textbox", { name: "Command name", exact: true })
+    .fill("test");
+  await command
+    .getByRole("button", { name: "Advanced command arguments", exact: true })
+    .click();
+  const vector = command.getByRole("textbox", {
+    name: "Argument vector as JSON",
+    exact: true,
+  });
   await vector.fill('["git", 1]');
   await vector.blur();
-  await expect(command.getByRole("alert")).toHaveText("Command arguments must be a JSON string array.");
+  await expect(command.getByRole("alert")).toHaveText(
+    "Command arguments must be a JSON string array.",
+  );
   const argv = ["git", "", "a b", "line one\nline two", "semi;colon"];
   await vector.fill(JSON.stringify(argv));
   await vector.blur();
   await expect(command.getByRole("alert")).toHaveCount(0);
-  await panel.getByRole("button", { name: "Add shared command", exact: true }).click();
-  const duplicate = panel.getByRole("region", { name: "Shared command 2", exact: true });
-  await duplicate.getByRole("textbox", { name: "Command name", exact: true }).fill("test");
-  await expect(panel.getByRole("region", { name: "Shared commands", exact: true }).getByRole("alert")).toHaveText("That command name is already in this list.");
-  await duplicate.getByRole("button", { name: /Remove shared command/ }).click();
-  await panel.getByRole("button", { name: "Add environment variable", exact: true }).click();
-  await panel.getByRole("textbox", { name: "Variable name", exact: true }).fill("RELAY_TEXT");
-  await panel.getByRole("textbox", { name: "Value", exact: true }).fill("line one\nline two");
-  await panel.getByRole("button", { name: "Save global settings", exact: true }).click();
-  await expect(panel.getByText("Global defaults saved. Future runs inherit these choices.")).toBeVisible();
-  const saved = (await (await page.request.get("/api/settings")).json()).settings.workflow_defaults;
+  await panel
+    .getByRole("button", { name: "Add shared command", exact: true })
+    .click();
+  const duplicate = panel.getByRole("region", {
+    name: "Shared command 2",
+    exact: true,
+  });
+  await duplicate
+    .getByRole("textbox", { name: "Command name", exact: true })
+    .fill("test");
+  await expect(
+    panel
+      .getByRole("region", { name: "Shared commands", exact: true })
+      .getByRole("alert"),
+  ).toHaveText("That command name is already in this list.");
+  await duplicate
+    .getByRole("button", { name: /Remove shared command/ })
+    .click();
+  await panel
+    .getByRole("button", { name: "Add environment variable", exact: true })
+    .click();
+  await panel
+    .getByRole("textbox", { name: "Variable name", exact: true })
+    .fill("RELAY_TEXT");
+  await panel
+    .getByRole("textbox", { name: "Value", exact: true })
+    .fill("line one\nline two");
+  await panel
+    .getByRole("button", { name: "Save global settings", exact: true })
+    .click();
+  await expect(
+    panel.getByText(
+      "Global defaults saved. Future runs inherit these choices.",
+    ),
+  ).toBeVisible();
+  const saved = (await (await page.request.get("/api/settings")).json())
+    .settings.workflow_defaults;
   expect(saved.commands.test).toEqual(argv);
   expect(saved.env).toEqual({ RELAY_TEXT: "line one\nline two" });
 });

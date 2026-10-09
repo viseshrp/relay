@@ -19,6 +19,7 @@ import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type { ProjectRecord, StorageUsage } from "../types";
 import { TemporaryResourceCleanup } from "./TemporaryResourceCleanup";
+type ReadResponse1 = { deleted: Record<string, number> };
 
 const scopes = {
   worktrees: {
@@ -128,7 +129,7 @@ export function StorageSettings({
     setBusy(true);
     setError(null);
     try {
-      const result = await api<{ deleted: Record<string, number> }>(
+      const result = await api<ReadResponse1>(
         projectPath("/api/data/clean", requestProject),
         { method: "POST", body: JSON.stringify({ scope, confirm: true }) },
       );

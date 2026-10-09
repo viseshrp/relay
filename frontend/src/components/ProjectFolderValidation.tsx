@@ -1,6 +1,7 @@
 import { Alert, Button, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
+type ReadResponse1 = { repositories: Array<{ path: string; name: string }> };
 
 type Candidate = { path: string; repository: boolean; message: string };
 export function ProjectFolderValidation({
@@ -22,10 +23,9 @@ export function ProjectFolderValidation({
   );
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ repositories: Array<{ path: string; name: string }> }>(
-      "/api/projects/candidates",
-      { signal: controller.signal },
-    )
+    void api<ReadResponse1>("/api/projects/candidates", {
+      signal: controller.signal,
+    })
       .then((result) => setRecent(result.repositories))
       .catch(() => undefined);
     return () => controller.abort();

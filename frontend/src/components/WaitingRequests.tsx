@@ -29,15 +29,16 @@ export function WaitingRequests({
     if (selected) setOpened(selected);
   }, [selected]);
   const shown = requests.find((request) => request.id === opened);
+  const shownId = shown?.id;
   useEffect(() => {
-    if (!focusRequest || !shown) return;
+    if (!focusRequest || !shownId) return;
     form.current?.scrollIntoView({ block: "start" });
     form.current
       ?.querySelector<HTMLElement>(
         "[data-owner-response] button, [data-owner-response] input:not([aria-hidden=true]), [data-owner-response] textarea, [data-owner-response] [role=combobox]",
       )
       ?.focus({ preventScroll: true });
-  }, [focusRequest, shown?.id]);
+  }, [focusRequest, shownId]);
   function respond(id: string) {
     setOpened(id);
     setFocusRequest((current) => current + 1);

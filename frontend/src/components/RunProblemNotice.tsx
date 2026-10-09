@@ -11,64 +11,99 @@ function failureReason(problem: RunProblem): string {
   const reasons: Record<string, string> = {
     agent_protocol_error: "The agent stopped before completing its request.",
     agent_usage_limit: "The provider's usage limit stopped this step.",
-    agent_auth_error: "The agent needs a working sign-in before it can continue.",
+    agent_auth_error:
+      "The agent needs a working sign-in before it can continue.",
     agent_launch_error: "Relay could not start the selected agent.",
-    model_unavailable_error: "The selected model is unavailable from the configured tools.",
+    model_unavailable_error:
+      "The selected model is unavailable from the configured tools.",
     model_selection_rejected_error: "The agent rejected the selected model.",
-    agent_configuration_error: "The agent rejected the requested configuration.",
+    agent_configuration_error:
+      "The agent rejected the requested configuration.",
     output_validation_error: "The step did not produce its required output.",
-    repair_exhausted: "The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.",
+    repair_exhausted:
+      "The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.",
     node_timeout: "The step reached its time limit.",
     worker_lost: "The worker stopped before finishing this step.",
     soft_denied: "The tool did not have permission to complete its work.",
     git_error: "A Git operation could not complete.",
     worktree_error: "Relay could not prepare or clean up the working folder.",
   };
-  return reasons[problem.error_code ?? ""] ?? reasons[problem.stop_reason ?? ""]
-    ?? "The step could not finish. Open its activity to inspect the cause.";
+  return (
+    reasons[problem.error_code ?? ""] ??
+    reasons[problem.stop_reason ?? ""] ??
+    "The step could not finish. Open its activity to inspect the cause."
+  );
 }
 
-export function RunProblemNotice({ problem, displayScope, onShowStep, onCancelRetry }: {
+export function RunProblemNotice({
+  problem,
+  displayScope,
+  onShowStep,
+  onCancelRetry,
+}: {
   problem: RunProblem;
   displayScope?: string;
   onShowStep: (scope: string) => void;
   onCancelRetry: () => void;
 }) {
   const scheduled = problem.retry?.state === "scheduled";
-  return <Alert severity={scheduled ? "warning" : "error"} sx={{ mt: 2 }}>
-    <Stack spacing={1}>
-      <Typography variant="subtitle1" component="h2">
-        {stageLabel(displayScope ?? problem.scope_path)} stopped
-      </Typography>
-      <Typography>{failureReason(problem)}</Typography>
-      {problem.provider_message && <>
-        <Typography variant="subtitle2">
-          {problem.agent_id ? `${stageLabel(problem.agent_id)} message` : "Provider message"}
+  return (
+    <Alert severity={scheduled ? "warning" : "error"} sx={{ mt: 2 }}>
+      <Stack spacing={1}>
+        <Typography variant="subtitle1" component="h2">
+          {stageLabel(displayScope ?? problem.scope_path)} stopped
         </Typography>
-        <Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {problem.provider_message}
+        <Typography>{failureReason(problem)}</Typography>
+        {problem.provider_message && (
+          <>
+            <Typography variant="subtitle2">
+              {problem.agent_id
+                ? `${stageLabel(problem.agent_id)} message`
+                : "Provider message"}
+            </Typography>
+            <Typography
+              sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+            >
+              {problem.provider_message}
+            </Typography>
+            {problem.provider_message_truncated && (
+              <Typography variant="body2">
+                Showing part of the provider message. The full message is in
+                Activity.
+              </Typography>
+            )}
+          </>
+        )}
+        <Typography variant="body2">
+          Completed steps are saved.{" "}
+          {scheduled && problem.retry?.reset_at
+            ? `Relay will retry this step after ${new Date(problem.retry.reset_at).toLocaleString()}, using the same model and settings. Keep Relay running; a restart keeps this schedule.`
+            : problem.retry?.state === "blocked"
+              ? (problem.retry.error_message ??
+                "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved.")
+              : problem.retry?.state === "canceled"
+                ? "Automatic retry is canceled. You can retry this step manually."
+                : problem.error_code === "repair_exhausted"
+                  ? "The repair budget stays spent. Change the rule in a new run if more rounds are needed."
+                  : "Retry this step when the cause is resolved."}
         </Typography>
-        {problem.provider_message_truncated && <Typography variant="body2">
-          Showing part of the provider message. The full message is in Activity.
-        </Typography>}
-      </>}
-      <Typography variant="body2">
-        Completed steps are saved. {scheduled && problem.retry?.reset_at
-          ? `Relay will retry this step after ${new Date(problem.retry.reset_at).toLocaleString()}, using the same model and settings. Keep Relay running; a restart keeps this schedule.`
-          : problem.retry?.state === "blocked"
-            ? problem.retry.error_message ?? "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved."
-            : problem.retry?.state === "canceled"
-              ? "Automatic retry is canceled. You can retry this step manually."
-              : problem.error_code === "repair_exhausted"
-                ? "The repair budget stays spent. Change the rule in a new run if more rounds are needed."
-                : "Retry this step when the cause is resolved."}
-      </Typography>
-      <Button variant="outlined" sx={{ alignSelf: "flex-start" }} onClick={() => onShowStep(problem.scope_path)}>
-        Show stopped step
-      </Button>
-      {scheduled && <Button variant="outlined" sx={{ alignSelf: "flex-start" }} onClick={onCancelRetry}>
-        Cancel automatic retry
-      </Button>}
-    </Stack>
-  </Alert>;
+        <Button
+          variant="outlined"
+          sx={{ alignSelf: "flex-start" }}
+          onClick={() => onShowStep(problem.scope_path)}
+        >
+          Show stopped step
+        </Button>
+        {scheduled && (
+          <Button
+            variant="outlined"
+            sx={{ alignSelf: "flex-start" }}
+            onClick={onCancelRetry}
+          >
+            Cancel automatic retry
+          </Button>
+        )}
+      </Stack>
+    </Alert>
+  );
 }

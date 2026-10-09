@@ -10,9 +10,11 @@
     "build": "tsc --noEmit && node scripts/build.mjs",
     "build:dist": "tsc --noEmit && vite build && node scripts/compress.mjs",
     "test:build": "node --test scripts/*.test.mjs",
-    "test": "npm run test:build && npm run build && playwright test && playwright test --config playwright.no-login.config.ts",
+    "test": "npm run lint && npm run format:check && npm run test:build && npm run build && playwright test && playwright test --config playwright.no-login.config.ts",
     "test:e2e": "npm test",
-    "capture:welcome": "playwright test --config playwright.capture.config.ts"
+    "capture:welcome": "playwright test --config playwright.capture.config.ts",
+    "lint": "eslint src e2e *.ts scripts *.mjs --max-warnings 0",
+    "format:check": "prettier --check src e2e scripts *.ts *.mjs *.json .prettierrc.json"
   },
   "dependencies": {
     "@actions/expressions": "0.3.61",
@@ -38,8 +40,9 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
-    "@babel/eslint-parser": "8.0.7",
-    "@babel/plugin-syntax-typescript": "8.0.3",
+    "@babel/core": "7.29.7",
+    "@babel/eslint-parser": "7.29.9",
+    "@babel/plugin-syntax-typescript": "7.29.7",
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.63.0",
     "@types/react": "19.3.0",

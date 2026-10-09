@@ -12,7 +12,6 @@ export interface WorkflowWorkspaceProps {
   onNavigationReady: (callback: (() => Promise<void>) | null) => void;
 }
 
-
 export function WorkflowWorkspace(props: WorkflowWorkspaceProps) {
   return <ActionsWorkflowWorkspace {...props} />;
 }

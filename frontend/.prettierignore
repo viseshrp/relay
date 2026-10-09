@@ -1,0 +1,5 @@
+node_modules
+../relay/static
+test-results
+playwright-report
+package-lock.json

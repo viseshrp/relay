@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type { AgentRecord } from "../types";
+type ReadResponse1 = { models: Array<{ value: string; name: string }> };
 
 export function ModelPicker({
   agents,
@@ -37,7 +38,7 @@ export function ModelPicker({
       agents
         .filter((agent) => agent.installed)
         .map((agent) =>
-          api<{ models: Array<{ value: string; name: string }> }>(
+          api<ReadResponse1>(
             projectPath(`/api/agents/${agent.id}/models`, project),
             { method: "POST", body: "{}" },
           ),

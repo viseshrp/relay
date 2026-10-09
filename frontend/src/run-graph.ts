@@ -99,7 +99,11 @@ export function runSummaryGraph(
             source,
             target,
             markerEnd: undefined,
-            style: { ...edge.style, strokeWidth: 2, stroke: "var(--relay-border)" },
+            style: {
+              ...edge.style,
+              strokeWidth: 2,
+              stroke: "var(--relay-border)",
+            },
           },
         ];
       }),
