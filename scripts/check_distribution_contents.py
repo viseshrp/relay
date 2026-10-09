@@ -72,7 +72,23 @@ def _check_wheel(path: Path, names: tuple[str, ...]) -> None:
 
 
 def _check_sdist(path: Path, names: tuple[str, ...]) -> None:
-    required = {"frontend/package.json", "frontend/package-lock.json", "hatch_build.py"}
+    generated_roots = (
+        "frontend/node_modules/",
+        "frontend/test-results/",
+        "frontend/playwright-report/",
+        "relay/static/",
+    )
+    if any(name.startswith(generated_roots) for name in names):
+        message = f"{path.name} contains generated frontend dependencies or artifacts"
+        raise RuntimeError(message)
+    required = {
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "hatch_build.py",
+        "docs/getting-started.md",
+        "docs/coming-from-github-actions.md",
+        "docs/keyboard-shortcuts.md",
+    }
     missing = sorted(required.difference(names))
     if missing:
         message = f"{path.name} is missing wheel-from-sdist inputs: {', '.join(missing)}"

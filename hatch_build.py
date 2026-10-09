@@ -52,6 +52,7 @@ class CustomBuildHook(BuildHookInterface):
         for source_map in static_root.rglob("*.map"):
             source_map.unlink()
         shutil.rmtree(static_root / ".vite", ignore_errors=True)
+        (static_root / ".relay-builds.json").unlink(missing_ok=True)
         for build_manifest in static_root.glob(".relay-build-*.json"):
             build_manifest.unlink()
 

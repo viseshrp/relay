@@ -46,7 +46,11 @@ the files directly from the installed package.
 The source-distribution target includes `frontend/**`, `hatch_build.py`, the
 Python package, and package metadata. In particular, it carries both
 `frontend/package.json` and `frontend/package-lock.json`. It does not run npm
-during source-distribution assembly.
+during source-distribution assembly. The three Markdown guides imported by
+`HelpGuides.tsx` also ship as build inputs so the installed browser can display
+its in-app help without fetching external documentation.
+Installed frontend dependencies, browser test reports, and generated static
+assets are excluded; the wheel hook rebuilds assets from the locked sources.
 
 Building a wheel from the resulting source distribution invokes the wheel
 hook in the unpacked source tree. This produces the same static layout as a
@@ -65,7 +69,8 @@ make check-dist
 `make build` builds the source distribution and wheel. `make check-dist` runs
 Twine metadata checks and `scripts/check_distribution_contents.py`. The
 content check requires compiled static files in the wheel, requires the
-frontend lockfile and hook in the source distribution, rejects certification
+frontend lockfile, hook, and help guides in the source distribution, rejects
+installed dependencies and generated artifacts there, rejects certification
 evidence, and rejects workflow or prompt templates outside the exact allow-list
 for the six [starter workflows](workflows.md#starter-workflows). Their twelve
 source files live under `relay/workflows/starters/` and ship in both archives.
