@@ -103,6 +103,8 @@ pull request containing only `.pre-commit-config.yaml`. Repository Actions
 settings must allow workflows to create pull requests. Approve workflow runs
 when GitHub requests it for a bot-created pull request, then merge only after
 its checks pass. The updater does not require a personal access token.
+It retains an existing newer numeric release when the upstream branch's
+nearest tag would downgrade that hook, while accepting other hook updates.
 
 To test a scratch frontend build without replacing a running app's assets, set
 `RELAY_TEST_ASSETS_ROOT` to that build directory when invoking Playwright. Only
