@@ -125,6 +125,16 @@ def test_invalid_matrix_shapes_and_expansion_bounds_are_rejected(matrix: dict[st
         ("environment", "missing", {}, "configured environment"),
         ("string", "x" * 65536, {}, "65535 bytes"),
     ],
+    ids=[
+        "boolean-string",
+        "number-boolean",
+        "number-infinity",
+        "number-string",
+        "string-number",
+        "choice-unknown",
+        "environment-unknown",
+        "string-oversized",
+    ],
 )
 def test_launch_input_types_and_payload_bounds(
     kind: str, value: object, extra: dict[str, object], reason: str
