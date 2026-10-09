@@ -406,9 +406,6 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
                 validate_schedule(item)
     for event in ("workflow_dispatch", "workflow_call"):
         declared = input_definitions(workflow, event)
-        if event == "workflow_dispatch" and len(declared) > 25:
-            message = "on.workflow_dispatch.inputs"
-            raise _issue(message, "At most 25 dispatch inputs are supported.")
         for name, raw in declared.items():
             if IDENTIFIER.fullmatch(name) is None:
                 message = f"on.{event}.inputs.{name}"

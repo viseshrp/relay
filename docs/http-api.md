@@ -74,6 +74,13 @@ unavailable; required report evidence retains its existing preservation rules.
 Automatic activation is an owner operation. Deliveries remain deduplicated in
 SQLite, and writing triggers never activate merely by saving YAML.
 
+Local dispatch requires a nonempty `event_type`, an object `client_payload`,
+and an `idempotency_key` of 1 to 200 characters. The complete delivery payload
+is limited to 65,535 bytes, including the event name and envelope. Property
+counts and event names have no separate GitHub service limit. Oversized
+deliveries fail before inserting any record, including when no activated
+trigger matches the event.
+
 See [Workflow language](workflows.md) and the
 [local language audit](workflow-language-compatibility.md) for event semantics,
 credential references, frozen source rules, and expression contexts.

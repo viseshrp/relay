@@ -50,14 +50,7 @@ def cron_fields(source: str) -> tuple[set[int], ...]:
 
 
 def validate_schedule(value: Mapping[str, Any]) -> None:
-    fields = cron_fields(str(value.get("cron", "")))
-    ordered = sorted(hour * 60 + minute for hour in fields[1] for minute in fields[0])
-    if any(
-        right - left < 5
-        for left, right in zip(ordered, [*ordered[1:], ordered[0] + 1440], strict=True)
-    ):
-        message = "Schedule intervals must be at least five minutes."
-        raise WorkflowValidationError(message)
+    cron_fields(str(value.get("cron", "")))
     try:
         ZoneInfo(str(value.get("timezone", "UTC")))
     except ZoneInfoNotFoundError:
@@ -66,9 +59,13 @@ def validate_schedule(value: Mapping[str, Any]) -> None:
 
 
 def occurrences(
-    schedule: Mapping[str, Any], after: datetime, through: datetime
+    schedule: Mapping[str, Any],
+    after: datetime,
+    through: datetime,
+    *,
+    latest_only: bool = False,
 ) -> list[tuple[str, datetime]]:
-    """Wall time identities coalesce a repeated clock and advance gaps once."""
+    """Coalesce folds and advance gaps; latest-only lookup skips old backlog."""
     validate_schedule(schedule)
     minutes, hours, days, months, weekdays = cron_fields(str(schedule["cron"]))
     zone = ZoneInfo(str(schedule.get("timezone", "UTC")))
@@ -76,10 +73,10 @@ def occurrences(
         after.astimezone(zone).date(), (through - timedelta(days=400)).astimezone(zone).date()
     )
     finish = through.astimezone(zone).date()
-    day = start
+    day = finish if latest_only else start
     result = []
     day_any, week_any = str(schedule["cron"]).split()[2::2]
-    while day <= finish:
+    while start <= day <= finish:
         weekday = (day.weekday() + 1) % 7
         selected_day = day.day in days
         selected_week = weekday in weekdays or (weekday == 0 and 7 in weekdays)
@@ -89,8 +86,8 @@ def occurrences(
             else selected_day and selected_week
         )
         if day.month in months and selected:
-            for hour in sorted(hours):
-                for minute in sorted(minutes):
+            for hour in sorted(hours, reverse=latest_only):
+                for minute in sorted(minutes, reverse=latest_only):
                     wall = datetime(day.year, day.month, day.day, hour, minute)
                     candidate = wall.replace(tzinfo=zone, fold=0)
                     # During a gap advance to the first actual local minute.
@@ -111,7 +108,9 @@ def occurrences(
                                 instant,
                             )
                         )
-        day += timedelta(days=1)
+                        if latest_only:
+                            return result
+        day += timedelta(days=-1 if latest_only else 1)
     return sorted(result, key=lambda item: item[1])
 
 
@@ -125,15 +124,12 @@ def filter_ref(config: Mapping[str, Any], reference: str, paths: Sequence[str]) 
     other = "branches" if kind == "tags" else "tags"
     if other in config and kind not in config and f"{kind}-ignore" not in config:
         return False
-    if kind != "tags":
-        if "paths" in config and not any(
-            matches(path, config["paths"], file_glob=True) for path in paths
-        ):
-            return False
-        if (
-            "paths-ignore" in config
-            and paths
-            and all(matches(path, config["paths-ignore"], file_glob=True) for path in paths)
-        ):
-            return False
-    return True
+    if "paths" in config and not any(
+        matches(path, config["paths"], file_glob=True) for path in paths
+    ):
+        return False
+    return not (
+        "paths-ignore" in config
+        and paths
+        and all(matches(path, config["paths-ignore"], file_glob=True) for path in paths)
+    )

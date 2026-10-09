@@ -75,6 +75,27 @@ test("typed defaults and descriptions stay visible and untouched inputs are omit
   await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
 });
 
+test("local workflows render and launch more than 25 typed inputs", async ({ page }) => {
+  const definitions = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [
+    `flag_${index}`, { type: "boolean" as const, default: true },
+  ]));
+  await create(page, "many-inputs", { inputs: definitions });
+  const panel = await open(page);
+  await expect(panel.getByRole("checkbox")).toHaveCount(30);
+  await panel.getByRole("checkbox").last().uncheck();
+  const created = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
+  await panel.getByRole("button", { name: "Run workflow", exact: true }).click();
+  const response = await created;
+  expect(response.status(), await response.text()).toBe(201);
+  expect(response.request().postDataJSON().inputs).toEqual({ flag_29: false });
+  const { run_id: id } = await response.json();
+  await expect(page.getByText("Work is complete. Review the saved documents and code changes below.")).toBeVisible();
+  const saved = await page.request.get(`/api/runs/${id}/launch-inputs`);
+  expect(saved.ok(), await saved.text()).toBeTruthy();
+  const launchInputs = await saved.json();
+  expect(launchInputs.inputs).toEqual(Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`flag_${index}`, index !== 29])));
+});
+
 test("edited inputs preserve JSON types and advanced cleanup choices stay explicit", async ({ page }) => {
   await create(page, "typed-launch", { inputs, entrypoints: [{ scope_path: "root.check" }] });
   const panel = await open(page);
