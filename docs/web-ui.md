@@ -964,3 +964,15 @@ An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested
 and rechecks path containment. Reload the browser after the build finishes.
 A Python service change still requires an orderly server restart.
+
+Run navigation lists jobs. Open a job to expand its ordered steps, each with its
+own attempt, output, exit code, and duration. Step links still open captured
+historical attempts. Finished runs read saved pages without opening a live
+stream. Disclosure choices are remembered separately for each run and job.
+Elapsed duration includes waits; recorded dispatch holds appear separately.
+
+The Artifacts section hides empty internal commit and diff evidence, while the
+original evidence remains retained. Preview text or Markdown before downloading
+an individual file. Download all produces a bounded ZIP of retained files,
+verifying every recorded size and digest before returning it. Large runs above
+1,000 retained files or 256 MiB require individual downloads.

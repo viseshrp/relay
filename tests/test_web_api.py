@@ -2090,3 +2090,24 @@ def test_named_artifact_download_verifies_bytes_and_project_access(
     )
     (Path(artifact.directory) / "evidence.txt").write_text("tampered")
     assert owner.get(f"/api/workflow-artifacts/{artifact.pk}/download").status_code == 500
+
+
+def test_download_all_artifacts_verifies_every_digest(owner: Client, finished_run: str) -> None:
+    from hashlib import sha256
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    response = owner.get(f"/api/runs/{finished_run}/artifacts/download")
+    assert response.status_code == 200
+    rows = Artifact.objects.filter(attempt__node_run__run_id=finished_run)
+    with ZipFile(BytesIO(b"".join(response.streaming_content))) as archive:
+        assert len(archive.namelist()) == rows.count()
+        for row in rows:
+            name = next(name for name in archive.namelist() if f"/{row.pk}-" in name)
+            assert ".." not in name.split("/") and not name.startswith("/")
+            assert sha256(archive.read(name)).hexdigest() == row.sha256
+    first = rows.first()
+    assert first is not None
+    retained, _, _ = DjangoReadStore().artifact_file(str(first.pk))
+    retained.write_bytes(b"changed retained bytes")
+    assert owner.get(f"/api/runs/{finished_run}/artifacts/download").status_code == 400

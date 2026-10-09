@@ -612,3 +612,13 @@ Existing scheduling rules select downstream work and preserve skipped
 upstream distinctions. **Run from here** in the editor saves a declaration
 before opening the launch panel. Workflow names allow 256 characters and
 run titles allow 1000 characters, including the resolved expression result.
+
+### Answer buttons at approval steps
+
+`relay/human-wait@v1` accepts optional `options`, a JSON list of 1–10 unique
+answer strings, each at most 256 characters. For example,
+`options: '["Approve", "Reject"]'` adds explicit answer buttons beside the
+free-text response. Clicking a button sends that exact value to the current
+interaction; it does not approve another request. The response remains available
+as `steps.<id>.outputs.answer`. The request explains whether its expiry comes
+from an approval, step, job, or default job timeout.

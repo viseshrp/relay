@@ -332,6 +332,14 @@ def _integer(instance: models.Model, name: str) -> int:
     return value
 
 
+def _number(instance: models.Model, name: str) -> float:
+    value = getattr(instance, name)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        message = f"Stored field {name} is not a number."
+        raise PersistenceError(message)
+    return float(value)
+
+
 def _mapping(instance: models.Model, name: str) -> dict[str, object]:
     value = getattr(instance, name)
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
@@ -833,6 +841,8 @@ def _run_record(run: Run) -> dict[str, object]:
         "failure_summary": run.failure_summary,
         "entry_point": run.entry_point,
         "dispatch_paused": _boolean(run, "dispatch_paused"),
+        "dispatch_paused_at": _datetime_text(_datetime_field(run, "dispatch_paused_at")),
+        "dispatch_paused_seconds": _number(run, "dispatch_paused_seconds"),
         "waiting_count": _integer(run, "read_waiting_count"),
     }
 
@@ -1160,6 +1170,9 @@ def _artifact_record(artifact: Artifact) -> dict[str, object]:
         "bytes": _integer(artifact, "bytes"),
         "media_type": _string(artifact, "media_type"),
         "preservation_state": _string(artifact, "preservation_state"),
+        "created_at": _datetime_text(_datetime_field(attempt, "ended_at"))
+        if attempt.ended_at is not None
+        else _datetime_text(_datetime_field(attempt, "started_at")),
     }
 
 
@@ -5662,13 +5675,37 @@ class DjangoExecutionStore(DjangoAgentStore):
                     RunStatus.CANCELING.value,
                 }:
                     return ControlResult.STALE
+                now = timezone.now()
+                if paused and not _boolean(run, "dispatch_paused"):
+                    _set_model_field(run, "dispatch_paused_at", now)
+                elif not paused and isinstance(run.dispatch_paused_at, datetime):
+                    elapsed = max(0, (now - run.dispatch_paused_at).total_seconds())
+                    _set_model_field(
+                        run,
+                        "dispatch_paused_seconds",
+                        _number(run, "dispatch_paused_seconds") + elapsed,
+                    )
+                    _set_model_field(run, "dispatch_paused_at", None)
                 _set_model_field(run, "dispatch_paused", paused)
-                run.save(update_fields=("dispatch_paused",))
+                run.save(
+                    update_fields=(
+                        "dispatch_paused",
+                        "dispatch_paused_at",
+                        "dispatch_paused_seconds",
+                    )
+                )
                 _append_event(
                     run,
                     "run.dispatch_changed",
                     EventSource.RUN,
-                    {"paused": paused, "idempotency_key": idempotency_key},
+                    {
+                        "paused": paused,
+                        "idempotency_key": idempotency_key,
+                        "dispatch_paused_at": _datetime_text(
+                            _datetime_field(run, "dispatch_paused_at")
+                        ),
+                        "dispatch_paused_seconds": _number(run, "dispatch_paused_seconds"),
+                    },
                 )
                 return ControlResult.ACCEPTED
         except DatabaseError:

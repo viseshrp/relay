@@ -919,6 +919,8 @@ class ActionsStepExecutor:
             )
             return CommandExecutor().execute(replace(context, attempt=attempt))
         if reference == "relay/human-wait@v1":
+            from relay.workflows.actions.builtins import human_wait_options
+
             deadline = (
                 float(inputs["timeout-minutes"]) * 60 if "timeout-minutes" in inputs else None
             )
@@ -929,6 +931,7 @@ class ActionsStepExecutor:
                 context.attempt.attempt_id,
                 expressions.string(inputs.get("prompt", "Owner input required.")),
                 deadline,
+                human_wait_options(inputs["options"]) if "options" in inputs else [],
             )
             return ExecutionOutcome(OutcomeKind.WAITING, wait_timeout_seconds=deadline)
         if reference == "relay/agent@v1":

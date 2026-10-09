@@ -255,3 +255,27 @@ def test_local_filters_and_queue_enums_have_exact_semantics() -> None:
     ):
         with pytest.raises(WorkflowValidationError, match="Expected one of"):
             load(header + "\njobs: {check: {steps: [{run: echo}]}}")
+
+
+@pytest.mark.parametrize(
+    "options",
+    ['["Approve","Reject"]', '["", "Approve"]', '["Same","Same"]', "[1]", '{"Approve":true}'],
+)
+def test_human_wait_answer_buttons_are_bounded(options: str) -> None:
+    value = {
+        "jobs": {
+            "main": {
+                "steps": [
+                    {
+                        "uses": "relay/human-wait@v1",
+                        "with": {"prompt": "Continue?", "options": options},
+                    }
+                ]
+            }
+        }
+    }
+    if options == '["Approve","Reject"]':
+        assert load(source(value)).value["jobs"]
+    else:
+        with pytest.raises(WorkflowValidationError, match="answer strings"):
+            load(source(value))

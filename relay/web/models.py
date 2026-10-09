@@ -187,6 +187,8 @@ class Run(RelayModel):
     merged_commit: models.CharField = models.CharField(max_length=40, null=True, blank=True)
     recovery_policy: models.JSONField = models.JSONField(default=dict)
     dispatch_paused: models.BooleanField = models.BooleanField(default=False)
+    dispatch_paused_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
+    dispatch_paused_seconds: models.FloatField = models.FloatField(default=0)
     repair_groups: models.JSONField = models.JSONField(default=dict)
     actions_state: models.JSONField = models.JSONField(default=dict)
 

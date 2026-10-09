@@ -63,7 +63,13 @@ export interface LaunchCleanliness {
   clean: boolean;
   blocking_count: number;
   allowed_count: number;
-  files: Array<{ status: string; path: string; original_path: string | null; allowed: boolean; reasons: string[] }>;
+  files: Array<{
+    status: string;
+    path: string;
+    original_path: string | null;
+    allowed: boolean;
+    reasons: string[];
+  }>;
   truncated: boolean;
 }
 
@@ -127,13 +133,16 @@ export interface WorkflowTemplate {
   description: string;
   jobs: string[];
   required_agents: string;
-  inputs: Record<string, {
-    type: string;
-    description?: string | null;
-    default?: JsonScalar;
-    required: boolean;
-    constraints?: { values?: string[] };
-  }>;
+  inputs: Record<
+    string,
+    {
+      type: string;
+      description?: string | null;
+      default?: JsonScalar;
+      required: boolean;
+      constraints?: { values?: string[] };
+    }
+  >;
 }
 
 export interface AgentOptions {
@@ -185,6 +194,8 @@ export interface RunSummary {
   failure_summary: string | null;
   entry_point: string | null;
   dispatch_paused: boolean;
+  dispatch_paused_at?: string | null;
+  dispatch_paused_seconds?: number;
   waiting_count?: number;
 }
 
@@ -199,16 +210,25 @@ export interface DashboardRun extends RunSummary {
   request: { id: string; kind: string; scope_path: string } | null;
 }
 
-export interface DashboardPage<T> { items: T[]; next_cursor: string | null }
+export interface DashboardPage<T> {
+  items: T[];
+  next_cursor: string | null;
+}
 export interface DashboardData {
-  counts: { projects: number; waiting: number; unfinished: number; paused: number };
+  counts: {
+    projects: number;
+    waiting: number;
+    unfinished: number;
+    paused: number;
+  };
   projects: DashboardPage<DashboardProject>;
   waiting: DashboardPage<DashboardRun>;
   active: DashboardPage<DashboardRun>;
   recent: DashboardPage<DashboardRun>;
 }
 export type DashboardSection = "projects" | "waiting" | "active" | "recent";
-export type DashboardResponse = Pick<DashboardData, "counts"> & Partial<Omit<DashboardData, "counts">>;
+export type DashboardResponse = Pick<DashboardData, "counts"> &
+  Partial<Omit<DashboardData, "counts">>;
 
 export interface RunNode {
   display_name?: string;
@@ -239,10 +259,16 @@ export interface RunNode {
     accepted_value: JsonScalar;
     fix_instruction: string | null;
     verify_instruction: string | null;
-    roles: Record<string, {
-      type: string; model: string | null; agents: string[] | null;
-      agent_options: Record<string, AgentOptions> | null; writes: boolean | null;
-    }>;
+    roles: Record<
+      string,
+      {
+        type: string;
+        model: string | null;
+        agents: string[] | null;
+        agent_options: Record<string, AgentOptions> | null;
+        writes: boolean | null;
+      }
+    >;
   } | null;
   retry_settings?: RetryConfiguration | null;
   pending_settings?: RetryConfiguration | null;
@@ -277,7 +303,11 @@ export interface RunJob {
   retry_settings: RetryConfiguration | null;
   command: string[] | null;
   prompt: string | null;
-  instructions: Array<{ reference: { local?: string; global?: string }; text: string; truncated: boolean }>;
+  instructions: Array<{
+    reference: { local?: string; global?: string };
+    text: string;
+    truncated: boolean;
+  }>;
   outputs: Record<string, JsonValue>;
   attempts: JobAttempt[];
   latest_attempt: JobAttempt | null;
@@ -315,7 +345,13 @@ export interface RunDetail extends RunSummary {
       scope_path: string;
       attempt_number: number;
       retry_number: number;
-      state: "scheduled" | "preparing" | "resumed" | "blocked" | "exhausted" | "canceled";
+      state:
+        | "scheduled"
+        | "preparing"
+        | "resumed"
+        | "blocked"
+        | "exhausted"
+        | "canceled";
       instruction: string;
       instruction_sha256: string;
       message: string;
@@ -375,6 +411,7 @@ export interface CapturedRunWorkflow {
 }
 
 export interface ArtifactRecord {
+  created_at?: string | null;
   scope_path: string;
   attempt_number: number;
   id: string;
@@ -400,7 +437,11 @@ export interface WorkflowDefaults {
   timeout: string | null;
   auto_retry: boolean;
   recovery: { enabled: boolean; max_retries: number };
-  repairs: { max_rounds: number; fix_instruction: string; verify_instruction: string };
+  repairs: {
+    max_rounds: number;
+    fix_instruction: string;
+    verify_instruction: string;
+  };
 }
 export interface OwnerSettings {
   agent_preferences: string[];
@@ -421,7 +462,9 @@ export interface SettingsResponse {
 export interface ProjectDefaultOverrides {
   agent_preferences?: string[];
   cleanup_policy?: OwnerSettings["cleanup_policy"];
-  workflow_defaults?: Partial<Omit<WorkflowDefaults, "recovery" | "repairs">> & {
+  workflow_defaults?: Partial<
+    Omit<WorkflowDefaults, "recovery" | "repairs">
+  > & {
     recovery?: Partial<WorkflowDefaults["recovery"]>;
     repairs?: Partial<WorkflowDefaults["repairs"]>;
   };
@@ -435,12 +478,16 @@ export interface StorageUsage {
   runs: number;
   artifacts: number;
   artifact_bytes: number;
-  working_copies: { bytes: number; files: number; directories: number; truncated: boolean };
+  working_copies: {
+    bytes: number;
+    files: number;
+    directories: number;
+    truncated: boolean;
+  };
   branches: number;
   attempt_refs: number;
   cleanup_blocked: boolean;
 }
-
 
 export interface FolderListing {
   root: string;

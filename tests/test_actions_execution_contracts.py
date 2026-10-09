@@ -43,6 +43,7 @@ jobs:
         uses: relay/human-wait@v1
         with:
           prompt: "Continue after ${{ steps.first.outputs.value }}?"
+          options: '["go", "stop"]'
       - run: test '${{ steps.approval.outputs.answer }}' = go
 """,
     )
@@ -51,6 +52,8 @@ jobs:
     engine.drain(run_id)
     interaction = HumanInteraction.objects.get(run_id=run_id, status="pending")
     assert interaction.request_payload["prompt"] == "Continue after once?"
+    assert interaction.request_payload["options"] == ["go", "stop"]
+    assert interaction.request_payload["deadline_source"] == "default job timeout"
     NodeAttempt.objects.filter(node_run__run_id=run_id).update(
         heartbeat_at=timezone.now() - timedelta(days=1)
     )

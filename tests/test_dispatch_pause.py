@@ -378,3 +378,31 @@ def test_owner_pause_defers_native_recovery_without_consuming_its_budget(
         assert engine.store.resume_automatic_retries() == 1
     else:
         assert engine.store.resume_usage_retries() == 1
+
+
+def test_dispatch_hold_duration_is_durable_and_idempotent(
+    paused_review: tuple[str, Client], engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from django.utils import timezone
+
+    run_id, _client = paused_review
+    run = Run.objects.get(pk=run_id)
+    start = run.dispatch_paused_at
+    assert start is not None
+    later = start + timedelta(minutes=5)
+    monkeypatch.setattr(timezone, "now", lambda: later)
+    assert (
+        engine.store.configure_dispatch_pause(run_id, True, "same-hold") is ControlResult.ACCEPTED
+    )
+    assert Run.objects.get(pk=run_id).dispatch_paused_at == start
+    assert (
+        engine.store.configure_dispatch_pause(run_id, False, "resume-timing")
+        is ControlResult.ACCEPTED
+    )
+    assert (
+        engine.store.configure_dispatch_pause(run_id, False, "resume-timing")
+        is ControlResult.ALREADY_APPLIED
+    )
+    run.refresh_from_db()
+    assert run.dispatch_paused_seconds == 300
+    assert run.dispatch_paused_at is None

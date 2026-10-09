@@ -86,6 +86,9 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/attempts/<str:attempt_id>/wait", actions.answer_wait, name="attempt-wait"),
     path("api/artifacts/<str:artifact_id>", pages.artifact, name="artifact"),
     path(
+        "api/runs/<str:run_id>/artifacts/download", pages.artifact_archive, name="artifact-archive"
+    ),
+    path(
         "api/artifacts/<str:artifact_id>/preview", pages.artifact_preview, name="artifact-preview"
     ),
     path("api/data/usage", settings.storage_usage, name="data-usage"),

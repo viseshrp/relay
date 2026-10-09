@@ -457,6 +457,23 @@ def artifact(request: HttpRequest, artifact_id: str) -> FileResponse:
 @api_errors
 @owner_required
 @require_GET
+def artifact_archive(request: HttpRequest, run_id: str) -> FileResponse:
+    from ..artifact_downloads import run_artifact_archive
+
+    del request
+    run_id = canonical_uuid(run_id, resource="run")
+    archive = run_artifact_archive(run_id)
+    return FileResponse(
+        archive,
+        as_attachment=True,
+        filename=f"relay-{run_id}-artifacts.zip",
+        content_type="application/zip",
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def artifact_preview(request: HttpRequest, artifact_id: str) -> HttpResponse:
     del request
     path, name, _media_type = DjangoReadStore().artifact_file(

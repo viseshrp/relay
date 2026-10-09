@@ -857,3 +857,9 @@ Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 50,000 entries and 1,000 run roots; incomplete counts are lower bounds.
 It reads metadata only, follows no inner symlinks, and never returns file
 contents. The existing confirmed `POST /api/data/clean` remains unchanged.
+
+`GET /api/runs/<id>/artifacts/download` downloads retained attempt files as a
+ZIP. The archive is limited to 1,000 files and 256 MiB and rejects changed
+retained bytes. Artifact records include their attempt's completion or start
+time as `created_at`. Run records expose `dispatch_paused_at` and accumulated
+`dispatch_paused_seconds`; pause changes retain these counters transactionally.
