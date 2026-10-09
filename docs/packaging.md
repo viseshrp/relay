@@ -77,6 +77,13 @@ install the pinned Node version before building the source distribution and whee
 The release publication job downloads the already-built artifacts and does not
 rebuild them.
 
+On pushes to `main`, CI always checks the development version, builds both
+distributions, validates their contents, and retains them as the
+`verified-distributions` artifact for seven days. Uploading them to TestPyPI
+requires `TEST_PYPI_TOKEN` in the repository or `test-pypi` environment. If the
+token is absent, CI reports the skipped upload in its log and job summary.
+Build, version, and content failures still fail the job.
+
 ## Source dependency checks
 
 The dependency scan in `make check` excludes installed Python environments,
