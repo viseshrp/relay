@@ -79,3 +79,39 @@ def test_unreadable_folders_return_a_relay_error(
         folders.browse_folders("x" * 4097)
     with pytest.raises(ConfigError, match="too long"):
         folders.browse_folders(since="x" * 1025)
+
+
+def test_candidate_validation_and_explicit_git_initialization_preserve_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: Client
+) -> None:
+    from tests.support import git
+
+    monkeypatch.setattr(folders, "_home_directory", lambda: tmp_path)
+    directory = tmp_path / "Documents" / "GitHub" / "new-project"
+    directory.mkdir(parents=True)
+    code = directory / "owner.py"
+    code.write_bytes(b"# unchanged owner work\n")
+    assert (
+        owner.get("/api/projects/candidates", {"path": str(directory)}).json()["repository"]
+        is False
+    )
+    rejected = owner.post(
+        "/api/projects/initialize-git", {"path": str(directory)}, content_type="application/json"
+    )
+    assert rejected.status_code == 400 and not (directory / ".git").exists()
+    initialized = owner.post(
+        "/api/projects/initialize-git",
+        {"path": str(directory), "confirmed": True},
+        content_type="application/json",
+    )
+    assert initialized.status_code == 200 and initialized.json()["repository"] is True
+    assert code.read_bytes() == b"# unchanged owner work\n"
+    assert git(directory, "status", "--porcelain").strip() == "?? owner.py"
+    candidates = owner.get("/api/projects/candidates").json()["repositories"]
+    assert candidates == [{"name": "new-project", "path": str(directory), "repository": True}]
+    outside = owner.post(
+        "/api/projects/initialize-git",
+        {"path": str(tmp_path.parent), "confirmed": True},
+        content_type="application/json",
+    )
+    assert outside.status_code == 400

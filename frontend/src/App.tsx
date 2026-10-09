@@ -16,8 +16,6 @@ import {
   Menu,
   Select,
   Stack,
-  Tab,
-  Tabs,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -50,9 +48,13 @@ import { HomeDashboard } from "./components/HomeDashboard";
 import { ActionIcon } from "./components/ActionIcon";
 import { AuthView } from "./components/AuthView";
 import { GetStarted } from "./components/GetStarted";
+import { ProjectFolderValidation } from "./components/ProjectFolderValidation";
 import { FolderPicker } from "./components/FolderPicker";
 import { readLocation, saveLocation, type LocationState } from "./navigation";
 import type { AuthState, ProjectRecord } from "./types";
+
+import { HelpGuides, type HelpGuide } from "./components/HelpGuides";
+import { viewHref, projectPath as boundProjectPath } from "./navigation";
 
 const SettingsPage = lazy(() =>
   import("./components/SettingsPage").then((module) => ({
@@ -87,7 +89,7 @@ export function App() {
   const [reloading, setReloading] = useState(false);
   const projectPickerId = useId();
   const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeen(WELCOME_SEEN));
-  const [tourRequested, setTourRequested] = useState(() => !hasSeen(TOUR_SEEN));
+  const [tourRequested, setTourRequested] = useState(false);
   const [tourSection, setTourSection] = useState<SettingsSection | null>(null);
   const tourReturn = useRef<LocationState | null>(null);
   const [auth, setAuth] = useState<AuthState | null>(null);
@@ -106,6 +108,7 @@ export function App() {
   const [openingProject, setOpeningProject] = useState(false);
   const [projectPath, setProjectPath] = useState("");
   const [projectBusy, setProjectBusy] = useState(false);
+  const [projectValid, setProjectValid] = useState(false);
   const [authAttempt, setAuthAttempt] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -118,6 +121,8 @@ export function App() {
     }, 200);
     return () => window.clearTimeout(timer);
   }, [auth?.authenticated]);
+  const [guide, setGuide] = useState<HelpGuide | null>(null);
+  const [mobileNav, setMobileNav] = useState<HTMLElement | null>(null);
   const [setupForced, setSetupForced] = useState(false);
   const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
   const helpButton = useRef<HTMLButtonElement>(null);
@@ -345,11 +350,30 @@ export function App() {
   useEffect(() => {
     setSetupRunSucceeded(false);
     setSetupForced(false);
-  }, [location.project]);
+    if (!auth?.authenticated || !location.project) return;
+    const controller = new AbortController();
+    void api<{ runs: Array<{ status: string }> }>(
+      boundProjectPath(`/api/runs?status=succeeded&limit=1`, location.project),
+      { signal: controller.signal },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted && result.runs.length)
+          setSetupRunSucceeded(true);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [location.project, auth?.authenticated]);
   useEffect(() => {
     if (setupWasOpen.current && !setupForced) helpButton.current?.focus();
     setupWasOpen.current = setupForced;
   }, [setupForced]);
+
+  useEffect(() => {
+    if (welcomeOpen || openingProject || setupForced) return;
+    const main = document.getElementById("main-content");
+    main?.scrollIntoView({ block: "start" });
+    main?.focus({ preventScroll: true });
+  }, [location.view, location.run, location.workflow]);
 
   function dismissSetup(): void {
     setSetupDismissed(true);
@@ -456,6 +480,13 @@ export function App() {
 
   return (
     <Box sx={{ minHeight: "100vh" }}>
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={() => document.getElementById("main-content")?.focus()}
+      >
+        Skip to content
+      </a>
       <AppBar
         ref={header}
         position="sticky"
@@ -491,54 +522,94 @@ export function App() {
             Relay
           </Button>
           {renderProjectContext()}
-          <Tabs
-            value={
-              location.view === "home" ||
-              (loginRequired && location.view === "settings")
-                ? false
-                : location.view
-            }
-            onChange={(_event, value: LocationState["view"]) => {
-              const previousRun =
-                lastSelectedRun.current?.project === location.project
-                  ? lastSelectedRun.current.id
-                  : null;
-              const selected = location.run ?? previousRun;
-              const waiting =
-                selected && attention.attention.waiting_runs.includes(selected)
-                  ? selected
-                  : attention.attention.waiting_runs[0];
-              if (value === "runs" && waiting && location.view !== "runs")
-                void openWaitingRun(waiting);
-              else
-                void navigateSafely({
-                  view: value,
-                  run: null,
-                  job: null,
-                  interaction: null,
-                });
-            }}
-            sx={{ flex: 1, minWidth: 270 }}
+          <Box
+            component="nav"
+            aria-label="Main navigation"
+            className="main-navigation"
           >
-            {!loginRequired && (
-              <Tab
-                data-tour="settings-tab"
-                value="settings"
-                label="Settings"
-                sx={{ order: 3 }}
-              />
+            {(["workflows", "runs", "settings"] as const).map((view) => (
+              <Button
+                component="a"
+                key={view}
+                href={viewHref(view, location.project)}
+                aria-current={location.view === view ? "page" : undefined}
+                data-tour={
+                  view === "workflows"
+                    ? "workflow-tab"
+                    : view === "runs"
+                      ? "runs-tab"
+                      : "settings-tab"
+                }
+                onClick={(event) => {
+                  if (
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  )
+                    return;
+                  event.preventDefault();
+                  void navigateSafely({
+                    view,
+                    run: null,
+                    job: null,
+                    interaction: null,
+                  });
+                }}
+              >
+                {view === "runs"
+                  ? `Runs${attention.attention.waiting_count ? ` (${attention.attention.waiting_count})` : ""}`
+                  : view === "workflows"
+                    ? "Workflows"
+                    : "Settings"}
+              </Button>
+            ))}
+          </Box>
+          <Button
+            className="mobile-navigation"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(mobileNav)}
+            onClick={(event) => setMobileNav(event.currentTarget)}
+          >
+            Navigate
+          </Button>
+          <Menu
+            anchorEl={mobileNav}
+            open={Boolean(mobileNav)}
+            onClose={() => setMobileNav(null)}
+          >
+            {(["home", "workflows", "runs", "settings"] as const).map(
+              (view) => (
+                <MenuItem
+                  component="a"
+                  key={view}
+                  href={viewHref(view, location.project)}
+                  aria-current={view === location.view ? "page" : undefined}
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey)
+                      return;
+                    event.preventDefault();
+                    setMobileNav(null);
+                    void navigateSafely({
+                      view,
+                      run: null,
+                      job: null,
+                      interaction: null,
+                    });
+                  }}
+                >
+                  {view === "home"
+                    ? "Home"
+                    : view === "workflows"
+                      ? "Workflows"
+                      : view === "runs"
+                        ? "Runs"
+                        : "Settings"}
+                </MenuItem>
+              ),
             )}
-            <Tab data-tour="workflow-tab" value="workflows" label="Workflows" />
-            <Tab
-              data-tour="runs-tab"
-              value="runs"
-              label={
-                attention.attention.waiting_count
-                  ? `Runs (${attention.attention.waiting_count})`
-                  : "Runs"
-              }
-            />
-          </Tabs>
+          </Menu>
           <Button
             ref={helpButton}
             aria-label={
@@ -571,6 +642,23 @@ export function App() {
                 Settings
               </MenuItem>
             )}
+            {(
+              [
+                "Getting started",
+                "Coming from GitHub Actions",
+                "Keyboard shortcuts",
+              ] as HelpGuide[]
+            ).map((name) => (
+              <MenuItem
+                key={name}
+                onClick={() => {
+                  setHelpAnchor(null);
+                  setGuide(name);
+                }}
+              >
+                {name}
+              </MenuItem>
+            ))}
             {loginRequired && <Divider />}
             <MenuItem
               onClick={
@@ -625,7 +713,13 @@ export function App() {
           </Menu>
         </Toolbar>
       </AppBar>
-      <Container maxWidth={false} className="app-content">
+      <Container
+        component="main"
+        id="main-content"
+        tabIndex={-1}
+        maxWidth={false}
+        className="app-content"
+      >
         {updatedFrontend && (
           <Alert
             severity="info"
@@ -649,7 +743,7 @@ export function App() {
             {projectError}
           </Alert>
         )}
-        {!setupDismissed && (
+        {!setupDismissed && !setupRunSucceeded && (
           <Alert
             className="setup-banner"
             severity="info"
@@ -835,6 +929,7 @@ export function App() {
           </Suspense>
         </WorkspaceBoundary>
       </Container>
+      <HelpGuides guide={guide} onClose={() => setGuide(null)} />
       {projectReady && welcomeOpen && (
         <WelcomeCarousel
           onClose={() => {
@@ -877,6 +972,12 @@ export function App() {
             placeholder="/path/to/project"
           />
           <Box sx={{ mt: 2 }}>
+            <ProjectFolderValidation
+              path={projectPath}
+              disabled={projectBusy}
+              onValidated={setProjectValid}
+              onSelect={setProjectPath}
+            />
             <FolderPicker disabled={projectBusy} onSelect={setProjectPath} />
           </Box>
           {projectError && (
@@ -895,7 +996,7 @@ export function App() {
           <Button
             variant="contained"
             onClick={() => void openProject()}
-            disabled={projectBusy || !projectPath.trim()}
+            disabled={projectBusy || !projectPath.trim() || !projectValid}
           >
             Open project
           </Button>

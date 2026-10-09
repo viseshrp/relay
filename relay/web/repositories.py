@@ -4194,6 +4194,11 @@ class DjangoExecutionStore(DjangoAgentStore):
             frozen.get("bound_agent"), dict
         )
         explicit_retry = cast(dict, frozen.get("step", {})).get("with", {}).get("auto-retry")
+        retry_limit = policy.max_retries
+        if actions_agent:
+            configured_limit = cast(dict, frozen.get("step", {})).get("with", {}).get("retry-limit")
+            if str(configured_limit) in {"1", "2"}:
+                retry_limit = min(retry_limit, int(configured_limit))
         existing = AutomaticRetry.objects.filter(attempt=attempt).first()
         if not policy.enabled and not (actions_agent and explicit_retry in (True, "true")):
             return
@@ -4224,13 +4229,13 @@ class DjangoExecutionStore(DjangoAgentStore):
             AttemptStopReason.SOFT_DENIED.value,
         }:
             state, reason = "blocked", "This failure requires an owner decision or safe recovery."
-        elif used >= policy.max_retries:
+        elif used >= retry_limit:
             state, reason = "exhausted", "The automatic retry budget for this step is exhausted."
         instruction, digest = recovery_instruction(_string(node, "scope_path"), error_code, message)
         retry, _created = AutomaticRetry.objects.update_or_create(
             attempt=attempt,
             defaults={
-                "retry_number": min(used + 1, policy.max_retries),
+                "retry_number": min(used + 1, retry_limit),
                 "state": state,
                 "instruction": instruction,
                 "instruction_sha256": digest,

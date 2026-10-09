@@ -23,6 +23,7 @@ CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
             "field",
             "label",
             "auto-retry",
+            "retry-limit",
         },
         set(),
     ),
@@ -63,6 +64,15 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
         if isinstance(maximum, bool) or str(maximum) not in {str(i) for i in range(1, 101)}:
             message = "Loop max-iterations must be a literal integer between 1 and 100."
             raise WorkflowValidationError(message)
+    if (
+        reference == "relay/agent@v1"
+        and "retry-limit" in inputs
+        and (
+            isinstance(inputs["retry-limit"], bool) or str(inputs["retry-limit"]) not in {"1", "2"}
+        )
+    ):
+        message = "Agent retry-limit must be a literal integer between 1 and 2."
+        raise WorkflowValidationError(message)
     if reference == "relay/human-wait@v1" and "options" in inputs:
         value = inputs["options"]
         if "${{" not in str(value):

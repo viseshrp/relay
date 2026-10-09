@@ -2,7 +2,8 @@ import { Alert, Button, Paper, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { pollVisible } from "../poll-visible";
 import { api, errorMessage } from "../api";
-import { projectPath } from "../navigation";
+import { NamedArtifactPreview } from "./NamedArtifactPreview";
+import { projectPath, stageLabel } from "../navigation";
 import type { RunEvent, RunNode } from "../types";
 import { SafeMarkdown } from "./SafeMarkdown";
 
@@ -13,6 +14,8 @@ type Products = {
     digest: string;
     bytes: number;
     expires_at: string | null;
+    scope_path: string;
+    created_at: string;
   }>;
   queues: Array<{ scope: string; group: string; mode: string; state: string }>;
   environments?: Record<string, { name: string; url: string }>;
@@ -34,6 +37,9 @@ export function ActionsRunProducts({
     queues: [],
   });
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<
+    Products["artifacts"][number] | null
+  >(null);
   useEffect(() => {
     let active = true;
     async function load() {
@@ -99,8 +105,8 @@ export function ActionsRunProducts({
         </Paper>
       )}
       {products.artifacts.length > 0 && (
-        <Paper variant="outlined" sx={{ p: 2 }} aria-label="Named artifacts">
-          <Typography variant="h6">Named artifacts</Typography>
+        <Paper variant="outlined" sx={{ p: 2 }} aria-label="Uploaded artifacts">
+          <Typography variant="h6">Uploaded artifacts</Typography>
           {products.artifacts.map((item) => (
             <Stack
               key={item.id}
@@ -117,8 +123,12 @@ export function ActionsRunProducts({
               >
                 Download {item.name}
               </Button>
+              <Button onClick={() => setSelected(item)}>
+                Preview {item.name}
+              </Button>
               <Typography variant="body2">
-                {item.bytes.toLocaleString()} bytes · SHA-256 {item.digest}
+                {stageLabel(item.scope_path)} · {item.bytes.toLocaleString()}{" "}
+                bytes · {new Date(item.created_at).toLocaleString()}
                 {item.expires_at
                   ? ` · expires ${new Date(item.expires_at).toLocaleString()}`
                   : ""}
@@ -126,6 +136,14 @@ export function ActionsRunProducts({
             </Stack>
           ))}
         </Paper>
+      )}
+      {selected && (
+        <NamedArtifactPreview
+          id={selected.id}
+          name={selected.name}
+          project={projectId}
+          onClose={() => setSelected(null)}
+        />
       )}
       {annotations.map((item) => (
         <Alert

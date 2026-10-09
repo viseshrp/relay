@@ -323,6 +323,19 @@ def sign_out(request: HttpRequest) -> HttpResponse:
 @api_errors
 @owner_required
 @require_POST
+def initialize_git(request: HttpRequest) -> HttpResponse:
+    from relay.projects.folders import initialize_git_folder
+
+    body = json_body(request)
+    if body.get("confirmed") is not True:
+        message = "Confirm Git initialization for this folder."
+        raise ConfigError(message)
+    return JsonResponse(initialize_git_folder(required_text(body, "path")))
+
+
+@api_errors
+@owner_required
+@require_POST
 def open_project(request: HttpRequest) -> HttpResponse:
     body = json_body(request)
     location = Path(required_text(body, "path"))
@@ -548,7 +561,7 @@ def read_workflow_prompt(request: HttpRequest, key: str) -> HttpResponse:
 
         prompt = resolve_prompt(GlobalPrompt(global_=reference[7:]), relay_root)
         if len(prompt.content.encode()) > 1_048_576:
-            message = "These instructions exceed the editor’s size limit."
+            message = "These instructions exceed the editor's size limit."
             raise ConfigError(message)
         return JsonResponse(
             {

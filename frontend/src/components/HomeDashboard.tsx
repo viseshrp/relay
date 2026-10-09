@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { pollVisible } from "../poll-visible";
 import { RelayApiError, errorMessage, readDashboard } from "../api";
 import { jobDuration } from "../job";
-import { stageLabel, statusLabel } from "../navigation";
+import { stageLabel, statusLabel, viewHref } from "../navigation";
 import type {
   DashboardData,
   DashboardPage,
@@ -220,7 +220,12 @@ export function HomeDashboard({
               <div className="dashboard-run-body">
                 <Button
                   className="dashboard-run-link"
-                  onClick={() => onNavigate(run.project, "runs", run)}
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey)
+                      return;
+                    event.preventDefault();
+                    onNavigate(run.project, "runs", run);
+                  }}
                 >
                   {run.title ||
                     stageLabel(run.workflow_key.replace(/\.ya?ml$/, ""))}{" "}
@@ -251,7 +256,12 @@ export function HomeDashboard({
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => onNavigate(run.project, "runs", run)}
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey)
+                      return;
+                    event.preventDefault();
+                    onNavigate(run.project, "runs", run);
+                  }}
                 >
                   Open request
                 </Button>
@@ -277,7 +287,7 @@ export function HomeDashboard({
   }
 
   return (
-    <Box className="dashboard" component="main" aria-label="Relay home">
+    <Box className="dashboard" component="div" aria-label="Relay home">
       <div className="dashboard-heading">
         <Box>
           <Typography component="h1" variant="h5">
@@ -331,7 +341,9 @@ export function HomeDashboard({
                 <Typography variant="body2" color="text.secondary">
                   {label}
                 </Typography>
-                <Typography variant="h4">{value}</Typography>
+                <Typography component="p" variant="h5">
+                  {value}
+                </Typography>
               </Paper>
             ))}
           </div>

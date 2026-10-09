@@ -622,3 +622,8 @@ free-text response. Clicking a button sends that exact value to the current
 interaction; it does not approve another request. The response remains available
 as `steps.<id>.outputs.answer`. The request explains whether its expiry comes
 from an approval, step, job, or default job timeout.
+
+A `relay/agent@v1` step can set `retry-limit: 1` or `retry-limit: 2` beside
+`auto-retry: true`. The limit is literal and bounded; expressions are not
+accepted. It caps the captured workflow recovery budget for that step,
+without resetting retries already used across restart or owner retry.

@@ -22,6 +22,8 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/auth/logout", actions.sign_out, name="auth-logout"),
     path("api/settings", settings.owner_settings, name="owner-settings"),
     path("api/projects/defaults", settings.project_defaults, name="project-defaults"),
+    path("api/projects/candidates", pages.project_candidates, name="project-candidates"),
+    path("api/projects/initialize-git", actions.initialize_git, name="project-initialize-git"),
     path("api/projects/folders", pages.project_folders, name="project-folders"),
     path("api/projects", pages.projects, name="projects"),
     path("api/dashboard", pages.dashboard, name="dashboard"),
@@ -93,6 +95,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("api/data/usage", settings.storage_usage, name="data-usage"),
     path("api/data/clean", actions.clean_data, name="data-clean"),
+    path("api/workflow-artifacts/<str:artifact_id>/preview", actions_language.preview_product),
     path(
         "api/workflow-artifacts/<str:artifact_id>/download",
         actions_language.download_product,

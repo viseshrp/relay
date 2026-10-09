@@ -29,7 +29,9 @@
       }
     },
     "workflow-description": {
-      "string": {}
+      "string": {
+        "max-length": 4096
+      }
     },
     "run-name": {
       "context": [
@@ -180,7 +182,7 @@
       "mapping": {
         "properties": {
           "description": {
-            "type": "string"
+            "type": "input-description"
           },
           "type": {
             "type": "workflow-call-input-type",
@@ -253,7 +255,7 @@
       "mapping": {
         "properties": {
           "description": {
-            "type": "string"
+            "type": "input-description"
           },
           "required": {
             "type": "boolean"
@@ -276,7 +278,7 @@
       "mapping": {
         "properties": {
           "description": {
-            "type": "string"
+            "type": "input-description"
           },
           "value": {
             "type": "workflow-output-context",
@@ -322,7 +324,7 @@
       "mapping": {
         "properties": {
           "description": {
-            "type": "string"
+            "type": "input-description"
           },
           "type": {
             "type": "workflow-dispatch-input-type"
@@ -404,7 +406,7 @@
           "if": "job-if",
           "strategy": "strategy",
           "name": {
-            "type": "string-strategy-context"
+            "type": "job-name"
           },
           "timeout-minutes": {
             "type": "number-strategy-context"
@@ -429,7 +431,7 @@
       "mapping": {
         "properties": {
           "name": {
-            "type": "string-strategy-context"
+            "type": "job-name"
           },
           "uses": {
             "type": "non-empty-string",
@@ -793,7 +795,9 @@
         "env",
         "hashFiles(1,255)"
       ],
-      "string": {}
+      "string": {
+        "max-length": 256
+      }
     },
     "step-timeout-minutes": {
       "context": [
@@ -1074,6 +1078,24 @@
         }
       },
       "description": "Opt-in bounded automatic recovery. Per-step auto-retry can opt out."
+    },
+    "job-name": {
+      "context": [
+        "relay",
+        "inputs",
+        "vars",
+        "needs",
+        "strategy",
+        "matrix"
+      ],
+      "string": {
+        "max-length": 256
+      }
+    },
+    "input-description": {
+      "string": {
+        "max-length": 4096
+      }
     }
   }
 }

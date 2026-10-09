@@ -134,7 +134,7 @@ export function JobLog({ events, command, label, workingFolder, live, loading, h
         <span className="log-line-number">{index + 1}</span>
         {row.message && <ActivityMessageView message={row.message} workingFolder={workingFolder} timestamps={timestamps} expanded={current?.row === index} />}
       </Box>)}
-      {!rows.length && <Typography sx={{ p: 2 }}>Output will appear here when this job starts.</Typography>}
+      {!rows.length && <Typography sx={{ p: 2 }}>{live ? "Waiting for output from this step." : "This step produced no output."}</Typography>}
     </Box>
     <Stack direction="row" className="log-footer" spacing={1}>
       <Typography variant="caption" role="status">{loading ? "Loading log history…" : hasMore ? "Log history incomplete" : live ? "Live logs" : "All logs received"} · {rows.length.toLocaleString()} {command ? "lines" : "messages"}</Typography>

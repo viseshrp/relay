@@ -23,7 +23,7 @@ from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import CleanupPolicy, RunStatus
 from relay.owner_settings import effective_config
-from relay.projects.folders import browse_folders
+from relay.projects.folders import browse_folders, common_repositories, inspect_folder
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
@@ -101,6 +101,15 @@ def project_folders(request: HttpRequest) -> HttpResponse:
         request.GET.get("path"), since=request.GET.get("since", ""), limit=_page_limit(request)
     )
     return JsonResponse(asdict(listing))
+
+
+@api_errors
+@owner_required
+@require_GET
+def project_candidates(request: HttpRequest) -> HttpResponse:
+    if request.GET.get("path"):
+        return JsonResponse(inspect_folder(request.GET["path"]))
+    return JsonResponse({"repositories": [asdict(entry) for entry in common_repositories()]})
 
 
 @api_errors

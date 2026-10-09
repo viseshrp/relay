@@ -27,6 +27,9 @@ and signed in. The setup screen gives install links and sign-in commands.
 Relay opens your browser and creates the blank project files on first start.
 To open the local app without a password, use `relay up --no-login`.
 
+For a syntax comparison and three examples, see
+[Coming from GitHub Actions](docs/coming-from-github-actions.md).
+
 ## Requirements
 
 - Python 3.10 through 3.14

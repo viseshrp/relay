@@ -349,6 +349,22 @@ def test_named_products_download_exact_bytes_and_reject_expired_or_corrupt_data(
         assert archive.read("result.txt") == b"exact\r\nbytes\xff"
     products = owner.get(f"/api/runs/{run_id}/products").json()
     assert products["artifacts"][0]["digest"] == digest and products["queues"] == []
+    assert products["artifacts"][0]["scope_path"] == attempt.node_run.scope_path
+    assert "manifest" not in products["artifacts"][0]
+    preview = owner.get(f"/api/workflow-artifacts/{artifact.pk}/preview").json()
+    assert preview["files"] == [{"path": "result.txt", "bytes": size}]
+    assert preview["previewable"] is False
+    assert (
+        owner.get(
+            f"/api/workflow-artifacts/{artifact.pk}/preview", {"path": "../../outside"}
+        ).status_code
+        == 400
+    )
+    combined = owner.get(f"/api/runs/{run_id}/artifacts/download")
+    assert combined.status_code == 200
+    with ZipFile(BytesIO(b"".join(combined.streaming_content))) as archive:
+        assert archive.read(f"uploaded/{artifact.pk}/result.txt") == b"exact\r\nbytes\xff"
+
     assert owner.get(f"/api/runs/{uuid.uuid4()}/products").status_code == 404
     assert owner.get(f"/api/workflow-artifacts/{uuid.uuid4()}/download").status_code == 400
     artifact.expires_at = timezone.now() - timedelta(seconds=1)

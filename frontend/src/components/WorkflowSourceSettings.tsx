@@ -13,8 +13,8 @@ export function WorkflowSourceSettings({ open, value, manifest, change, onClose 
   const dispatch = isRecord(events.workflow_dispatch) ? events.workflow_dispatch : {};
   return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
     <DialogTitle>Workflow settings</DialogTitle><DialogContent><Stack spacing={2} sx={{ pt: 1 }}>
-      <TextField label="Workflow name" value={value?.name ?? ""} onChange={event => change(["name"], event.target.value)} />
-      <TextField label="Run title expression" value={value?.["run-name"] ?? ""} onChange={event => change(["run-name"], event.target.value || undefined)} />
+      <TextField label="Workflow name" slotProps={{ htmlInput: { maxLength: 256 } }} value={value?.name ?? ""} onChange={event => change(["name"], event.target.value)} />
+      <TextField label="Run title expression" slotProps={{ htmlInput: { maxLength: 1000 } }} value={value?.["run-name"] ?? ""} onChange={event => change(["run-name"], event.target.value || undefined)} />
       <Typography component="h2" variant="h6">Launch inputs</Typography>
       <WorkflowInputsEditor value={dispatch.inputs} onChange={inputs => change(["on"], { ...events, workflow_dispatch: { ...dispatch, inputs } })} />
       {manifest && <SchemaFields manifest={manifest} type="workflow-root" value={value} omit={["jobs", "name", "run-name"]} onChange={(field, entry) => change([field], entry)} />}

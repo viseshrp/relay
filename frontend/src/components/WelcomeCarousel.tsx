@@ -48,6 +48,6 @@ export function WelcomeCarousel({ onClose, onShowTour }: { onClose: () => void; 
         <Typography role="status" variant="body2" sx={{ textAlign: "center" }}>Slide {selected + 1} of {slides.length}</Typography>
       </div>
     </DialogContent>
-    <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}><Button onClick={onClose}>Skip introduction</Button><span style={{ flex: 1 }} /><Button disabled={selected === 0} onClick={() => embla?.scrollPrev()}>Back</Button><Button variant="contained" onClick={() => selected === slides.length - 1 ? onShowTour() : embla?.scrollNext()}>{selected === slides.length - 1 ? "Show guided tour" : "Next"}</Button></DialogActions>
+    <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}><Button onClick={onClose}>Skip introduction</Button><span style={{ flex: 1 }} /><Button disabled={selected === 0} onClick={() => embla?.scrollPrev()}>Back</Button><Button variant="contained" onClick={() => selected === slides.length - 1 ? onShowTour() : embla?.scrollNext()}>{selected === slides.length - 1 ? "Take the tour" : "Next"}</Button></DialogActions>
   </Dialog>;
 }

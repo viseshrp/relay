@@ -13,11 +13,11 @@ export function HelpTip({ topic }: { topic: HelpTopic }) {
   }
   const [title, description] = help[topic];
   return <ClickAwayListener onClickAway={() => setOpen(false)}><span className="help-tip">
-    <Tooltip title={description} open={open} placement="top" describeChild disableFocusListener disableTouchListener arrow
+    <Tooltip title={<span>{description}<br /><a href="https://github.com/viseshrp/relay/blob/main/docs/web-ui.md" target="_blank" rel="noreferrer">Read the guide</a></span>} open={open} placement="top" describeChild disableFocusListener disableTouchListener arrow
       slotProps={{ tooltip: { sx: { bgcolor: "background.paper", color: "text.primary", border: "1px solid", borderColor: "divider", boxShadow: 3, fontSize: 14, lineHeight: 1.5, p: 1.5, boxSizing: "border-box", maxWidth: "min(360px, calc(100vw - 32px))" } }, arrow: { sx: { color: "background.paper" } }, popper: { modifiers: [{ name: "offset", options: { offset: [0, 8] } }, { name: "preventOverflow", options: { padding: 12, boundary: boundary ?? "clippingParents" } }, { name: "flip", options: { padding: 12, boundary: boundary ?? "clippingParents" } }] } }}
       onOpen={() => { if (!dismissed.current) show(); }} onClose={() => setOpen(false)}>
       <IconButton ref={icon} size="small" aria-label={`About ${title}`} onClick={() => { dismissed.current = false; show(); }}
-        onFocus={() => { if (!dismissed.current) show(); }} onBlur={() => { dismissed.current = false; setOpen(false); }}
+        onFocus={() => { if (!dismissed.current) show(); }} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest("[role=tooltip]"))) { dismissed.current = false; setOpen(false); } }}
         onMouseLeave={() => { dismissed.current = false; }} onKeyDown={(event) => {
         if (event.key === "Escape") { event.stopPropagation(); dismissed.current = true; setOpen(false); }
       }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4" /><circle cx="12" cy="17" r=".8" fill="currentColor" /></svg></IconButton>

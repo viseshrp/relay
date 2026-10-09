@@ -64,6 +64,7 @@ export function ActionBuiltinFields({
           "prompt",
           "prompt-files",
           "auto-retry",
+          "retry-limit",
         ]
       : step.uses === "relay/command@v1"
         ? ["argv"]
@@ -253,30 +254,6 @@ export function ActionBuiltinFields({
       )}
       {step.uses === "relay/agent@v1" && (
         <>
-          <Accordion>
-            <AccordionSummary>When this job fails</AccordionSummary>
-            <AccordionDetails>
-              <FormControlLabel
-                label="Retry this agent within the saved bounded recovery policy"
-                control={
-                  <Checkbox
-                    checked={
-                      inputs["auto-retry"] === true ||
-                      inputs["auto-retry"] === "true"
-                    }
-                    onChange={(event) =>
-                      onChange("auto-retry", event.target.checked)
-                    }
-                  />
-                }
-              />
-              <Typography variant="body2">
-                The default stops and tells you. A fix-and-check workflow can
-                use a bounded relay/loop step; retries preserve prompts, model,
-                and the lifetime retry budget.
-              </Typography>
-            </AccordionDetails>
-          </Accordion>
           <Autocomplete
             multiple
             options={agents.map((item) => item.id)}

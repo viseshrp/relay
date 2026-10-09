@@ -397,13 +397,17 @@ jobs:
 class RepairDriver:
     prompts: list[tuple[str, ...]]
 
-    def __init__(self) -> None:
+    failures: int
+
+    def __init__(self, failures: int = 1) -> None:
         self.prompts = []
+        self.failures = failures
 
     def execute(self, context: AttemptContext, _node: AgentNode) -> ExecutionOutcome:
         self.prompts.append(context.attempt.prompt_contents)
         (context.worktree / "REVIEW.md").write_text(
-            "invalid report\n" if len(self.prompts) == 1 else "Ready: yes\n", encoding="utf-8"
+            "invalid report\n" if len(self.prompts) <= self.failures else "Ready: yes\n",
+            encoding="utf-8",
         )
         return ExecutionOutcome(OutcomeKind.SUCCEEDED)
 
@@ -595,3 +599,39 @@ def test_environment_url_resolves_after_steps_and_omits_secrets(
     assert run.actions_state["environment_links"]["root.deploy"]["url"] == (
         "https://preview.example.test/build"
     )
+
+
+@pytest.mark.parametrize("limit", [1, 2])
+def test_explicit_agent_retry_limit_exhausts_without_resetting_lifetime_budget(
+    project: RelayProject, tmp_path: Path, fake_agents: FakeAgents, limit: int
+) -> None:
+    fake_agents.install("codex")
+    project.write_workflow(
+        "limited",
+        f"""jobs:
+  main:
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: codex
+          model: m1
+          prompt: Preserve these exact instructions
+          report: REVIEW.md
+          label: Ready
+          auto-retry: true
+          retry-limit: {limit}
+""",
+    )
+    driver = RepairDriver(failures=100)
+    engine = InlineEngine(
+        {"actions_job": ActionsJobExecutor(driver), "actions_step": ActionsStepExecutor(driver)},
+        tmp_path / "artifacts",
+    )
+    run_id = engine.launch(project, "limited")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "failed"
+    assert len(driver.prompts) == limit + 1
+    records = AutomaticRetry.objects.filter(attempt__node_run__run_id=run_id)
+    assert records.filter(state="resumed").count() == limit
+    assert records.filter(state="exhausted").count() == 1
+    assert all(prompts[-1] == "Preserve these exact instructions" for prompts in driver.prompts)

@@ -1,3 +1,6 @@
+import "@fontsource/inter/latin-400.css";
+import "@fontsource/inter/latin-500.css";
+import "@fontsource/inter/latin-600.css";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 
@@ -9,7 +12,8 @@ import { App } from "./App";
 import { relayTheme } from "./theme";
 
 const root = document.getElementById("root");
-if (root === null) throw new Error("Relay could not find its browser application root.");
+if (root === null)
+  throw new Error("Relay could not find its browser application root.");
 
 createRoot(root).render(
   <StrictMode>

@@ -420,7 +420,7 @@ def display_name(attempt_id: str, value: str) -> None:
         state = dict(run.actions_state)
         state.setdefault("display_names", {})[cast(str, record.node_run.scope_path)] = redactor(
             str(run.pk)
-        ).text(value)[:1024]
+        ).text(value)[:256]
         Run.objects.filter(pk=run.pk).update(actions_state=state)
 
 

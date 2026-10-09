@@ -1,3 +1,4 @@
+import { terminalColors } from "./theme";
 import type { RunEvent } from "./types";
 
 export function jobDuration(
@@ -36,16 +37,7 @@ export interface AnsiStyle {
   color?: string;
   bold: boolean;
 }
-const COLORS = [
-  "#cbd5e1",
-  "#f87171",
-  "#86efac",
-  "#fde047",
-  "#93c5fd",
-  "#d8b4fe",
-  "#67e8f9",
-  "#ffffff",
-];
+const COLORS = terminalColors;
 
 function palette(value: number): string | undefined {
   if (!Number.isInteger(value) || value < 0 || value > 255) return undefined;

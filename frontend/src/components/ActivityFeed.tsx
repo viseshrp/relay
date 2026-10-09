@@ -103,9 +103,9 @@ export function ActivityFeed({ events, nodes, workingFolder, live, command = fal
     </Stack>
     {error && <Alert severity="error">{error}</Alert>}
     {(count > limit || hasMore) && <Button disabled={loading} onClick={() => void more()}>{loading ? "Loading messages…" : "Load earlier messages"}</Button>}
-    {command ? <Box component="ol" aria-label="Command output lines" start={Math.max(1, lines.length - limit + 1)} sx={{ bgcolor: "#0f172a", color: "#f1f5f9", fontFamily: "monospace", p: 2, pl: 7, m: 0 }}>
+    {command ? <Box component="ol" aria-label="Command output lines" start={Math.max(1, lines.length - limit + 1)} sx={{ bgcolor: "var(--relay-terminal)", color: "var(--relay-text-on-dark)", fontFamily: "monospace", p: 2, pl: 7, m: 0 }}>
       {lines.slice(-limit).map((line, index) => <Box component="li" key={index} sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", pl: 1 }}>
-        <Box component="span" sx={{ color: line.stream === "stderr" ? "#fca5a5" : "#94a3b8", mr: 1 }}>{line.stream}</Box>
+        <Box component="span" sx={{ color: line.stream === "stderr" ? "var(--relay-danger-on-dark)" : "var(--relay-muted-on-dark)", mr: 1 }}>{line.stream}</Box>
         {line.spans.map((span, part) => <Box component="span" key={part} sx={{ color: span.color, fontWeight: span.bold ? 700 : 400 }}>{span.text}</Box>)}
       </Box>)}
     </Box> : <Stack spacing={1.5}>{rows.slice(-limit).map((message) => <ActivityMessageView key={message.id} message={message} workingFolder={workingFolder} />)}</Stack>}

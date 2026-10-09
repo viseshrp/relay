@@ -1,3 +1,4 @@
+import { countLabel } from "../count";
 import {
   Alert,
   Accordion,
@@ -1199,8 +1200,7 @@ export function RunWorkspace({
       {detail && (
         <Box
           component="header"
-          role="region"
-          aria-label="Workflow run history"
+          aria-labelledby="run-title"
           className="run-header"
         >
           <Button
@@ -1214,6 +1214,7 @@ export function RunWorkspace({
             <Typography
               component="h1"
               variant="h5"
+              id="run-title"
               className="run-title"
               title={detail.title}
               sx={{ flex: 1 }}
@@ -1378,23 +1379,34 @@ export function RunWorkspace({
         <Box className="run-layout">
           <Paper variant="outlined" className="history-panel actions-sidebar">
             {detail && (
-              <JobList
-                nodes={detail.nodes}
-                selected={selectedJob}
-                repairOwners={repairOwners}
-                hasMore={nodeCursor !== null}
-                onSelect={(scope) =>
-                  scope ? showStep(scope) : onSelectJob(null)
-                }
-                onMore={() => void loadMoreNodes()}
-                pendingChoices={
-                  dispatchPaused ? pendingChoices.choices : undefined
-                }
-                onCheck={pendingChoices.retry}
-                onEdit={(settings, choices) =>
-                  setPendingSettings({ runId: detail.id, settings, choices })
-                }
-              />
+              <>
+                <a
+                  className="skip-link skip-summary"
+                  href="#run-summary"
+                  onClick={() =>
+                    document.getElementById("run-summary")?.focus()
+                  }
+                >
+                  Skip to summary
+                </a>
+                <JobList
+                  nodes={detail.nodes}
+                  selected={selectedJob}
+                  repairOwners={repairOwners}
+                  hasMore={nodeCursor !== null}
+                  onSelect={(scope) =>
+                    scope ? showStep(scope) : onSelectJob(null)
+                  }
+                  onMore={() => void loadMoreNodes()}
+                  pendingChoices={
+                    dispatchPaused ? pendingChoices.choices : undefined
+                  }
+                  onCheck={pendingChoices.retry}
+                  onEdit={(settings, choices) =>
+                    setPendingSettings({ runId: detail.id, settings, choices })
+                  }
+                />
+              </>
             )}
             <Divider sx={{ my: 2 }} />
             <Typography variant="caption" color="text.secondary" sx={{ px: 2 }}>
@@ -1422,6 +1434,8 @@ export function RunWorkspace({
           </Paper>
 
           <Stack
+            id="run-summary"
+            tabIndex={-1}
             ref={jobContent}
             spacing={2}
             sx={{ minWidth: 0, scrollMarginTop: 80 }}

@@ -14,8 +14,8 @@ export function PathDisplay({ path, label, display }: { path: string; label: str
     catch { setNotice("Could not copy. Select the full path below to copy it."); }
   }
   return <details className="path-display">
-    <summary role="button" aria-label={`Full path for ${label}`}><code>{display ?? shortenedPath(path)}</code><span>Full path</span></summary>
-    <div className="path-details"><code>{path}</code><Button onClick={() => void copy()} aria-label={`Copy full path for ${label}`}>Copy path</Button></div>
+    <summary title={path}><code>{display ?? shortenedPath(path)}</code><span>Full path</span></summary>
+    <div className="path-details"><code>{path}</code><Button onClick={() => void copy()} aria-label={`Copy path for ${label}`}>Copy path</Button></div>
     {notice && <Typography variant="caption" role="status">{notice}</Typography>}
   </details>;
 }

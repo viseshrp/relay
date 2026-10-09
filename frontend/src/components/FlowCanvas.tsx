@@ -44,7 +44,7 @@ function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; f
   const initialized = useNodesInitialized();
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (initialized && selectedId) void fitView({ nodes: [{ id: selectedId }], padding: 0.6, minZoom: 0.8, maxZoom: 1 });
+    if (initialized && selectedId) void fitView({ nodes: [{ id: selectedId }], padding: 0.6, minZoom: 0.25, maxZoom: 1 });
   }, [initialized, selectedId, focusRequest, fitView]);
   return null;
 }
@@ -65,7 +65,7 @@ function InitialRunViewport({ container }: { container: RefObject<HTMLDivElement
     if (zoom < 0.65) {
       void setViewport({ x: 24 - first.position.x * 0.8, y: 24 - first.position.y * 0.8, zoom: 0.8 });
     } else {
-      void fitView({ padding: 0.2, minZoom: 0.65, maxZoom: 1 });
+      void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1 });
     }
   }, [initialized, container, getNodes, fitView, setViewport]);
   return null;
@@ -121,11 +121,12 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
         deleteKeyCode={runMode ? null : ["Backspace", "Delete"]}
         ariaLabelConfig={runMode ? { "node.a11yDescription.default": "Press Enter to open this job.", "controls.interactive.ariaLabel": "Read-only graph" } : undefined}
         nodesDraggable={!runMode}
-        zoomOnScroll={!runMode}
-        preventScrolling={!runMode}
+        zoomOnScroll={false}
+        zoomActivationKeyCode={["Meta", "Control"]}
+        preventScrolling={false}
         panOnScroll={false}
         zoomOnDoubleClick={!runMode}
-        fitViewOptions={runMode ? { padding: 0.2, minZoom: 0.65, maxZoom: 1 } : undefined}
+        fitViewOptions={runMode ? { padding: 0.2, minZoom: 0.25, maxZoom: 1 } : undefined}
         fitView={!runMode}
         minZoom={0.25}
         maxZoom={1.75}

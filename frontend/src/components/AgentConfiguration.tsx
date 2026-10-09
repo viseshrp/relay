@@ -20,7 +20,7 @@ interface AgentConfigurationProps {
   fields?: Array<keyof AgentOptions>;
 }
 
-export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Provider default", inheritDefaults = false, fields = ["effort", "permission_mode"] }: AgentConfigurationProps) {
+export function AgentConfiguration({ agent, model, options, onChange, project, disabled = false, labels, defaultLabel = "Agent’s default", inheritDefaults = false, fields = ["effort", "permission_mode"] }: AgentConfigurationProps) {
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<{
     key: string;

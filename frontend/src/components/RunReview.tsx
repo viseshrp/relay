@@ -313,7 +313,7 @@ export function ReviewRequest({
           {stageLabel(interaction.scope_path)}
         </Typography>
         <Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {String(interaction.request.prompt ?? "Owner input required.")}
+          {String(interaction.request.prompt ?? "Your response is needed.")}
         </Typography>
         {interaction.deadline && (
           <Typography variant="body2">

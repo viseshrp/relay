@@ -124,7 +124,7 @@ export function RunArtifacts({
         <Typography component="h2" variant="h6">
           Artifacts
         </Typography>
-        {visible.length > 0 && (
+        {
           <Button
             component="a"
             href={`/api/runs/${runId}/artifacts/download`}
@@ -132,7 +132,7 @@ export function RunArtifacts({
           >
             Download all
           </Button>
-        )}
+        }
       </Stack>
       {visible.length ? (
         <TableContainer>

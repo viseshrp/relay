@@ -983,3 +983,31 @@ and attention feed slow to one refresh every 30 seconds after a minute; focus
 or a deliberate action refreshes immediately. Signed-out polling stops until
 authentication is restored. Workspace code is preloaded after authentication so
 the Run workflow panel does not wait for a first chunk download.
+
+### Help, keyboard access, and settings validation
+
+The Help menu includes [Getting started](getting-started.md),
+[Coming from GitHub Actions](coming-from-github-actions.md), and
+[keyboard shortcuts](keyboard-shortcuts.md). Welcome slides close on Escape;
+starting a tour is an explicit choice. A successful project run hides the
+first-run banner. Navigation links support opening another tab. Skip links
+move keyboard focus into the current page or run summary.
+
+Settings validate durations, retry limits, ports, and worker counts next to
+the field. Invalid values disable Save. Switching sections with unsaved
+changes offers Keep editing or Discard changes. Restart-only settings retain
+their restart notices.
+
+Job settings use key/value tables, matrix axes, a concurrency group with a
+cancel-in-progress switch, and searchable expression helpers. The failure
+tab selects the saved workflow recovery default, Stop and tell me, or a
+literal limit of one or two automatic retries per agent step. The smaller
+of the step limit and captured workflow limit applies; retries never reset
+the lifetime budget. A fix-and-check loop remains an explicit bounded step
+calling a local reusable workflow and preserves existing conclusions.
+
+Opening a project includes a home-bounded folder browser, common development
+folders, and live Git validation. Initialize Git is an explicit action for
+a selected non-repository folder; it preserves the folder's existing files.
+Named artifact uploads show their job and creation time, offer verified
+text or Markdown previews, and join retained reports in Download all.

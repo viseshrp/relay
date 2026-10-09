@@ -83,8 +83,8 @@ export function RetrySettings({ problem, projectId, onClose, onRetry, purpose = 
   const selector = configuration?.effort;
   const editable = selector !== null && selector !== undefined && selector.transport !== "native";
   const choices = models?.agentId === agentId ? models.choices : [];
-  const currentEffort = selector?.choices.find((choice) => choice.value === problem.effort)?.name ?? problem.effort ?? "Provider default";
-  const currentPermission = configuration?.permission_mode?.choices.find((choice) => choice.value === problem.permission_mode)?.name ?? problem.permission_mode ?? "Provider default";
+  const currentEffort = selector?.choices.find((choice) => choice.value === problem.effort)?.name ?? problem.effort ?? "Agent’s default";
+  const currentPermission = configuration?.permission_mode?.choices.find((choice) => choice.value === problem.permission_mode)?.name ?? problem.permission_mode ?? "Agent’s default";
 
   function changeAgent(value: string) {
     setAgentId(value);
