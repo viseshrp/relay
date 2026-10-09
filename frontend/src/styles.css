@@ -425,7 +425,8 @@ p.diff-empty { padding: 24px 16px; margin: 0; color: #526078; font-size: 0.85rem
 .settings-content .MuiAccordionDetails-root { padding-top: 16px; }
 .settings-save { position: static; flex-wrap: wrap; gap: 8px; margin-top: 28px !important; }
 .help-tip { display: inline-flex; flex: 0 0 auto; align-items: center; }
-.help-tip .MuiIconButton-root:not(.Mui-disabled) { color: #3156d3; width: 28px; height: 28px; padding: 6px; }
+.help-tip .MuiIconButton-root { width: 28px; height: 28px; padding: 6px; }
+.help-tip .MuiIconButton-root:not(.Mui-disabled) { color: #3156d3; }
 .help-field { display: grid; gap: 6px; min-width: 0; align-content: start; }
 .help-field-grow { flex: 1 1 220px; }
 .help-field-heading, .help-label, .help-control { display: flex; gap: 4px; align-items: center; min-width: 0; }
