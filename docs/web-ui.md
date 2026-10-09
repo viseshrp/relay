@@ -976,3 +976,10 @@ original evidence remains retained. Preview text or Markdown before downloading
 an individual file. Download all produces a bounded ZIP of retained files,
 verifying every recorded size and digest before returning it. Large runs above
 1,000 retained files or 256 MiB require individual downloads.
+
+Browser reads share in-flight requests, with independent cancellation for each
+consumer. Hidden tabs stop background polling. An unchanged visible dashboard
+and attention feed slow to one refresh every 30 seconds after a minute; focus
+or a deliberate action refreshes immediately. Signed-out polling stops until
+authentication is restored. Workspace code is preloaded after authentication so
+the Run workflow panel does not wait for a first chunk download.

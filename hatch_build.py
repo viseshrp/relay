@@ -48,6 +48,13 @@ class CustomBuildHook(BuildHookInterface):
             message = "The frontend build did not produce Relay's required static assets."
             raise RuntimeError(message)
 
+        # Development diagnostics never become public wheel assets.
+        for source_map in static_root.rglob("*.map"):
+            source_map.unlink()
+        shutil.rmtree(static_root / ".vite", ignore_errors=True)
+        for build_manifest in static_root.glob(".relay-build-*.json"):
+            build_manifest.unlink()
+
         force_include = build_data.setdefault("force_include", {})
         if not isinstance(force_include, dict):
             message = "Hatch supplied an invalid force_include build mapping."

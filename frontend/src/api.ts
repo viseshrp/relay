@@ -1,4 +1,9 @@
-import type { ApiErrorBody, DashboardResponse, DashboardSection } from "./types";
+import { invalidateReads, sharedRead } from "./read-cache";
+import type {
+  ApiErrorBody,
+  DashboardResponse,
+  DashboardSection,
+} from "./types";
 
 export class RelayApiError extends Error {
   readonly status: number;
@@ -35,23 +40,34 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
     headers.set("X-CSRFToken", csrfToken());
   }
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers,
-  });
-  if (!response.ok) {
-    const value: unknown = await response.json().catch(() => null);
-    const body: ApiErrorBody = isErrorBody(value)
-      ? value
-      : {
-          code: "http_error",
-          message: `Relay returned HTTP ${response.status}.`,
-          context: {},
-        };
-    throw new RelayApiError(response.status, body);
+  async function read(signal?: AbortSignal | null): Promise<T> {
+    const response = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers,
+      signal,
+    });
+    if (!response.ok) {
+      const value: unknown = await response.json().catch(() => null);
+      const body: ApiErrorBody = isErrorBody(value)
+        ? value
+        : {
+            code: "http_error",
+            message: `Relay returned HTTP ${response.status}.`,
+            context: {},
+          };
+      throw new RelayApiError(response.status, body);
+    }
+    return (await response.json()) as T;
   }
-  return (await response.json()) as T;
+  if (method === "GET")
+    return sharedRead(
+      `${path}:${JSON.stringify([...headers])}:${init.cache ?? "default"}`,
+      init.signal,
+      read,
+    );
+  invalidateReads();
+  return read(init.signal);
 }
 
 export function errorMessage(error: unknown): string {
@@ -60,10 +76,18 @@ export function errorMessage(error: unknown): string {
       ? `${error.body.message} ${error.body.next_action}`
       : error.body.message;
   }
-  return error instanceof Error ? error.message : "Relay could not complete the request.";
+  return error instanceof Error
+    ? error.message
+    : "Relay could not complete the request.";
 }
 
-export function readDashboard(signal: AbortSignal, query: string, section?: DashboardSection, cursor?: string, limit = 10): Promise<DashboardResponse> {
+export function readDashboard(
+  signal: AbortSignal,
+  query: string,
+  section?: DashboardSection,
+  cursor?: string,
+  limit = 10,
+): Promise<DashboardResponse> {
   const parameters = new URLSearchParams({ limit: String(limit) });
   if (query) parameters.set("query", query);
   if (section) parameters.set("section", section);

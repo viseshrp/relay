@@ -112,3 +112,10 @@ Wheel builds use `npm run build:dist`, which cleans the asset output before
 building. Releases therefore contain one build, without older checkout chunks.
 `npm --prefix frontend run test:build` checks publication failure and a browser
 tab loading an earlier lazy chunk after publication.
+
+Development publication keeps assets for the latest three builds so recently
+opened tabs can finish loading their chunks. Each successful entry-page swap
+records its assets before pruning older generations. Release builds contain no
+source maps or build manifests. JavaScript, CSS, HTML, and other compressible
+assets include Brotli and gzip alternatives; the static server negotiates the
+encoding while retaining the original media type and cache policy.

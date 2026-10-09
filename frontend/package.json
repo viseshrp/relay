@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs",
-    "build:dist": "tsc --noEmit && vite build",
+    "build:dist": "tsc --noEmit && vite build && node scripts/compress.mjs",
     "test:build": "node --test scripts/*.test.mjs",
     "test": "npm run test:build && npm run build && playwright test && playwright test --config playwright.no-login.config.ts",
     "test:e2e": "npm test",

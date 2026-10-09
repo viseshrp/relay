@@ -16,8 +16,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useEffect, useState } from "react";
-import { api, errorMessage } from "../api";
+import { useResource } from "../useResource";
 import { jobDuration } from "../job";
 import { projectPath, stageLabel, statusLabel, viewHref } from "../navigation";
 import type { ProjectRecord, RunSummary } from "../types";
@@ -58,23 +57,13 @@ export function RunHistory({
   filters: HistoryFilters;
   onFilters: (filters: HistoryFilters) => void;
 }) {
-  const [workflows, setWorkflows] = useState<WorkflowEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { data: inventory, error } = useResource<{
+    workflows: WorkflowEntry[];
+  }>(projectPath("/api/workflows", project.id));
+  const workflows = inventory?.workflows ?? [];
   const now = useClock(
     runs.some((run) => !run.ended_at && run.started_at !== null),
   );
-  useEffect(() => {
-    const controller = new AbortController();
-    void api<{ workflows: WorkflowEntry[] }>(
-      projectPath("/api/workflows", project.id),
-      { signal: controller.signal },
-    )
-      .then((response) => setWorkflows(response.workflows))
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(errorMessage(caught));
-      });
-    return () => controller.abort();
-  }, [project.id]);
   const current = workflows.find(
     (workflow) => workflow.key === filters.workflow,
   );

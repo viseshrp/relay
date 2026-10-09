@@ -31,6 +31,8 @@ _STATIC_ASSETS: dict[str, Path] = _asset_catalog()
 
 
 def _asset(path: str) -> Path | None:
+    if path.startswith(".") or "/." in path or path.endswith(".map"):
+        return None
     candidate = _STATIC_ASSETS.get(path)
     if candidate is None or not candidate.is_file():
         # Editable checkouts can replace their hashed assets while the server runs.
@@ -50,18 +52,45 @@ def _asset(path: str) -> Path | None:
 @require_http_methods(("GET", "HEAD"))
 def serve_spa(request: HttpRequest, asset_path: str = "") -> FileResponse:
     """Serve immutable build assets or fall back to `index.html` for app routes."""
-    del request
     requested = _asset(asset_path) if asset_path else None
     if asset_path.startswith("assets/") and requested is None:
         raise Http404
     path = requested or _asset("index.html")
     if path is None:
         raise Http404
+    original = path
+    encodings: list[tuple[float, int, str]] = []
+    for part in request.headers.get("Accept-Encoding", "").split(","):
+        values = part.strip().split(";")
+        encoding = values[0].strip()
+        if encoding not in {"br", "gzip"}:
+            continue
+        try:
+            quality = float(
+                next(
+                    (value.strip()[2:] for value in values[1:] if value.strip().startswith("q=")),
+                    "1",
+                )
+            )
+        except ValueError:
+            continue
+        if 0 < quality <= 1:
+            encodings.append((quality, int(encoding == "br"), encoding))
+    content_encoding = None
+    for _quality, _priority, encoding in sorted(encodings, reverse=True):
+        relative = original.relative_to(STATIC_ROOT.resolve()).as_posix()
+        compressed = _asset(relative + (".br" if encoding == "br" else ".gz"))
+        if compressed is not None:
+            path, content_encoding = compressed, encoding
+            break
     try:
         asset = path.open("rb")
     except OSError:
         raise Http404 from None
-    response = FileResponse(asset, content_type=media_type_for(path))
+    response = FileResponse(asset, content_type=media_type_for(original))
+    response["Vary"] = "Accept-Encoding"
+    if content_encoding is not None:
+        response["Content-Encoding"] = content_encoding
     response["Cache-Control"] = (
         "public, max-age=31536000, immutable"
         if requested is not None and asset_path.startswith("assets/")

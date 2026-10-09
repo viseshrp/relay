@@ -60,6 +60,9 @@ def _looks_like_template(name: str) -> bool:
 
 
 def _check_wheel(path: Path, names: tuple[str, ...]) -> None:
+    if any(name.endswith(".map") or "/.vite/" in name for name in names):
+        message = f"{path.name} contains frontend source maps or build manifests"
+        raise RuntimeError(message)
     if "relay/static/index.html" not in names:
         message = f"{path.name} does not contain relay/static/index.html"
         raise RuntimeError(message)
