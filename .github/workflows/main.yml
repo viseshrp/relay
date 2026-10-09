@@ -96,6 +96,13 @@ jobs:
               stream.write(f"RELAY_TEST_NODE_24={executable}\n")
           PY
 
+      - name: Validate Windows command and payload boundaries
+        if: runner.os == 'Windows'
+        run: >-
+          uv run pytest tests/test_windows_process.py
+          tests/test_workflow_starters.py
+          tests/test_actions_language_boundaries.py -q
+
       - name: Run tests
         run: make test
 
