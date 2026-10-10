@@ -77,6 +77,10 @@ restores the existing owner login, or onboarding if no owner was created.
 Disabling login leaves stored passwords, sessions, projects, and runs intact.
 Actions started without a login are attributed to `local`.
 
+Workflow and prompt editors show normalized LF text, but conflict hashes use
+the exact saved UTF-8 bytes. Saving an existing source preserves its LF or
+CRLF newline style; immutable launch snapshots retain the original bytes.
+
 ## Home and navigation
 
 Opening `/` or `?view=home` shows activity across all registered projects.

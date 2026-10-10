@@ -129,7 +129,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @owner_required
     @require_POST
     def reset(request: HttpRequest) -> JsonResponse:
-        del request
+        crlf = json_body(request).get("line_endings") == "crlf"
         from relay.execution.cancellation import request_cancellation
         from relay.web.models import WorkflowControl
         from tests.ui_fixtures import clear_ui_fixtures
@@ -157,6 +157,10 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         settings_path().unlink(missing_ok=True)
         Project.objects.filter(pk=project.project_id).update(defaults={})
         project.write_workflow("workflow", WORKFLOW)
+        if crlf:
+            (project.relay_root / "workflows/workflow.yaml").write_bytes(
+                WORKFLOW.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+            )
         return JsonResponse({"ok": True, "python": sys.executable})
 
     @owner_required

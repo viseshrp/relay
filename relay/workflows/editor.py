@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
-from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -24,6 +23,7 @@ from relay.paths import safe_resolve
 
 from .loader import load_workflow_text, resolve_workflow_path, workflow_key_parts
 from .schema import AgentNode, CommandNode, ExistsSelector, LoopNode, NodeDefinition
+from .source_text import read_source
 from .validation import validate_loaded_workflow
 
 _WINDOWS_DEVICE = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)", re.IGNORECASE)
@@ -69,10 +69,6 @@ class WorkflowDocument:
     base_hash: str
 
 
-def _digest(text: str) -> str:
-    return sha256(text.encode("utf-8")).hexdigest()
-
-
 def _path(relay_root: Path, workflow_key: str) -> Path:
     root = (relay_root / "workflows").resolve()
     current = root
@@ -105,17 +101,19 @@ def read_workflow_document(
     project_id: str,
     workflow_key: str,
 ) -> WorkflowDocument:
+    """Read the saved file and latest recovery draft without merging either."""
     from .source_bundle import source_lock
 
     with source_lock(relay_root):
-        """Read the saved file and latest recovery draft without merging either."""
         path = _path(relay_root, workflow_key)
         try:
-            text = path.read_text(encoding="utf-8")
+            source = read_source(path, max_bytes=API_MAX_PAGE_BYTES)
         except (OSError, UnicodeError):
             message = f"Workflow {workflow_key!r} could not be read as UTF-8."
             raise WorkflowValidationError(message, context={"workflow": workflow_key}) from None
-        return WorkflowDocument(text, store.get_draft(project_id, workflow_key), _digest(text))
+        return WorkflowDocument(
+            source.text, store.get_draft(project_id, workflow_key), source.base_hash
+        )
 
 
 def list_workflow_documents(relay_root: Path) -> list[dict[str, str]]:
@@ -151,10 +149,10 @@ def create_workflow_document(
     yaml_text: str | None = None,
     name: str = "New workflow",
 ) -> WorkflowDocument:
+    """Validate and publish a new file without replacing an existing workflow."""
     from .source_bundle import source_lock
 
     with source_lock(relay_root):
-        """Validate and publish a new file without replacing an existing workflow."""
         _require_portable_names(workflow_key_parts(workflow_key))
         path = resolve_workflow_path(relay_root / "workflows", workflow_key)
         text = (
@@ -203,23 +201,18 @@ def _atomic_create(path: Path, text: str | bytes) -> None:
 
 
 def read_prompt_document(relay_root: Path, reference: str) -> dict[str, str]:
+    """Read an editable local prompt within this project's prompts directory."""
     from .source_bundle import source_lock
 
     with source_lock(relay_root):
-        """Read an editable local prompt within this project's prompts directory."""
         path = safe_resolve(relay_root, reference)
         path = safe_resolve(relay_root / "prompts", path)
         try:
-            with path.open("rb") as stream:
-                content = stream.read(API_MAX_PAGE_BYTES + 1)
-            if len(content) > API_MAX_PAGE_BYTES:
-                message = "These instructions exceed the editor's size limit."
-                raise WorkflowValidationError(message)
-            text = content.decode("utf-8")
+            source = read_source(path, max_bytes=API_MAX_PAGE_BYTES)
         except (OSError, UnicodeError):
             message = "The selected instructions could not be read as UTF-8."
             raise WorkflowValidationError(message) from None
-        return {"text": text, "base_hash": _digest(text), "reference": reference}
+        return {"text": source.text, "base_hash": source.base_hash, "reference": reference}
 
 
 def save_prompt_document(
@@ -228,10 +221,10 @@ def save_prompt_document(
     text: str,
     base_hash: str | None,
 ) -> dict[str, str]:
+    """Write local instructions only if the owner's loaded bytes still match."""
     from .source_bundle import source_lock
 
     with source_lock(relay_root):
-        """Write local instructions only if the owner's loaded bytes still match."""
         path = safe_resolve(relay_root, reference)
         path = safe_resolve(relay_root / "prompts", path)
         if path.exists():
@@ -241,7 +234,11 @@ def save_prompt_document(
                 raise PermissionFlowError(
                     message, next_action="Reload the instructions before saving."
                 )
-            _atomic_replace(path, text, resource="instructions")
+            _atomic_replace(
+                path,
+                read_source(path, max_bytes=API_MAX_PAGE_BYTES).replacement(text),
+                resource="instructions",
+            )
         else:
             if base_hash is not None:
                 message = "The instructions file was removed after you loaded it."

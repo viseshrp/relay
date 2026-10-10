@@ -139,3 +139,36 @@ test("reviewed workflow-source commits unblock another workflow and required inp
     ),
   ).toBeVisible();
 });
+
+test("CRLF workflow saves without a false conflict and preserves its source hash", async ({
+  page,
+}) => {
+  expect(
+    (await post(page, "/__test__/reset", { line_endings: "crlf" })).ok(),
+  ).toBeTruthy();
+  const before = await (
+    await page.request.get("/api/workflows/workflow.yaml")
+  ).json();
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page.locator(".cm-content").fill(`${before.yaml}\n`);
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/workflows/workflow.yaml/save") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await saved).ok()).toBeTruthy();
+  const after = await (
+    await page.request.get("/api/workflows/workflow.yaml")
+  ).json();
+  expect(after.yaml).toBe(`${before.yaml}\n`);
+  const expected = await page.evaluate(async (text) => {
+    const bytes = new TextEncoder().encode(text.replaceAll("\n", "\r\n"));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (value) =>
+      value.toString(16).padStart(2, "0"),
+    ).join("");
+  }, after.yaml);
+  expect(after.base_hash).toBe(expected);
+});

@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import threading
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from relay.constants import API_MAX_PAGE_BYTES
 from relay.errors import PermissionFlowError, WorkflowValidationError
@@ -22,6 +22,12 @@ from .editor import (
     _path,
     _require_portable_names,
 )
+from .source_text import SourceText, read_source
+
+
+class SourceChange(TypedDict):
+    old: str | None
+    new: str
 
 
 class PromptEdit(TypedDict):
@@ -84,16 +90,11 @@ def _require_journal(condition: bool) -> None:
         raise ValueError
 
 
-def _read_source(path: Path) -> str | None:
+def _read_source(path: Path) -> SourceText | None:
     if not path.exists():
         return None
     try:
-        with path.open("rb") as stream:
-            raw = stream.read(API_MAX_PAGE_BYTES + 1)
-        if len(raw) > API_MAX_PAGE_BYTES:
-            message = "A source file exceeds 1 MiB."
-            raise WorkflowValidationError(message)
-        return raw.decode("utf-8")
+        return read_source(path, max_bytes=API_MAX_PAGE_BYTES)
     except (OSError, UnicodeError):
         message = f"Source {path.name!r} could not be read as UTF-8."
         raise WorkflowValidationError(message) from None
@@ -121,7 +122,8 @@ def _recover(root: Path) -> None:
             path = safe_resolve(root / name.split("/")[0], safe_resolve(root, name))
             old, new = record["old"], record["new"]
             _require_journal(isinstance(new, str) and (old is None or isinstance(old, str)))
-            current = _read_source(path)
+            source = _read_source(path)
+            current = source.raw_text if source is not None else None
             if current not in (old, new):
                 message = "A source changed while an interrupted save was being recovered."
                 raise PermissionFlowError(
@@ -186,22 +188,26 @@ def save_source_bundle(
             reference: (edit["text"], edit["base_hash"]) for reference, edit in edits.items()
         }
         changes[workflow.relative_to(relay_root.resolve()).as_posix()] = (yaml_text, base_hash)
-        files: dict[str, dict[str, str | None]] = {}
+        files: dict[str, SourceChange] = {}
         previous_size = 0
         for name, (text, expected) in changes.items():
             path = safe_resolve(relay_root, name)
-            old = _read_source(path)
+            source = _read_source(path)
+            old = source.raw_text if source is not None else None
             previous_size += len(old.encode()) if old is not None else 0
             if previous_size > 2 * API_MAX_PAGE_BYTES:
                 message = "The previous source bundle exceeds 2 MiB."
                 raise WorkflowValidationError(message)
-            actual = sha256(old.encode()).hexdigest() if old is not None else None
+            actual = source.base_hash if source is not None else None
             if actual != expected:
                 message = f"{name} changed after this editor loaded it."
                 raise PermissionFlowError(
                     message, next_action="Reload and reconcile the changes before saving."
                 )
-            files[name] = {"old": old, "new": text}
+            files[name] = {
+                "old": old,
+                "new": source.replacement(text) if source is not None else text,
+            }
         load(yaml_text, source=workflow)
         journal = _journal(relay_root)
         _atomic_create(journal, json.dumps({"owner": str(relay_root.resolve()), "files": files}))
@@ -210,13 +216,15 @@ def save_source_bundle(
                 if name.startswith("workflows/"):
                     continue
                 path = safe_resolve(relay_root, name)
-                text = cast(str, record["new"])
+                text = record["new"]
                 if record["old"] is None:
                     _atomic_create(path, text)
                 else:
                     _atomic_replace(path, text, resource="instructions")
             validate_loaded_workflow(load_workflow_text(yaml_text, source=workflow), relay_root)
-            _atomic_replace(workflow, yaml_text)
+            _atomic_replace(
+                workflow, files[workflow.relative_to(relay_root.resolve()).as_posix()]["new"]
+            )
             _atomic_replace(
                 journal,
                 json.dumps({"owner": str(relay_root.resolve()), "files": files, "committed": True}),
