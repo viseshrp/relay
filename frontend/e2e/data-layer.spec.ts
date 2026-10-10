@@ -154,3 +154,80 @@ test("cached Run workflow opens within 150 ms while launch checks are pending", 
     0,
   );
 });
+
+test("each page loads each initial resource once", async ({ page }) => {
+  await page.request.get("/api/auth");
+  expect(
+    (
+      await post(page, "/api/auth/login", {
+        username: "owner",
+        password: "Relay-Test-Passphrase-2026!",
+      })
+    ).ok(),
+  ).toBeTruthy();
+  expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
+  const response = await post(page, "/__test__/worst-case", { enabled: false });
+  expect(response.ok()).toBeTruthy();
+  const fixture = await response.json();
+  const routes = [
+    ["Home", `/?view=home&project=${fixture.project}`, "Your projects"],
+    ["Runs", `/?view=runs&project=${fixture.project}`, "All runs"],
+    [
+      "finished run",
+      `/?view=runs&project=${fixture.project}&run=${fixture.run}`,
+      "Step progress",
+    ],
+    [
+      "running run",
+      `/?view=runs&project=${fixture.project}&run=${fixture.running}`,
+      "Step progress",
+    ],
+    [
+      "job",
+      `/?view=runs&project=${fixture.project}&run=${fixture.run}&job=${fixture.job}`,
+      "Job log",
+    ],
+  ];
+  for (const [label, url, ready] of routes) {
+    const counts = new Map<string, number>();
+    const pending = new Set<string>();
+    const requested = (request: import("@playwright/test").Request) => {
+      if (
+        request.method() !== "GET" ||
+        !request.url().includes("/api/") ||
+        request.url().includes("/stream?")
+      )
+        return;
+      counts.set(request.url(), (counts.get(request.url()) ?? 0) + 1);
+      pending.add(request.url());
+    };
+    const finished = (request: import("@playwright/test").Request) =>
+      pending.delete(request.url());
+    page.on("request", requested);
+    page.on("requestfinished", finished);
+    page.on("requestfailed", finished);
+    await page.goto(url ?? "/");
+    if (label === "Home")
+      await expect(
+        page.getByRole("heading", { name: ready, exact: true }),
+      ).toBeVisible();
+    else if (label === "Runs")
+      await expect(page.locator(".history-run-title").first()).toBeVisible();
+    else
+      await expect(
+        page.getByRole("region", { name: ready, exact: true }),
+      ).toBeVisible();
+    await expect.poll(() => pending.size).toBe(0);
+    expect(
+      [...counts].filter(([, count]) => count > 1),
+      label,
+    ).toEqual([]);
+    expect(
+      [...counts.keys()].filter((key) => key.includes("/api/attention")),
+      label,
+    ).toHaveLength(1);
+    page.off("request", requested);
+    page.off("requestfinished", finished);
+    page.off("requestfailed", finished);
+  }
+});

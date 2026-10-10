@@ -1047,7 +1047,10 @@ Evidence comes from your instance unless it says "isolated".
     immediately, takeover is tested across two tabs, and contested loads
     leave a clean console.
 
-- [ ] **DT-02. The same data is fetched twice on load.**
+- [x] **DT-02. The same data is fetched twice on load.**
+  Verified by `data-layer.spec.ts` "each page loads each initial resource once"
+  on Home, Runs, finished and running runs, and a job page. The test counts
+  every initial GET and requires one attention read per load.
   - **Evidence:** Home requests `GET /api/dashboard?limit=10` twice. A run
     page requests `/artifacts?since=0` twice. The job page's
     `/api/runs/{id}/job` request is aborted and sent again at 375 px.

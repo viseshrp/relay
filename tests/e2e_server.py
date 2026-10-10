@@ -422,7 +422,9 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                 engine.store.resume_automatic_retries()
                 if (
                     reset_requested.is_set()
-                    and not Run.objects.filter(status__in=("running", "canceling")).exists()
+                    and not Run.objects.filter(status__in=("running", "canceling"))
+                    .exclude(run_branch__startswith="relay/ui-fixture/")
+                    .exists()
                 ):
                     consumer_idle.set()
                     fixture_ready.wait()
@@ -430,7 +432,11 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                     continue
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
-                for run_id in Run.objects.filter(status="running").values_list("id", flat=True):
+                for run_id in (
+                    Run.objects.filter(status="running")
+                    .exclude(run_branch__startswith="relay/ui-fixture/")
+                    .values_list("id", flat=True)
+                ):
                     dispatch_ready_nodes(engine.store, str(run_id), engine.tokens.append)
         finally:
             connections.close_all()

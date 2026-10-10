@@ -189,6 +189,7 @@ export function useRunWorkspace({
       collection: DetailCollection,
       since: number,
       mode: PageMode,
+      publish = true,
     ): Promise<RunDetail> => {
       if (selectedRun === null)
         throw new Error("Select a run before loading its detail.");
@@ -202,26 +203,27 @@ export function useRunWorkspace({
         `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
       );
       if (currentRun.current !== selectedRun) return response.run;
-      setDetail((current) => {
-        const sameRun = current?.id === response.run.id;
-        const currentNodes = sameRun ? current.nodes : [];
-        const currentInteractions = sameRun ? current.interactions : [];
-        return {
-          ...response.run,
-          nodes:
-            collection === "nodes"
-              ? mode === "replace"
-                ? response.run.nodes
-                : mergeRecords(currentNodes, response.run.nodes)
-              : currentNodes,
-          interactions:
-            collection === "interactions"
-              ? mode !== "append"
-                ? response.run.interactions
-                : mergeRecords(currentInteractions, response.run.interactions)
-              : currentInteractions,
-        };
-      });
+      if (publish)
+        setDetail((current) => {
+          const sameRun = current?.id === response.run.id;
+          const currentNodes = sameRun ? current.nodes : [];
+          const currentInteractions = sameRun ? current.interactions : [];
+          return {
+            ...response.run,
+            nodes:
+              collection === "nodes"
+                ? mode === "replace"
+                  ? response.run.nodes
+                  : mergeRecords(currentNodes, response.run.nodes)
+                : currentNodes,
+            interactions:
+              collection === "interactions"
+                ? mode !== "append"
+                  ? response.run.interactions
+                  : mergeRecords(currentInteractions, response.run.interactions)
+                : currentInteractions,
+          };
+        });
       if (collection === "nodes") setNodeCursor(response.next);
       else setInteractionCursor(response.next);
       return response.run;
@@ -264,22 +266,24 @@ export function useRunWorkspace({
   }, [selectedRun, selectedInteraction]);
 
   const refreshDetail = useCallback(
-    async (reset = false): Promise<RunDetail | null> => {
+    async (reset = false, publish = true): Promise<RunDetail | null> => {
       if (selectedRun === null) return null;
       const mode: PageMode = reset ? "replace" : "refresh";
       const [run, interactions] = await Promise.all([
-        loadDetailCollection("nodes", 0, mode),
-        loadDetailCollection("interactions", 0, mode),
+        loadDetailCollection("nodes", 0, mode, !reset),
+        loadDetailCollection("interactions", 0, mode, !reset),
         loadArtifacts(0, mode),
         loadLinkedRequest(),
       ]);
+      const complete = { ...run, interactions: interactions.interactions };
       if (reset && currentRun.current === selectedRun) {
+        if (publish) setDetail(complete);
         stateAfter.current = Math.min(
           run.event_cursor ?? 0,
           interactions.event_cursor ?? 0,
         );
       }
-      return run;
+      return complete;
     },
     [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun],
   );
@@ -289,6 +293,15 @@ export function useRunWorkspace({
       // Historical output stays visible; progress starts at the loaded state cursor.
       const live = batch.filter((item) => item.id > stateAfter.current);
       setDetail((current) => live.reduce(applyStateEvent, current));
+      if (
+        live.some(
+          (item) =>
+            item.type.startsWith("run.") ||
+            item.type.endsWith(".requested") ||
+            item.type.endsWith(".answered"),
+        )
+      )
+        attentionChanged();
       const interactionChanged = live.some(
         (item) =>
           item.type === "attempt.ended" ||
@@ -378,15 +391,19 @@ export function useRunWorkspace({
     setArtifactCursor(null);
     setEventCursor(null);
     if (selectedRun === null) return;
-    void refreshDetail(true)
+    let initialRun: RunDetail | null = null;
+    void refreshDetail(true, false)
       .then((run) => {
+        initialRun = run;
         summaryOnly.current = Boolean(run && TERMINAL_RUNS.has(run.status));
         return loadEvents();
       })
       .then((history) => {
         if (disposed) return;
         // A step may finish between the state read and the history response.
-        // Apply those events before the stream starts after their final ID.
+        // Publish history and state together so job reads start at one revision.
+        // Apply new events before the stream starts after their final ID.
+        setDetail(initialRun);
         applyLiveUpdates(history);
         setStreamRun(selectedRun);
       })
@@ -769,10 +786,6 @@ export function useRunWorkspace({
         .map((item) => [item.id, item]),
     ).values(),
   );
-  const interactionRevision = pendingInteractions
-    .map((request) => request.id)
-    .join(",");
-  useEffect(() => attentionChanged(), [interactionRevision, detail?.status]);
   const currentStages = visibleStages.filter((node) =>
     ["waiting", "running", "failed", "repairing", "repair_stopped"].includes(
       node.status,

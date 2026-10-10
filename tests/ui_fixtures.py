@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from django.db.models import Q
@@ -35,7 +34,7 @@ def clear_ui_fixtures() -> None:
     projects.delete()
 
 
-def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, Any]:
+def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
     """Toggle between a compact demo and the audit's hostile display values."""
     clear_ui_fixtures()
     names = (
@@ -230,6 +229,14 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, Any]:
                 for start in range(0, line_count, 100)
             ]
         )
+        RunEvent.objects.create(
+            run=main,
+            node_run=node,
+            type="attempt.ended",
+            source="node",
+            ts=WHEN,
+            payload={"scope_path": scope, "status": status},
+        )
         for kind in ("commits", "worktree_diff"):
             Artifact.objects.create(
                 attempt=attempt,
@@ -244,13 +251,25 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, Any]:
     approval = run_record(2, "paused_wait", waiting=True)
     run_record(3, "succeeded")
     run_record(4, "canceled")
-    for index in range(5, 155 if worst else 6):
+    running = run_record(5, "running")
+    NodeRun.objects.create(
+        run=running,
+        node_id=job_ids[0],
+        scope_path=f"root.{job_ids[0]}",
+        node_type="actions_job",
+        status="running",
+        frozen_def=ActionsJobNode(
+            job_id=job_ids[0], job=jobs[job_ids[0]], workflow=workflow
+        ).model_dump(mode="json"),
+    )
+    for index in range(6, 155 if worst else 7):
         run_record(index, "pending")
-    Project.objects.filter(pk=project_id).update(next_run_number=155 if worst else 6)
+    Project.objects.filter(pk=project_id).update(next_run_number=155 if worst else 7)
     return {
         "project": str(project_id),
         "run": str(main.pk),
         "approval": str(approval.pk),
+        "running": str(running.pk),
         "job": f"root.{job_ids[0]}",
         "workflow": "visual.yaml",
         "worst": worst,
