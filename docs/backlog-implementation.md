@@ -1,10 +1,10 @@
 # Beginner-experience backlog implementation
 
-This index maps the unchecked findings in the owner's backlog to the current
+This index maps the completed findings in the owner's backlog to the current
 Actions workflow format and focused regression coverage. Current workflows
 use jobs, ordered steps, scripts, reusable workflows and local triggers.
 Historical v1 snapshots retain their execution and monitoring contracts.
-The owner's working backlog remains unchanged.
+The [working backlog](todo.md) marks these findings complete.
 
 | Findings | Implemented behavior | Focused coverage |
 | --- | --- | --- |
