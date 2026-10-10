@@ -124,3 +124,8 @@ records its assets before pruning older generations. Release builds contain no
 source maps or build manifests. JavaScript, CSS, HTML, and other compressible
 assets include Brotli and gzip alternatives; the static server negotiates the
 encoding while retaining the original media type and cache policy.
+
+Optional compressed companions do not trigger an asset-catalog rescan when
+absent. New original asset requests still discover newly published files and
+their companions. This keeps uncompressed font requests from delaying lazy
+modules while preserving path containment and encoding negotiation.

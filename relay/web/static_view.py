@@ -30,11 +30,11 @@ def _asset_catalog() -> dict[str, Path]:
 _STATIC_ASSETS: dict[str, Path] = _asset_catalog()
 
 
-def _asset(path: str) -> Path | None:
+def _asset(path: str, *, refresh_if_missing: bool = True) -> Path | None:
     if path.startswith(".") or "/." in path or path.endswith(".map"):
         return None
     candidate = _STATIC_ASSETS.get(path)
-    if candidate is None or not candidate.is_file():
+    if refresh_if_missing and (candidate is None or not candidate.is_file()):
         # Editable checkouts can replace their hashed assets while the server runs.
         _STATIC_ASSETS.clear()
         _STATIC_ASSETS.update(_asset_catalog())
@@ -79,7 +79,11 @@ def serve_spa(request: HttpRequest, asset_path: str = "") -> FileResponse:
     content_encoding = None
     for _quality, _priority, encoding in sorted(encodings, reverse=True):
         relative = original.relative_to(STATIC_ROOT.resolve()).as_posix()
-        compressed = _asset(relative + (".br" if encoding == "br" else ".gz"))
+        # The original lookup already discovers newly published companions.
+        # Optional compression misses must not rescan every retained asset.
+        compressed = _asset(
+            relative + (".br" if encoding == "br" else ".gz"), refresh_if_missing=False
+        )
         if compressed is not None:
             path, content_encoding = compressed, encoding
             break

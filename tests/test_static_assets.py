@@ -78,3 +78,29 @@ def test_static_compression_keeps_type_cache_and_encoding_negotiation(
         assert b"".join(response.streaming_content) == payload
     finally:
         response.close()
+
+
+def test_uncompressed_fonts_do_not_rebuild_the_asset_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "static"
+    (root / "assets").mkdir(parents=True)
+    (root / "assets/font.woff2").write_bytes(b"font fixture")
+    monkeypatch.setattr(static_view, "STATIC_ROOT", root)
+    monkeypatch.setattr(static_view, "_STATIC_ASSETS", static_view._asset_catalog())
+    scans = []
+    original = static_view._asset_catalog
+
+    def record_scan() -> dict[str, Path]:
+        scans.append(True)
+        return original()
+
+    monkeypatch.setattr(static_view, "_asset_catalog", record_scan)
+    request = RequestFactory().get("/assets/font.woff2", HTTP_ACCEPT_ENCODING="br, gzip")
+    response = static_view.serve_spa(request, "assets/font.woff2")
+    try:
+        assert b"".join(response.streaming_content) == b"font fixture"
+        assert "Content-Encoding" not in response
+    finally:
+        response.close()
+    assert scans == []
