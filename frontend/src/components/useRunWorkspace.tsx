@@ -333,7 +333,7 @@ export function useRunWorkspace({
           setError(errorMessage(caught)),
         );
       }
-      if (batch.some((item) => item.type === "artifact.preserved")) {
+      if (live.some((item) => item.type === "artifact.preserved")) {
         void loadArtifacts(0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );

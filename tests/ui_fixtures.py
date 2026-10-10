@@ -262,6 +262,13 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
             job_id=job_ids[0], job=jobs[job_ids[0]], workflow=workflow
         ).model_dump(mode="json"),
     )
+    RunEvent.objects.create(
+        run=running,
+        type="artifact.preserved",
+        source="run",
+        ts=WHEN,
+        payload={},
+    )
     for index in range(6, 155 if worst else 7):
         run_record(index, "pending")
     Project.objects.filter(pk=project_id).update(next_run_number=155 if worst else 7)
