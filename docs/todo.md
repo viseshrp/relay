@@ -1398,7 +1398,10 @@ and `frontend/src/styles.css` (row 3), `ActionsWorkflowWorkspace.tsx`
 - [x] **BR-07. Give truncated text a way to read it** (row 8).
 - [x] **BR-08. Bound the editor picker and node sizes** (row 9).
 - [x] **BR-09. Add a Queued state and honest durations** (rows 10, 11).
-- [ ] **BR-10. Use plural rules** (row 13).
+- [x] **BR-10. Use plural rules** (row 13).
+  Verified by `editor-recovery.spec.ts`: the reviewed-source confirmation says
+  "Commit 1 reviewed file" and completes the commit. Parallel-job counts use
+  the same `countLabel` helper.
 - [x] **BR-11. Add a worst-case fixture and toggle.** Add the data above
   to `tests/e2e_server.py` behind a test-only `/__test__/worst-case`
   route, with a Playwright spec that loads each screen at 320 and 1440 px

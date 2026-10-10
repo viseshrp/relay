@@ -1,3 +1,4 @@
+import { countLabel } from "./count";
 import type { Edge, Node } from "@xyflow/react";
 import { arrangeGraph, capturedRunGraph } from "./graph";
 import { jobDuration } from "./job";
@@ -69,7 +70,7 @@ export function runSummaryGraph(
         type: "runJob",
         position: { x: 0, y: 0 },
         data: {
-          label: `${group.length} parallel jobs`,
+          label: countLabel(group.length, "parallel job"),
           kind: "group",
           status,
           members: group.map((node) => node.id),

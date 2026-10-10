@@ -104,7 +104,7 @@ test("reviewed workflow-source commits unblock another workflow and required inp
     review.getByRole("button", { name: "Confirm commit" }),
   ).toBeDisabled();
   await review
-    .getByRole("checkbox", { name: "Commit these 1 reviewed files" })
+    .getByRole("checkbox", { name: "Commit 1 reviewed file" })
     .check();
   await review.getByRole("button", { name: "Confirm commit" }).click();
   await expect(review).toBeHidden();

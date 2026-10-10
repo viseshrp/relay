@@ -1,3 +1,4 @@
+import { countLabel } from "../count";
 import {
   Alert,
   Button,
@@ -118,7 +119,7 @@ export function CommitWorkflowFiles({
                   onChange={(event) => setConfirmed(event.target.checked)}
                 />
               }
-              label={`Commit these ${preview?.files.length ?? 0} reviewed files`}
+              label={`Commit ${countLabel(preview?.files.length ?? 0, "reviewed file")}`}
             />
             {error && <Alert severity="error">{error}</Alert>}
           </Stack>
