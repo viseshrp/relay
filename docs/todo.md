@@ -1351,7 +1351,10 @@ on. Everything else is SHIP WITH FIXES.
     header its final shape on the first paint.
   - **Done when:** CLS is below 0.1 on every page at 375 and 1440 px.
 
-- [ ] **QA-12. Add visual baselines.**
+- [x] **QA-12. Add visual baselines.**
+  Verified by all 21 normal-screen `visual-regression.spec.ts` captures in
+  Linux CI run 38072518542, with its reviewed baseline artifact committed under
+  `baselines/linux`. Separate reviewed macOS baselines pass the same spec.
   - **Evidence:** No screenshot baselines exist, so regressions in this
     audit could only be judged by eye.
   - **Fix:** Add `toHaveScreenshot` baselines for Home, Workflows, Runs,
