@@ -92,11 +92,11 @@ def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPrevie
     }
 
 
-def _require_staged_sources(repository: Path, hashes: Mapping[str, str]) -> None:
+def _require_staged_sources(repository: Path, blobs: Mapping[str, str]) -> None:
     staged = set(git_stdout(repository, ["diff", "--cached", "--name-only"]).splitlines())
-    if staged != set(hashes) or any(
-        sha256(run_git_bytes(repository, ["show", f":{path}"]).stdout).hexdigest() != expected
-        for path, expected in hashes.items()
+    if staged != set(blobs) or any(
+        git_stdout(repository, ["rev-parse", f":{path}"]) != expected
+        for path, expected in blobs.items()
     ):
         message = "Another Git operation changed the index. Workflow files were not committed."
         raise PermissionFlowError(message)
@@ -105,7 +105,7 @@ def _require_staged_sources(repository: Path, hashes: Mapping[str, str]) -> None
 def commit_workflow_sources(
     relay_root: Path, workflow_key: str, head: str, hashes: Mapping[str, str]
 ) -> str:
-    """Commit exactly the confirmed bytes after repeating validation and the index check."""
+    """Commit confirmed sources after Git clean conversion and repeated index checks."""
     preview = preview_workflow_commit(relay_root, workflow_key)
     files = preview["files"]
     current = {item["path"]: item["hash"] for item in files}
@@ -114,9 +114,21 @@ def commit_workflow_sources(
         raise PermissionFlowError(message, next_action="Review a fresh preview before committing.")
     paths = sorted(current)
     repository = relay_root.parent.resolve()
+    # Git's clean conversion can normalize CRLF or apply repository attributes.
+    # Feed the reviewed bytes, so a later worktree edit cannot redefine consent.
+    blobs = {
+        item["path"]: run_git_bytes(
+            repository,
+            ["hash-object", f"--path={item['path']}", "--stdin"],
+            input_bytes=item["text"].encode("utf-8"),
+        )
+        .stdout.decode("ascii")
+        .strip()
+        for item in files
+    }
     try:
         run_git(repository, ["add", "--", *paths])
-        _require_staged_sources(repository, current)
+        _require_staged_sources(repository, blobs)
         run_git(repository, ["commit", "-m", "Add Relay workflow sources"])
     except Exception:
         # The index was empty before this operation. Restore only our selected paths.

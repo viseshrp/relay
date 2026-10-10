@@ -71,7 +71,7 @@ remain separate platform/certification checks.
 | Plurals | Reviewed files, parallel jobs, repair rounds, and artifact bytes use the shared helper | `editor-recovery.spec.ts`, `actions-layout.spec.ts`, `singular-labels.spec.ts` |
 | Rendered names | Long input-derived names truncate at a grapheme boundary; full inputs remain frozen; long literals still fail | `test_run_titles` |
 | Burst launches | Underlying persistence failures retain tracebacks; public errors remain generic; 40 concurrent SQLite launches succeed | `test_launch_contention` |
-| Reviewed commits | Staged blobs match confirmed hashes, unrelated invalid candidates produce notices, and cleanup cannot mask the original error | `test_workflow_publication` |
+| Reviewed commits | Staged blobs match Git's conversion of confirmed bytes (including CRLF with `core.autocrlf=true`), unrelated invalid candidates produce notices, and cleanup cannot mask the original error | `test_workflow_publication` |
 | Small corrections | Captured workflow names survive source edits; human-wait options are documented; editor docstrings are restored | `test_run_metadata`, `title-clamp.spec.ts`, guide example checks |
 
 The transient launch 503 was not reproduced by the concurrent launch test.

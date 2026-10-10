@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from relay.errors import GitError, PermissionFlowError, WorkflowValidationError
-from relay.vcs.git import GitResult
+from relay.vcs.git import GitResult, run_git_bytes
 from relay.workflows import publication
 from tests.support import RelayProject, git
 from tests.test_editor_recovery import SOURCE
@@ -33,11 +33,36 @@ def test_preview_skips_invalid_unrelated_sources_with_a_notice(
         publication.preview_workflow_commit(project.relay_root, invalid.name)
 
 
-@pytest.mark.parametrize("when", ["before-add", "after-add"])
-def test_only_the_reviewed_staged_blob_can_be_committed(
-    sources: tuple[RelayProject, Path], monkeypatch: pytest.MonkeyPatch, when: str
+@pytest.mark.parametrize("autocrlf", ["false", "true"])
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_reviewed_sources_follow_git_newline_conversion(
+    sources: tuple[RelayProject, Path], autocrlf: str, newline: bytes
 ) -> None:
     project, path = sources
+    git(project.repository, "config", "core.autocrlf", autocrlf)
+    raw = path.read_bytes().replace(b"\n", newline)
+    path.write_bytes(raw)
+    preview = publication.preview_workflow_commit(project.relay_root, "check.yaml")
+    publication.commit_workflow_sources(
+        project.relay_root,
+        "check.yaml",
+        preview["head"],
+        {item["path"]: item["hash"] for item in preview["files"]},
+    )
+    committed = run_git_bytes(project.repository, ["show", "HEAD:.relay/workflows/new.yaml"])
+    assert committed.stdout == (raw.replace(b"\r\n", b"\n") if autocrlf == "true" else raw)
+    assert path.read_bytes() == raw
+    assert git(project.repository, "diff", "--cached", "--name-only") == ""
+
+
+@pytest.mark.parametrize("autocrlf", ["false", "true"])
+@pytest.mark.parametrize("when", ["before-add", "after-add"])
+def test_only_the_reviewed_staged_blob_can_be_committed(
+    sources: tuple[RelayProject, Path], monkeypatch: pytest.MonkeyPatch, when: str, autocrlf: str
+) -> None:
+    project, path = sources
+    git(project.repository, "config", "core.autocrlf", autocrlf)
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     preview = publication.preview_workflow_commit(project.relay_root, "check.yaml")
     original = publication.run_git
     reviewed = path.read_bytes()
@@ -63,9 +88,10 @@ def test_only_the_reviewed_staged_blob_can_be_committed(
         publication.commit_workflow_sources(
             project.relay_root, "check.yaml", preview["head"], hashes
         )
-        assert git(
-            project.repository, "show", "HEAD:.relay/workflows/new.yaml"
-        ).encode() == reviewed.rstrip(b"\n")
+        committed = run_git_bytes(project.repository, ["show", "HEAD:.relay/workflows/new.yaml"])
+        assert committed.stdout == (
+            reviewed.replace(b"\r\n", b"\n") if autocrlf == "true" else reviewed
+        )
     assert path.read_bytes() == foreign
     assert git(project.repository, "diff", "--cached", "--name-only") == ""
 

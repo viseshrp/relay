@@ -347,8 +347,9 @@ An explicit confirmation commits exactly those reviewed paths. Changed bytes,
 a changed Git head, or a nonempty index reject the operation. Root reports and
 unrelated code remain untouched. Invalid unrelated workflow candidates appear
 as notices and are omitted; required invalid sources still block the preview.
-Relay verifies the staged bytes before committing the reviewed index. The panel
-repeats preflight after the commit.
+Relay verifies staged blobs against Git's conversion of the confirmed bytes,
+including configured newline conversion, before committing the reviewed index.
+The panel repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. Historical workflows can also expose **Start from job**.
