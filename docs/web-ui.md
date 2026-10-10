@@ -44,6 +44,10 @@ Relay binds only to loopback. `--host 0.0.0.0` and non-loopback names are
 rejected. IPv6 `::1` is rendered in the browser URL as
 `http://[::1]:7845/`; `127.0.0.1` becomes `http://127.0.0.1:7845/`.
 
+Initial workspace rendering waits for project setup visibility, so loading a
+successful project cannot briefly insert and remove the welcome banner above
+its content. Runs history also waits for its workflow sidebar inventory.
+
 ## First login
 
 Login is required by default. The first browser session shows owner onboarding.

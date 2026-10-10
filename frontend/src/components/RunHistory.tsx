@@ -70,6 +70,7 @@ export function RunHistory({
   const current = workflows.find(
     (workflow) => workflow.key === filters.workflow,
   );
+  if (!inventory && !error) return <ViewSkeleton view="runs" />;
   return (
     <Box className="actions-layout">
       <WorkflowSidebar

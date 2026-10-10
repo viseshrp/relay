@@ -22,6 +22,7 @@ export function AppMain({ state }: { state: AppState }) {
     openingProject,
     setupDismissed,
     setupRunSucceeded,
+    setupReady,
     openSetup,
     projectReady,
     selectedProject,
@@ -85,7 +86,7 @@ export function AppMain({ state }: { state: AppState }) {
           {projectError}
         </Alert>
       )}
-      {!setupDismissed && !setupRunSucceeded && (
+      {projectReady && setupReady && !setupDismissed && !setupRunSucceeded && (
         <Alert
           className="setup-banner"
           severity="info"
@@ -163,7 +164,7 @@ export function AppMain({ state }: { state: AppState }) {
             <ViewSkeleton view={location.run ? "summary" : location.view} />
           }
         >
-          {!projectReady ? (
+          {!projectReady || !setupReady ? (
             <ViewSkeleton view={location.run ? "summary" : location.view} />
           ) : location.view === "home" ? (
             <HomeDashboard

@@ -64,7 +64,7 @@ remain separate platform/certification checks.
 | Defect | Verified behavior | Proving coverage |
 | --- | --- | --- |
 | CRLF sources | Editor hashes exact bytes and preserves existing workflow/prompt newline style; snapshots retain exact sources | `test_source_line_endings`, `test_launch_recovery`, `editor-recovery.spec.ts` |
-| Browser stability | Visual server owns its database; platform baselines, stable skeleton geometry, one initial graph fit, mounted tour targets, awaited drawer removal, a bounded phone project picker, and serialized fixture reset | `visual-regression`, `control-layout`, `onboarding`, `agent-configuration` browser specs; `test_static_assets` |
+| Browser stability | Visual server owns its database; platform baselines, stable skeleton geometry, resolved setup visibility and workflow inventory before workspace rendering, one initial graph fit, mounted tour targets, awaited drawer removal, a bounded phone project picker, and serialized fixture reset | `visual-regression`, `control-layout`, `onboarding`, `agent-configuration` browser specs; `test_static_assets` |
 | Long headings | Title text clamps separately from the status icon and run number; full title remains available | `title-clamp.spec.ts` at 320, 375, and 1440 px |
 | Duplicate reads | Initial state/history publish together; historical events do not trigger fresh attention or artifact reads | `data-layer.spec.ts` counts Home, Runs, finished/running runs, and job reads |
 | Accessibility/type scale | Every normal/stress screen receives serious/critical axe checks, including WCAG 2.1 A and 2.2 AA; history text is at least 12 px; paging retains a visible focus destination; path disclosure and copy names include their visible labels | `visual-regression.spec.ts`, `activity-feed.spec.ts`, `accessibility.spec.ts`, `a11y-test.ts` |
@@ -93,3 +93,12 @@ The isolated manual check on port 4190 saved CRLF YAML and verified its raw
 hash, measured two-line titles with visible numbers at 320 and 1440 px, counted
 one initial read per finished-run resource, and measured fan-out CLS of 0 at
 both widths. The reviewed-file dialog displayed "Commit 1 reviewed file".
+
+The follow-up review reproduced a 109 px startup shift when the welcome banner
+was removed after the successful-run query, plus a 116 px shift when the Runs
+workflow sidebar loaded. The workspace now stays in its loading state until
+those results are known. `visual-regression.spec.ts` measures startup with an
+undismissed banner at 320, 375, and 1440 px, rather than hiding it in test
+storage. `accessibility.spec.ts` separately checks visible Home path names and
+audits each disclosure state; `test_workflow_publication` covers Git newline
+conversion and edits racing with staging.

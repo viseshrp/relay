@@ -240,7 +240,7 @@ for (const width of [320, 768, 1024, 1440])
     await expect(page.getByRole("dialog")).toContainText("owner@example.test");
   });
 
-for (const width of [375, 1440])
+for (const width of [320, 375, 1440])
   test(`loading reserves space and CLS stays below 0.1 at ${width}`, async ({
     page,
   }, info) => {
@@ -253,6 +253,7 @@ for (const width of [375, 1440])
       shifts: object[];
     }> = [];
     await page.addInitScript(() => {
+      localStorage.removeItem("relay.setup-dismissed");
       (
         window as typeof window & { testCLS: number; testShifts: object[] }
       ).testCLS = 0;

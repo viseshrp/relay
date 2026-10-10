@@ -96,11 +96,24 @@ export function useApp() {
     return () => observer.disconnect();
   }, [auth]);
   const setupWasOpen = useRef(false);
-  const [setupRunSucceeded, setSetupRunSucceeded] = useState(false);
+  const [setupResult, setSetupResult] = useState<{
+    project: string;
+    succeeded: boolean;
+  } | null>(null);
+  const setupRunSucceeded =
+    setupResult?.project === location.project &&
+    setupResult?.succeeded === true;
+  const setupReady =
+    setupDismissed ||
+    !location.project ||
+    setupResult?.project === location.project;
   const [launchWorkflow, setLaunchWorkflow] = useState<string | null>(null);
   const [workflowCreate, setWorkflowCreate] = useState(false);
   const [workflowRevision, setWorkflowRevision] = useState(0);
-  const runSucceeded = useCallback(() => setSetupRunSucceeded(true), []);
+  const runSucceeded = useCallback(() => {
+    const project = currentLocation.current.project;
+    if (project) setSetupResult({ project, succeeded: true });
+  }, []);
   const beforeLeave = useRef<(() => Promise<void>) | null>(null);
   const registerNavigation = useCallback(
     (callback: (() => Promise<void>) | null) => {
@@ -300,19 +313,25 @@ export function useApp() {
   const requestProject =
     location.project === servedProject ? null : location.project;
   useEffect(() => {
-    setSetupRunSucceeded(false);
     setSetupForced(false);
-    if (!auth?.authenticated || !location.project) return;
+    const project = location.project;
+    if (!auth?.authenticated || !project) return;
     const controller = new AbortController();
     void api<ReadResponse5>(
-      boundProjectPath(`/api/runs?status=succeeded&limit=1`, location.project),
+      boundProjectPath(`/api/runs?status=succeeded&limit=1`, project),
       { signal: controller.signal },
     )
       .then((result) => {
-        if (!controller.signal.aborted && result.runs.length)
-          setSetupRunSucceeded(true);
+        if (!controller.signal.aborted)
+          setSetupResult({
+            project,
+            succeeded: result.runs.length > 0,
+          });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setSetupResult({ project, succeeded: false });
+      });
     return () => controller.abort();
   }, [location.project, auth?.authenticated]);
   useEffect(() => {
@@ -522,6 +541,7 @@ export function useApp() {
     openingProject,
     setupDismissed,
     setupRunSucceeded,
+    setupReady,
     projectReady,
     dismissSetup,
     setupForced,
