@@ -1047,7 +1047,7 @@ Evidence comes from your instance unless it says "isolated".
     immediately, takeover is tested across two tabs, and contested loads
     leave a clean console.
 
-- [x] **DT-02. The same data is fetched twice on load.**
+- [ ] **DT-02. The same data is fetched twice on load.**
   - **Evidence:** Home requests `GET /api/dashboard?limit=10` twice. A run
     page requests `/artifacts?since=0` twice. The job page's
     `/api/runs/{id}/job` request is aborted and sent again at 375 px.
@@ -1137,7 +1137,7 @@ Evidence comes from your instance unless it says "isolated".
   - **Done when:** A tab walk shows a visible indicator on every stop and
     no indicator on programmatic heading focus.
 
-- [x] **DT-11. Small and low-contrast text.**
+- [ ] **DT-11. Small and low-contrast text.**
   - **Evidence:** "All jobs" is `#67738b` on `#f4f6fb`, 4.41:1. The React
     Flow attribution is 2.79:1 and a 52×12 px target. The paused run page
     has 69 text nodes at 11 px; field labels are 10.5 px.
@@ -1146,7 +1146,7 @@ Evidence comes from your instance unless it says "isolated".
     attribution after checking React Flow's attribution policy.
   - **Done when:** axe `color-contrast` and `target-size` pass everywhere.
 
-- [x] **DT-12. Fix the remaining axe violations.**
+- [ ] **DT-12. Fix the remaining axe violations.**
   - **Evidence:** One critical rule (`aria-allowed-attr` on
     `.project-context` during the tour). Serious: the CodeMirror editor has
     no accessible name (`aria-input-field-name`); MUI `<ul>` elements contain
@@ -1332,7 +1332,7 @@ on. Everything else is SHIP WITH FIXES.
   - **Fix:** Use "Cancelled", and show "Started by you" when login is off.
   - **Done when:** The status vocabulary matches the BX vocabulary map.
 
-- [x] **QA-11. Layout shift fails Core Web Vitals on run pages.**
+- [ ] **QA-11. Layout shift fails Core Web Vitals on run pages.**
   - **Evidence:** The largest shift, 0.256 at 375 px, is the job sidebar
     rendering "Jobs will appear" and then the list (a 231 px jump). The
     next, 0.138, is the header reflowing when projects load.
@@ -1340,7 +1340,7 @@ on. Everything else is SHIP WITH FIXES.
     header its final shape on the first paint.
   - **Done when:** CLS is below 0.1 on every page at 375 and 1440 px.
 
-- [x] **QA-12. Add visual baselines.**
+- [ ] **QA-12. Add visual baselines.**
   - **Evidence:** No screenshot baselines exist, so regressions in this
     audit could only be judged by eye.
   - **Fix:** Add `toHaveScreenshot` baselines for Home, Workflows, Runs,
@@ -1384,7 +1384,7 @@ and `frontend/src/styles.css` (row 3), `ActionsWorkflowWorkspace.tsx`
 (row 9), `relay/workflows/actions/language.py` and `relay/web/models.py`
 (row 12).
 
-- [x] **BR-01. Clamp the run title** (rows 1 and 12).
+- [ ] **BR-01. Clamp the run title** (rows 1 and 12).
 - [x] **BR-02. Make the run header fit 320 px** (row 2).
 - [x] **BR-03. Give the app header a phone layout** (row 3).
 - [x] **BR-04. Show steps inside jobs, as GitHub does** (rows 4 and 5).
@@ -1396,7 +1396,7 @@ and `frontend/src/styles.css` (row 3), `ActionsWorkflowWorkspace.tsx`
 - [x] **BR-07. Give truncated text a way to read it** (row 8).
 - [x] **BR-08. Bound the editor picker and node sizes** (row 9).
 - [x] **BR-09. Add a Queued state and honest durations** (rows 10, 11).
-- [x] **BR-10. Use plural rules** (row 13).
+- [ ] **BR-10. Use plural rules** (row 13).
 - [x] **BR-11. Add a worst-case fixture and toggle.** Add the data above
   to `tests/e2e_server.py` behind a test-only `/__test__/worst-case`
   route, with a Playwright spec that loads each screen at 320 and 1440 px
@@ -1453,7 +1453,7 @@ Interaction feel and visual craft, measured in the browser and read from
 - [x] **DE-01. Add press feedback and tighten hover transitions** (rows 1–3).
 - [x] **DE-02. Make Run workflow open instantly** (row 4; see DT-05).
 - [x] **DE-03. Use tabular figures for every live number** (row 5).
-- [x] **DE-04. Reduce the type scale and weights** (row 7) through
+- [ ] **DE-04. Reduce the type scale and weights** (row 7) through
   `theme.ts` tokens.
 - [x] **DE-05. Gate hover on pointer type and make tooltips instant after
   the first** (rows 8 and 9).
@@ -1540,7 +1540,7 @@ Production engineering benchmarks applied to `frontend/src`.
   - **Done when:** Switching between Workflows and Runs keeps the same
     sidebar and selection.
 
-- [x] **FE-08. Gate accessibility in CI.**
+- [ ] **FE-08. Gate accessibility in CI.**
   - **Evidence:** Today's sweep found 1 critical and 5 serious axe rules
     that the existing browser tests did not catch.
   - **Fix:** Add `@axe-core/playwright` (dev dependency, owner approval)

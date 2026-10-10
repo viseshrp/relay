@@ -1,10 +1,12 @@
 # Beginner-experience backlog implementation
 
-This index maps the completed findings in the owner's backlog to the current
+This index maps the findings in the owner's backlog to the current
 Actions workflow format and focused regression coverage. Current workflows
 use jobs, ordered steps, scripts, reusable workflows and local triggers.
 Historical v1 snapshots retain their execution and monitoring contracts.
-The [working backlog](todo.md) marks these findings complete.
+The [working backlog](todo.md) records verification status. BR-01, BR-10,
+DE-04, DT-02, DT-11, DT-12, FE-08, QA-11, and QA-12 are reopened after
+independent verification; the coverage below does not yet prove those items.
 
 | Findings | Implemented behavior | Focused coverage |
 | --- | --- | --- |
