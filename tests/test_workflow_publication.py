@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from relay.errors import GitError, PermissionFlowError, WorkflowValidationError
-from relay.vcs.git import GitResult, run_git_bytes
+from relay.vcs.git import GitBytesResult, GitResult, run_git_bytes
 from relay.workflows import publication
 from tests.support import RelayProject, git
 from tests.test_editor_recovery import SOURCE
@@ -94,6 +94,42 @@ def test_only_the_reviewed_staged_blob_can_be_committed(
         )
     assert path.read_bytes() == foreign
     assert git(project.repository, "diff", "--cached", "--name-only") == ""
+
+
+@pytest.mark.parametrize("autocrlf", ["false", "true"])
+def test_an_edit_while_hashing_cannot_redefine_the_reviewed_sources(
+    sources: tuple[RelayProject, Path], monkeypatch: pytest.MonkeyPatch, autocrlf: str
+) -> None:
+    project, path = sources
+    git(project.repository, "config", "core.autocrlf", autocrlf)
+    reviewed = path.read_bytes().replace(b"\n", b"\r\n")
+    path.write_bytes(reviewed)
+    preview = publication.preview_workflow_commit(project.relay_root, "check.yaml")
+    foreign = reviewed.replace(b"New", b"Unreviewed")
+    original = publication.run_git_bytes
+
+    def racing_hash(
+        repository: Path,
+        arguments: Sequence[str],
+        *,
+        check: bool = True,
+        input_bytes: bytes | None = None,
+    ) -> GitBytesResult:
+        if arguments[0] == "hash-object":
+            path.write_bytes(foreign)
+        return original(repository, arguments, check=check, input_bytes=input_bytes)
+
+    monkeypatch.setattr(publication, "run_git_bytes", racing_hash)
+    with pytest.raises(PermissionFlowError, match="changed the index"):
+        publication.commit_workflow_sources(
+            project.relay_root,
+            "check.yaml",
+            preview["head"],
+            {item["path"]: item["hash"] for item in preview["files"]},
+        )
+    assert git(project.repository, "rev-parse", "HEAD") == preview["head"]
+    assert git(project.repository, "diff", "--cached", "--name-only") == ""
+    assert path.read_bytes() == foreign
 
 
 def test_failed_index_cleanup_does_not_mask_the_original_error(
