@@ -121,6 +121,7 @@ export function AppHeader({ state }: { state: AppState }) {
         </Box>
         <Button
           className="mobile-navigation"
+          data-tour="mobile-navigation"
           aria-haspopup="menu"
           aria-expanded={Boolean(mobileNav)}
           onClick={(event) => setMobileNav(event.currentTarget)}

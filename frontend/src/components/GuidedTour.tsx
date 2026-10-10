@@ -71,8 +71,24 @@ export function GuidedTour({
       onClose();
     }
     rememberSeen(TOUR_SEEN);
+    function visibleTarget(
+      topic: HelpTopic,
+      target?: string,
+    ): HTMLElement | undefined {
+      const selector = `[data-tour="${target ?? topic}"]`;
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(selector),
+      );
+      if (topic === "workflows" || topic === "runs") {
+        const mobile = document.querySelector<HTMLElement>(
+          '[data-tour="mobile-navigation"]',
+        );
+        if (mobile) candidates.push(mobile);
+      }
+      return candidates.find((element) => element.getClientRects().length > 0);
+    }
     const definitions: DriveStep[] = steps.map(({ topic, target }) => ({
-      element: `[data-tour="${target ?? topic}"]`,
+      element: () => visibleTarget(topic, target) ?? document.body,
       waitForElement: 5000,
       popover: { title: help[topic][0], description: help[topic][1] },
     }));
@@ -131,13 +147,7 @@ export function GuidedTour({
       try {
         await onDestination({ section: step.section });
         if (disposing || closed) return;
-        const selector = `[data-tour="${step.target ?? step.topic}"]`;
-        const mounted = () => {
-          const target = document.querySelector(selector);
-          return (
-            target instanceof HTMLElement && target.getClientRects().length > 0
-          );
-        };
+        const mounted = () => Boolean(visibleTarget(step.topic, step.target));
         if (!mounted())
           await new Promise<void>((resolve) => {
             pending = new MutationObserver(() => {
