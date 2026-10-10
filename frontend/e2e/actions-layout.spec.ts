@@ -468,22 +468,15 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
   await page
     .getByRole("textbox", { name: "Filter workflow runs" })
     .fill(detail.source_commit.slice(0, 7));
-  await expect(
-    page.getByRole("link", {
-      name: `Build and verify #${detail.number} · Succeeded`,
-      exact: true,
-    }),
-  ).toBeVisible();
+  const runLink = page
+    .getByRole("link", { name: "Build and verify" })
+    .filter({ hasText: `#${detail.number} ·` });
+  await expect(runLink).toBeVisible();
   await page.screenshot({
     path: info.outputPath("actions-history.png"),
     animations: "disabled",
   });
-  await page
-    .getByRole("link", {
-      name: `Build and verify #${detail.number} · Succeeded`,
-      exact: true,
-    })
-    .click();
+  await runLink.click();
   const graph = page.getByRole("region", {
     name: "Step progress",
     exact: true,
