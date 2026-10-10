@@ -2370,6 +2370,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         branch = run_branch(run_id)
         worktree = run_worktree_path(run_id)
         policy = load_workflow_text(snapshot.workflow_yaml, source=Path(request.workflow_key))
+        context = snapshot.launch_defaults.get("actions_context", {})
+        title = (
+            context.get("run_name", policy.definition.name)
+            if isinstance(context, Mapping)
+            else policy.definition.name
+        )
+        if not isinstance(title, str):
+            message = "The captured run title is invalid."
+            raise PersistenceError(message, context={"run": run_id})
         try:
             with transaction.atomic():
                 instance = Instance.objects.select_for_update().filter(singleton_key=1).first()
@@ -2391,9 +2400,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     project=project,
                     workflow_key=request.workflow_key,
                     number=number,
-                    title=cast(dict, snapshot.launch_defaults.get("actions_context", {})).get(
-                        "run_name", policy.definition.name
-                    ),
+                    title=title,
                     source_branch=request.source_branch,
                     status=run_transition.status,
                     source_commit=source_commit,
@@ -2442,6 +2449,9 @@ class DjangoExecutionStore(DjangoAgentStore):
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except (DatabaseError, IntegrityError):
+            LOGGER.exception(
+                "Could not persist the pending run and immutable snapshot", extra={"run": run_id}
+            )
             message = "Relay could not persist the pending run and immutable snapshot."
             raise PersistenceError(message, context={"run": run_id}) from None
 
