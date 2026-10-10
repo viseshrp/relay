@@ -1565,7 +1565,8 @@ Production engineering benchmarks applied to `frontend/src`.
 - [x] **FE-08. Gate accessibility in CI.**
   Verified by `visual-regression.spec.ts` and the automatic `a11y-test.ts`
   fixture. Explicit audits cover every screen in loops, including stress data,
-  and settle finite animations before testing final geometry.
+  while `activity-feed.spec.ts` proves paging preserves a visible focus
+  destination below the header without obscuring graph targets.
   - **Evidence:** Today's sweep found 1 critical and 5 serious axe rules
     that the existing browser tests did not catch.
   - **Fix:** Add `@axe-core/playwright` (dev dependency, owner approval)

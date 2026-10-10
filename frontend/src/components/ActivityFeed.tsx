@@ -14,7 +14,7 @@ import {
   Typography,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   activityRows,
   relativeActivityText,
@@ -154,10 +154,19 @@ export function ActivityFeed({
   const [follow, setFollow] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pageRevision, setPageRevision] = useState(0);
   const following = useRef(true);
   const previousRevision = useRef("");
   const root = useRef<HTMLDivElement>(null);
   const tail = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!pageRevision || !root.current) return;
+    // Paging changes the scroll anchor and can remove the focused control.
+    // Keep the newly revealed messages below the sticky header.
+    root.current.scrollIntoView({ block: "start", behavior: "instant" });
+    if (!root.current.querySelector("[data-activity-earlier]"))
+      root.current.focus({ preventScroll: true });
+  }, [pageRevision]);
   const filteredEvents = useMemo(
     () =>
       scope
@@ -233,6 +242,7 @@ export function ActivityFeed({
       setError(errorMessage(caught));
     } finally {
       setLoading(false);
+      setPageRevision((current) => current + 1);
     }
   }
   return (
@@ -241,6 +251,8 @@ export function ActivityFeed({
       spacing={1.5}
       component="section"
       aria-label="Activity feed"
+      tabIndex={-1}
+      sx={{ scrollMarginTop: "calc(var(--relay-header-height, 76px) + 16px)" }}
     >
       <Stack
         direction={{ xs: "column", sm: "row" }}
@@ -294,7 +306,11 @@ export function ActivityFeed({
       </Stack>
       {error && <Alert severity="error">{error}</Alert>}
       {(count > limit || hasMore) && (
-        <Button disabled={loading} onClick={() => void more()}>
+        <Button
+          data-activity-earlier
+          disabled={loading}
+          onClick={() => void more()}
+        >
           {loading ? "Loading messages…" : "Load earlier messages"}
         </Button>
       )}

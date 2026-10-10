@@ -472,4 +472,10 @@ test("one paging control reveals older messages and recovers from a page read fa
   await earlier.click();
   await expect(feed.getByRole("alert")).toHaveCount(0);
   await expect(earlier).toHaveCount(0);
+  await expect(feed).toBeFocused();
+  const position = await feed.boundingBox();
+  const header = await page.getByRole("banner").boundingBox();
+  if (!position || !header)
+    throw new Error("The feed and header must be visible.");
+  expect(position.y).toBeCloseTo(header.y + header.height + 16, 0);
 });

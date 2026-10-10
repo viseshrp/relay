@@ -513,6 +513,9 @@ The monitor combines the SSE stream with paginated database reads:
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
 
+Loading earlier activity places the revealed messages below the sticky header.
+When the paging button disappears, keyboard focus moves to the activity region.
+
 Activity renders Markdown headings, emphasis, lists, quotes, tables, and code
 blocks through React. Raw HTML and images stay inert; links accept only HTTP,
 HTTPS, email, or fragment targets. Tool calls and their results become one
