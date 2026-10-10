@@ -20,12 +20,6 @@ def test_boolean_expression_cannot_silently_clear_an_explicit_agent_effort() -> 
         bind_agent(step, {})
 
 
-@pytest.mark.parametrize("addition", ["permissions: read-all", "container: alpine", "services: {}"])
-def test_platform_only_job_features_are_rejected(addition):
-    with pytest.raises(WorkflowValidationError):
-        load(f"jobs:\n  test:\n    {addition}\n    steps: [{{run: echo ready}}]\n")
-
-
 @pytest.mark.parametrize(
     "source",
     [

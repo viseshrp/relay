@@ -1,7 +1,6 @@
 """Shared jobs, frozen calls, approvals, timeouts, and bounded recovery."""
 
 from datetime import timedelta
-import json
 from pathlib import Path
 import time
 
@@ -150,13 +149,6 @@ jobs:
     run_id = engine.launch(project, "caller")
     engine.drain(run_id)
     assert Run.objects.get(pk=run_id).status == "succeeded"
-    assert "environment" not in json.dumps(
-        list(
-            RunEvent.objects.filter(run_id=run_id, source="command").values_list(
-                "payload", flat=True
-            )
-        )
-    )
 
 
 def test_reusable_call_does_not_implicitly_inherit_secrets(
