@@ -47,8 +47,9 @@ def paused_review(
     fake_agents: FakeAgents,
     registry_network: RegistryNetwork,
     monkeypatch: pytest.MonkeyPatch,
+    database_threads: None,
 ) -> tuple[str, Client]:
-    del registry_network
+    del registry_network, database_threads
     fake_agents.install("codex", mode="configuration")
     monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
     project.write(".relay/prompts/review.md", "Review the committed implementation.\n")
