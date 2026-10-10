@@ -30,6 +30,9 @@ from relay.workflows.schema import (
 from tests.support import symlink_or_skip
 
 VALID = "version: 1\nname: Saved\nnodes: {}\n"
+ACTIONS = (
+    "name: Saved\non: workflow_dispatch\njobs:\n  check:\n    steps:\n      - run: echo Ready\n"
+)
 
 
 def _label(artifact: str, label: str) -> LabelSelector:
@@ -136,7 +139,7 @@ def test_an_artifact_that_is_not_utf8_fails_output_validation(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     ("text", "state"),
-    [("nodes: [", DraftValidationState.INVALID), (VALID, DraftValidationState.INVALID)],
+    [("nodes: [", DraftValidationState.INVALID), (ACTIONS, DraftValidationState.VALID)],
 )
 def test_an_autosaved_draft_is_labeled_by_validity_and_read_back(
     relay_root: Path, text: str, state: DraftValidationState
@@ -209,8 +212,8 @@ def test_a_failed_replacement_is_reported_without_leaving_a_temporary_file(
 
     monkeypatch.setattr(os, "replace", disk_full)
 
-    with pytest.raises(WorkflowValidationError):
-        save_workflow_document(store, relay_root, "p1", "main", VALID, base)
+    with pytest.raises(WorkflowValidationError, match="could not atomically save"):
+        save_workflow_document(store, relay_root, "p1", "main", ACTIONS, base)
     assert sorted(path.name for path in (relay_root / "workflows").iterdir()) == [
         "main.yaml",
         "nested",
