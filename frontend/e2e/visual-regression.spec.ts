@@ -1,4 +1,10 @@
-import { assertAccessible, test, expect, type Page } from "./a11y-test";
+import {
+  assertAccessible,
+  test,
+  expect,
+  type Page,
+  type Request,
+} from "./a11y-test";
 import { post } from "./setup-helpers";
 
 type Fixture = {
@@ -286,7 +292,7 @@ test("project controls reserve their geometry before inventory arrives", async (
 });
 
 for (const width of [320, 375, 1440])
-  test(`loading reserves space and CLS stays below 0.1 at ${width}`, async ({
+  test(`loading reserves space and CLS stays below 0.01 at ${width}`, async ({
     page,
   }, info) => {
     test.setTimeout(90_000);
@@ -331,28 +337,68 @@ for (const width of [320, 375, 1440])
         }
       }).observe({ type: "layout-shift", buffered: true });
     });
+    const pendingReads = new Set<Request>();
+    let releaseHistory: () => void = () => undefined;
+    let historyDelivered = Promise.resolve();
     await page.route("**/api/**", async (route) => {
       if (
         (route.request().headers().accept ?? "").includes("text/event-stream")
       )
         return route.continue();
-      const response = await route.fetch();
-      const body = await response.body();
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          ),
-      );
-      await route.fulfill({
-        status: response.status(),
-        headers: response.headers(),
-        body,
-      });
+      const request = route.request();
+      pendingReads.add(request);
+      try {
+        const response = await route.fetch();
+        const body = await response.body();
+        const url = new URL(route.request().url());
+        const setupRead =
+          url.pathname === "/api/runs" &&
+          url.searchParams.get("status") === "succeeded" &&
+          url.searchParams.get("limit") === "1";
+        // A response from the previous screen can settle during navigation.
+        const settled = await (async () => {
+          // Paint the Runs list before its sidebar inventory can resize it.
+          if (url.pathname === "/api/workflows") await historyDelivered;
+          if (setupRead) {
+            // Paint the project before resolving whether its welcome banner belongs.
+            await page.waitForFunction(() => {
+              const picker = document.querySelector(
+                '.project-picker [role="combobox"]',
+              );
+              return picker && picker.getAttribute("aria-disabled") !== "true";
+            });
+          }
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => resolve()),
+                ),
+              ),
+          );
+        })().then(
+          () => true,
+          () => false,
+        );
+        if (!settled) return;
+        await route.fulfill({
+          status: response.status(),
+          headers: response.headers(),
+          body,
+        });
+        if (url.pathname === "/api/runs" && !setupRead) releaseHistory();
+      } finally {
+        pendingReads.delete(request);
+      }
     });
     try {
       for (const screen of screens) {
+        historyDelivered = new Promise<void>((resolve) => {
+          releaseHistory = resolve;
+          if (screen !== "runs") resolve();
+        });
         await open(page, fixture, screen);
+        await expect.poll(() => pendingReads.size).toBe(0);
         await expect
           .poll(() => page.locator('[aria-busy="true"]').count())
           .toBe(0);
@@ -372,9 +418,10 @@ for (const width of [320, 375, 1440])
         expect(
           cls,
           `${screen} at ${width}: ${JSON.stringify(shifts)}`,
-        ).toBeLessThan(0.1);
+        ).toBeLessThan(0.01);
       }
     } finally {
+      releaseHistory();
       await info.attach(`layout-shifts-${width}`, {
         body: JSON.stringify(measurements, null, 2),
         contentType: "application/json",
