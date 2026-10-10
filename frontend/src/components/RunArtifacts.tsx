@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { visibleArtifacts } from "../artifacts";
+import { countLabel } from "../count";
 import { stageLabel } from "../navigation";
 import type { ArtifactRecord } from "../types";
 import { SafeMarkdown } from "./SafeMarkdown";
@@ -171,7 +172,7 @@ export function RunArtifacts({
                   </TableCell>
                   <TableCell
                     data-label="Size"
-                    title={`${artifact.bytes.toLocaleString()} bytes`}
+                    title={countLabel(artifact.bytes, "byte")}
                   >
                     {sizeLabel(artifact.bytes)}
                   </TableCell>

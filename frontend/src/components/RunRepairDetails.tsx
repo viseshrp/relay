@@ -9,6 +9,7 @@ import {
 } from "@mui/material";
 
 import type { RunNode } from "../types";
+import { countLabel } from "../count";
 
 import { stageLabel, statusLabel } from "../navigation";
 
@@ -83,7 +84,7 @@ export function RunRepairDetails({ state }: { state: RunWorkspaceState }) {
                 <Typography variant="body2">
                   {round
                     ? `Round ${round} of ${settings.max_rounds}`
-                    : `Up to ${settings.max_rounds} rounds`}
+                    : `Up to ${countLabel(settings.max_rounds, "round")}`}
                   {settings.legacy
                     ? " · Existing workflow loop"
                     : ` · ${settings.accepted_output} must equal ${JSON.stringify(settings.accepted_value)}`}
