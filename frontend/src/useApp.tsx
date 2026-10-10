@@ -475,11 +475,12 @@ export function useApp() {
         spacing={1}
         useFlexGap
       >
-        {projects.length > 0 && (
+        {(projects.length > 0 || !projectReady) && (
           <Box className="project-picker">
             <FormControl fullWidth size="small">
               <InputLabel id={`${projectPickerId}-label`}>Project</InputLabel>
               <Select
+                disabled={!projectReady}
                 id={projectPickerId}
                 labelId={`${projectPickerId}-label`}
                 label="Project"
@@ -506,8 +507,13 @@ export function useApp() {
             <HelpTip topic="project" />
           </Box>
         )}
-        <Button onClick={() => setOpeningProject(true)}>
-          {projects.length ? "Open another project" : "Open a project"}
+        <Button
+          disabled={!projectReady}
+          onClick={() => setOpeningProject(true)}
+        >
+          {projects.length || !projectReady
+            ? "Open another project"
+            : "Open a project"}
         </Button>
       </Stack>
     );

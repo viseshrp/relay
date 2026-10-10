@@ -240,6 +240,51 @@ for (const width of [320, 768, 1024, 1440])
     await expect(page.getByRole("dialog")).toContainText("owner@example.test");
   });
 
+test("project controls reserve their geometry before inventory arrives", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 960 });
+  const fixture = await seed(page, true);
+  let releaseInventory: () => void = () => undefined;
+  let inventoryStarted: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    releaseInventory = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    inventoryStarted = resolve;
+  });
+  await page.route("**/api/projects", async (route) => {
+    inventoryStarted();
+    await held;
+    await route.continue();
+  });
+  try {
+    await page.goto(`/?view=home&project=${fixture.project}`);
+    await started;
+    const button = page.locator(".app-header .project-context > button");
+    await expect(button).toBeVisible();
+    await page.addStyleTag({
+      content:
+        ".app-header .project-context > button { font-family: monospace; }",
+    });
+    await expect(page.locator(".app-header .project-picker")).toBeVisible();
+    await expect(button).toHaveText("Open another project");
+    await expect(button).toBeDisabled();
+    const before = await button.boundingBox();
+    const headerBefore = await page.getByRole("banner").boundingBox();
+    releaseInventory();
+    await expect(button).toBeEnabled();
+    await expect(
+      page.getByRole("heading", { name: "Your projects", exact: true }),
+    ).toBeVisible();
+    expect(await button.boundingBox()).toEqual(before);
+    expect(await page.getByRole("banner").boundingBox()).toEqual(headerBefore);
+  } finally {
+    releaseInventory();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});
+
 for (const width of [320, 375, 1440])
   test(`loading reserves space and CLS stays below 0.1 at ${width}`, async ({
     page,

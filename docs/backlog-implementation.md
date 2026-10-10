@@ -90,9 +90,13 @@ performs requests before asserting their responses, and workflow listing only
 assigns its fallback title after parsing fails.
 
 The isolated manual check on port 4190 saved CRLF YAML and verified its raw
-hash, measured two-line titles with visible numbers at 320 and 1440 px, counted
-one initial read per finished-run resource, and measured fan-out CLS of 0 at
-both widths. The reviewed-file dialog displayed "Commit 1 reviewed file".
+hash, measured two-line titles with visible numbers at 320 and 1440 px, and
+counted one initial read per finished-run resource. Home, Workflows, Runs, and
+the fan-out summary measured CLS of 0 at 320 and 375 px and below 0.00002 at
+1440 px. Home had no serious or critical axe findings with its path disclosure
+closed or open. The reviewed-file dialog displayed "Commit 1 reviewed file";
+committing CRLF YAML with `core.autocrlf=true` retained CRLF on disk, stored LF
+in Git, and left a clean index.
 
 The follow-up review reproduced a 109 px startup shift when the welcome banner
 was removed after the successful-run query, plus a 116 px shift when the Runs
@@ -102,3 +106,9 @@ undismissed banner at 320, 375, and 1440 px, rather than hiding it in test
 storage. `accessibility.spec.ts` separately checks visible Home path names and
 audits each disclosure state; `test_workflow_publication` covers Git newline
 conversion and edits racing with staging.
+
+The Linux trace also exposed a project button moving sideways and wrapping
+when the project picker arrived at 320 px. The initial header now reserves the
+picker and the final button label, with controls disabled until project loading
+finishes. The held-inventory case in `visual-regression.spec.ts` verifies both
+control and header rectangles remain unchanged with wider font metrics.

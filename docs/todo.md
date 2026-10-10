@@ -1346,7 +1346,9 @@ on. Everything else is SHIP WITH FIXES.
   Verified by `visual-regression.spec.ts` delayed-response CLS checks across
   seven worst-case screens at 320, 375, and 1440 px, each below 0.1, with the
   setup banner undismissed so startup shifts cannot escape the gate. The tests
-  retain `layout-shift` source rectangles and clean up delayed routes.
+  retain `layout-shift` source rectangles and clean up delayed routes. A held
+  project-inventory response also proves header controls keep their rectangles
+  before and after loading, including wider fallback font metrics.
   - **Evidence:** The largest shift, 0.256 at 375 px, is the job sidebar
     rendering "Jobs will appear" and then the list (a 231 px jump). The
     next, 0.138, is the header reflowing when projects load.

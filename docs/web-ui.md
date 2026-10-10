@@ -46,7 +46,9 @@ rejected. IPv6 `::1` is rendered in the browser URL as
 
 Initial workspace rendering waits for project setup visibility, so loading a
 successful project cannot briefly insert and remove the welcome banner above
-its content. Runs history also waits for its workflow sidebar inventory.
+its content. Runs history also waits for its workflow sidebar inventory. The
+header reserves its project picker and final button label while projects load,
+then enables the controls without moving them.
 
 ## First login
 
