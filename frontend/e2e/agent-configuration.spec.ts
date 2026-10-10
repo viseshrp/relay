@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { parse } from "yaml";
+import { closeJobSettings } from "./setup-helpers";
 
 async function post(page: Page, path: string, body: object = {}) {
   const cookie = (await page.context().cookies()).find(
@@ -18,7 +19,7 @@ async function workflow(page: Page) {
 }
 
 async function save(page: Page) {
-  await page.getByRole("button", { name: "Close job settings" }).click();
+  await closeJobSettings(page);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   const confirmation = page.getByRole("button", {
     name: "Save canonical YAML",
@@ -37,8 +38,7 @@ async function choose(page: Page, tool: string, label: string, value: string) {
 }
 
 async function launch(page: Page) {
-  const close = page.getByRole("button", { name: "Close job settings" });
-  if (await close.isVisible()) await close.click();
+  await closeJobSettings(page);
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const created = page.waitForResponse(
     (response) =>

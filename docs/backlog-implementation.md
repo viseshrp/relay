@@ -64,7 +64,7 @@ remain separate platform/certification checks.
 | Defect | Verified behavior | Proving coverage |
 | --- | --- | --- |
 | CRLF sources | Editor hashes exact bytes and preserves existing workflow/prompt newline style; snapshots retain exact sources | `test_source_line_endings`, `test_launch_recovery`, `editor-recovery.spec.ts` |
-| Browser stability | Visual server owns its database; platform baselines, stable skeleton geometry, one initial graph fit, mounted tour targets, and serialized fixture reset | `visual-regression`, `control-layout`, `onboarding` browser specs; `test_static_assets` |
+| Browser stability | Visual server owns its database; platform baselines, stable skeleton geometry, one initial graph fit, mounted tour targets, awaited drawer removal, and serialized fixture reset | `visual-regression`, `control-layout`, `onboarding`, `agent-configuration` browser specs; `test_static_assets` |
 | Long headings | Title text clamps separately from the status icon and run number; full title remains available | `title-clamp.spec.ts` at 320, 375, and 1440 px |
 | Duplicate reads | Initial state/history publish together; historical events do not trigger fresh attention or artifact reads | `data-layer.spec.ts` counts Home, Runs, finished/running runs, and job reads |
 | Accessibility/type scale | Every normal/stress screen receives serious/critical axe checks, including WCAG 2.1 A and 2.2 AA; history text is at least 12 px; paging retains a visible focus destination | `visual-regression.spec.ts`, `activity-feed.spec.ts`, `a11y-test.ts` |
