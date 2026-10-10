@@ -13,7 +13,7 @@ import {
   useNodesInitialized,
   useReactFlow,
 } from "@xyflow/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
 
 import { RunGraphNode } from "./RunGraphNode";
@@ -62,15 +62,17 @@ function FocusStep({
   return null;
 }
 
-function InitialRunViewport({
+function InitialViewport({
   container,
+  runMode,
 }: {
   container: RefObject<HTMLDivElement | null>;
+  runMode: boolean;
 }) {
   const initialized = useNodesInitialized();
   const positioned = useRef(false);
   const { getNodes, fitView, setViewport } = useReactFlow();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!initialized || positioned.current || !container.current) return;
     const nodes = getNodes();
     const first = nodes[0];
@@ -82,16 +84,25 @@ function InitialRunViewport({
       available.clientWidth / (bounds.width * 1.4),
       available.clientHeight / (bounds.height * 1.4),
     );
-    if (zoom < 0.65) {
-      void setViewport({
-        x: 24 - first.position.x * 0.8,
-        y: 24 - first.position.y * 0.8,
-        zoom: 0.8,
-      });
+    const ready = () => available.setAttribute("data-viewport-ready", "true");
+    if (runMode && zoom < 0.65) {
+      void setViewport(
+        {
+          x: 24 - first.position.x * 0.8,
+          y: 24 - first.position.y * 0.8,
+          zoom: 0.8,
+        },
+        { duration: 0 },
+      ).then(ready);
     } else {
-      void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1 });
+      void fitView({
+        padding: runMode ? 0.2 : 0.1,
+        minZoom: 0.25,
+        maxZoom: 1,
+        duration: 0,
+      }).then(ready);
     }
-  }, [initialized, container, getNodes, fitView, setViewport]);
+  }, [initialized, container, runMode, getNodes, fitView, setViewport]);
   return null;
 }
 
@@ -145,6 +156,7 @@ export function FlowCanvas({
   return (
     <div
       ref={container}
+      data-viewport-ready="false"
       role="application"
       aria-label={
         runMode ? "Read-only workflow graph" : "Workflow graph editor"
@@ -216,11 +228,10 @@ export function FlowCanvas({
         fitViewOptions={
           runMode ? { padding: 0.2, minZoom: 0.25, maxZoom: 1 } : undefined
         }
-        fitView={!runMode}
         minZoom={0.25}
         maxZoom={1.75}
       >
-        {runMode && <InitialRunViewport container={container} />}
+        <InitialViewport container={container} runMode={runMode} />
         {/* Authoring can focus a stage while retaining manually dragged positions. */}
         {(followSelection || initialFocusId) && (
           <FocusStep

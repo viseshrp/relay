@@ -585,6 +585,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
 
   return {
     fallback: null as null,
+    loadedDocument,
     inventory,
     setLoadRevision,
     key,

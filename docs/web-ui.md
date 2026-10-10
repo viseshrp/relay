@@ -345,7 +345,10 @@ When another untracked workflow blocks launch, **Commit workflow files** opens
 a bounded preview of validated workflow sources and their complete contents.
 An explicit confirmation commits exactly those reviewed paths. Changed bytes,
 a changed Git head, or a nonempty index reject the operation. Root reports and
-unrelated code remain untouched. The panel repeats preflight after the commit.
+unrelated code remain untouched. Invalid unrelated workflow candidates appear
+as notices and are omitted; required invalid sources still block the preview.
+Relay verifies the staged bytes before committing the reviewed index. The panel
+repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. Historical workflows can also expose **Start from job**.
@@ -1043,3 +1046,29 @@ independent, so a successful metadata refresh cannot hide a failed log read.
 [Browser view states](ui-states.md) records loading, empty, error, success and
 access-denied behavior. [Backlog implementation](backlog-implementation.md)
 connects the remaining findings to their implementation and regression tests.
+
+### Browser regression gates
+
+Visual tests use a separate disposable server and database on port 4176,
+so functional test runs cannot appear on the Home dashboard. Baselines live
+under `frontend/e2e/baselines/{platform}`. Linux CI is the reference for CI
+screenshots; macOS baselines support local checks. Relative times and private
+paths are masked rather than relaxing the pixel-difference threshold.
+
+To refresh Linux baselines, dispatch the Main workflow on the working branch
+with **Generate Linux visual baselines for review** enabled. Review the
+`linux-visual-baselines` artifact before committing its PNG files. Generate
+macOS baselines only from an isolated checkout with the visual Playwright
+configuration and `--update-snapshots`.
+
+Every normal and worst-case fixture screen receives an axe audit with WCAG
+2.0, 2.1, and 2.2 tags, failing on serious or critical violations. The previous
+gate omitted WCAG 2.1 A and 2.2 AA and only audited the final screen in loops;
+that missed link-name and target-size defects. History typography checks also
+require visible text of at least 12 px and weights 400, 500, or 600.
+
+Delayed-response CLS checks capture `layout-shift` sources at 375 and 1440 px.
+Editor skeletons reserve the final sidebar geometry, initial run collections
+and history publish together, and graphs keep their height and fit once before
+revealing the viewport. Optional self-hosted fonts and a metric-adjusted
+fallback prevent a late font response from moving already painted content.

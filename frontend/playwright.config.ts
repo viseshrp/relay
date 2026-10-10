@@ -2,8 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "optional-login.spec.ts",
-  snapshotPathTemplate: "{testDir}/baselines/{arg}{ext}",
+  testIgnore: ["optional-login.spec.ts", "visual-regression.spec.ts"],
+  snapshotPathTemplate: "{testDir}/baselines/{platform}/{arg}{ext}",
   fullyParallel: false,
   workers: 1,
   use: {

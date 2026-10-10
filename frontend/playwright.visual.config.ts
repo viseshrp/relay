@@ -3,8 +3,9 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   ...base,
+  testIgnore: [],
   testMatch: "visual-regression.spec.ts",
-  snapshotPathTemplate: "{testDir}/baselines/{arg}{ext}",
+  snapshotPathTemplate: "{testDir}/baselines/{platform}/{arg}{ext}",
   use: {
     ...base.use,
     baseURL: "http://127.0.0.1:4176",

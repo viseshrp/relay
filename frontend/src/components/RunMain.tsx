@@ -66,15 +66,6 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
       spacing={2}
       sx={{ minWidth: 0, scrollMarginTop: 80 }}
     >
-      {detail &&
-        detail.nodes.some((node) => node.node_type === "actions_job") && (
-          <ActionsRunProducts
-            runId={detail.id}
-            projectId={detail.project_id}
-            events={events}
-            nodes={detail.nodes}
-          />
-        )}
       {detail && (
         <WaitingRequests
           key={detail.id}
@@ -291,6 +282,14 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
 
           <RunDiagnostics state={state} />
         </>
+      )}
+      {detail.nodes.some((node) => node.node_type === "actions_job") && (
+        <ActionsRunProducts
+          runId={detail.id}
+          projectId={detail.project_id}
+          events={events}
+          nodes={detail.nodes}
+        />
       )}
     </Stack>
   );

@@ -59,7 +59,7 @@ export const relayTheme = createTheme({
   shape: { borderRadius: 7 },
   typography: {
     fontFamily:
-      'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+      'Inter, "Inter Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
     fontSize: 14,
     caption: { fontSize: ".75rem" },
     h5: { fontWeight: 600, fontSize: "1.375rem" },

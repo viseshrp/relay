@@ -68,6 +68,8 @@ export function ActionsWorkflowWorkspaceView({
     setJobId,
     setDrawer,
   } = state;
+  if ((!state.loadedDocument || !manifest) && !error)
+    return <ViewSkeleton view="workflows" header={false} />;
   return (
     <Box className="actions-layout">
       <WorkflowSidebar
@@ -165,7 +167,13 @@ export function ActionsWorkflowWorkspaceView({
           onClose={() => setSettings(false)}
           onEnvironments={setEnvironments}
         />
-        {lease && valid && <Typography>Ready to edit</Typography>}
+        <Typography>
+          {lease && valid
+            ? "Ready to edit"
+            : lease
+              ? "Validating workflow…"
+              : "Connecting editor…"}
+        </Typography>
         {notice && <Alert severity="success">{notice}</Alert>}
         {!key && <Typography variant="h6">No workflows yet</Typography>}
         {leaseError && (

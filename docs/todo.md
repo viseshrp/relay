@@ -1340,7 +1340,10 @@ on. Everything else is SHIP WITH FIXES.
   - **Fix:** Use "Cancelled", and show "Started by you" when login is off.
   - **Done when:** The status vocabulary matches the BX vocabulary map.
 
-- [ ] **QA-11. Layout shift fails Core Web Vitals on run pages.**
+- [x] **QA-11. Layout shift fails Core Web Vitals on run pages.**
+  Verified by `visual-regression.spec.ts` delayed-response CLS checks across
+  seven worst-case screens at 375 and 1440 px, each below 0.1. The tests retain
+  `layout-shift` source rectangles and clean up delayed routes.
   - **Evidence:** The largest shift, 0.256 at 375 px, is the job sidebar
     rendering "Jobs will appear" and then the list (a 231 px jump). The
     next, 0.138, is the header reflowing when projects load.

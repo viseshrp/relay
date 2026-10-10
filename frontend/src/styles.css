@@ -2236,7 +2236,7 @@ summary:focus-visible,
 }
 @media (max-width: 479px) {
   .app-header {
-    min-height: 120px;
+    min-height: 128px;
   }
   .skeleton-header {
     padding: var(--relay-space-2) var(--relay-space-3);
@@ -2282,6 +2282,10 @@ summary:focus-visible,
 .run-heading-row h1 > svg,
 .run-number {
   flex-shrink: 0;
+}
+
+.flow-canvas[data-viewport-ready="false"] .react-flow__viewport {
+  visibility: hidden;
 }
 
 .react-flow__attribution a {
