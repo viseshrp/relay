@@ -231,6 +231,15 @@ class _ClaimContext(NamedTuple):
 
 
 @lru_cache(maxsize=RECONCILE_MAX_ITEMS)
+def _captured_workflow_name(source: str) -> str:
+    """Older snapshots keep their display name only in the frozen YAML."""
+    try:
+        return load_workflow_text(source, source=Path("snapshot:workflow")).definition.name or ""
+    except RelayError:
+        return ""
+
+
+@lru_cache(maxsize=RECONCILE_MAX_ITEMS)
 def _compiled_run_graph(run_id: str) -> CompiledGraph:
     """Compile each immutable snapshot once while its run stays in the cache."""
     snapshot = RunSnapshot.objects.get(run_id=run_id)
@@ -1667,6 +1676,12 @@ class DjangoReadStore:
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            name = _mapping(snapshot, "resolved_definition").get("name")
+            result["workflow_name"] = (
+                name
+                if isinstance(name, str) and name
+                else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
+            ) or _string(run, "workflow_key")
             result["working_folder"] = _string(run, "worktree_path")
             result["problem"] = _run_problem(run)
             result["recovery"] = _run_recovery(run)

@@ -284,7 +284,9 @@ are not silently converted to a different repair contract.
 ## Human waits
 
 `relay/human-wait@v1` accepts a rendered `prompt` and optional
-`timeout-minutes`. It creates one durable interaction on the current step
+`timeout-minutes` and `options`. Supply `options` as a JSON string array of
+1–10 distinct strings, each at most 256 characters. Omitting it allows a free
+text answer. It creates one durable interaction on the current step
 attempt and exports `steps.ID.outputs.answer`. Restart preserves that request
 and completed steps. Duplicate, stale, expired, or mismatched responses cannot
 resume another attempt.
@@ -297,7 +299,8 @@ jobs:
       - id: approval
         uses: relay/human-wait@v1
         with:
-          prompt: Review the change. Type Approved to continue.
+          prompt: Review the change and choose an answer.
+          options: '["Approved", "Request changes"]'
           timeout-minutes: 30
       - if: steps.approval.outputs.answer == 'Approved'
         run: echo Approved

@@ -41,7 +41,7 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
         startIcon={<ActionIcon name="back" />}
         onClick={() => onSelectRun(null)}
       >
-        {stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}
+        {detail.workflow_name || detail.workflow_key}
       </Button>
       <Stack direction="row" spacing={2} className="run-heading-row">
         <Typography

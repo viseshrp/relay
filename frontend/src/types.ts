@@ -338,6 +338,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  workflow_name: string;
   working_folder: string;
   problem: RunProblem | null;
   recovery: {

@@ -25,6 +25,12 @@ for (const width of [320, 375, 1440])
     await expect(
       page.getByRole("region", { name: "Step progress" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Visual <script> ** &amp; workflow",
+        exact: true,
+      }),
+    ).toBeVisible();
     const title = page.locator(".run-heading-row .run-title");
     const geometry = await title.evaluate((element) => ({
       height: element.getBoundingClientRect().height,
