@@ -20,6 +20,7 @@ export function PathDisplay({
   display?: string;
 }) {
   const [notice, setNotice] = useState<string | null>(null);
+  const visible = display ?? shortenedPath(path);
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(path);
@@ -30,15 +31,19 @@ export function PathDisplay({
   }
   return (
     <details className="path-display">
-      <summary role="button" title={path} aria-label={`Full path for ${label}`}>
-        <code>{display ?? shortenedPath(path)}</code>
+      <summary
+        role="button"
+        title={path}
+        aria-label={`${visible} Full path for ${label}`}
+      >
+        <code>{visible}</code>
         <span>Full path</span>
       </summary>
       <div className="path-details">
         <code>{path}</code>
         <Button
           onClick={() => void copy()}
-          aria-label={`Copy full path for ${label}`}
+          aria-label={`Copy path for ${label}`}
         >
           Copy path
         </Button>

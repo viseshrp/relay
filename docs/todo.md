@@ -1155,6 +1155,8 @@ Evidence comes from your instance unless it says "isolated".
 - [x] **DT-12. Fix the remaining axe violations.**
   Verified by `visual-regression.spec.ts`: every normal and worst-case screen
   passes serious/critical axe rules, including WCAG 2.1 A and 2.2 AA.
+  `accessibility.spec.ts` also checks every visible Home path name and audits
+  the disclosure both closed and open, including its Copy path button.
   - **Evidence:** One critical rule (`aria-allowed-attr` on
     `.project-context` during the tour). Serious: the CodeMirror editor has
     no accessible name (`aria-input-field-name`); MUI `<ul>` elements contain
@@ -1340,7 +1342,7 @@ on. Everything else is SHIP WITH FIXES.
   - **Fix:** Use "Cancelled", and show "Started by you" when login is off.
   - **Done when:** The status vocabulary matches the BX vocabulary map.
 
-- [x] **QA-11. Layout shift fails Core Web Vitals on run pages.**
+- [ ] **QA-11. Layout shift fails Core Web Vitals on run pages.**
   Verified by `visual-regression.spec.ts` delayed-response CLS checks across
   seven worst-case screens at 375 and 1440 px, each below 0.1. The tests retain
   `layout-shift` source rectangles and clean up delayed routes.
@@ -1566,7 +1568,9 @@ Production engineering benchmarks applied to `frontend/src`.
   Verified by `visual-regression.spec.ts` and the automatic `a11y-test.ts`
   fixture. Explicit audits cover every screen in loops, including stress data,
   while `activity-feed.spec.ts` proves paging preserves a visible focus
-  destination below the header without obscuring graph targets.
+  destination below the header without obscuring graph targets. Home path
+  names receive explicit visible-name assertions and closed/open axe checks
+  in `accessibility.spec.ts`.
   - **Evidence:** Today's sweep found 1 critical and 5 serious axe rules
     that the existing browser tests did not catch.
   - **Fix:** Add `@axe-core/playwright` (dev dependency, owner approval)

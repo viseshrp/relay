@@ -121,13 +121,13 @@ for (const width of [320, 390, 760, 1440])
     ).json();
     await expect(folders.locator(".path-details").first()).toBeHidden();
     await folders
-      .getByRole("button", { name: "Full path for Config", exact: true })
+      .getByRole("button", { name: /Full path for Config$/ })
       .click();
     await expect(folders.locator(".path-details").first()).toContainText(
       paths.paths.config,
     );
     await folders
-      .getByRole("button", { name: "Full path for Config", exact: true })
+      .getByRole("button", { name: /Full path for Config$/ })
       .press("Enter");
     await expect(folders.locator(".path-details").first()).toBeHidden();
     const deleteButton = await bounds(
@@ -405,13 +405,11 @@ test("full paths retain exact bytes and copy failures keep a selectable fallback
     exact: true,
   });
   await expect(
-    folders.getByRole("button", { name: "Full path for Data", exact: true }),
+    folders.getByRole("button", { name: /Full path for Data$/ }),
   ).toContainText("…/Relay/data");
+  await folders.getByRole("button", { name: /Full path for Data$/ }).click();
   await folders
-    .getByRole("button", { name: "Full path for Data", exact: true })
-    .click();
-  await folders
-    .getByRole("button", { name: "Copy full path for Data", exact: true })
+    .getByRole("button", { name: "Copy path for Data", exact: true })
     .click();
   await expect(folders.getByRole("status")).toHaveText("Path copied.");
   expect(await page.evaluate(() => sessionStorage.getItem("copied-path"))).toBe(
@@ -428,7 +426,7 @@ test("full paths retain exact bytes and copy failures keep a selectable fallback
     }),
   );
   await folders
-    .getByRole("button", { name: "Copy full path for Data", exact: true })
+    .getByRole("button", { name: "Copy path for Data", exact: true })
     .click();
   await expect(folders.getByRole("status")).toHaveText(
     "Could not copy. Select the full path below to copy it.",
@@ -653,8 +651,7 @@ for (const path of ["/tmp/repo", "C:\\work\\repo", "\\\\server\\share\\repo"])
       .getByRole("button", { name: "Storage", exact: true })
       .click();
     const button = page.getByRole("button", {
-      name: "Full path for Data",
-      exact: true,
+      name: /Full path for Data$/,
     });
     await expect(button).toContainText("…/");
     await button.click();

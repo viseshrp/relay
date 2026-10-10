@@ -1,4 +1,4 @@
-import { expect, test } from "./a11y-test";
+import { assertAccessible, expect, test } from "./a11y-test";
 import AxeBuilder from "@axe-core/playwright";
 import { post } from "./setup-helpers";
 
@@ -9,6 +9,25 @@ test.beforeEach(async ({ page }) => {
     password: "Relay-Test-Passphrase-2026!",
   });
   await post(page, "/__test__/reset");
+});
+
+test("Home path disclosures preserve visible names when closed and open", async ({
+  page,
+}) => {
+  await page.goto("/?view=home");
+  const disclosures = page.locator(".path-display summary");
+  await expect(disclosures.first()).toBeVisible();
+  for (const disclosure of await disclosures.all()) {
+    const visible = (await disclosure.innerText()).replace(/\s+/g, " ").trim();
+    const prefix = visible.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await expect(disclosure).toHaveAccessibleName(new RegExp(`^${prefix}`));
+  }
+  await assertAccessible(page);
+  await disclosures.first().click();
+  await expect(
+    page.getByRole("button", { name: /^Copy path/ }).first(),
+  ).toBeVisible();
+  await assertAccessible(page);
 });
 
 for (const view of ["home", "workflows", "runs", "settings"])
