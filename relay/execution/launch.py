@@ -263,9 +263,9 @@ def launch_workflow(
                     },
                 )
             )
-            if len(str(actions_context["run_name"])) > 1000:
-                message = "Use a run title of at most 1000 characters."
-                raise WorkflowValidationError(message)
+            from relay.workflows.titles import truncate_run_title
+
+            actions_context["run_name"] = truncate_run_title(str(actions_context["run_name"]))
             workflow = bind_routes(
                 workflow,
                 {

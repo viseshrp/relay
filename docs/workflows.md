@@ -43,6 +43,11 @@ jobs:
         with: {argv: '["git", "diff", "--check"]'}
 ```
 
+A literal `run-name` must contain at most 1,000 characters. A title rendered
+from expressions is shortened to that limit at a grapheme boundary with a
+trailing ellipsis when necessary. The complete input remains in the immutable
+run inputs; combining marks and joined emoji remain intact in the title.
+
 The root accepts `name`, `description`, `run-name`, `on`, `env`, `defaults`,
 `concurrency`, `cache-mode`, and `jobs`. A job accepts `name`, `needs`, `if`,
 `strategy`, `env`, `defaults`, `outputs`, `environment`, `concurrency`,
