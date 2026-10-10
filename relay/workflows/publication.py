@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from hashlib import sha256
+import logging
 from pathlib import Path
 from typing import TypedDict
 
 from relay.constants import API_MAX_PAGE_BYTES
-from relay.errors import PermissionFlowError, WorkflowValidationError
+from relay.errors import PermissionFlowError, RelayError, WorkflowValidationError
 from relay.execution.preflight import launch_source_files, load_launch_workflow
 from relay.projects.discovery import git_root
 from relay.vcs.cleanliness import execution_status
-from relay.vcs.git import git_stdout, run_git
+from relay.vcs.git import git_stdout, run_git, run_git_bytes
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CommitFile(TypedDict):
@@ -24,6 +27,7 @@ class CommitFile(TypedDict):
 class CommitPreview(TypedDict):
     head: str
     files: list[CommitFile]
+    notices: list[str]
 
 
 def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPreview:
@@ -43,6 +47,7 @@ def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPrevie
         raise PermissionFlowError(message)
     sources = set(launch_source_files(workflow, repository))
     candidates = []
+    notices = []
     for change in changes:
         if change.status != "??" or change.allowed:
             continue
@@ -51,7 +56,13 @@ def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPrevie
             continue
         relative = path.relative_to(relay_root)
         if relative.parts[0] == "workflows" and path.suffix in {".yaml", ".yml"}:
-            other = load_launch_workflow(relay_root, relative.relative_to("workflows").as_posix())
+            try:
+                other = load_launch_workflow(
+                    relay_root, relative.relative_to("workflows").as_posix()
+                )
+            except RelayError as error:
+                notices.append(f"Skipped {change.path}: {error.message}")
+                continue
             sources.update(launch_source_files(other, repository))
         if relative.parts[0] in {"workflows", "prompts"}:
             candidates.append(change.path)
@@ -74,12 +85,19 @@ def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPrevie
             raise WorkflowValidationError(message)
         remaining -= len(raw)
         files.append({"path": name, "hash": sha256(raw).hexdigest(), "text": raw.decode("utf-8")})
-    return {"head": git_stdout(repository, ["rev-parse", "HEAD"]), "files": files}
+    return {
+        "head": git_stdout(repository, ["rev-parse", "HEAD"]),
+        "files": files,
+        "notices": notices,
+    }
 
 
-def _require_staged_sources(repository: Path, paths: list[str]) -> None:
+def _require_staged_sources(repository: Path, hashes: Mapping[str, str]) -> None:
     staged = set(git_stdout(repository, ["diff", "--cached", "--name-only"]).splitlines())
-    if staged != set(paths):
+    if staged != set(hashes) or any(
+        sha256(run_git_bytes(repository, ["show", f":{path}"]).stdout).hexdigest() != expected
+        for path, expected in hashes.items()
+    ):
         message = "Another Git operation changed the index. Workflow files were not committed."
         raise PermissionFlowError(message)
 
@@ -98,10 +116,15 @@ def commit_workflow_sources(
     repository = relay_root.parent.resolve()
     try:
         run_git(repository, ["add", "--", *paths])
-        _require_staged_sources(repository, paths)
-        run_git(repository, ["commit", "-m", "Add Relay workflow sources", "--", *paths])
+        _require_staged_sources(repository, current)
+        run_git(repository, ["commit", "-m", "Add Relay workflow sources"])
     except Exception:
         # The index was empty before this operation. Restore only our selected paths.
-        run_git(repository, ["reset", "--", *paths])
+        try:
+            run_git(repository, ["reset", "--", *paths])
+        except Exception:
+            LOGGER.exception(
+                "Workflow source index cleanup failed", extra={"project": str(repository)}
+            )
         raise
     return git_stdout(repository, ["rev-parse", "HEAD"])

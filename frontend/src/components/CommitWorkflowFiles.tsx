@@ -18,6 +18,7 @@ import { projectPath } from "../navigation";
 interface Preview {
   head: string;
   files: Array<{ path: string; hash: string; text: string }>;
+  notices: string[];
 }
 
 export function CommitWorkflowFiles({
@@ -105,6 +106,11 @@ export function CommitWorkflowFiles({
                   {file.text}
                 </Typography>
               </Stack>
+            ))}
+            {preview?.notices.map((notice) => (
+              <Alert key={notice} severity="warning">
+                {notice}
+              </Alert>
             ))}
             {!preview?.files.length && (
               <Alert severity="info">
