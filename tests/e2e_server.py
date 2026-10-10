@@ -15,7 +15,6 @@ import shutil
 import sys
 import tempfile
 from threading import Event, Thread
-import time
 from types import SimpleNamespace
 from typing import TypeVar
 from uuid import uuid4
@@ -125,6 +124,10 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     )
     patch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     stopped = Event()
+    reset_requested = Event()
+    consumer_idle = Event()
+    fixture_ready = Event()
+    fixture_ready.set()
 
     @owner_required
     @require_POST
@@ -134,34 +137,40 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         from relay.web.models import WorkflowControl
         from tests.ui_fixtures import clear_ui_fixtures
 
-        clear_ui_fixtures()
-        WorkflowControl.objects.all().delete()
-
-        for run_id in Run.objects.filter(
-            status__in=("running", "paused_wait", "pending", "canceling")
-        )[:100].values_list("pk", flat=True):
-            request_cancellation(engine.store, str(run_id), "browser-fixture-reset")
-        deadline = time.monotonic() + 10
-        while Run.objects.filter(status="canceling").exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if Run.objects.filter(status="canceling").exists():
-            return JsonResponse({"message": "The preceding fixture has not stopped."}, status=503)
-        # The feedback scenario replaces Codex and the shared ACP mode.
-        # Restore its configuration so later tests get the normal capabilities.
-        shutil.rmtree(providers.directory)
-        providers.directory.mkdir()
-        for agent_id in ("codex", "claude", "antigravity"):
-            providers.install(agent_id, mode="configuration")
-        WorkflowDraft.objects.all().delete()
-        EditorLease.objects.all().delete()
-        settings_path().unlink(missing_ok=True)
-        Project.objects.filter(pk=project.project_id).update(defaults={})
-        project.write_workflow("workflow", WORKFLOW)
-        if crlf:
-            (project.relay_root / "workflows/workflow.yaml").write_bytes(
-                WORKFLOW.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
-            )
-        return JsonResponse({"ok": True, "python": sys.executable})
+        reset_requested.set()
+        fixture_ready.clear()
+        try:
+            for run_id in (
+                Run.objects.filter(status__in=("running", "paused_wait", "pending", "canceling"))
+                .exclude(run_branch__startswith="relay/ui-fixture/")
+                .values_list("pk", flat=True)
+            ):
+                request_cancellation(engine.store, str(run_id), "browser-fixture-reset")
+            if not consumer_idle.wait(10):
+                return JsonResponse(
+                    {"message": "The preceding fixture has not stopped."}, status=503
+                )
+            clear_ui_fixtures()
+            WorkflowControl.objects.all().delete()
+            # The feedback scenario replaces Codex and the shared ACP mode.
+            # Restore its configuration so later tests get the normal capabilities.
+            shutil.rmtree(providers.directory)
+            providers.directory.mkdir()
+            for agent_id in ("codex", "claude", "antigravity"):
+                providers.install(agent_id, mode="configuration")
+            WorkflowDraft.objects.all().delete()
+            EditorLease.objects.all().delete()
+            settings_path().unlink(missing_ok=True)
+            Project.objects.filter(pk=project.project_id).update(defaults={})
+            project.write_workflow("workflow", WORKFLOW)
+            if crlf:
+                (project.relay_root / "workflows/workflow.yaml").write_bytes(
+                    WORKFLOW.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+                )
+            return JsonResponse({"ok": True, "python": sys.executable})
+        finally:
+            reset_requested.clear()
+            fixture_ready.set()
 
     @owner_required
     @require_POST
@@ -411,6 +420,14 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
             while not stopped.wait(0.02):
                 engine.store.resolve_human_wait_controls()
                 engine.store.resume_automatic_retries()
+                if (
+                    reset_requested.is_set()
+                    and not Run.objects.filter(status__in=("running", "canceling")).exists()
+                ):
+                    consumer_idle.set()
+                    fixture_ready.wait()
+                    consumer_idle.clear()
+                    continue
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
                 for run_id in Run.objects.filter(status="running").values_list("id", flat=True):
@@ -424,6 +441,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         uvicorn.run("relay.web.asgi:application", host="127.0.0.1", port=port, log_level="warning")
     finally:
         stopped.set()
+        fixture_ready.set()
         consumer.join(timeout=10)
         connections.close_all()
         patch.undo()

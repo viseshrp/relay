@@ -57,12 +57,14 @@ export function GuidedTour({
   onDestination,
   onClose,
 }: {
-  onDestination: (destination: TourDestination) => void;
+  onDestination: (destination: TourDestination) => Promise<void>;
   onClose: () => void;
 }) {
   useEffect(() => {
     let disposing = false;
     let closed = false;
+    let pending: MutationObserver | null = null;
+    let moving = false;
     function finish(): void {
       if (disposing || closed) return;
       closed = true;
@@ -122,11 +124,39 @@ export function GuidedTour({
       },
       onDestroyed: finish,
     });
-    function move(index: number): void {
+    async function move(index: number): Promise<void> {
       const step = steps[index];
-      if (!step) return;
-      onDestination({ section: step.section });
-      tour.moveTo(index);
+      if (!step || moving) return;
+      moving = true;
+      try {
+        await onDestination({ section: step.section });
+        if (disposing || closed) return;
+        const selector = `[data-tour="${step.target ?? step.topic}"]`;
+        const mounted = () => {
+          const target = document.querySelector(selector);
+          return (
+            target instanceof HTMLElement && target.getClientRects().length > 0
+          );
+        };
+        if (!mounted())
+          await new Promise<void>((resolve) => {
+            pending = new MutationObserver(() => {
+              if (mounted() || disposing || closed) {
+                pending?.disconnect();
+                pending = null;
+                resolve();
+              }
+            });
+            pending.observe(document.body, {
+              subtree: true,
+              childList: true,
+              attributes: true,
+            });
+          });
+        if (!disposing && !closed) tour.moveTo(index);
+      } finally {
+        moving = false;
+      }
     }
     // Tour keyboard focus belongs to its controls, never to editable settings.
     const keepFocus = (event: KeyboardEvent) => {
@@ -151,6 +181,7 @@ export function GuidedTour({
     tour.drive();
     return () => {
       disposing = true;
+      pending?.disconnect();
       document.removeEventListener("keydown", keepFocus, true);
       tour.destroy();
     };

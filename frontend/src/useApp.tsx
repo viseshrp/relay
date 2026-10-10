@@ -164,13 +164,13 @@ export function useApp() {
     }
   }, []);
   const tourDestination = useCallback(
-    (destination: TourDestination) => {
+    async (destination: TourDestination): Promise<void> => {
       if (tourReturn.current === null)
         tourReturn.current = currentLocation.current;
       if (destination.section) {
         setTourSection(destination.section);
         if (currentLocation.current.view !== "settings")
-          void navigateSafely({ view: "settings" });
+          await navigateSafely({ view: "settings" });
       }
     },
     [navigateSafely],

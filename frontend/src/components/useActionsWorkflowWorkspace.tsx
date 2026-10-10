@@ -98,6 +98,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [environments, setEnvironments] = useState<string[]>([]);
   const holder = useRef(editorHolder());
   const writes = useRef(Promise.resolve());
+  const restoring = useRef(false);
   const currentDocument = useRef("");
   const [lastValid, setLastValid] = useState<ActionWorkflow | null>(null);
   const parsed = useMemo(() => parseActions(text), [text]);
@@ -263,6 +264,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   }, [key, requestProject, onWorkflowLoaded, setText, loadRevision]);
   const flush = useCallback(async () => {
     if (
+      restoring.current ||
       !key ||
       loadedDocument !==
         projectPath(`/api/workflows/${encoded(key)}`, requestProject) ||
@@ -398,23 +400,29 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       return false;
     }
   }
-  async function restoreSaved() {
+  async function restoreSaved(): Promise<void> {
     const target = path("");
-    const previousDraft = draft;
-    setText(saved);
-    setPromptEdits({});
+    restoring.current = true;
     try {
-      if (previousDraft)
+      // A queued autosave must finish before its recovery draft is discarded.
+      await writes.current.catch(() => undefined);
+      const document = await api<WorkflowDocumentResponse>(target);
+      if (document.draft)
         await api(path("/draft/discard"), {
           method: "POST",
-          body: JSON.stringify({ updated_at: previousDraft.updated_at }),
+          body: JSON.stringify({ updated_at: document.draft.updated_at }),
         });
       if (currentDocument.current === target) {
+        setText(saved);
+        setLastValid(savedParsed.value);
+        setPromptEdits({});
         setDraft(null);
         setError("");
       }
     } catch (e) {
       if (currentDocument.current === target) setError(errorMessage(e));
+    } finally {
+      restoring.current = false;
     }
   }
   async function takeOver() {

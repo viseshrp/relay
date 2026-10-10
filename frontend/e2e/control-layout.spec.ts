@@ -484,6 +484,9 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
     await page
       .getByRole("button", { name: "Restore saved source", exact: true })
       .click();
+    await expect(
+      page.getByRole("button", { name: "Restore saved source", exact: true }),
+    ).toHaveCount(0);
   }
 });
 
