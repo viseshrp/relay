@@ -50,8 +50,10 @@ def test_language_manifest_validation_and_method_boundaries(owner: Client) -> No
         "/api/workflow-environments",
         "/api/workflow-triggers",
     ):
-        assert owner.delete(url).status_code == 405
-        assert Client().get(url).status_code == 401
+        deletion = owner.delete(url)
+        anonymous = Client().get(url)
+        assert deletion.status_code == 405
+        assert anonymous.status_code == 401
 
 
 def test_library_import_export_captures_project_prompts_and_transitive_actions(

@@ -129,12 +129,13 @@ def list_workflow_documents(relay_root: Path) -> list[dict[str, str]]:
             if path.suffix not in {".yaml", ".yml"} or path.is_symlink():
                 continue
             key = path.relative_to(root).as_posix()
-            title = path.stem
             # Invalid files remain selectable so the owner can repair them in the editor.
-            with suppress(RelayError, OSError, UnicodeError):
+            try:
                 title = load_workflow_text(
                     path.read_text(encoding="utf-8"), source=path
                 ).definition.name
+            except (RelayError, OSError, UnicodeError):
+                title = path.stem
             records.append({"key": key, "name": title})
             if len(records) >= API_MAX_PAGE:
                 return records
