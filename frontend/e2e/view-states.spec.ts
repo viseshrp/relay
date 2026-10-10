@@ -141,6 +141,34 @@ for (const status of [503, 403])
     }
   });
 
+test("Runs keeps saved history visible when its workflow inventory fails", async ({
+  page,
+}) => {
+  const fixture = await seed(page);
+  await page.route(
+    (url) => url.pathname === "/api/workflows",
+    (route) =>
+      route.fulfill({
+        status: 503,
+        json: {
+          code: "persistence_error",
+          message: "The workflow inventory could not be read.",
+          context: {},
+        },
+      }),
+  );
+  try {
+    await page.goto(href(fixture, "runs"));
+    await expect(page.getByRole("link", { name: /#1/ }).first()).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(
+      "The workflow inventory could not be read.",
+    );
+    await expect(page.locator(".view-skeleton")).toHaveCount(0);
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});
+
 test("empty collections use copy appropriate to each view", async ({
   page,
 }) => {
