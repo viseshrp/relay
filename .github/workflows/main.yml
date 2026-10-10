@@ -24,6 +24,7 @@ env:
 
 jobs:
   quality:
+    if: inputs.refresh_visual_baselines != true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -55,6 +56,7 @@ jobs:
         run: make check
 
   tests:
+    if: inputs.refresh_visual_baselines != true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -157,7 +159,7 @@ jobs:
         run: |
           npm --prefix frontend run build
           cd frontend
-          npx playwright test --config playwright.visual.config.ts --update-snapshots --grep '^visual '
+          npx playwright test --config playwright.visual.config.ts --update-snapshots --grep 'visual .* at'
 
       - name: Retain generated Linux visual baselines
         if: inputs.refresh_visual_baselines == true
