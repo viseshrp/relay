@@ -2112,7 +2112,7 @@ summary:focus-visible,
   }
   .app-header .project-picker {
     flex: 1;
-    min-width: 0;
+    min-width: 128px;
     max-width: 100%;
   }
   .app-header .project-context .help-field {

@@ -149,6 +149,7 @@ for (const width of [320, 390, 760, 1440])
 test("long dropdown names stay within the screen and selected labels stay compact", async ({
   page,
 }, info) => {
+  await page.route("**/*.woff2", (route) => route.abort());
   await page.route("**/api/runs?*status=succeeded*", (route) =>
     route.fulfill({ json: { runs: [], next: null } }),
   );
@@ -172,6 +173,11 @@ test("long dropdown names stay within the screen and selected labels stay compac
   for (const width of [320, 760, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/?view=workflows&workflow=long-control.yaml");
+    // Wider fallback metrics must not squeeze the adjacent project picker.
+    await page.addStyleTag({
+      content:
+        ".app-header .project-context > button { font-family: monospace; }",
+    });
     const welcome = page.getByRole("region", {
       name: "Welcome to Relay",
       exact: true,
