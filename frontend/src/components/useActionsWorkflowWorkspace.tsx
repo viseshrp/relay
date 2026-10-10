@@ -47,6 +47,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const { requestProject, onWorkflowLoaded, onNavigationReady } = props;
   const [loadRevision, setLoadRevision] = useState(0);
   const [inventory, setInventory] = useState<WorkflowEntry[]>([]);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [key, setKey] = useState(props.initialWorkflow || "");
   const {
     text,
@@ -161,6 +162,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       );
       if (signal?.aborted) return;
       setInventory(result.workflows);
+      setInventoryLoaded(true);
       if (!key && result.workflows.length)
         setKey(
           (
@@ -586,6 +588,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   return {
     fallback: null as null,
     loadedDocument,
+    inventoryLoaded,
     inventory,
     setLoadRevision,
     key,

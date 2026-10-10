@@ -68,7 +68,10 @@ export function ActionsWorkflowWorkspaceView({
     setJobId,
     setDrawer,
   } = state;
-  if ((!state.loadedDocument || !manifest) && !error)
+  if (
+    (!state.inventoryLoaded || !manifest || (key && !state.loadedDocument)) &&
+    !error
+  )
     return <ViewSkeleton view="workflows" header={false} />;
   return (
     <Box className="actions-layout">
