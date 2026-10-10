@@ -156,7 +156,7 @@ test("workflow history filters persist in the URL and Back restores run and job 
   await expect(
     page.getByRole("heading", { name: "Audit A", exact: true }),
   ).toBeVisible();
-  await page.getByRole("link", { name: /^Audit.a #/i }).click();
+  await page.getByRole("link", { name: /Audit.a.*#/i }).click();
   await expect(page).toHaveURL(new RegExp(`run=${id}`));
   await page
     .getByRole("navigation", { name: "Jobs", exact: true })

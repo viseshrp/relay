@@ -132,7 +132,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @owner_required
     @require_POST
     def reset(request: HttpRequest) -> JsonResponse:
-        crlf = json_body(request).get("line_endings") == "crlf"
+        crlf = bool(request.body) and json_body(request).get("line_endings") == "crlf"
         from relay.execution.cancellation import request_cancellation
         from relay.web.models import WorkflowControl
         from tests.ui_fixtures import clear_ui_fixtures

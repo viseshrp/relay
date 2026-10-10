@@ -182,7 +182,7 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
         .getByRole("button", { name: "Run history", exact: true })
         .click();
       const historyRun = page.getByRole("link", {
-        name: new RegExp(`^${key} #`),
+        name: new RegExp(`${key}.*#`),
       });
       await expect(historyRun).toContainText("Waiting for you");
       await historyRun.click();

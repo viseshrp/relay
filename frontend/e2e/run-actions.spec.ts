@@ -346,7 +346,7 @@ test("switching runs while repeat options load drops the previous request", asyn
     await page
       .getByRole("link", { name: "All workflows", exact: true })
       .click();
-    await page.getByRole("link", { name: /^other-actions #/ }).click();
+    await page.getByRole("link", { name: /other-actions.*#/ }).click();
     await expect(page).toHaveURL(new RegExp(`run=${other}`));
   } finally {
     release?.();
