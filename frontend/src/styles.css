@@ -2269,3 +2269,17 @@ summary:focus-visible,
 .dashboard-project-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
 }
+
+.run-heading-row h1 .run-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.run-heading-row h1 > .status-icon,
+.run-heading-row h1 > svg,
+.run-number {
+  flex-shrink: 0;
+}

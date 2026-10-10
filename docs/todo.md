@@ -1384,7 +1384,9 @@ and `frontend/src/styles.css` (row 3), `ActionsWorkflowWorkspace.tsx`
 (row 9), `relay/workflows/actions/language.py` and `relay/web/models.py`
 (row 12).
 
-- [ ] **BR-01. Clamp the run title** (rows 1 and 12).
+- [x] **BR-01. Clamp the run title** (rows 1 and 12).
+  `title-clamp.spec.ts` proves the title stays within two lines and its run
+  number stays visible at 320, 375, and 1440 px; the dialog shows all text.
 - [x] **BR-02. Make the run header fit 320 px** (row 2).
 - [x] **BR-03. Give the app header a phone layout** (row 3).
 - [x] **BR-04. Show steps inside jobs, as GitHub does** (rows 4 and 5).

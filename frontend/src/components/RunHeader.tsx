@@ -48,14 +48,15 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
           component="h1"
           variant="h5"
           id="run-title"
-          className="run-title"
           title={detail.title}
           sx={{ flex: 1 }}
         >
           <StatusIcon status={detail.status} size={26} />{" "}
-          {detail.title ||
-            stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}{" "}
-          <Box component="span" color="text.secondary">
+          <span className="run-title">
+            {detail.title ||
+              stageLabel(detail.workflow_key.replace(/\.(yaml|yml)$/, ""))}
+          </span>
+          <Box component="span" className="run-number" color="text.secondary">
             #{detail.number}
           </Box>
         </Typography>

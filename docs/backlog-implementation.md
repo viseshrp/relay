@@ -4,8 +4,7 @@ This index maps the findings in the owner's backlog to the current
 Actions workflow format and focused regression coverage. Current workflows
 use jobs, ordered steps, scripts, reusable workflows and local triggers.
 Historical v1 snapshots retain their execution and monitoring contracts.
-The [working backlog](todo.md) records verification status. BR-01, BR-10,
-DE-04, DT-02, DT-11, DT-12, FE-08, QA-11, and QA-12 are reopened after
+The [working backlog](todo.md) records verification status. BR-10, DE-04, DT-02, DT-11, DT-12, FE-08, QA-11, and QA-12 are reopened after
 independent verification; the coverage below does not yet prove those items.
 
 | Findings | Implemented behavior | Focused coverage |
@@ -46,7 +45,7 @@ independent verification; the coverage below does not yet prove those items.
 | QA-08, DE-06 | Escape ends welcome, tours start explicitly, successful setup dismisses the banner, reduced motion and reserved loading space | accessibility, onboarding, visual-regression browser specs |
 | QA-09, BR-10 | Shared plural rules, consistent home copy and queued durations | dashboard, run-presentation, visual-regression browser specs |
 | QA-11, QA-12 | Reserved skeleton geometry, delayed-response CLS checks and reviewed visual baselines | visual-regression browser spec |
-| BR-01, BR-07 | Bounded titles/names, full-title dialog, exact text titles and copyable full paths | control-layout, visual-regression browser specs; schema bound tests |
+| BR-01, BR-07 | Bounded titles/names, full-title dialog, exact text titles and copyable full paths | title-clamp, control-layout, visual-regression browser specs; schema bound tests |
 | BR-04 | Jobs-only sidebar/counts, expandable steps with their own output and exit status | actions-layout and visual-regression browser specs |
 | BR-11 | Test-only normal/worst-case toggle and isolated stress data | visual-regression browser spec; tests/ui_fixtures.py |
 | DE-01, DE-03, DE-04, DE-05, FE-03 | Press feedback, tabular figures, bounded type scale, pointer-aware hover/tooltips and semantic palette/spacing tokens | frontend lint, accessibility and visual-regression browser specs |
