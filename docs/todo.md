@@ -1140,7 +1140,10 @@ Evidence comes from your instance unless it says "isolated".
   - **Done when:** A tab walk shows a visible indicator on every stop and
     no indicator on programmatic heading focus.
 
-- [ ] **DT-11. Small and low-contrast text.**
+- [x] **DT-11. Small and low-contrast text.**
+  Verified by `visual-regression.spec.ts` on all seven normal and worst-case
+  screens: axe contrast and target-size checks pass, and visible history text
+  is at least 12 px with weights 400, 500, or 600.
   - **Evidence:** "All jobs" is `#67738b` on `#f4f6fb`, 4.41:1. The React
     Flow attribution is 2.79:1 and a 52×12 px target. The paused run page
     has 69 text nodes at 11 px; field labels are 10.5 px.
@@ -1149,7 +1152,9 @@ Evidence comes from your instance unless it says "isolated".
     attribution after checking React Flow's attribution policy.
   - **Done when:** axe `color-contrast` and `target-size` pass everywhere.
 
-- [ ] **DT-12. Fix the remaining axe violations.**
+- [x] **DT-12. Fix the remaining axe violations.**
+  Verified by `visual-regression.spec.ts`: every normal and worst-case screen
+  passes serious/critical axe rules, including WCAG 2.1 A and 2.2 AA.
   - **Evidence:** One critical rule (`aria-allowed-attr` on
     `.project-context` during the tour). Serious: the CodeMirror editor has
     no accessible name (`aria-input-field-name`); MUI `<ul>` elements contain
@@ -1461,7 +1466,10 @@ Interaction feel and visual craft, measured in the browser and read from
 - [x] **DE-01. Add press feedback and tighten hover transitions** (rows 1–3).
 - [x] **DE-02. Make Run workflow open instantly** (row 4; see DT-05).
 - [x] **DE-03. Use tabular figures for every live number** (row 5).
-- [ ] **DE-04. Reduce the type scale and weights** (row 7) through
+- [x] **DE-04. Reduce the type scale and weights** (row 7) through
+  Verified by the history typography assertions in `visual-regression.spec.ts`:
+  visible text uses at least 12 px and weights 400, 500, or 600. Floating filter
+  labels and the Relay home link now follow that scale.
   `theme.ts` tokens.
 - [x] **DE-05. Gate hover on pointer type and make tooltips instant after
   the first** (rows 8 and 9).
@@ -1548,7 +1556,10 @@ Production engineering benchmarks applied to `frontend/src`.
   - **Done when:** Switching between Workflows and Runs keeps the same
     sidebar and selection.
 
-- [ ] **FE-08. Gate accessibility in CI.**
+- [x] **FE-08. Gate accessibility in CI.**
+  Verified by `visual-regression.spec.ts` and the automatic `a11y-test.ts`
+  fixture. Explicit audits cover every screen in loops, including stress data,
+  and settle finite animations before testing final geometry.
   - **Evidence:** Today's sweep found 1 critical and 5 serious axe rules
     that the existing browser tests did not catch.
   - **Fix:** Add `@axe-core/playwright` (dev dependency, owner approval)

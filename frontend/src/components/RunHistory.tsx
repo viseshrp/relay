@@ -184,7 +184,6 @@ export function RunHistory({
                     }
                   }}
                   className="run-history-row"
-                  aria-label={`${run.title || stageLabel(run.workflow_key)} #${run.number} · ${statusLabel(run.status)}`}
                 >
                   <StatusIcon status={run.status} size={22} />
                   <Box className="history-run-title">

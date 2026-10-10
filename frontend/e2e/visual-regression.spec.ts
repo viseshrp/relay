@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./a11y-test";
+import { assertAccessible, test, expect, type Page } from "./a11y-test";
 import { post } from "./setup-helpers";
 
 type Fixture = {
@@ -134,6 +134,44 @@ for (const width of [375, 768, 1440])
       const fixture = await seed(page, false);
       await open(page, fixture, screen);
       await contained(page);
+      await assertAccessible(page);
+      if (screen === "runs") {
+        const typography = await page
+          .locator(".run-history")
+          .evaluate((root) => {
+            const walker = document.createTreeWalker(
+              root,
+              NodeFilter.SHOW_TEXT,
+            );
+            const invalid: string[] = [];
+            for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+              const element = text.parentElement;
+              if (
+                !text.textContent?.trim() ||
+                !element?.checkVisibility({
+                  checkOpacity: true,
+                  checkVisibilityCSS: true,
+                })
+              )
+                continue;
+              const style = getComputedStyle(element);
+              const scale =
+                style.transform === "none"
+                  ? 1
+                  : new DOMMatrixReadOnly(style.transform).a;
+              if (
+                Number.parseFloat(style.fontSize) * scale < 12 ||
+                !["400", "500", "600"].includes(style.fontWeight)
+              )
+                invalid.push(
+                  `${text.textContent}: ${style.fontSize} / ${scale} / ${style.fontWeight}`,
+                );
+            }
+            return invalid;
+          });
+        expect(typography).toEqual([]);
+      }
+
       await expect(page).toHaveScreenshot(`${screen}-${width}.png`, {
         animations: "disabled",
         fullPage: false,
@@ -141,6 +179,7 @@ for (const width of [375, 768, 1440])
           page.locator(".path-display"),
           page.locator(".run-summary-metadata code"),
           page.locator(".history-run-title code"),
+          page.locator(".history-run-time"),
         ],
         maxDiffPixelRatio: 0.01,
       });
@@ -155,6 +194,43 @@ for (const width of [320, 768, 1024, 1440])
     for (const screen of screens) {
       await open(page, fixture, screen);
       await contained(page);
+      await assertAccessible(page);
+      if (screen === "runs") {
+        const typography = await page
+          .locator(".run-history")
+          .evaluate((root) => {
+            const walker = document.createTreeWalker(
+              root,
+              NodeFilter.SHOW_TEXT,
+            );
+            const invalid: string[] = [];
+            for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+              const element = text.parentElement;
+              if (
+                !text.textContent?.trim() ||
+                !element?.checkVisibility({
+                  checkOpacity: true,
+                  checkVisibilityCSS: true,
+                })
+              )
+                continue;
+              const style = getComputedStyle(element);
+              const scale =
+                style.transform === "none"
+                  ? 1
+                  : new DOMMatrixReadOnly(style.transform).a;
+              if (
+                Number.parseFloat(style.fontSize) * scale < 12 ||
+                !["400", "500", "600"].includes(style.fontWeight)
+              )
+                invalid.push(
+                  `${text.textContent}: ${style.fontSize} / ${scale} / ${style.fontWeight}`,
+                );
+            }
+            return invalid;
+          });
+        expect(typography).toEqual([]);
+      }
     }
     await open(page, fixture, "summary");
     await expect(
@@ -167,21 +243,45 @@ for (const width of [320, 768, 1024, 1440])
 for (const width of [375, 1440])
   test(`loading reserves space and CLS stays below 0.1 at ${width}`, async ({
     page,
-  }) => {
+  }, info) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width, height: 960 });
-    const fixture = await seed(page, false);
+    const fixture = await seed(page, true);
+    const measurements: Array<{
+      screen: Screen;
+      cls: number;
+      shifts: object[];
+    }> = [];
     await page.addInitScript(() => {
-      (window as typeof window & { testCLS: number }).testCLS = 0;
+      (
+        window as typeof window & { testCLS: number; testShifts: object[] }
+      ).testCLS = 0;
+      (window as typeof window & { testShifts: object[] }).testShifts = [];
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
           const shift = entry as PerformanceEntry & {
             value: number;
             hadRecentInput: boolean;
+            sources: Array<{
+              node?: Element;
+              previousRect: DOMRectReadOnly;
+              currentRect: DOMRectReadOnly;
+            }>;
           };
-          if (!shift.hadRecentInput)
+          if (!shift.hadRecentInput) {
+            (
+              window as typeof window & { testShifts: object[] }
+            ).testShifts.push({
+              value: shift.value,
+              sources: shift.sources.map((source) => ({
+                node: source.node?.outerHTML.slice(0, 160),
+                from: source.previousRect.toJSON(),
+                to: source.currentRect.toJSON(),
+              })),
+            });
             (window as typeof window & { testCLS: number }).testCLS +=
               shift.value;
+          }
         }
       }).observe({ type: "layout-shift", buffered: true });
     });
@@ -192,27 +292,47 @@ for (const width of [375, 1440])
         return route.continue();
       const response = await route.fetch();
       const body = await response.body();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
       await route.fulfill({
         status: response.status(),
         headers: response.headers(),
         body,
       });
     });
-    for (const screen of screens) {
-      await open(page, fixture, screen);
-      await expect
-        .poll(() => page.locator('[aria-busy="true"]').count())
-        .toBe(0);
-      await page.evaluate(
-        () =>
-          new Promise((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(resolve)),
-          ),
-      );
-      const cls = await page.evaluate(
-        () => (window as typeof window & { testCLS: number }).testCLS,
-      );
-      expect(cls, `${screen} at ${width}`).toBeLessThan(0.1);
+    try {
+      for (const screen of screens) {
+        await open(page, fixture, screen);
+        await expect
+          .poll(() => page.locator('[aria-busy="true"]').count())
+          .toBe(0);
+        await page.evaluate(
+          () =>
+            new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            ),
+        );
+        const cls = await page.evaluate(
+          () => (window as typeof window & { testCLS: number }).testCLS,
+        );
+        const shifts = await page.evaluate(
+          () => (window as typeof window & { testShifts: object[] }).testShifts,
+        );
+        measurements.push({ screen, cls, shifts });
+        expect(
+          cls,
+          `${screen} at ${width}: ${JSON.stringify(shifts)}`,
+        ).toBeLessThan(0.1);
+      }
+    } finally {
+      await info.attach(`layout-shifts-${width}`, {
+        body: JSON.stringify(measurements, null, 2),
+        contentType: "application/json",
+      });
+      await page.unrouteAll({ behavior: "ignoreErrors" });
     }
   });

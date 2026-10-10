@@ -175,7 +175,7 @@ body {
 }
 .diff-file-meta {
   justify-content: space-between;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--relay-text-secondary);
 }
 .diff-file-panel {
@@ -220,7 +220,7 @@ body {
   background: var(--relay-surface-muted);
   color: var(--relay-text-secondary);
   border-bottom: 1px solid var(--relay-border-subtle);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 .diff-column-labels span {
   padding: 7px var(--relay-space-3);
@@ -291,7 +291,7 @@ p.diff-empty {
 
 .relay-home-link.MuiButton-root {
   font-size: 1.5rem;
-  font-weight: 760;
+  font-weight: 600;
   padding: var(--relay-space-1) 0;
   min-width: auto;
 }
@@ -1218,7 +1218,7 @@ p.diff-empty {
 }
 .help-field-heading > label {
   font-size: 0.875rem;
-  font-weight: 550;
+  font-weight: 500;
   line-height: 1.5;
 }
 .help-field > .MuiFormControl-root {
@@ -2282,4 +2282,18 @@ summary:focus-visible,
 .run-heading-row h1 > svg,
 .run-number {
   flex-shrink: 0;
+}
+
+.react-flow__attribution a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 2px 4px;
+}
+.react-flow__controls {
+  margin-bottom: 40px !important;
+}
+.history-filters .MuiInputLabel-root {
+  font-size: 16px;
 }

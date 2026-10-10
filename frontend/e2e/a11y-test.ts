@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 export * from "@playwright/test";
@@ -12,40 +12,42 @@ export const test = base.extend<{ accessibility: void }>({
         info.status !== "passed"
       )
         return;
-      // Audit final colors rather than an intermediate enable/disable transition.
-      await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.evaluate(async () => {
-        await Promise.all(
-          document
-            .getAnimations()
-            .filter(
-              (animation) =>
-                animation.effect?.getComputedTiming().iterations !== Infinity,
-            )
-            .map((animation) => animation.finished.catch(() => undefined)),
-        );
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        );
-      });
-      const scan = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .analyze();
-      expect(
-        scan.violations
-          .filter(
-            (item) => item.impact === "critical" || item.impact === "serious",
-          )
-          .map((item) => ({
-            id: item.id,
-            impact: item.impact,
-            nodes: item.nodes.map((node) => ({
-              target: node.target,
-              summary: node.failureSummary,
-            })),
-          })),
-      ).toEqual([]);
+      await assertAccessible(page);
     },
     { auto: true },
   ],
 });
+
+export async function assertAccessible(page: Page): Promise<void> {
+  // Audit final colors rather than an intermediate enable/disable transition.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity,
+        )
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
+  const scan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(
+    scan.violations
+      .filter((item) => item.impact === "critical" || item.impact === "serious")
+      .map((item) => ({
+        id: item.id,
+        impact: item.impact,
+        nodes: item.nodes.map((node) => ({
+          target: node.target,
+          summary: node.failureSummary,
+        })),
+      })),
+  ).toEqual([]);
+}
