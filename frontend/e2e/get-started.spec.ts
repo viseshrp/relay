@@ -177,7 +177,12 @@ test("the full AI coding workflow is preselected and runs from one task", async 
     ).ok(),
   ).toBeTruthy();
   await page.goto("/?view=workflows");
-  await page.getByRole("button", { name: "Get started", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Account menu for owner", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Get started", exact: true })
+    .click();
   const setup = page.getByRole("dialog", { name: "Get started", exact: true });
   await expect(
     setup.getByRole("article", { name: "Claude Code", exact: true }),
@@ -275,7 +280,12 @@ test("the full starter requires Claude and the blank option remains available", 
   ).toBeTruthy();
   expect((await post(page, "/__test__/starter-project")).ok()).toBeTruthy();
   await page.goto("/?view=workflows");
-  await page.getByRole("button", { name: "Get started", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Account menu for owner", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Get started", exact: true })
+    .click();
   const setup = page.getByRole("dialog", { name: "Get started", exact: true });
   await setup
     .getByRole("button", { name: "Start from a template", exact: true })
