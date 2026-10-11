@@ -113,7 +113,13 @@ async def _stream(run_id: str, after: int) -> AsyncIterator[bytes]:
                     attempt__node_run__run_id=run_id, state__in=PENDING_RECOVERY_STATES
                 ).aexists()
             )
-            if status is None or (status in _TERMINAL and not scheduled):
+            if status is None:
+                return
+            if status in _TERMINAL and not scheduled:
+                # Completion can commit after the event page was read. Drain
+                # that committed tail before closing the stream.
+                if await RunEvent.objects.filter(run_id=run_id, id__gt=cursor).aexists():
+                    continue
                 return
             await asyncio.sleep(SSE_POLL_INTERVAL_SECONDS)
     except asyncio.CancelledError:
