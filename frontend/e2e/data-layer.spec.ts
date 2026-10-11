@@ -1,4 +1,4 @@
-import { expect, test } from "./a11y-test";
+import { expect, test, type Response } from "./a11y-test";
 import { sharedRead, invalidateReads } from "../src/read-cache";
 import { post } from "./setup-helpers";
 
@@ -80,28 +80,50 @@ test("unchanged visible Home backs off to thirty seconds and refreshes on focus"
     password: "Relay-Test-Passphrase-2026!",
   });
   await post(page, "/__test__/reset");
-  await page.clock.install();
+  // Network completion must not consume any part of a polling deadline.
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-01-02T00:00:00Z"));
   let reads = 0;
   page.on("request", (request) => {
     if (request.url().includes("/api/dashboard?limit=10")) reads++;
   });
-  await page.goto("/?view=home");
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  await expect(refresh).toBeEnabled();
+  const nextDashboard = () =>
+    page.waitForResponse((response) =>
+      response.url().includes("/api/dashboard?limit=10"),
+    );
+  async function settleDashboard(pending: Promise<Response>): Promise<void> {
+    const response = await pending;
+    expect(response.ok()).toBeTruthy();
+    await response.finished();
+    await expect(page.locator(".dashboard .view-skeleton")).toHaveCount(0);
+    await expect(refresh).toBeEnabled();
+    // A settled shared read is evicted on the next task, without elapsed time.
+    await page.clock.runFor(0);
+  }
+  const initial = nextDashboard();
+  await page.goto("/?view=home");
+  await settleDashboard(initial);
   for (let index = 0; index < 12; index++) {
     const before = reads;
+    const next = nextDashboard();
     await page.clock.runFor(5000);
-    await expect.poll(() => reads).toBe(before + 1);
-    await expect(refresh).toBeEnabled();
+    await settleDashboard(next);
+    expect(reads).toBe(before + 1);
   }
   const backedOff = reads;
+  const next = nextDashboard();
   await page.clock.runFor(29999);
+  expect(reads).toBe(backedOff);
   await page.clock.runFor(1);
-  expect(reads - backedOff).toBeLessThanOrEqual(1);
-  await expect(refresh).toBeEnabled();
+  await settleDashboard(next);
+  expect(reads).toBe(backedOff + 1);
   const beforeFocus = reads;
+  const focused = nextDashboard();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect.poll(() => reads).toBe(beforeFocus + 1);
+  await settleDashboard(focused);
+  expect(reads).toBe(beforeFocus + 1);
+  await page.clock.resume();
 });
 
 test("cached Run workflow opens within 150 ms while launch checks are pending", async ({
