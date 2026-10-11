@@ -504,8 +504,11 @@ Steps that finish during initial loading update progress before live updates
 start. The browser confirms the current run state before treating a stream as
 finished, so a recent retry can keep receiving updates.
 If the stream ends before its final events arrive, the browser reloads pending
-requests, job state, saved files, and missed history. An older pending-request
-response cannot restore an answered request after that reconciliation.
+requests, job state, saved files, and missed history. Older responses cannot
+restore answered or canceled requests, replace completed job state, or remove
+saved files after that reconciliation. Live pause, resume, settings, retry,
+recovery, and saved-file updates also invalidate reads started before those
+events, so an earlier refresh cannot undo the new state.
 
 The graph uses captured dependencies and control targets, so editing today's
 workflow cannot redraw a past run's connections. Connected rows show stage

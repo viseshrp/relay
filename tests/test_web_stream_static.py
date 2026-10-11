@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 import json
 from typing import NoReturn
 
@@ -18,7 +19,7 @@ import pytest
 
 from relay.constants import DATABASE_INTEGER_MAX, SSE_MAX_FRAME_BYTES
 from relay.errors import ConfigError, ProjectDiscoveryError
-from relay.web.models import RunEvent
+from relay.web.models import AutomaticRetry, RunEvent
 from relay.web.repositories import DjangoExecutionStore
 from relay.web.views import (
     api_errors,
@@ -27,7 +28,14 @@ from relay.web.views import (
     current_project,
     log_context_value,
 )
-from tests.support import InlineEngine, RelayProject
+from tests.support import (
+    FakeAgents,
+    InlineEngine,
+    RegistryNetwork,
+    RelayProject,
+    answer_wait,
+    run_status,
+)
 from tests.test_usage_retries import limited_run
 
 
@@ -118,6 +126,188 @@ def test_terminal_events_committed_after_an_empty_read_are_replayed(
     assert status == 200
     assert len(committed) == 3
     assert frame_ids(chunks) == committed
+
+
+@pytest.mark.parametrize("terminal", ["succeeded", "failed", "canceled"])
+@pytest.mark.parametrize("page_rows", [0, 2, 3], ids=["empty", "partial", "full"])
+def test_completion_between_event_and_status_reads_drains_every_batch(
+    project: RelayProject,
+    engine: InlineEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal: str,
+    page_rows: int,
+) -> None:
+    command = "relay-test-missing-command" if terminal == "failed" else "status"
+    project.write_workflow(
+        "stream-race",
+        "version: 1\nname: Stream race\nnodes:\n"
+        "  review: {type: human_wait, prompt: Continue?}\n"
+        f"  finish: {{type: command, needs: [review], run: [git, {command}]}}\n",
+    )
+    run_id = engine.launch(project, "stream-race")
+    engine.drain(run_id)
+    assert run_status(run_id) == "paused_wait"
+    cursor = RunEvent.objects.filter(run_id=run_id).latest("id").pk
+    RunEvent.objects.bulk_create(
+        [
+            RunEvent(run_id=run_id, type="command.stdout", source="command", payload={})
+            for _ in range(page_rows)
+        ]
+    )
+    # A small configured batch exercises all page boundaries with real rows.
+    monkeypatch.setattr("relay.web.views.stream.SSE_MAX_BATCH", 3)
+    original_iterator = QuerySet.aiterator
+    completed = False
+
+    def complete() -> None:
+        if terminal == "canceled":
+            engine.store.request_run_cancellation(run_id, "cancel-at-read-boundary")
+            engine.store.resolve_human_wait_controls()
+        else:
+            assert answer_wait(engine, run_id) == "accepted"
+        assert run_status(run_id) == terminal
+
+    async def finish_after_page(
+        query: QuerySet[RunEvent], chunk_size: int = 2000
+    ) -> AsyncIterator[RunEvent]:
+        nonlocal completed
+        async for row in original_iterator(query, chunk_size=chunk_size):
+            yield row
+        if query.model is RunEvent and not completed:
+            completed = True
+            await sync_to_async(complete)()
+
+    monkeypatch.setattr(QuerySet, "aiterator", finish_after_page)
+
+    status, chunks, _body = stream(f"/api/runs/{run_id}/stream?since={cursor}")
+
+    stored = list(
+        RunEvent.objects.filter(run_id=run_id, id__gt=cursor)
+        .order_by("id")
+        .values_list("id", flat=True)
+    )
+    assert completed
+    assert status == 200
+    assert len(stored) > 3
+    assert frame_ids(chunks) == stored
+    assert any(f'"type":"run.{terminal}"' in chunk for chunk in chunks)
+
+
+def test_a_stream_failure_reconnects_after_the_last_delivered_page(
+    finished_run: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = list(
+        RunEvent.objects.filter(run_id=finished_run).order_by("id").values_list("id", flat=True)
+    )
+    original_iterator = QuerySet.aiterator
+    reads = 0
+
+    async def fail_second_page(
+        query: QuerySet[RunEvent], chunk_size: int = 2000
+    ) -> AsyncIterator[RunEvent]:
+        nonlocal reads
+        if query.model is RunEvent:
+            reads += 1
+            if reads == 2:
+                message = "private database diagnostic"
+                raise OSError(message)
+        async for row in original_iterator(query, chunk_size=chunk_size):
+            yield row
+
+    with monkeypatch.context() as patch:
+        patch.setattr("relay.web.views.stream.SSE_MAX_BATCH", 1)
+        patch.setattr(QuerySet, "aiterator", fail_second_page)
+        status, chunks, _body = stream(f"/api/runs/{finished_run}/stream")
+
+    assert status == 200
+    assert frame_ids(chunks) == [stored[0], stored[0]]
+    error = json.loads(chunks[-1].split("data: ", 1)[1])
+    assert error["payload"]["code"] == "stream_error"
+    assert "private database diagnostic" not in "".join(chunks)
+
+    status, resumed, _body = stream(
+        f"/api/runs/{finished_run}/stream", **{"Last-Event-ID": str(stored[0])}
+    )
+    assert status == 200
+    assert frame_ids(chunks[:-1] + resumed) == stored
+
+
+@pytest.mark.parametrize("state", ["scheduled", "preparing"])
+def test_an_automatic_recovery_keeps_a_failed_stream_open_until_canceled(
+    project: RelayProject,
+    engine: InlineEngine,
+    fake_agents: FakeAgents,
+    registry_network: RegistryNetwork,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    from relay.execution.nodes import node_executors
+    from tests.test_automatic_recovery import ReportDriver, launch_report_run
+
+    del registry_network
+    fake_agents.install("codex", mode="configuration")
+    engine.executors = node_executors(agent_driver=ReportDriver())
+    run_id = launch_report_run(project, engine)
+    retry = AutomaticRetry.objects.get(attempt__node_run__run_id=run_id)
+    AutomaticRetry.objects.filter(pk=retry.pk).update(state=state)
+    polls = 0
+
+    async def cancel_at_poll(_interval: float) -> None:
+        nonlocal polls
+        polls += 1
+        await sync_to_async(engine.store.request_run_cancellation)(run_id, "stop-recovery")
+
+    monkeypatch.setattr("relay.web.views.stream.asyncio.sleep", cancel_at_poll)
+
+    status, chunks, _body = stream(f"/api/runs/{run_id}/stream")
+
+    assert status == 200
+    assert polls == 1
+    assert any('"type":"run.recovery_canceled"' in chunk for chunk in chunks)
+    retry.refresh_from_db()
+    assert retry.state == "canceled"
+
+
+@override_settings(RELAY_LOGIN_REQUIRED=False)
+def test_disconnecting_during_a_live_poll_propagates_cancellation(
+    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project.write_workflow(
+        "disconnect",
+        "version: 1\nname: Disconnect\nnodes:\n  review: {type: human_wait, prompt: Continue?}\n",
+    )
+    run_id = engine.launch(project, "disconnect")
+    engine.drain(run_id)
+    cursor = RunEvent.objects.filter(run_id=run_id).latest("id").pk
+
+    async def disconnect() -> None:
+        polling = asyncio.Event()
+
+        async def hold_poll(_interval: float) -> None:
+            polling.set()
+            await asyncio.Future()
+
+        monkeypatch.setattr("relay.web.views.stream.asyncio.sleep", hold_poll)
+        await sync_to_async(connections.close_all)()
+        response = await AsyncClient().get(f"/api/runs/{run_id}/stream?since={cursor}")
+        assert response.status_code == 200
+        iterator = response.streaming_content
+        pending = asyncio.create_task(anext(iterator))
+        try:
+            await asyncio.wait_for(polling.wait(), timeout=5)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        finally:
+            pending.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending
+            await iterator.aclose()
+            await sync_to_async(connections.close_all)()
+
+    asyncio.run(disconnect())
+    assert run_status(run_id) == "paused_wait"
+    assert RunEvent.objects.filter(run_id=run_id).latest("id").pk == cursor
 
 
 @override_settings(RELAY_LOGIN_REQUIRED=False)
