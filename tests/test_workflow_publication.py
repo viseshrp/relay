@@ -19,6 +19,43 @@ def sources(project: RelayProject) -> tuple[RelayProject, Path]:
     return project, project.write(".relay/workflows/new.yaml", SOURCE.replace("Recovery", "New"))
 
 
+def test_selected_untracked_workflow_and_prompt_can_be_reviewed_and_committed(
+    project: RelayProject,
+) -> None:
+    workflow = project.relay_root / "workflows/new.yaml"
+    text = (
+        "jobs:\n  review:\n    steps:\n      - uses: relay/agent@v1\n"
+        "        with:\n          prompt-files: prompts/review.md\n"
+    )
+    project.write(".relay/workflows/new.yaml", text)
+    prompt = project.write(".relay/prompts/review.md", "Review the code.\n")
+    report = project.write("REVIEW.md", "Owner review notes\n")
+    unused = project.write(".relay/prompts/unused.md", "Owner instructions\n")
+    preview = publication.preview_workflow_commit(project.relay_root, "new.yaml")
+    expected = {
+        path.relative_to(project.repository).as_posix(): path.read_bytes()
+        for path in (workflow, prompt)
+    }
+    assert {item["path"]: item["text"].encode() for item in preview["files"]} == expected
+    publication.commit_workflow_sources(
+        project.relay_root,
+        "new.yaml",
+        preview["head"],
+        {item["path"]: item["hash"] for item in preview["files"]},
+    )
+    for name, raw in expected.items():
+        assert run_git_bytes(project.repository, ["show", f"HEAD:{name}"]).stdout == raw
+    assert set(
+        git(
+            project.repository, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"
+        ).splitlines()
+    ) == set(expected)
+    assert git(project.repository, "diff", "--cached", "--name-only") == ""
+    assert report.read_text() == "Owner review notes\n"
+    assert unused.read_text() == "Owner instructions\n"
+    assert publication.preview_workflow_commit(project.relay_root, "new.yaml")["files"] == []
+
+
 def test_preview_skips_invalid_unrelated_sources_with_a_notice(
     sources: tuple[RelayProject, Path],
 ) -> None:

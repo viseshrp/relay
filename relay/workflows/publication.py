@@ -49,7 +49,7 @@ def preview_workflow_commit(relay_root: Path, workflow_key: str) -> CommitPrevie
     candidates = []
     notices = []
     for change in changes:
-        if change.status != "??" or change.allowed:
+        if change.status != "??" or (change.allowed and change.path not in sources):
             continue
         path = root / change.path
         if path.is_symlink() or not path.is_relative_to(relay_root):
