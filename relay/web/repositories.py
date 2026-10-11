@@ -70,7 +70,7 @@ from relay.execution.dispatch import (
     notify_dispatch,
     release_admission,
 )
-from relay.execution.launch import LaunchRequest
+from relay.execution.launch_request import FrozenLaunchBindings, LaunchRequest
 from relay.execution.locks import decide_admission
 from relay.execution.machine import (
     transition_control,
@@ -2376,6 +2376,12 @@ class DjangoExecutionStore(DjangoAgentStore):
         except DatabaseError:
             message = "Relay could not release the supervisor lease."
             raise PersistenceError(message) from None
+
+    def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
+        """Capture current binding revisions without resolving private secret bytes."""
+        from .binding_snapshots import freeze_bindings
+
+        return freeze_bindings(project_id)
 
     def create_pending_run(
         self,

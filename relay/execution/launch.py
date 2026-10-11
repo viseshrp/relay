@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -24,7 +24,7 @@ from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
-from relay.workflows.defaults import WorkflowDefaults, apply_workflow_defaults
+from relay.workflows.defaults import apply_workflow_defaults
 from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
@@ -32,28 +32,13 @@ from relay.workflows.scope import parse_scope_path
 from relay.workflows.snapshot import SnapshotBundle, build_snapshot
 from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
+from .launch_request import FrozenLaunchBindings, LaunchRequest
 from .preflight import launch_source_files, load_launch_workflow
 from .scheduler import SchedulingStore, dispatch_ready_nodes
 from .state import CleanupPolicy
 
 _HASH_CHUNK_BYTES = 1024 * 1024
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class LaunchRequest:
-    """Owner-selected values accepted by the browser launch surface."""
-
-    workflow_key: str
-    inputs: Mapping[str, object]
-    model: str | None
-    cleanup_policy: str
-    entry_point: str | None
-    owner_agents: Sequence[str]
-    launcher: str
-    source_branch: str | None = None
-    defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
-    event_context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +50,9 @@ class LaunchResult:
 
 class LaunchStore(SchedulingStore, AgentObservationStore, Protocol):
     """Persistence boundary needed by the launch transaction sequence."""
+
+    def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
+        """Capture variables, secret references, and environment approval settings."""
 
     def replace_model_observations(
         self,
@@ -208,14 +196,14 @@ def launch_workflow(
 
     with source_lock(relay_root):
         workflow = load_launch_workflow(relay_root, request.workflow_key)
-        actions_context = {}
+        actions_context: dict[str, object] = {}
         if workflow.root.definition.actions:
-            from relay.web.actions_bindings import freeze_bindings
             from relay.workflows.actions.compiler import bind_routes, validate_commands
             from relay.workflows.actions.language import resolve_inputs as actions_inputs
             from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
 
-            actions_context = freeze_bindings(project_id)
+            bindings = store.freeze_launch_bindings(project_id)
+            actions_context.update(bindings)
             from relay.workflows.schema import ActionsJobNode
 
             node = next(iter(workflow.root.definition.nodes.values()))
@@ -226,7 +214,7 @@ def launch_workflow(
             typed_inputs = actions_inputs(
                 workflow.root.definition.actions,
                 request.inputs,
-                environments=tuple(actions_context["environments"]),
+                environments=tuple(bindings["environments"]),
             )
             source = project_launch_source(relay_root.parent)
             actions_context["relay"] = {
