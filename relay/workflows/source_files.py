@@ -32,7 +32,8 @@ def _require_portable_names(parts: tuple[str, ...]) -> None:
 class WorkflowEditorStore(Protocol):
     """Mutable database state surrounding a Git-owned workflow file."""
 
-    def get_draft(self, project_id: str, workflow_key: str) -> dict[str, object] | None: ...
+    def get_draft(self, project_id: str, workflow_key: str) -> dict[str, object] | None:
+        """Read the durable recovery draft without changing its saved source."""
 
     def save_draft(
         self,
@@ -43,9 +44,11 @@ class WorkflowEditorStore(Protocol):
         validation_state: DraftValidationState,
         *,
         prompts: dict[str, object] | None = None,
-    ) -> dict[str, object]: ...
+    ) -> dict[str, object]:
+        """Persist recovery edits and their base hash without publishing source files."""
 
-    def discard_draft(self, project_id: str, workflow_key: str) -> None: ...
+    def discard_draft(self, project_id: str, workflow_key: str) -> None:
+        """Remove recovery state without modifying the Git-owned workflow."""
 
 
 def _path(relay_root: Path, workflow_key: str) -> Path:
