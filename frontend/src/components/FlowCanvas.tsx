@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
+import { useTheme } from "@mui/material/styles";
 
 import { RunGraphNode } from "./RunGraphNode";
 import { EditorGraphNode } from "./EditorGraphNode";
@@ -120,6 +121,7 @@ export function FlowCanvas({
   onDeleteNodes,
   onContextMenu,
 }: FlowCanvasProps) {
+  const muiTheme = useTheme();
   const container = useRef<HTMLDivElement>(null);
   const lastConnection = useRef(0);
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
@@ -182,6 +184,7 @@ export function FlowCanvas({
       }
     >
       <ReactFlow
+        colorMode={muiTheme.palette.mode}
         nodes={visibleNodes}
         edges={visibleEdges}
         onNodesChange={onNodesChange}

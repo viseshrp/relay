@@ -1,9 +1,11 @@
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { Button, Stack } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { useEffect, useRef, useState } from "react";
+import { createCodeMirrorTheme } from "../theme";
 import { SafeMarkdown } from "./SafeMarkdown";
 
 export function MarkdownEditor({
@@ -17,6 +19,11 @@ export function MarkdownEditor({
   readonly?: boolean;
   onChange: (value: string) => void;
 }) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === "dark";
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
+  const themeCompartment = useRef(new Compartment());
   const parent = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const callback = useRef(onChange);
@@ -33,6 +40,7 @@ export function MarkdownEditor({
         doc: currentValue.current,
         extensions: [
           basicSetup,
+          themeCompartment.current.of(createCodeMirrorTheme(isDarkRef.current)),
           markdown(),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ "aria-label": label }),
@@ -58,6 +66,15 @@ export function MarkdownEditor({
       view.current = null;
     };
   }, [label, readonly, preview]);
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
+    editor.dispatch({
+      effects: themeCompartment.current.reconfigure(
+        createCodeMirrorTheme(isDark),
+      ),
+    });
+  }, [isDark]);
   useEffect(() => {
     const editor = view.current;
     if (!editor || editor.state.doc.toString() === value) return;

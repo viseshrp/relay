@@ -2,11 +2,13 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell as shellMode } from "@codemirror/legacy-modes/mode/shell";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { Box, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { useEffect, useRef } from "react";
+import { createCodeMirrorTheme } from "../theme";
 import type { LanguageManifest } from "../workflow-language";
 
 export function ScriptEditor({
@@ -20,6 +22,11 @@ export function ScriptEditor({
   manifest: LanguageManifest;
   onChange: (value: string) => void;
 }) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === "dark";
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
+  const themeCompartment = useRef(new Compartment());
   const parent = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const currentValue = useRef(value);
@@ -37,6 +44,7 @@ export function ScriptEditor({
         doc: currentValue.current,
         extensions: [
           basicSetup,
+          themeCompartment.current.of(createCodeMirrorTheme(isDarkRef.current)),
           StreamLanguage.define(
             language === "python"
               ? python
@@ -65,6 +73,15 @@ export function ScriptEditor({
       view.current = null;
     };
   }, [language]);
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
+    editor.dispatch({
+      effects: themeCompartment.current.reconfigure(
+        createCodeMirrorTheme(isDark),
+      ),
+    });
+  }, [isDark]);
   useEffect(() => {
     const editor = view.current;
     if (!editor || editor.state.doc.toString() === value) return;

@@ -26,7 +26,10 @@ export type ActionGlyph =
   | "cross"
   | "pause"
   | "skip"
-  | "circle";
+  | "circle"
+  | "sun"
+  | "moon"
+  | "monitor";
 const paths: Record<ActionGlyph, string> = {
   agent: "M8 3h8v4h4v14H4V7h4ZM8 12h.01M16 12h.01M8 17h8M12 3V1",
   command: "m4 5 6 7-6 7M12 19h8",
@@ -56,6 +59,10 @@ const paths: Record<ActionGlyph, string> = {
   pause: "M9 8v8m6-8v8",
   skip: "m5 19 14-14",
   circle: "",
+  sun: "M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41",
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z",
+  monitor:
+    "M4 4h16c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2ZM8 20h8M12 16v4",
 };
 export function ActionIcon({
   name,
@@ -79,6 +86,7 @@ export function ActionIcon({
       focusable="false"
     >
       {name === "clock" && <circle cx="12" cy="12" r="9" />}
+      {name === "sun" && <circle cx="12" cy="12" r="4" />}
       <path d={paths[name]} />
     </svg>
   );

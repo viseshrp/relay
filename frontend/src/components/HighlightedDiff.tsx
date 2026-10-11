@@ -1,5 +1,6 @@
 import { parsePatchFiles, type FileDiffOptions } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
+import { useTheme } from "@mui/material/styles";
 import { useMemo, type ReactNode } from "react";
 
 export default function HighlightedDiff({
@@ -13,6 +14,8 @@ export default function HighlightedDiff({
   wrap: boolean;
   fallback: ReactNode;
 }) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === "dark";
   const fileDiff = useMemo(() => {
     try {
       return parsePatchFiles(patch, undefined, true)[0]?.files[0];
@@ -25,8 +28,12 @@ export default function HighlightedDiff({
     () => ({
       diffStyle: split ? "split" : "unified",
       overflow: wrap ? "wrap" : "scroll",
-      theme: "github-light-high-contrast",
-      unsafeCSS: "[data-no-newline] span { color: #475569; opacity: 1; }",
+      theme: isDark
+        ? "github-dark-high-contrast"
+        : "github-light-high-contrast",
+      unsafeCSS: isDark
+        ? "[data-no-newline] span { color: #94a3b8; opacity: 1; }"
+        : "[data-no-newline] span { color: #475569; opacity: 1; }",
       onPostRender: (node) => {
         for (const code of node.shadowRoot?.querySelectorAll("code") ?? []) {
           code.tabIndex = 0;
@@ -38,7 +45,7 @@ export default function HighlightedDiff({
           );
         }
       },
-      themeType: "light",
+      themeType: isDark ? "dark" : "light",
       preferredHighlighter: "shiki-js",
       disableFileHeader: true,
       hunkSeparators: "metadata",
@@ -46,7 +53,7 @@ export default function HighlightedDiff({
       // Relay's error boundary shows the patch rather than library error details.
       disableErrorHandling: true,
     }),
-    [split, wrap],
+    [split, wrap, isDark],
   );
   return fileDiff ? (
     <FileDiff className="diff-rendered" fileDiff={fileDiff} options={options} />

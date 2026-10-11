@@ -69,7 +69,10 @@ export function ActivityMessageView({
       sx={
         message.kind.startsWith("agent.")
           ? {
-              color: "secondary.dark",
+              color: (theme) =>
+                theme.palette.mode === "dark"
+                  ? theme.palette.secondary.light
+                  : theme.palette.secondary.dark,
               bgcolor: (theme) => alpha(theme.palette.secondary.main, 0.055),
             }
           : undefined
