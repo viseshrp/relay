@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 import { historicalPost as post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
-import type { RunDetail } from "../src/types";
+import type { RunDetail, RunEvent } from "../src/types";
 
 declare global {
   interface Window {
@@ -46,6 +46,14 @@ async function detail(page: Page, id: string): Promise<RunDetail> {
 }
 async function waiting(page: Page): Promise<Attention> {
   return (await page.request.get("/api/attention")).json();
+}
+
+function gate() {
+  let release: () => void = () => undefined;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { pending, release: () => release() };
 }
 
 test.beforeEach(async ({ page }) => {
@@ -326,6 +334,191 @@ test("a job log keeps its pending response available above the output", async ({
     page.getByRole("region", { name: "Job log", exact: true }),
   ).toBeVisible();
 });
+
+for (const delivery of ["missing stream tail", "late pending read"] as const)
+  test(`a human-wait job reconciles its answer after a ${delivery}`, async ({
+    page,
+  }) => {
+    const key = `waiting-${delivery.replaceAll(" ", "-")}.yaml`;
+    const created = await post(page, "/api/workflows", {
+      key,
+      holder: key,
+      yaml: stringify({
+        name: key,
+        on: "workflow_dispatch",
+        jobs: {
+          review: {
+            steps: [
+              {
+                id: "approval",
+                uses: "relay/human-wait@v1",
+                with: { prompt: "Approve this exact job." },
+              },
+            ],
+          },
+        },
+      }),
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const id = await launch(page, key);
+    await expect
+      .poll(async () => (await detail(page, id)).interactions.length)
+      .toBe(1);
+    const interaction = (await detail(page, id)).interactions[0];
+    if (!interaction) throw new Error("The human-wait request is missing.");
+
+    const streamStarted = gate();
+    const streamReady = gate();
+    const staleReady = gate();
+    const staleRelease = gate();
+    const historyStarted = gate();
+    const historyRelease = gate();
+    let streamSince = 0;
+    let streamBody = "";
+    let staleReleased = false;
+    await page.route(
+      (url) => url.pathname === `/api/runs/${id}/stream`,
+      async (route) => {
+        streamSince = Number(
+          new URL(route.request().url()).searchParams.get("since") ?? 0,
+        );
+        streamStarted.release();
+        await streamReady.pending;
+        if (staleReleased) await historyRelease.pending;
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: streamBody,
+        });
+      },
+    );
+    try {
+      await page.goto(
+        `/?view=runs&run=${id}&job=${encodeURIComponent(interaction.scope_path)}`,
+      );
+      await streamStarted.pending;
+      const banner = page.getByRole("region", {
+        name: "Waiting for you",
+        exact: true,
+      });
+      const job = page.getByRole("region", { name: "Job log", exact: true });
+      await expect(banner).toContainText("Approve this exact job.");
+      await expect(
+        job.getByRole("combobox", { name: "Attempt", exact: true }),
+      ).toContainText("Waiting");
+      await job.getByRole("button", { name: "Outputs", exact: true }).click();
+      await expect(job.getByText("No declared outputs.")).toBeVisible();
+
+      if (delivery === "late pending read") {
+        let held = false;
+        await page.route(
+          (url) =>
+            url.pathname === `/api/runs/${id}` &&
+            url.searchParams.has("collection"),
+          async (route) => {
+            if (staleReleased) await historyRelease.pending;
+            if (
+              held ||
+              new URL(route.request().url()).searchParams.get("collection") !==
+                "interactions"
+            ) {
+              await route.continue();
+              return;
+            }
+            held = true;
+            const response = await route.fetch();
+            const saved: { run: RunDetail } = await response.json();
+            expect(saved.run.interactions.map((item) => item.id)).toContain(
+              interaction.id,
+            );
+            staleReady.release();
+            await staleRelease.pending;
+            await route.fulfill({ response });
+          },
+        );
+        // Automatic repair and history catch-up must not conceal a stale write.
+        await page.route(
+          (url) =>
+            url.pathname === `/api/runs/${id}/events` &&
+            !url.searchParams.has("job"),
+          async (route) => {
+            if (!staleReleased) {
+              await route.continue();
+              return;
+            }
+            historyStarted.release();
+            await historyRelease.pending;
+            await route.continue();
+          },
+        );
+        await page
+          .getByRole("button", { name: "Refresh", exact: true })
+          .click();
+        await staleReady.pending;
+      }
+
+      const answer = "Approved without losing the final state.";
+      const answered = await post(
+        page,
+        `/api/attempts/${interaction.attempt_id}/wait`,
+        {
+          interaction_id: interaction.id,
+          idempotency_key: `answer-${delivery}`,
+          value: answer,
+        },
+      );
+      expect(answered.status(), await answered.text()).toBe(202);
+      await expect
+        .poll(async () => (await detail(page, id)).status)
+        .toBe("succeeded");
+      if (delivery === "late pending read") {
+        const replay: { events: RunEvent[] } = await (
+          await page.request.get(
+            `/api/runs/${id}/events?since=${streamSince}&limit=100`,
+          )
+        ).json();
+        expect(
+          replay.events.some((event) => event.type === "wait.answered"),
+        ).toBe(true);
+        streamBody = replay.events
+          .map(
+            (event) =>
+              `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+          )
+          .join("");
+      }
+      streamReady.release();
+      await expect(banner).toHaveCount(0);
+      await expect(
+        job.getByRole("combobox", { name: "Attempt", exact: true }),
+      ).toHaveText("Attempt 1 · Completed");
+      await expect(
+        job.getByRole("table", { name: "Declared outputs", exact: true }),
+      ).toContainText(answer);
+
+      if (delivery === "late pending read") {
+        staleReleased = true;
+        staleRelease.release();
+        await historyStarted.pending;
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+        );
+        await expect(banner).toHaveCount(0);
+        await expect(
+          job.getByRole("table", { name: "Declared outputs", exact: true }),
+        ).toContainText(answer);
+      }
+    } finally {
+      streamReady.release();
+      staleRelease.release();
+      historyRelease.release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
 
 test("desktop notifications require opt-in and announce new waits and completions", async ({
   page,

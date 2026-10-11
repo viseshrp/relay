@@ -3,6 +3,7 @@ import { useDisclosureState } from "../view-state";
 import { runJobs } from "../job-list";
 
 import { api, errorMessage } from "../api";
+import { invalidateReads } from "../read-cache";
 import type {
   ArtifactRecord,
   AgentsResponse,
@@ -143,6 +144,7 @@ export function useRunWorkspace({
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
+  const detailGeneration = useRef(0);
   const stateAfter = useRef(0);
   const eventAfter = useRef(0);
   const previousRunStatus = useRef<string | null>(null);
@@ -151,6 +153,12 @@ export function useRunWorkspace({
   useEffect(() => {
     if (selectedJob) jobContent.current?.scrollIntoView({ block: "start" });
   }, [selectedJob]);
+
+  const invalidateRunReads = useCallback(() => {
+    detailGeneration.current += 1;
+    if (selectedRun !== null)
+      invalidateReads(`/api/runs/${encodeURIComponent(selectedRun)}`);
+  }, [selectedRun]);
 
   const historyRequest = useRef<AbortController | null>(null);
   useEffect(() => () => historyRequest.current?.abort(), []);
@@ -193,6 +201,7 @@ export function useRunWorkspace({
     ): Promise<RunDetail> => {
       if (selectedRun === null)
         throw new Error("Select a run before loading its detail.");
+      const generation = detailGeneration.current;
       const query = new URLSearchParams({
         collection,
         since: String(since),
@@ -202,7 +211,11 @@ export function useRunWorkspace({
       const response = await api<RunDetailPage>(
         `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
       );
-      if (currentRun.current !== selectedRun) return response.run;
+      if (
+        currentRun.current !== selectedRun ||
+        generation !== detailGeneration.current
+      )
+        return response.run;
       if (publish)
         setDetail((current) => {
           const sameRun = current?.id === response.run.id;
@@ -258,16 +271,21 @@ export function useRunWorkspace({
       setLinkedRequest(null);
       return;
     }
+    const generation = detailGeneration.current;
     const response = await api<RunDetailPage>(
       `/api/runs/${selectedRun}?collection=interactions&interaction=${encodeURIComponent(selectedInteraction)}&limit=1`,
     );
-    if (currentRun.current === selectedRun)
+    if (
+      currentRun.current === selectedRun &&
+      generation === detailGeneration.current
+    )
       setLinkedRequest(response.run.interactions[0] ?? null);
   }, [selectedRun, selectedInteraction]);
 
   const refreshDetail = useCallback(
     async (reset = false, publish = true): Promise<RunDetail | null> => {
       if (selectedRun === null) return null;
+      const generation = detailGeneration.current;
       const mode: PageMode = reset ? "replace" : "refresh";
       const [run, interactions] = await Promise.all([
         loadDetailCollection("nodes", 0, mode, !reset),
@@ -275,6 +293,7 @@ export function useRunWorkspace({
         loadArtifacts(0, mode),
         loadLinkedRequest(),
       ]);
+      if (generation !== detailGeneration.current) return null;
       const complete = { ...run, interactions: interactions.interactions };
       if (reset && currentRun.current === selectedRun) {
         if (publish) setDetail(complete);
@@ -309,6 +328,11 @@ export function useRunWorkspace({
           item.type.endsWith(".requested") ||
           item.type.endsWith(".answered"),
       );
+      if (interactionChanged) {
+        // A live state event must not share or publish a read from before
+        // its transaction, even if that older response is still in flight.
+        invalidateRunReads();
+      }
       if (
         interactionChanged ||
         live.some(
@@ -339,7 +363,12 @@ export function useRunWorkspace({
         );
       }
     },
-    [loadArtifacts, loadDetailCollection, loadLinkedRequest],
+    [
+      invalidateRunReads,
+      loadArtifacts,
+      loadDetailCollection,
+      loadLinkedRequest,
+    ],
   );
 
   const loadEvents = useCallback(
@@ -374,6 +403,7 @@ export function useRunWorkspace({
   useEffect(() => {
     let disposed = false;
     currentRun.current = selectedRun;
+    detailGeneration.current += 1;
     eventAfter.current = 0;
     stateAfter.current = 0;
     previousRunStatus.current = null;
@@ -453,13 +483,45 @@ export function useRunWorkspace({
       if (completionCheck !== null) return;
       // A replayed terminal event may precede a retry. Confirm current state
       // before closing, including when the server ends a terminal stream.
-      completionCheck = loadDetailCollection("nodes", 0, "refresh")
-        .then((run) => {
-          if (disposed || currentRun.current !== selectedRun) return;
+      invalidateRunReads();
+      const generation = detailGeneration.current;
+      completionCheck = Promise.all([
+        refreshDetail(true, false),
+        loadEvents(eventAfter.current),
+      ])
+        .then(([run, history]) => {
           if (
-            TERMINAL_RUNS.has(run.status) &&
-            run.problem?.retry?.state !== "scheduled" &&
-            !PENDING_RECOVERY.has(run.recovery?.current?.state ?? "")
+            currentRun.current !== selectedRun ||
+            generation !== detailGeneration.current ||
+            run === null
+          )
+            return;
+          // A terminal event may already have disposed this stream effect.
+          // Finish reconciling the same run and keep previously loaded pages.
+          const latest = history
+            .filter((event) => event.id > run.event_cursor)
+            .reduce<RunDetail | null>(applyStateEvent, run);
+          if (latest === null) return;
+          const loadedScopes = new Set(
+            run.nodes.map((node) => node.scope_path),
+          );
+          setDetail((current) =>
+            history
+              .filter(
+                (event) =>
+                  event.type.startsWith("node.") &&
+                  typeof event.payload.scope_path === "string" &&
+                  !loadedScopes.has(event.payload.scope_path),
+              )
+              .reduce<RunDetail | null>(applyStateEvent, {
+                ...latest,
+                nodes: mergeRecords(current?.nodes ?? [], latest.nodes),
+              }),
+          );
+          if (
+            TERMINAL_RUNS.has(latest.status) &&
+            latest.problem?.retry?.state !== "scheduled" &&
+            !PENDING_RECOVERY.has(latest.recovery?.current?.state ?? "")
           ) {
             source.close();
             setStreamState("complete");
@@ -534,7 +596,9 @@ export function useRunWorkspace({
     };
   }, [
     applyLiveUpdates,
-    loadDetailCollection,
+    invalidateRunReads,
+    loadEvents,
+    refreshDetail,
     selectedRun,
     streamEpoch,
     streamRun,

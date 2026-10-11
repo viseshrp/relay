@@ -6,8 +6,10 @@ interface ReadEntry {
 }
 const reads = new Map<string, ReadEntry>();
 
-export function invalidateReads(): void {
-  reads.clear();
+export function invalidateReads(prefix?: string): void {
+  for (const key of reads.keys()) {
+    if (prefix === undefined || key.startsWith(prefix)) reads.delete(key);
+  }
 }
 
 export function sharedRead<T>(
