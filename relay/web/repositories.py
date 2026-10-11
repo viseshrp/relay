@@ -669,7 +669,12 @@ class DjangoWorkflowStore:
             )
 
     def move_editor_state(self, project_id: str, old_key: str, new_key: str) -> None:
+        from .models import WorkflowTrigger
+
         with transaction.atomic():
+            WorkflowTrigger.objects.filter(project_id=project_id, workflow_key=old_key).update(
+                enabled=False
+            )
             for model in (WorkflowDraft, EditorLease, WorkflowControl):
                 model.objects.filter(project_id=project_id, workflow_key=old_key).update(
                     workflow_key=new_key
