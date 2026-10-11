@@ -59,27 +59,27 @@ export const darkPaletteTokens = {
   "text-on-dark": "#f1f5f9",
   "muted-on-dark": "#94a3b8",
   "danger-on-dark": "#fca5a5",
-  primary: "#7c9bfb",
-  "primary-strong": "#a5b9fd",
-  surface: "#141b2d",
-  "surface-muted": "#0f1524",
-  "surface-hover": "#1b243b",
-  "surface-elevated": "#192136",
-  border: "#28354f",
-  "border-subtle": "#1e293f",
-  focus: "#7c9bfb",
-  success: "#22c55e",
-  "success-surface": "rgba(34, 197, 94, 0.14)",
+  primary: "#93c5fd",
+  "primary-strong": "#bfdbfe",
+  surface: "#1e293b",
+  "surface-muted": "#0f172a",
+  "surface-hover": "#243147",
+  "surface-elevated": "#1e293b",
+  border: "#334155",
+  "border-subtle": "#1e293b",
+  focus: "#93c5fd",
+  success: "#86efac",
+  "success-surface": "rgba(134, 239, 172, 0.14)",
   danger: "#f87171",
   "danger-surface": "rgba(248, 113, 113, 0.14)",
-  warning: "#fbbf24",
-  "warning-surface": "rgba(251, 191, 36, 0.14)",
+  warning: "#fde047",
+  "warning-surface": "rgba(253, 224, 71, 0.14)",
   disabled: "#64748b",
-  terminal: "#080c16",
+  terminal: "#0f172a",
   shadow: "rgba(0, 0, 0, 0.5)",
-  selection: "rgba(92, 125, 247, 0.2)",
-  "focus-glow": "rgba(92, 125, 247, 0.35)",
-  overlay: "rgba(11, 15, 25, 0.8)",
+  selection: "rgba(147, 197, 253, 0.2)",
+  "focus-glow": "rgba(147, 197, 253, 0.35)",
+  overlay: "rgba(15, 23, 42, 0.8)",
 };
 
 export const paletteTokens = lightPaletteTokens;
@@ -92,9 +92,9 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
       mode,
       primary: {
         main: tokens.primary,
-        ...(mode === "dark" ? { contrastText: "#0b0f19" } : {}),
+        ...(mode === "dark" ? { contrastText: "#0f172a" } : {}),
       },
-      secondary: { main: mode === "dark" ? "#8c75ff" : "#6b4eff" },
+      secondary: { main: mode === "dark" ? "#d8b4fe" : "#6b4eff" },
       text: {
         primary: tokens.text,
         secondary: tokens["text-secondary"],
@@ -104,7 +104,7 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
       warning: { main: tokens.warning },
       divider: tokens["border-subtle"],
       background: {
-        default: mode === "dark" ? "#0b0f19" : "#f4f6fb",
+        default: mode === "dark" ? "#0f172a" : "#f4f6fb",
         paper: tokens.surface,
       },
     },
@@ -442,7 +442,7 @@ export function applyThemeToDocument(resolved: ResolvedTheme): void {
 
   const themeColors: Record<ResolvedTheme, string> = {
     light: "#f4f6fb",
-    dark: "#0b0f19",
+    dark: "#0f172a",
   };
 
   const metaTags = document.querySelectorAll<HTMLMetaElement>(
