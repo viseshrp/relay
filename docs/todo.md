@@ -807,6 +807,9 @@ unless an item below says otherwise.
     the file name under the display name.
   - **Outcome:** Users can manage workflows without a terminal.
   - **Done when:** Each action has API, UI, and tests; deletes respect leases.
+  - **Verified:** `test_workflow_management` proves rename disables old-name
+    schedule, push, and dispatch triggers while preserving delivery history.
+    Fresh activation at the new name launches successfully for each event.
 
 - [x] **BX-26. Add GitHub-style re-run actions.**
   - **What:** Run-level controls.
@@ -1242,6 +1245,10 @@ on. Everything else is SHIP WITH FIXES.
        only those paths.
   - **Done when:** Creating two starters back to back lets both run, with
     a browser test.
+  - **Verified:** `test_workflow_publication` proves the selected untracked
+    workflow and captured prompts can be reviewed and committed, preserving
+    unrelated owner files. `editor-recovery.spec.ts` proves the commit dialog
+    works when that workflow is the only untracked source.
 
 - [x] **QA-02. One bad edit can strand the editor. Blocker.**
   - **Evidence (isolated):** An invalid YAML edit autosaves as a recovery
