@@ -247,6 +247,7 @@ export function useRunWorkspace({
   const loadArtifacts = useCallback(
     async (since: number, mode: PageMode): Promise<void> => {
       if (selectedRun === null) return;
+      const generation = detailGeneration.current;
       const query = new URLSearchParams({
         since: String(since),
         limit: "50",
@@ -255,7 +256,11 @@ export function useRunWorkspace({
       const response = await api<ArtifactPage>(
         `/api/runs/${encodeURIComponent(selectedRun)}/artifacts?${query.toString()}`,
       );
-      if (currentRun.current !== selectedRun) return;
+      if (
+        currentRun.current !== selectedRun ||
+        generation !== detailGeneration.current
+      )
+        return;
       setArtifacts((current) =>
         mode === "replace"
           ? response.artifacts
@@ -328,12 +333,7 @@ export function useRunWorkspace({
           item.type.endsWith(".requested") ||
           item.type.endsWith(".answered"),
       );
-      if (interactionChanged) {
-        // A live state event must not share or publish a read from before
-        // its transaction, even if that older response is still in flight.
-        invalidateRunReads();
-      }
-      if (
+      const nodesChanged =
         interactionChanged ||
         live.some(
           (item) =>
@@ -343,8 +343,16 @@ export function useRunWorkspace({
             item.type === "node.settings_changed" ||
             item.type.startsWith("run.retry_") ||
             item.type.startsWith("run.recovery_"),
-        )
-      ) {
+        );
+      const artifactsChanged = live.some(
+        (item) => item.type === "artifact.preserved",
+      );
+      if (nodesChanged || artifactsChanged) {
+        // Every collection refresh must replace reads from before its event,
+        // including pending responses from an earlier owner refresh.
+        invalidateRunReads();
+      }
+      if (nodesChanged) {
         void loadDetailCollection("nodes", 0, "refresh").catch(
           (caught: unknown) => setError(errorMessage(caught)),
         );
@@ -357,7 +365,7 @@ export function useRunWorkspace({
           setError(errorMessage(caught)),
         );
       }
-      if (live.some((item) => item.type === "artifact.preserved")) {
+      if (artifactsChanged) {
         void loadArtifacts(0, "refresh").catch((caught: unknown) =>
           setError(errorMessage(caught)),
         );

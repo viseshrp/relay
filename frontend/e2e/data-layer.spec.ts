@@ -2,6 +2,19 @@ import { expect, test, type Response } from "./a11y-test";
 import { sharedRead, invalidateReads } from "../src/read-cache";
 import { post } from "./setup-helpers";
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function cacheCleanup(): Promise<void> {
+  // Cross the cache's task boundary without depending on elapsed wall time.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 test("one abort does not cancel a shared read used by another subscriber", async () => {
   invalidateReads();
   let resolve: (value: string) => void = () => undefined;
@@ -20,6 +33,114 @@ test("one abort does not cancel a shared read used by another subscriber", async
   expect(await a).toBe("AbortError");
   expect(await b).toBe("result");
   expect(requests).toBe(1);
+});
+
+test("an invalidated read cannot evict its replacement when it finishes late", async () => {
+  invalidateReads();
+  const stale = deferred<string>();
+  const fresh = deferred<string>();
+  const other = deferred<string>();
+  const before = sharedRead("/api/runs/one", undefined, () => stale.promise);
+  const unrelated = sharedRead("/api/projects", undefined, () => other.promise);
+  invalidateReads("/api/runs/one");
+  let requests = 0;
+  const readFresh = () => {
+    requests += 1;
+    return fresh.promise;
+  };
+  const after = sharedRead("/api/runs/one", undefined, readFresh);
+  stale.resolve("waiting");
+  expect(await before).toBe("waiting");
+  await cacheCleanup();
+
+  const subscriber = sharedRead("/api/runs/one", undefined, readFresh);
+  const otherSubscriber = sharedRead("/api/projects", undefined, () => {
+    throw new Error("Invalidating one run must preserve unrelated reads.");
+  });
+  fresh.resolve("finished");
+  other.resolve("project");
+  expect(await Promise.all([after, subscriber])).toEqual([
+    "finished",
+    "finished",
+  ]);
+  expect(await Promise.all([unrelated, otherSubscriber])).toEqual([
+    "project",
+    "project",
+  ]);
+  expect(requests).toBe(1);
+});
+
+test("abort cleanup from an invalidated read cannot cancel its replacement", async () => {
+  invalidateReads();
+  const controller = new AbortController();
+  const stale = deferred<string>();
+  const fresh = deferred<string>();
+  const before = sharedRead("replacement", controller.signal, (signal) => {
+    signal.addEventListener("abort", () => stale.resolve("aborted"));
+    return stale.promise;
+  }).catch((error: Error) => error.name);
+  controller.abort();
+  invalidateReads("replacement");
+  let requests = 0;
+  const readFresh = (signal: AbortSignal) => {
+    requests += 1;
+    signal.addEventListener("abort", () =>
+      fresh.resolve("incorrectly aborted"),
+    );
+    return fresh.promise;
+  };
+  const after = sharedRead("replacement", undefined, readFresh);
+  await cacheCleanup();
+  expect(await before).toBe("AbortError");
+  expect(await stale.promise).toBe("aborted");
+
+  const subscriber = sharedRead("replacement", undefined, readFresh);
+  fresh.resolve("current");
+  expect(await Promise.all([after, subscriber])).toEqual([
+    "current",
+    "current",
+  ]);
+  expect(requests).toBe(1);
+});
+
+test("a replacement subscriber keeps the underlying read alive across an abort", async () => {
+  invalidateReads();
+  const controller = new AbortController();
+  const result = deferred<string>();
+  let requests = 0;
+  const read = (signal: AbortSignal) => {
+    requests += 1;
+    signal.addEventListener("abort", () =>
+      result.resolve("incorrectly aborted"),
+    );
+    return result.promise;
+  };
+  const first = sharedRead("resubscribe", controller.signal, read).catch(
+    (error: Error) => error.name,
+  );
+  controller.abort();
+  const second = sharedRead("resubscribe", undefined, read);
+  await cacheCleanup();
+  result.resolve("retained");
+
+  expect(await first).toBe("AbortError");
+  expect(await second).toBe("retained");
+  expect(requests).toBe(1);
+});
+
+test("a failed shared read does not poison the next refresh", async () => {
+  invalidateReads();
+  const failed = sharedRead("retry-read", undefined, () =>
+    Promise.reject(new Error("temporary read failure")),
+  );
+  await expect(failed).rejects.toThrow("temporary read failure");
+  await cacheCleanup();
+
+  expect(
+    await sharedRead("retry-read", undefined, () =>
+      Promise.resolve("recovered"),
+    ),
+  ).toBe("recovered");
 });
 
 test("Home reads once under StrictMode and hidden tabs make no polling requests", async ({

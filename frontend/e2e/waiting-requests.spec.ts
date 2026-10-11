@@ -335,7 +335,11 @@ test("a job log keeps its pending response available above the output", async ({
   ).toBeVisible();
 });
 
-for (const delivery of ["missing stream tail", "late pending read"] as const)
+for (const delivery of [
+  "missing stream tail",
+  "late pending read",
+  "late node read",
+] as const)
   test(`a human-wait job reconciles its answer after a ${delivery}`, async ({
     page,
   }) => {
@@ -408,7 +412,9 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
       await job.getByRole("button", { name: "Outputs", exact: true }).click();
       await expect(job.getByText("No declared outputs.")).toBeVisible();
 
-      if (delivery === "late pending read") {
+      if (delivery !== "missing stream tail") {
+        const collection =
+          delivery === "late node read" ? "nodes" : "interactions";
         let held = false;
         await page.route(
           (url) =>
@@ -419,7 +425,7 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
             if (
               held ||
               new URL(route.request().url()).searchParams.get("collection") !==
-                "interactions"
+                collection
             ) {
               await route.continue();
               return;
@@ -427,9 +433,17 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
             held = true;
             const response = await route.fetch();
             const saved: { run: RunDetail } = await response.json();
-            expect(saved.run.interactions.map((item) => item.id)).toContain(
-              interaction.id,
-            );
+            expect(saved.run.status).toBe("paused_wait");
+            if (collection === "interactions")
+              expect(saved.run.interactions.map((item) => item.id)).toContain(
+                interaction.id,
+              );
+            else
+              expect(
+                saved.run.nodes.find(
+                  (node) => node.scope_path === interaction.scope_path,
+                )?.status,
+              ).toBe("waiting");
             staleReady.release();
             await staleRelease.pending;
             await route.fulfill({ response });
@@ -470,7 +484,7 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
       await expect
         .poll(async () => (await detail(page, id)).status)
         .toBe("succeeded");
-      if (delivery === "late pending read") {
+      if (delivery !== "missing stream tail") {
         const replay: { events: RunEvent[] } = await (
           await page.request.get(
             `/api/runs/${id}/events?since=${streamSince}&limit=100`,
@@ -495,7 +509,7 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
         job.getByRole("table", { name: "Declared outputs", exact: true }),
       ).toContainText(answer);
 
-      if (delivery === "late pending read") {
+      if (delivery !== "missing stream tail") {
         staleReleased = true;
         staleRelease.release();
         await historyStarted.pending;
@@ -508,6 +522,9 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
             ),
         );
         await expect(banner).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { name: "Pause", exact: true }),
+        ).toHaveCount(0);
         await expect(
           job.getByRole("table", { name: "Declared outputs", exact: true }),
         ).toContainText(answer);
