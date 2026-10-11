@@ -1001,7 +1001,7 @@ FE = frontend-ui-engineering.
 | F06 | Home dashboard | Logo; `?view=home` | Waiting requests, active and paused runs, recent results, project cards, search | DT, QA, BR, DE |
 | F07 | Switch or open a project | Project picker; **Open another project** (path field and folder browser) | Choose a registered repository or add one | QA, BR |
 | F08 | Workflow selection | Workflows tab; workflow picker | Pick a workflow; empty-project state | QA, BR, FE |
-| F09 | Create a workflow | **Create workflow** / **New workflow** | Choose one of six starters or a blank workflow | QA |
+| F09 | Create a workflow | **Create workflow** / **New workflow** | Choose one of seven starters or a blank workflow | QA |
 | F10 | Visual editing | Canvas and job form | Add and remove jobs and steps; set needs, conditions, timeouts, matrix, outputs, env, concurrency | QA, BR, FE |
 | F11 | YAML editing | Workflow YAML panel | Type YAML, see validation, save, recover drafts, handle lease conflicts | DT, QA, BR |
 | F12 | Agent step settings | Agent step in the job form | Agent, exact model, effort, permissions, instructions | FE (source) |
