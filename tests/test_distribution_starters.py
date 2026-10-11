@@ -17,6 +17,12 @@ from scripts.check_distribution_contents import check_distribution
     [
         ("relay/workflows/starters/ask-agent.yaml", True),
         ("relay/workflows/starters/ask-agent.md", True),
+        ("relay/workflows/starters/ai-coding-workflow.yaml", True),
+        ("relay/workflows/starters/ai-coding-workflow/action.yaml", True),
+        ("relay/workflows/starters/ai-coding-workflow/LICENSE", True),
+        ("relay/workflows/starters/ai-coding-workflow/provenance.json", True),
+        ("relay/workflows/starters/ai-coding-workflow/01_initial_exploration_any_model.md", True),
+        ("relay/workflows/starters/ai-coding-workflow/unknown.md", False),
         ("relay/workflows/starters/unknown.yaml", False),
         ("relay/workflows/starters/unknown.md", False),
         ("relay/templates/ask-agent.yaml", False),

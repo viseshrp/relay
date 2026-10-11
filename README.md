@@ -18,9 +18,11 @@ Relay lets you draw, edit, and run coding-agent workflows in your browser.
 1. Install Relay: `pip install relay-app`.
 2. Open a terminal in your Git repository and run `relay up`.
 3. Create your local password, check the agent connections, and select
-   **Start from a template › Ask an agent**.
-4. Press **Run workflow** with the sample question. Follow the job and its
-   conversation on the run page.
+   **Start from a template**. The full **AI coding workflow** is preselected.
+4. Enter your task once, choose the coding model and Claude Opus model, and
+   press **Run workflow**. Follow its progress and approval requests.
+
+For a quick read-only first run with one agent, choose **Ask an agent** instead.
 
 You need Python 3.10 or newer, Git, and one supported coding agent installed
 and signed in. The setup screen gives install links and sign-in commands.
@@ -166,7 +168,7 @@ The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.
 
 Phase 1 is local and single-owner. It contains no remote workers, containers,
-Redis, Postgres, model fallback, or automatic merge. Six
+Redis, Postgres, model fallback, or automatic merge. Seven
 [starter workflows](docs/workflows.md#starter-workflows) copy into the project
 when the owner chooses one; runs use the saved project files.
 Opt-in [automatic recovery](docs/execution.md#automatic-step-recovery) retries

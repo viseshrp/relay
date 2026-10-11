@@ -146,7 +146,7 @@ that key before execution.
 | Human waits, loops, report and input validation | `nodes/actions.py`, `actions_repository.py` | Current-attempt answers and retained report bytes |
 | Bounded repair and confirmed-usage-reset recovery | `repositories.py`, `actions_repository.py` | Durable budgets and separate repair instructions |
 | Library metadata, import/export and default-branch copy | `workflows/library.py` | Owner files preserved and sources validated |
-| Six jobs/steps starters | `workflows/starters/` | Source validation and deterministic full execution |
+| Seven jobs/steps starters | `workflows/starters/` | Source validation and deterministic full execution |
 | Installation/project/environment variables | `actions_bindings.py`, `WorkflowBinding` | Frozen values and scope precedence |
 | Environment/native credential references and masking | `native_credentials.py`, `masking.py` | Explicit OS backend, no database secret values |
 | Environment approval, timers, branch filters and URL | `actions_repository.py`, `WorkflowEnvironment` | Approval before secret resolution and stale rejection |

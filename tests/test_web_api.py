@@ -1439,7 +1439,7 @@ def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
     assert Client().get("/api/workflow-templates").status_code == 401
     gallery = owner.get("/api/workflow-templates")
     assert gallery.status_code == 200
-    assert len(gallery.json()["templates"]) == 6
+    assert len(gallery.json()["templates"]) == 7
     created = post(
         owner,
         "/api/workflows",

@@ -1,4 +1,5 @@
 import { PathDisplay } from "./PathDisplay";
+import { GetStartedRunInputs } from "./GetStartedRunInputs";
 import {
   Alert,
   Box,
@@ -7,14 +8,9 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControl,
-  InputLabel,
   Link,
-  MenuItem,
   Paper,
-  Select,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 
@@ -37,13 +33,7 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
     workflow,
     setNewWorkflow,
     template,
-    inputs,
     setInputs,
-    model,
-    setModel,
-    models,
-    launch,
-    launching,
     error,
     newWorkflow,
     requestProject,
@@ -90,8 +80,10 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
             <Box>
               <Typography variant="h6">2. Agents</Typography>
               <Typography variant="body2">
-                One working agent is enough. A connection check reads available
-                models; authentication is verified when a run starts.
+                The full AI coding workflow needs a coding agent and Claude Code
+                with Opus. Other starters need one working agent. A connection
+                check reads available models; authentication is verified when a
+                run starts.
               </Typography>
               <Box
                 sx={{
@@ -184,10 +176,13 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
               <Typography variant="h6">
                 3. First workflow {workflow ? "✓" : ""}
               </Typography>
-              <Button variant="outlined" onClick={() => setNewWorkflow(true)}>
+              <Button
+                variant="outlined"
+                onClick={() => setNewWorkflow("starter")}
+              >
                 Start from a template
               </Button>
-              <Button onClick={() => setNewWorkflow(true)}>
+              <Button onClick={() => setNewWorkflow("blank")}>
                 Blank workflow
               </Button>
               {workflow && (
@@ -206,70 +201,7 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
                   in the workflow editor.
                 </Typography>
               ) : (
-                <Stack spacing={2} sx={{ mt: 1 }}>
-                  {Object.entries(template.inputs).map(([key, definition]) =>
-                    definition.type === "enum" ? (
-                      <FormControl key={key}>
-                        <InputLabel id={`setup-input-${key}`}>
-                          {definition.description ?? key}
-                        </InputLabel>
-                        <Select
-                          labelId={`setup-input-${key}`}
-                          label={definition.description ?? key}
-                          value={inputs[key] ?? ""}
-                          onChange={(event) =>
-                            setInputs((current) => ({
-                              ...current,
-                              [key]: event.target.value,
-                            }))
-                          }
-                        >
-                          {definition.constraints?.values?.map((value) => (
-                            <MenuItem key={value} value={value}>
-                              {value}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    ) : (
-                      <TextField
-                        key={key}
-                        label={definition.description ?? key}
-                        value={inputs[key] ?? ""}
-                        onChange={(event) =>
-                          setInputs((current) => ({
-                            ...current,
-                            [key]: event.target.value,
-                          }))
-                        }
-                      />
-                    ),
-                  )}
-                  <FormControl>
-                    <InputLabel id="setup-model">Model</InputLabel>
-                    <Select
-                      labelId="setup-model"
-                      label="Model"
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                    >
-                      {models.map((value) => (
-                        <MenuItem key={value} value={value}>
-                          {value}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <Button
-                    variant="contained"
-                    onClick={() => void launch()}
-                    disabled={
-                      launching || checking || !model || !models.includes(model)
-                    }
-                  >
-                    Run workflow
-                  </Button>
-                </Stack>
+                <GetStartedRunInputs state={state} />
               )}
             </Box>
             {error && <Alert severity="error">{error}</Alert>}
@@ -279,10 +211,11 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
           <Button onClick={onClose}>Close checklist</Button>
         </DialogActions>
         <CreateWorkflowDialog
-          open={newWorkflow}
+          open={newWorkflow !== null}
+          startBlank={newWorkflow === "blank"}
           requestProject={requestProject}
           holder={holder.current}
-          onClose={() => setNewWorkflow(false)}
+          onClose={() => setNewWorkflow(null)}
           onCreated={async (key, selected) => {
             await onWorkflowCreated(key);
             setWorkflow(key);

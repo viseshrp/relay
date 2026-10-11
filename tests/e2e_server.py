@@ -175,7 +175,9 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @owner_required
     @require_POST
     def starter_project(request: HttpRequest) -> JsonResponse:
-        fresh_owner = json_body(request).get("fresh_owner") is True
+        body = json_body(request)
+        fresh_owner = body.get("fresh_owner") is True
+        full_workflow = body.get("full_workflow") is True
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
         # Only this server owns the scratch repository and fake-provider directory.
@@ -184,7 +186,15 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Restore untouched initialization files")
         shutil.rmtree(providers.directory)
         providers.directory.mkdir()
-        providers.install("codex", mode="configuration-starters")
+        if full_workflow:
+            counters = root / "ai-starter-counters"
+            shutil.rmtree(counters, ignore_errors=True)
+            counters.mkdir()
+            patch.setenv("FAKE_AI_COUNTER_ROOT", str(counters))
+            for agent in ("codex", "claude"):
+                providers.install(agent, mode="configuration-ai-starter")
+        else:
+            providers.install("codex", mode="configuration-starters")
         fake_executable(
             providers.directory,
             "python",

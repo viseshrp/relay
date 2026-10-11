@@ -136,7 +136,7 @@ export async function runStarter(
     .getByRole("button", { name: "Start from a template", exact: true })
     .click();
   const gallery = page.getByRole("dialog", { name: "Choose a workflow" });
-  await expect(gallery.getByRole("button", { name: /^Use / })).toHaveCount(6);
+  await expect(gallery.getByRole("button", { name: /^Use / })).toHaveCount(7);
   await gallery
     .getByRole("button", { name: `Use ${name}`, exact: true })
     .click();

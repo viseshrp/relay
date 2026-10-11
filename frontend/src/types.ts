@@ -133,6 +133,7 @@ export interface WorkflowTemplate {
   description: string;
   jobs: string[];
   required_agents: string;
+  default?: boolean;
   inputs: Record<
     string,
     {

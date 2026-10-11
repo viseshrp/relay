@@ -157,3 +157,155 @@ for (const readyCount of [0, 5]) {
     ).toBeEnabled();
   });
 }
+
+test("the full AI coding workflow is preselected and runs from one task", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.request.get("/api/auth");
+  expect(
+    (
+      await post(page, "/api/auth/login", {
+        username: "owner",
+        password: "Relay-Test-Passphrase-2026!",
+      })
+    ).ok(),
+  ).toBeTruthy();
+  expect(
+    (
+      await post(page, "/__test__/starter-project", { full_workflow: true })
+    ).ok(),
+  ).toBeTruthy();
+  await page.goto("/?view=workflows");
+  await page.getByRole("button", { name: "Get started", exact: true }).click();
+  const setup = page.getByRole("dialog", { name: "Get started", exact: true });
+  await expect(
+    setup.getByRole("article", { name: "Claude Code", exact: true }),
+  ).toContainText("Ready to connect");
+  await setup
+    .getByRole("button", { name: "Start from a template", exact: true })
+    .click();
+  const gallery = page.getByRole("dialog", { name: "Choose a workflow" });
+  await expect(
+    gallery.getByRole("button", {
+      name: "Use AI coding workflow",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await gallery
+    .getByRole("button", { name: "Create workflow", exact: true })
+    .click();
+  await expect(gallery).toBeHidden();
+  await expect(
+    setup.getByRole("button", { name: "Run workflow", exact: true }),
+  ).toBeDisabled();
+  await setup
+    .getByLabel("What should we build?", { exact: true })
+    .fill("Add dark mode");
+  await setup
+    .getByRole("combobox", {
+      name: "Exact model value for the selected agent",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("option", { name: "m1", exact: true }).click();
+  await setup
+    .getByRole("combobox", {
+      name: "Exact Claude Opus model value advertised by Claude",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("option", { name: "m2", exact: true }).click();
+  await expect(
+    setup.getByRole("combobox", { name: "Model", exact: true }),
+  ).toHaveCount(0);
+  const launched = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/runs") &&
+      response.request().method() === "POST",
+  );
+  await setup
+    .getByRole("button", { name: "Run workflow", exact: true })
+    .click();
+  const response = await launched;
+  expect(response.status(), await response.text()).toBe(201);
+  expect(response.request().postDataJSON()).toMatchObject({
+    inputs: {
+      task: "Add dark mode",
+      agent: "codex",
+      model: "m1",
+      opus_model: "m2",
+    },
+  });
+  expect(response.request().postDataJSON()).not.toHaveProperty("model");
+  for (const answer of ["IMPLEMENT", "TESTS", "ACCEPT"]) {
+    await page
+      .getByRole("region", { name: "Waiting for you", exact: true })
+      .getByRole("button", { name: "Respond", exact: true })
+      .click();
+    const request = page
+      .locator(".interaction-card")
+      .filter({ hasText: new RegExp(`Reply ${answer}`) });
+    await expect(request).toBeVisible({ timeout: 30_000 });
+    await request.getByLabel("Your response", { exact: true }).fill(answer);
+    await request
+      .getByRole("button", { name: "Send response and continue", exact: true })
+      .click();
+    await expect(request).toHaveCount(0);
+  }
+  await expect(
+    page.getByText(
+      "Work is complete. Review the saved documents and code changes below.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
+test("the full starter requires Claude and the blank option remains available", async ({
+  page,
+}) => {
+  await page.request.get("/api/auth");
+  expect(
+    (
+      await post(page, "/api/auth/login", {
+        username: "owner",
+        password: "Relay-Test-Passphrase-2026!",
+      })
+    ).ok(),
+  ).toBeTruthy();
+  expect((await post(page, "/__test__/starter-project")).ok()).toBeTruthy();
+  await page.goto("/?view=workflows");
+  await page.getByRole("button", { name: "Get started", exact: true }).click();
+  const setup = page.getByRole("dialog", { name: "Get started", exact: true });
+  await setup
+    .getByRole("button", { name: "Start from a template", exact: true })
+    .click();
+  const gallery = page.getByRole("dialog", { name: "Choose a workflow" });
+  await expect(
+    gallery.getByRole("button", {
+      name: "Use AI coding workflow",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await gallery
+    .getByRole("button", { name: "Create workflow", exact: true })
+    .click();
+  await expect(gallery).toBeHidden();
+  await expect(
+    setup.getByText(
+      "Install and sign in to Claude Code, then choose Check again. This workflow uses Claude Opus for planning and review.",
+    ),
+  ).toBeVisible();
+  await expect(
+    setup.getByRole("button", { name: "Run workflow", exact: true }),
+  ).toBeDisabled();
+  await setup
+    .getByRole("button", { name: "Blank workflow", exact: true })
+    .click();
+  await expect(
+    gallery.getByRole("textbox", { name: "Workflow name", exact: true }),
+  ).toBeVisible();
+  await expect(
+    gallery.getByRole("button", { name: "Blank workflow", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});

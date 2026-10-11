@@ -29,7 +29,9 @@ export function useGetStarted({
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState(0);
   const [complete, setComplete] = useState<boolean | null>(null);
-  const [newWorkflow, setNewWorkflow] = useState(false);
+  const [newWorkflow, setNewWorkflow] = useState<"starter" | "blank" | null>(
+    null,
+  );
   const [workflow, setWorkflow] = useState<string | null>(null);
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
   const [inputs, setInputs] = useState<Record<string, JsonScalar>>({});
@@ -39,6 +41,19 @@ export function useGetStarted({
   const models = Array.from(
     new Set(readiness.filter((row) => row.ready).flatMap((row) => row.models)),
   );
+  const fullWorkflow = template?.id === "ai-coding-workflow";
+  const codingModels =
+    readiness.find((row) => row.id === inputs.agent && row.ready)?.models ?? [];
+  const claudeModels =
+    readiness.find((row) => row.id === "claude" && row.ready)?.models ?? [];
+  const readyToRun = fullWorkflow
+    ? typeof inputs.model === "string" &&
+      codingModels.includes(inputs.model) &&
+      typeof inputs.opus_model === "string" &&
+      claudeModels.includes(inputs.opus_model) &&
+      typeof inputs.task === "string" &&
+      Boolean(inputs.task.trim())
+    : Boolean(model) && models.includes(model);
 
   useEffect(() => {
     let active = true;
@@ -106,7 +121,7 @@ export function useGetStarted({
           body: JSON.stringify({
             workflow_key: workflow,
             project_id: project.id,
-            model,
+            ...(!fullWorkflow ? { model } : {}),
             inputs,
           }),
         },
@@ -138,6 +153,10 @@ export function useGetStarted({
     model,
     setModel,
     models,
+    fullWorkflow,
+    codingModels,
+    claudeModels,
+    readyToRun,
     launch,
     launching,
     error,

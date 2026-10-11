@@ -46,6 +46,10 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page
     .getByRole("button", { name: "Create workflow", exact: true })
     .click();
+  await page
+    .getByRole("dialog", { name: "Choose a workflow" })
+    .getByRole("button", { name: "Blank workflow", exact: true })
+    .click();
   await page.getByLabel("Workflow name").fill("Guided browser flow");
   await page
     .getByRole("dialog", { name: "Choose a workflow" })

@@ -1,0 +1,38 @@
+name: Focused tests and independent audit cycle
+on:
+  workflow_call:
+    inputs:
+      agent: {type: string, required: true}
+      model: {type: string, required: true}
+      opus_model: {type: string, required: true}
+    outputs:
+      next:
+        value: ${{ jobs.cycle.outputs.next }}
+
+jobs:
+  cycle:
+    outputs:
+      next: ${{ steps.audit.outputs.value }}
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: >-
+            prompts/ai-coding-workflow/09_write_focused_tests_any_model.md
+      - id: audit
+        uses: relay/agent@v1
+        with:
+          agent: claude
+          model: ${{ inputs.opus_model }}
+          prompt-files: |
+            prompts/ai-coding-workflow/10_test_audit_any_model.md
+            prompts/ai-coding-workflow/audit-routing.md
+          report: TEST_AUDIT.md
+          format: label
+          label: Next phase
+      - uses: relay/validate-input@v1
+        with:
+          value: ${{ toJSON(steps.audit.outputs.value) }}
+          type: enum
+          constraints: '{"values":["done","tests"]}'

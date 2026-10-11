@@ -23,6 +23,7 @@ interface CreateWorkflowDialogProps {
   open: boolean;
   requestProject: string | null;
   holder: string;
+  startBlank?: boolean;
   onClose: () => void;
   onCreated: (key: string, template: WorkflowTemplate | null) => Promise<void>;
 }
@@ -31,6 +32,7 @@ export function CreateWorkflowDialog({
   open,
   requestProject,
   holder,
+  startBlank = false,
   onClose,
   onCreated,
 }: CreateWorkflowDialogProps) {
@@ -56,7 +58,13 @@ export function CreateWorkflowDialog({
     setError(null);
     void api<ReadResponse1>("/api/workflow-templates")
       .then((value) => {
-        if (active) setTemplates(value.templates);
+        if (!active) return;
+        setTemplates(value.templates);
+        const starter = startBlank
+          ? null
+          : (value.templates.find((item) => item.default) ?? null);
+        setSelected(starter);
+        setName(starter?.name ?? "New workflow");
       })
       .catch((caught: unknown) => {
         if (active) setError(errorMessage(caught));
@@ -67,7 +75,7 @@ export function CreateWorkflowDialog({
     return () => {
       active = false;
     };
-  }, [open, check]);
+  }, [open, check, startBlank]);
 
   async function create() {
     setBusy(true);
@@ -159,7 +167,7 @@ export function CreateWorkflowDialog({
                       setSelected(template);
                       setName(template.name);
                     }}
-                    disabled={busy}
+                    disabled={busy || loading}
                   >
                     Use {template.name}
                   </Button>
@@ -174,7 +182,7 @@ export function CreateWorkflowDialog({
               setSelected(null);
               setName("New workflow");
             }}
-            disabled={busy}
+            disabled={busy || loading}
           >
             Blank workflow
           </Button>
@@ -211,7 +219,7 @@ export function CreateWorkflowDialog({
         <Button
           variant="contained"
           onClick={() => void create()}
-          disabled={busy || !name.trim()}
+          disabled={busy || loading || !name.trim()}
         >
           Create workflow
         </Button>
