@@ -15,7 +15,7 @@ from relay.errors import PermissionFlowError, WorkflowValidationError
 from relay.manage import MigrationLock
 from relay.paths import data_dir, safe_resolve
 
-from .editor import (
+from .source_files import (
     WorkflowEditorStore,
     _atomic_create,
     _atomic_replace,
