@@ -3589,6 +3589,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                 status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
             ).update(heartbeat_at=now)
         except DatabaseError:
+            LOGGER.exception(
+                "Attempt heartbeat database update failed", extra={"attempt_id": attempt_id}
+            )
             message = "Relay could not update the attempt heartbeat."
             raise PersistenceError(message) from None
         else:
