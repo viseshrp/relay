@@ -12,8 +12,7 @@ from relay.errors import ConfigError
 from relay.execution.masking import redactor
 from relay.execution.native_credentials import credential
 
-from .binding_snapshots import freeze_bindings as freeze_bindings
-from .binding_snapshots import scopes as scopes
+from .binding_snapshots import freeze_bindings, scopes
 from .models import WorkflowBinding
 
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -137,3 +136,6 @@ def job_secrets(
     for value in result.values():
         redactor(run_id).register(value)
     return result
+
+
+__all__ = ["freeze_bindings", "job_secrets", "put_binding", "resolve_secrets", "scopes"]
