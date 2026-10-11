@@ -1054,6 +1054,8 @@ Evidence comes from your instance unless it says "isolated".
   Verified by `data-layer.spec.ts` "each page loads each initial resource once"
   on Home, Runs, finished and running runs, and a job page. The test counts
   every initial GET and requires one attention read per load.
+  `waiting-requests.spec.ts` also forces a late pending-request response and
+  proves live invalidation keeps the answered request cleared.
   - **Evidence:** Home requests `GET /api/dashboard?limit=10` twice. A run
     page requests `/artifacts?since=0` twice. The job page's
     `/api/runs/{id}/job` request is aborted and sent again at 375 px.
@@ -1299,6 +1301,10 @@ on. Everything else is SHIP WITH FIXES.
     field, and other sections stay clean.
 
 - [x] **QA-06. Approvals ask the user to type a magic word.**
+  `waiting-requests.spec.ts` verifies completed attempts and exact answer
+  outputs after a missing stream tail or a late pending read.
+  `test_terminal_events_committed_after_an_empty_read_are_replayed` proves
+  the server delivers the final answer and completion events before closing.
   - **Evidence (isolated):**
     - **Free-text answer:** the request says "Type Approved to continue"
       above a free-text box. There are no Approve or Reject buttons.

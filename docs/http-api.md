@@ -356,6 +356,8 @@ shape and uses each event ID as its replay cursor. The initial connection may us
 `GET /api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
 `Last-Event-ID` takes precedence over `since`; omitting both starts at zero.
 Both cursors must fit the same nonnegative database integer range.
+Before closing a finished run's stream, Relay drains events committed between
+its last event read and the terminal-status read.
 
 Run history and detail add `number`, `title`, `source_branch`, and `created_at`.
 Numbers increase within each project and remain reserved after deletion. The
