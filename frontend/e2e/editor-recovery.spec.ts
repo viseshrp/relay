@@ -78,6 +78,42 @@ test("invalid drafts retain the graph and the valid saved file can still run", a
   ).toBeEnabled();
 });
 
+test("the selected untracked workflow can be committed without another blocking workflow", async ({
+  page,
+}) => {
+  const created = await post(page, "/api/workflows", {
+    key: "selected",
+    holder: "fixture",
+    yaml: "name: Selected workflow\njobs: {check: {steps: [{run: echo Ready}]}}\n",
+  });
+  expect(created.ok()).toBeTruthy();
+  await page.goto("/?view=workflows&workflow=selected.yaml");
+  await page.getByRole("button", { name: "Run workflow", exact: true }).click();
+  const launch = page.getByRole("dialog", {
+    name: "Run workflow",
+    exact: true,
+  });
+  await expect(launch).toContainText("Project files are ready to run.");
+  await launch
+    .getByRole("button", { name: "Commit workflow files", exact: true })
+    .click();
+  const review = page.getByRole("dialog", {
+    name: "Review workflow files to commit",
+  });
+  await expect(review).toContainText(".relay/workflows/selected.yaml");
+  await review
+    .getByRole("checkbox", { name: "Commit 1 reviewed file" })
+    .check();
+  await review.getByRole("button", { name: "Confirm commit" }).click();
+  await expect(review).toBeHidden();
+  await expect(
+    launch.getByRole("button", { name: "Commit workflow files", exact: true }),
+  ).toHaveCount(0);
+  const preview = await page.request.get("/api/workflows/selected.yaml/commit");
+  expect(preview.ok()).toBeTruthy();
+  expect((await preview.json()).files).toEqual([]);
+});
+
 test("reviewed workflow-source commits unblock another workflow and required inputs have inline errors", async ({
   page,
 }) => {

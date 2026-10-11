@@ -95,7 +95,8 @@ export function LaunchPreflight({
           {workflowKey &&
             result.files.some(
               (file) =>
-                !file.allowed &&
+                (!file.allowed ||
+                  file.reasons.includes("Captured workflow source")) &&
                 file.status === "??" &&
                 /(?:^|\/)\.relay\/(workflows|prompts)\//.test(file.path),
             ) && (
