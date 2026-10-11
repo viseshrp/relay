@@ -101,10 +101,14 @@ def local_refs(repository: Path) -> dict[str, str]:
     return dict(line.split(" ", 1) for line in output.splitlines())
 
 
-def deliver(trigger: WorkflowTrigger, occurrence: str, payload: dict[str, Any]) -> None:
+def _validate_payload(payload: dict[str, Any]) -> None:
     if len(json.dumps(payload).encode()) > 65535:
         message = "Trigger payloads are limited to 65535 bytes."
         raise ConfigError(message)
+
+
+def deliver(trigger: WorkflowTrigger, occurrence: str, payload: dict[str, Any]) -> None:
+    _validate_payload(payload)
     TriggerDelivery.objects.get_or_create(
         trigger=trigger, occurrence=occurrence, defaults={"payload": payload}
     )
@@ -113,15 +117,17 @@ def deliver(trigger: WorkflowTrigger, occurrence: str, payload: dict[str, Any]) 
 def repository_dispatch(
     project_id: str, event_type: str, payload: dict[str, Any], identity: str
 ) -> None:
-    if (
-        not event_type
-        or len(event_type) > 100
-        or len(payload) > 10
-        or not identity
-        or len(identity) > 200
-    ):
-        message = "repository_dispatch requires an event type and at most ten payload properties."
+    if not event_type:
+        message = "repository_dispatch requires a nonempty event type."
         raise ConfigError(message)
+    if not identity or len(identity) > 200:
+        message = "repository_dispatch requires an idempotency key of 1 to 200 characters."
+        raise ConfigError(message)
+    dispatch_payload = {
+        "event_name": "repository_dispatch",
+        "event": {"action": event_type, "client_payload": payload},
+    }
+    _validate_payload(dispatch_payload)
     for trigger in WorkflowTrigger.objects.filter(
         project_id=project_id, event="repository_dispatch", enabled=True
     ):
@@ -130,10 +136,7 @@ def repository_dispatch(
             deliver(
                 trigger,
                 identity,
-                {
-                    "event_name": "repository_dispatch",
-                    "event": {"action": event_type, "client_payload": payload},
-                },
+                dispatch_payload,
             )
 
 
@@ -150,7 +153,7 @@ def reconcile() -> None:
                     (identity, instant, item)
                     for item in config
                     for identity, instant in occurrences(
-                        item, datetime.fromisoformat(cursor["at"]), now
+                        item, datetime.fromisoformat(cursor["at"]), now, latest_only=True
                     )
                 ]
                 if found:

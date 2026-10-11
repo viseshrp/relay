@@ -15,7 +15,13 @@ import pytest
 
 from relay.execution.action_products import capture
 from relay.execution.nodes import node_executors
-from relay.web.models import ActionsArtifact, NodeAttempt, WorkflowBinding, WorkflowEnvironment
+from relay.web.models import (
+    ActionsArtifact,
+    NodeAttempt,
+    TriggerDelivery,
+    WorkflowBinding,
+    WorkflowEnvironment,
+)
 from tests.support import InlineEngine, RelayProject
 
 BASE = "name: Owner source\njobs: {main: {steps: [{run: echo ready}]}}\n"
@@ -358,6 +364,38 @@ def test_named_artifact_preview_pages_keep_selected_files_and_utf8_boundaries(
     last = owner.get(url, {"offset": "100", "path": "file-000.txt"}).json()
     assert len(last["files"]) == 3 and last["next"] is None
     assert last["path"] == "file-000.txt" and last["text"] == "File 0"
+
+
+def test_dispatch_api_accepts_local_property_counts_and_long_event_names(
+    owner: Client, project: RelayProject
+) -> None:
+    event_type = "local-event-" + "x" * 101
+    project.write_workflow(
+        "dispatch", f"on: {{repository_dispatch: {{types: [{event_type}]}}}}\n" + BASE
+    )
+    assert (
+        post(
+            owner,
+            "/api/workflow-triggers",
+            {
+                "key": "dispatch",
+                "event": "repository_dispatch",
+                "enabled": True,
+                "allow_writers": True,
+            },
+        ).status_code
+        == 200
+    )
+    payload = {f"value{i}": i for i in range(100)}
+    body = {"event_type": event_type, "idempotency_key": "once", "client_payload": payload}
+    assert post(owner, "/api/repository-dispatch", body).json() == {"accepted": True}
+    assert post(owner, "/api/repository-dispatch", body).json() == {"accepted": True}
+    delivery = TriggerDelivery.objects.get()
+    assert delivery.payload["event"] == {"action": event_type, "client_payload": payload}
+    body["idempotency_key"] = "oversized"
+    body["client_payload"] = {"value": "x" * 65536}
+    assert post(owner, "/api/repository-dispatch", body).status_code == 400
+    assert TriggerDelivery.objects.count() == 1
 
 
 def test_named_products_download_exact_bytes_and_reject_expired_or_corrupt_data(

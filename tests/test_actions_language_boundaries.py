@@ -168,16 +168,17 @@ def test_yaml_resource_bounds_and_syntax_diagnostics() -> None:
         ("a: " + "[" * 52 + "value" + "]" * 52, "depth limit"),
         ("a: &a [value]\nb: [" + ", ".join(["*a"] * 101) + "]", "alias limit"),
         ("a: [" + ", ".join(["value"] * 10001) + "]", "node or depth"),
-        (
-            "on: {workflow_dispatch: {inputs: {"
-            + ", ".join(f"v{i}: {{type: string}}" for i in range(26))
-            + "}}}\n"
-            + BASE,
-            "At most 25",
-        ),
     ]:
         with pytest.raises(WorkflowValidationError, match=reason):
             load(source)
+
+
+@pytest.mark.parametrize("event", ["workflow_dispatch", "workflow_call"])
+def test_local_inputs_use_size_bounds_instead_of_a_hosted_field_count(event: str) -> None:
+    definitions = ", ".join(f"value{i}: {{type: boolean, required: true}}" for i in range(100))
+    workflow = load(f"on: {{{event}: {{inputs: {{{definitions}}}}}}}\n" + BASE).value
+    supplied = {f"value{i}": i % 2 == 0 for i in range(100)}
+    assert resolve_inputs(workflow, supplied, event=event) == supplied
 
 
 def test_frozen_local_references_require_callable_utf8_sources(project: RelayProject) -> None:

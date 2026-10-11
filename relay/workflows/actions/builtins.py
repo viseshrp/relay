@@ -56,9 +56,6 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "relay/validate-report@v1 requires path, report, or selector."
         raise WorkflowValidationError(message)
-    if "permissions" in inputs:
-        message = "Workflow permissions are not part of Relay's Actions dialect."
-        raise WorkflowValidationError(message)
     if reference == "relay/loop@v1":
         maximum = inputs["max-iterations"]
         if isinstance(maximum, bool) or str(maximum) not in {str(i) for i in range(1, 101)}:

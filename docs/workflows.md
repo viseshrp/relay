@@ -121,7 +121,8 @@ isolated run job and does not authorize staging unrelated owner changes.
 and `environment`. The browser provides typed controls and configured
 environment choices. `inputs` and the manual event payload preserve JSON
 types. Unknown supplied names and invalid defaults fail validation.
-Dispatch declarations are limited to 25 inputs.
+Input counts are bounded by the YAML size/node limits; resolved inputs must
+fit within 65,535 bytes. There is no separate hosted-service field count.
 
 `on.workflow_call.inputs` supports `string`, `boolean`, and `number`.
 `relay/validate-input@v1` provides explicit constraints: `value`, `type`, and
@@ -515,10 +516,12 @@ provider, input, and environment gates. Delivery identities are deduplicated.
 Blocked and uncertain launches remain visible for owner review.
 
 `on.schedule` uses POSIX five-field cron, optional IANA `timezone` (UTC by
-default), and at least five minutes between occurrences. Ranges, lists, steps,
+default), and one-minute resolution. Ranges, lists, steps,
 and Sunday 0 or 7 are supported. Day-of-month/day-of-week use POSIX OR.
 Missing DST times advance to the first valid time; ambiguous folds fire once.
 Downtime coalesces the latest due occurrence instead of replaying the backlog.
+Reconciliation searches from the latest calendar time so a frequent schedule
+does not allocate all missed occurrences after downtime.
 
 <!-- relay-example: valid local-schedule -->
 ```yaml
@@ -533,12 +536,15 @@ jobs:
 
 `on.push` observes changed local branch/tag refs, without watching GitHub,
 fetching remotes, or checking out another source. `branches`, `tags`, `paths`,
-their `-ignore` forms, and ordered negative patterns filter changes. Observed
+their `-ignore` forms, and ordered negative patterns filter changes.
+Path filters apply to both branches and tags. The observed
 ref/SHA must match the launch source; other deliveries block for review.
 
 `on.repository_dispatch` accepts optional `types`. The authenticated loopback
-API accepts `event_type` up to 100 characters, at most ten `client_payload`
-properties within 65,535 bytes, and a bounded `idempotency_key`. Normal owner
+API requires a nonempty `event_type` and an object `client_payload`. The
+complete delivery payload must fit within 65,535 bytes; neither property
+count nor event-name length has a separate hosted-service limit.
+The `idempotency_key` must contain 1 to 200 characters. Normal owner
 and CSRF requirements apply in both login modes.
 
 `on.workflow_run` supports completed local runs, workflow name/key and branch
