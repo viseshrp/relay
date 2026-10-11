@@ -233,7 +233,7 @@ def test_disabled_policy_or_step_never_retries(
     [
         "agent_auth_error",
         "permission_flow_error",
-        "model_unavailable",
+        "model_unavailable_error",
         "path_safety_error",
         "artifact_preservation_error",
     ],

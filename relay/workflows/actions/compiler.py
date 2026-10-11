@@ -14,11 +14,13 @@ from relay.workflows.schema import (
     AgentNode,
     AgentOptions,
     BooleanInput,
+    EntryPoint,
     EnumConstraints,
     EnumInput,
     GlobalPrompt,
     LocalPrompt,
     NumberInput,
+    RecoveryPolicy,
     StringInput,
     WorkflowDefinition,
 )
@@ -78,6 +80,8 @@ def definition(
         inputs=inputs,
         nodes=nodes,
         actions=value,
+        entrypoints=[EntryPoint.model_validate(item) for item in value.get("entrypoints", [])],
+        recovery=RecoveryPolicy.model_validate(value.get("recovery", {})),
     )
 
 

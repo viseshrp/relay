@@ -88,8 +88,25 @@ class ProjectRelink(RelayModel):
     at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 
 
+class WorkflowControl(RelayModel):
+    """Owner-controlled launch availability, independent of workflow files and runs."""
+
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    workflow_key: models.TextField = models.TextField()
+    disabled: models.BooleanField = models.BooleanField(default=False)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("project", "workflow_key"), name="relay_unique_workflow_control"
+            )
+        ]
+
+
 class WorkflowDraft(RelayModel):
-    """Latest recovery YAML for one tracked workflow."""
+    """Latest recovery YAML and prompt edits for one tracked workflow."""
+
+    prompt_edits: models.JSONField = models.JSONField(default=dict)
 
     project: models.ForeignKey = models.ForeignKey(
         Project, on_delete=models.CASCADE, related_name="workflow_drafts"
@@ -170,6 +187,8 @@ class Run(RelayModel):
     merged_commit: models.CharField = models.CharField(max_length=40, null=True, blank=True)
     recovery_policy: models.JSONField = models.JSONField(default=dict)
     dispatch_paused: models.BooleanField = models.BooleanField(default=False)
+    dispatch_paused_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
+    dispatch_paused_seconds: models.FloatField = models.FloatField(default=0)
     repair_groups: models.JSONField = models.JSONField(default=dict)
     actions_state: models.JSONField = models.JSONField(default=dict)
 

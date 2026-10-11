@@ -89,7 +89,7 @@ def test_dashboard_counts_all_projects_and_only_actionable_requests(
     finished = saved_run(project, 2)
     saved_run(another, 2, "failed")
     probe = Mock(side_effect=RuntimeError("Dashboard must not probe Git"))
-    monkeypatch.setattr("relay.projects.service.project_launch_source", probe)
+    monkeypatch.setattr("relay.web.views.pages.project_launch_source", probe)
     response = owner.get("/api/dashboard")
     assert response.status_code == 200
     value = response.json()

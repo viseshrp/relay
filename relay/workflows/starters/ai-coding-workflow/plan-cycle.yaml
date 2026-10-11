@@ -1,0 +1,41 @@
+name: Plan critique and revision cycle
+on:
+  workflow_call:
+    inputs:
+      agent: {type: string, required: true}
+      model: {type: string, required: true}
+      opus_model: {type: string, required: true}
+    outputs:
+      ready:
+        value: ${{ jobs.cycle.outputs.ready }}
+
+jobs:
+  cycle:
+    outputs:
+      ready: ${{ steps.verify.outputs.value }}
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: >-
+            prompts/ai-coding-workflow/02_plan_critique_any_model.md
+      - id: instruction
+        uses: ./.relay/actions/ai-coding-workflow/read-generated-prompt
+        with:
+          file: OPUS_PLAN_REVISION_REQUEST.md
+      - uses: relay/agent@v1
+        with:
+          agent: claude
+          model: ${{ inputs.opus_model }}
+          prompt: ${{ steps.instruction.outputs.prompt }}
+      - id: verify
+        uses: relay/agent@v1
+        with:
+          agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
+          prompt-files: >-
+            prompts/ai-coding-workflow/03_plan_revision_verification_any_model.md
+          report: PLAN_REVISION_VERIFICATION.md
+          format: label
+          label: '- Ready for implementation'

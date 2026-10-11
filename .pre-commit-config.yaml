@@ -1,5 +1,5 @@
-# Preserve byte-exact upstream expression fixtures and license notices.
-exclude: ^(tests/fixtures/actions/(expressions/.*\.json|LICENSE)|relay/workflows/actions/LICENSE)$
+# Preserve byte-exact upstream expression fixtures, prompt files, and licenses.
+exclude: ^(tests/fixtures/actions/(expressions/.*\.json|LICENSE)|relay/workflows/actions/LICENSE|relay/workflows/starters/ai-coding-workflow/(0[1-9]_.*\.md|10_test_audit_any_model\.md|LICENSE))$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

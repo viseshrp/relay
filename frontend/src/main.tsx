@@ -1,3 +1,4 @@
+import "./fonts.css";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 
@@ -9,7 +10,8 @@ import { App } from "./App";
 import { relayTheme } from "./theme";
 
 const root = document.getElementById("root");
-if (root === null) throw new Error("Relay could not find its browser application root.");
+if (root === null)
+  throw new Error("Relay could not find its browser application root.");
 
 createRoot(root).render(
   <StrictMode>

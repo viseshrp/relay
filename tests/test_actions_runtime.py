@@ -101,7 +101,9 @@ def test_agent_effort_inherits_or_explicitly_preserves_provider_defaults(
     project: RelayProject,
     tmp_path: Path,
     fake_agents: FakeAgents,
+    database_threads: None,
 ) -> None:
+    del database_threads
     fake_agents.install("codex", mode="configuration")
     defaults = validate_defaults({"providers": {"codex": {"model": "m1", "effort": "low"}}})
     project.write_workflow(

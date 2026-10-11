@@ -6,6 +6,7 @@ from .static_view import serve_spa
 from .views import actions, actions_language, pages, settings, stream
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("api/workflow-prompts", actions_language.prompt_inventory),
     path("api/workflow-language", actions_language.manifest),
     path("api/workflow-library", actions_language.library),
     path("api/workflow-language/validate", actions_language.validate),
@@ -21,6 +22,8 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/auth/logout", actions.sign_out, name="auth-logout"),
     path("api/settings", settings.owner_settings, name="owner-settings"),
     path("api/projects/defaults", settings.project_defaults, name="project-defaults"),
+    path("api/projects/candidates", pages.project_candidates, name="project-candidates"),
+    path("api/projects/initialize-git", actions.initialize_git, name="project-initialize-git"),
     path("api/projects/folders", pages.project_folders, name="project-folders"),
     path("api/projects", pages.projects, name="projects"),
     path("api/dashboard", pages.dashboard, name="dashboard"),
@@ -31,8 +34,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflow-templates", pages.workflow_templates, name="workflow-templates"),
     path("api/workflows/<path:key>/preflight", pages.workflow_preflight, name="workflow-preflight"),
     path("api/workflows/<path:key>/draft", actions.autosave_draft, name="workflow-draft"),
+    path("api/workflows/<path:key>/draft/discard", actions.discard_workflow_draft),
     path("api/workflows/<path:key>/save", actions.save_workflow, name="workflow-save"),
+    path("api/workflows/<path:key>/commit", actions.publish_workflow_sources),
+    path("api/workflows/<path:key>/manage", actions.manage_workflow),
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
+    path("api/workflows/<path:key>/lease/release", actions.release_workflow_lease),
     path("api/workflows/<path:key>/prompt", actions.workflow_prompt, name="workflow-prompt"),
     path("api/workflows/<path:key>", pages.workflow, name="workflow"),
     path("api/agents", pages.agents, name="agents"),
@@ -81,10 +88,14 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/attempts/<str:attempt_id>/wait", actions.answer_wait, name="attempt-wait"),
     path("api/artifacts/<str:artifact_id>", pages.artifact, name="artifact"),
     path(
+        "api/runs/<str:run_id>/artifacts/download", pages.artifact_archive, name="artifact-archive"
+    ),
+    path(
         "api/artifacts/<str:artifact_id>/preview", pages.artifact_preview, name="artifact-preview"
     ),
     path("api/data/usage", settings.storage_usage, name="data-usage"),
     path("api/data/clean", actions.clean_data, name="data-clean"),
+    path("api/workflow-artifacts/<str:artifact_id>/preview", actions_language.preview_product),
     path(
         "api/workflow-artifacts/<str:artifact_id>/download",
         actions_language.download_product,

@@ -11,6 +11,25 @@ import zipfile
 _STARTER_FILES = frozenset(
     f"relay/workflows/starters/{name}"
     for name in (
+        "ai-coding-workflow.yaml",
+        "ai-coding-workflow/01_initial_exploration_any_model.md",
+        "ai-coding-workflow/02_plan_critique_any_model.md",
+        "ai-coding-workflow/03_plan_revision_verification_any_model.md",
+        "ai-coding-workflow/04_opus_review_branch.md",
+        "ai-coding-workflow/05_opus_verify_review_fixes.md",
+        "ai-coding-workflow/06_opus_refresh_review_and_walkthrough.md",
+        "ai-coding-workflow/07_human_code_walkthrough.md",
+        "ai-coding-workflow/08_implement_human_followup_any_model.md",
+        "ai-coding-workflow/09_write_focused_tests_any_model.md",
+        "ai-coding-workflow/10_test_audit_any_model.md",
+        "ai-coding-workflow/LICENSE",
+        "ai-coding-workflow/action.yaml",
+        "ai-coding-workflow/audit-routing.md",
+        "ai-coding-workflow/interaction.md",
+        "ai-coding-workflow/plan-cycle.yaml",
+        "ai-coding-workflow/provenance.json",
+        "ai-coding-workflow/review-cycle.yaml",
+        "ai-coding-workflow/test-cycle.yaml",
         "ask-agent.yaml",
         "ask-agent.md",
         "plan-approve-implement.yaml",
@@ -60,6 +79,9 @@ def _looks_like_template(name: str) -> bool:
 
 
 def _check_wheel(path: Path, names: tuple[str, ...]) -> None:
+    if any(name.endswith(".map") or "/.vite/" in name for name in names):
+        message = f"{path.name} contains frontend source maps or build manifests"
+        raise RuntimeError(message)
     if "relay/static/index.html" not in names:
         message = f"{path.name} does not contain relay/static/index.html"
         raise RuntimeError(message)
@@ -69,7 +91,23 @@ def _check_wheel(path: Path, names: tuple[str, ...]) -> None:
 
 
 def _check_sdist(path: Path, names: tuple[str, ...]) -> None:
-    required = {"frontend/package.json", "frontend/package-lock.json", "hatch_build.py"}
+    generated_roots = (
+        "frontend/node_modules/",
+        "frontend/test-results/",
+        "frontend/playwright-report/",
+        "relay/static/",
+    )
+    if any(name.startswith(generated_roots) for name in names):
+        message = f"{path.name} contains generated frontend dependencies or artifacts"
+        raise RuntimeError(message)
+    required = {
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "hatch_build.py",
+        "docs/getting-started.md",
+        "docs/coming-from-github-actions.md",
+        "docs/keyboard-shortcuts.md",
+    }
     missing = sorted(required.difference(names))
     if missing:
         message = f"{path.name} is missing wheel-from-sdist inputs: {', '.join(missing)}"

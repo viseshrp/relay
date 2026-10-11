@@ -48,3 +48,59 @@ def test_rebuilt_assets_are_served_without_restarting(
         static_view.serve_spa(request, "assets/current.js")
     with pytest.raises(Http404):
         static_view.serve_spa(request, "assets/../../private.js")
+
+
+def test_static_compression_keeps_type_cache_and_encoding_negotiation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gzip
+
+    root = tmp_path / "static"
+    (root / "assets").mkdir(parents=True)
+    payload = b"console.log('static fixture');" * 100
+    (root / "assets/main.js").write_bytes(payload)
+    (root / "assets/main.js.gz").write_bytes(gzip.compress(payload))
+    monkeypatch.setattr(static_view, "STATIC_ROOT", root)
+    monkeypatch.setattr(static_view, "_STATIC_ASSETS", static_view._asset_catalog())
+    request = RequestFactory().get("/assets/main.js", HTTP_ACCEPT_ENCODING="br, gzip")
+    response = static_view.serve_spa(request, "assets/main.js")
+    try:
+        assert response["Content-Encoding"] == "gzip"
+        assert response["Vary"] == "Accept-Encoding"
+        assert "javascript" in response["Content-Type"]
+        assert gzip.decompress(b"".join(response.streaming_content)) == payload
+    finally:
+        response.close()
+    request = RequestFactory().get("/assets/main.js", HTTP_ACCEPT_ENCODING="gzip;q=0, br;q=0")
+    response = static_view.serve_spa(request, "assets/main.js")
+    try:
+        assert "Content-Encoding" not in response
+        assert b"".join(response.streaming_content) == payload
+    finally:
+        response.close()
+
+
+def test_uncompressed_fonts_do_not_rebuild_the_asset_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "static"
+    (root / "assets").mkdir(parents=True)
+    (root / "assets/font.woff2").write_bytes(b"font fixture")
+    monkeypatch.setattr(static_view, "STATIC_ROOT", root)
+    monkeypatch.setattr(static_view, "_STATIC_ASSETS", static_view._asset_catalog())
+    scans = []
+    original = static_view._asset_catalog
+
+    def record_scan() -> dict[str, Path]:
+        scans.append(True)
+        return original()
+
+    monkeypatch.setattr(static_view, "_asset_catalog", record_scan)
+    request = RequestFactory().get("/assets/font.woff2", HTTP_ACCEPT_ENCODING="br, gzip")
+    response = static_view.serve_spa(request, "assets/font.woff2")
+    try:
+        assert b"".join(response.streaming_content) == b"font fixture"
+        assert "Content-Encoding" not in response
+    finally:
+        response.close()
+    assert scans == []

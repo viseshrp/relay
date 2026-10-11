@@ -34,9 +34,50 @@ class Starter:
     description: str
     jobs: tuple[str, ...]
     prompts: tuple[str, ...]
+    files: tuple[tuple[str, str], ...] = ()
+    required_agents: str = "One compatible coding agent"
+    default: bool = False
 
 
 STARTERS = (
+    Starter(
+        "ai-coding-workflow",
+        "AI coding workflow",
+        "Enter a task once. Explore, plan, implement, review, and test with human approvals.",
+        ("Explore", "Plan and verify", "Approve and implement", "Review", "Walkthrough", "Tests"),
+        tuple(
+            f"ai-coding-workflow/{name}"
+            for name in (
+                "01_initial_exploration_any_model.md",
+                "02_plan_critique_any_model.md",
+                "03_plan_revision_verification_any_model.md",
+                "04_opus_review_branch.md",
+                "05_opus_verify_review_fixes.md",
+                "06_opus_refresh_review_and_walkthrough.md",
+                "07_human_code_walkthrough.md",
+                "08_implement_human_followup_any_model.md",
+                "09_write_focused_tests_any_model.md",
+                "10_test_audit_any_model.md",
+                "interaction.md",
+                "audit-routing.md",
+            )
+        ),
+        files=(
+            *(
+                (
+                    f"workflows/ai-coding-workflow/{cycle}-cycle.yaml",
+                    f"ai-coding-workflow/{cycle}-cycle.yaml",
+                )
+                for cycle in ("plan", "review", "test")
+            ),
+            (
+                "actions/ai-coding-workflow/read-generated-prompt/action.yaml",
+                "ai-coding-workflow/action.yaml",
+            ),
+        ),
+        required_agents="A coding agent and Claude Code with an Opus model",
+        default=True,
+    ),
     Starter(
         "ask-agent",
         "Ask an agent",
@@ -89,6 +130,10 @@ def _sources(starter: Starter, key: str) -> tuple[tuple[str, str], ...]:
             (f"prompts/{name}", (STARTER_ROOT / name).read_text(encoding="utf-8"))
             for name in starter.prompts
         ),
+        *(
+            (target, (STARTER_ROOT / source).read_text(encoding="utf-8"))
+            for target, source in starter.files
+        ),
     )
 
 
@@ -106,7 +151,8 @@ def starter_inventory() -> list[dict[str, object]]:
                 "name": starter.name,
                 "description": starter.description,
                 "jobs": list(starter.jobs),
-                "required_agents": "One compatible coding agent",
+                "required_agents": starter.required_agents,
+                "default": starter.default,
                 "inputs": {
                     key: item.model_dump(mode="json") for key, item in definition.inputs.items()
                 },
@@ -161,7 +207,7 @@ def _copy_starter_workflow(
     key = "/".join(parts)
     sources = _sources(starter, key)
     with tempfile.TemporaryDirectory(prefix="relay-starter-") as directory:
-        scratch = Path(directory)
+        scratch = Path(directory) / ".relay"
         for relative, text in sources:
             path = scratch / relative
             path.parent.mkdir(parents=True, exist_ok=True)

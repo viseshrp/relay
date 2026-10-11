@@ -51,7 +51,7 @@ The local-language review made three separate passes:
 3. Reconcile authoring, defaults, starters, local action capture, examples,
    manifests, and regression tests against the resulting local contract.
 
-| Removed syntax | Local reason |
+| Removed syntax or rule | Local reason |
 | --- | --- |
 | `jobs.*.runs-on`, runner groups, labels and images | Jobs execute on this computer; no runner pool exists. |
 | `strategy.max-parallel` and its expression property | The local admission lease serializes jobs and variants. |
@@ -69,6 +69,9 @@ The local-language review made three separate passes:
 | `GITHUB_*` and `RUNNER_*` generated command variables | Local scripts use `RELAY_*` and `RELAY_HOST_*`; no alias is provided. |
 | Choice `options` on other input types, callable expression defaults, matrix policy without a matrix | They were ignored or could not resolve as declared. |
 | Arbitrary trigger properties and unsupported nested action steps | All triggers and step containers use the same strict local contract. |
+| Five-minute schedule minimum | Local POSIX cron supports one-minute resolution; there is no hosted scheduler quota. |
+| 25 manual inputs, ten dispatch payload properties, 100-character dispatch event names | Source/node and complete payload size bounds already control local resource use. |
+| Ignoring `paths`/`paths-ignore` for tag changes | Local Git supplies changed files for tags as well as branches; declared filters must apply. |
 
 No conversion or backwards compatibility layer is added. Old editable sources
 and drafts can be rewritten. Run history and captured source bytes are retained.
@@ -83,6 +86,42 @@ schedules, local refs, loopback dispatch and completion triggers automate local
 work; artifacts, summaries, annotations and caches retain or reuse results.
 Their runtime subjects are listed below. A matrix `os` axis is user data and
 cannot select another host.
+
+## Follow-up audit of remaining syntax
+
+The 2026-10-09 review repeated the inventory, runtime-consumer trace, and
+authoring/API checks against the curated schema. `runs-on` was already absent
+from validation and the live support manifest. The additional removals above
+eliminate restrictions copied from GitHub's
+[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+and [event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
+Local schedule reconciliation now selects the latest due occurrence without
+allocating a missed minutely backlog. Dispatch validates the complete payload
+before matching active triggers. No alias or conversion path is introduced.
+
+| Remaining syntax checked | Local purpose |
+| --- | --- |
+| `name`, `description`, `run-name`, step/job names and IDs | Explain the source, label runs, and address ordered work/results. |
+| Manual/callable inputs, choice options, required/default/type | Browser controls, typed launch snapshots, and reusable contracts. |
+| `env`, `defaults.run.shell`, `defaults.run.working-directory` | Configure local process environments, shells, and directories. |
+| `needs`, job/step `if`, outputs, expressions and status functions | Order work, pass retained results, and select follow-ups/cleanup. |
+| `timeout-minutes`, `continue-on-error` | Persist deadlines and distinguish raw failure from tolerated results. |
+| `strategy.matrix`, `include`, `exclude`, `fail-fast` | Repeat work serially and choose whether a failed variant stops later variants. |
+| `concurrency.group`, `queue`, `cancel-in-progress` | Queue, supersede, or cancel local run/job owners before admission. |
+| `environment.name`, `environment.url`, environment inputs | Select local variables/secrets, require owner approval, and display result links. |
+| `uses`, `with`, callable secret declarations/mappings/`inherit` | Freeze local workflows/actions and enforce scoped input/credential contracts. |
+| Composite/JavaScript `runs`, outputs, `post`, `post-if`, input `deprecationMessage` | Execute installed local runtimes, export results, run bounded cleanup, and warn on a deprecated input. |
+| `cache-mode`, artifact/cache action inputs | Control real local file reads/writes, integrity, expiry, and reuse. |
+| `schedule`, `push`, `repository_dispatch`, `workflow_run` and their filters | Observe local time, refs, loopback events, and completed runs after owner activation. |
+| `relay`/`host` facts and `RELAY_*` command variables | Expose real local identity, workspaces, temporary paths, and command files. |
+
+The remaining resource limits protect local parsing, persistence, process
+ownership, and bounded recursion. They include YAML/expression size/depth,
+payload bytes, source capture, matrix expansion, reusable depth/count,
+output size, pending owners, and process deadlines. They are retained for
+those local reasons. The unreachable special-case `permissions` check in
+built-in validation was also removed; the common allowed-input gate rejects
+that key before execution.
 
 ## Accepted feature map
 
@@ -107,7 +146,7 @@ cannot select another host.
 | Human waits, loops, report and input validation | `nodes/actions.py`, `actions_repository.py` | Current-attempt answers and retained report bytes |
 | Bounded repair and confirmed-usage-reset recovery | `repositories.py`, `actions_repository.py` | Durable budgets and separate repair instructions |
 | Library metadata, import/export and default-branch copy | `workflows/library.py` | Owner files preserved and sources validated |
-| Six jobs/steps starters | `workflows/starters/` | Source validation and deterministic full execution |
+| Seven jobs/steps starters | `workflows/starters/` | Source validation and deterministic full execution |
 | Installation/project/environment variables | `actions_bindings.py`, `WorkflowBinding` | Frozen values and scope precedence |
 | Environment/native credential references and masking | `native_credentials.py`, `masking.py` | Explicit OS backend, no database secret values |
 | Environment approval, timers, branch filters and URL | `actions_repository.py`, `WorkflowEnvironment` | Approval before secret resolution and stale rejection |

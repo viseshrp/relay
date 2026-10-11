@@ -76,18 +76,47 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function parseWorkflow(text: string): ParsedWorkflow {
-  const document = parseDocument(text, { keepSourceTokens: true, prettyErrors: true });
+  const document = parseDocument(text, {
+    keepSourceTokens: true,
+    prettyErrors: true,
+  });
   const errors = document.errors.map((error) => error.message);
   if (errors.length > 0) return { document, value: null, errors };
   let value: unknown;
-  try { value = document.toJS({ maxAliasCount: 100 }); }
-  catch (error) { return { document, value: null, errors: [String(error)] }; }
+  try {
+    value = document.toJS({ maxAliasCount: 100 });
+  } catch (error) {
+    return { document, value: null, errors: [String(error)] };
+  }
   if (isRecord(value) && isRecord(value.jobs)) {
-    const jobs = Object.fromEntries(Object.entries(value.jobs).map(([name, job]) => [name, isRecord(job) ? { ...job, type: "actions_job", needs: typeof job.needs === "string" ? [job.needs] : job.needs } : { type: "actions_job" }]));
-    return { document, value: { ...value, name: String(value.name || "Workflow"), nodes: jobs } as unknown as WorkflowValue, errors: [] };
+    const jobs = Object.fromEntries(
+      Object.entries(value.jobs).map(([name, job]) => [
+        name,
+        isRecord(job)
+          ? {
+              ...job,
+              type: "actions_job",
+              needs: typeof job.needs === "string" ? [job.needs] : job.needs,
+            }
+          : { type: "actions_job" },
+      ]),
+    );
+    return {
+      document,
+      value: {
+        ...value,
+        name: String(value.name || "Workflow"),
+        nodes: jobs,
+      } as unknown as WorkflowValue,
+      errors: [],
+    };
   }
   if (!isRecord(value) || !isRecord(value.nodes)) {
-    return { document, value: null, errors: ["The workflow must contain a nodes mapping."] };
+    return {
+      document,
+      value: null,
+      errors: ["The workflow must contain a nodes mapping."],
+    };
   }
   return { document, value: value as unknown as WorkflowValue, errors: [] };
 }
@@ -123,28 +152,54 @@ export function flowElements(
       kind: definition.type,
       status: statuses.get(`root.${id}`),
     },
-    className: statuses.get(`root.${id}`) ? `node-status-${statuses.get(`root.${id}`)}` : "",
+    className: statuses.get(`root.${id}`)
+      ? `node-status-${statuses.get(`root.${id}`)}`
+      : "",
   }));
   const nodeIds = new Set(entries.map(([id]) => id));
   const edges: Edge[] = entries.flatMap(([target, definition]) =>
     (definition.needs ?? [])
       .filter((source) => nodeIds.has(source))
-      .map((source) => ({ id: `${source}-${target}`, source, target, animated: true })),
+      .map((source) => ({
+        id: `${source}-${target}`,
+        source,
+        target,
+        animated: true,
+      })),
   );
   for (const [source, definition] of entries) {
     const branches = isRecord(definition.branches) ? definition.branches : {};
     for (const [label, target] of Object.entries(branches)) {
-      if (typeof target === "string" && nodeIds.has(target)) edges.push({ id: `branch:${source}:${target}`, source, target, label, type: "smoothstep", animated: false });
+      if (typeof target === "string" && nodeIds.has(target))
+        edges.push({
+          id: `branch:${source}:${target}`,
+          source,
+          target,
+          label,
+          type: "smoothstep",
+          animated: false,
+        });
     }
     for (const field of ["on_timeout", "exhausted"]) {
       const target = definition[field];
-      if (typeof target === "string" && nodeIds.has(target)) edges.push({ id: `${field}:${source}:${target}`, source, target, label: field === "on_timeout" ? "Time limit" : "Iteration limit", type: "smoothstep", animated: false });
+      if (typeof target === "string" && nodeIds.has(target))
+        edges.push({
+          id: `${field}:${source}:${target}`,
+          source,
+          target,
+          label: field === "on_timeout" ? "Time limit" : "Iteration limit",
+          type: "smoothstep",
+          animated: false,
+        });
     }
   }
   return { nodes: arrangeGraph(nodes, edges), edges };
 }
 
-export function nextNodeId(value: WorkflowValue | null, prefix = "node"): string {
+export function nextNodeId(
+  value: WorkflowValue | null,
+  prefix = "node",
+): string {
   // Existing IDs "node", "node_2" -> "node_3"; an empty map -> "node".
   const ids = new Set(Object.keys(value?.nodes ?? {}));
   if (!ids.has(prefix)) return prefix;
@@ -160,12 +215,16 @@ export function nodeDefaults(type: string): WorkflowNodeValue {
     case "human_wait":
       return { type, prompt: "Continue?" };
     case "condition":
-      return { type, expr: "${{ \"true\" }}", branches: { true: "" } };
+      return { type, expr: '${{ "true" }}', branches: { true: "" } };
     case "loop":
       return { type, body: {}, max_iterations: 1, exhausted: "" };
     case "subworkflow":
       return { type, workflow: "workflow" };
     default:
-      return { type: "command", writes: false, run: ["git", "status", "--short"] };
+      return {
+        type: "command",
+        writes: false,
+        run: ["git", "status", "--short"],
+      };
   }
 }

@@ -3,6 +3,7 @@ import {
   Controls,
   getNodesBounds,
   type Edge,
+  type Connection,
   MiniMap,
   type Node,
   type NodeMouseHandler,
@@ -12,14 +13,18 @@ import {
   useNodesInitialized,
   useReactFlow,
 } from "@xyflow/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
 
 import { RunGraphNode } from "./RunGraphNode";
+import { EditorGraphNode } from "./EditorGraphNode";
+import { InsertJobEdge } from "./InsertJobEdge";
 
 import type { WorkflowNodeData } from "../workflow";
 
 const RUN_NODE_TYPES = { runJob: RunGraphNode };
+const EDITOR_NODE_TYPES = { editorJob: EditorGraphNode };
+const EDITOR_EDGE_TYPES = { insertJob: InsertJobEdge };
 
 interface FlowCanvasProps {
   runMode?: boolean;
@@ -30,22 +35,44 @@ interface FlowCanvasProps {
   followSelection?: boolean;
   focusRequest?: number;
   initialFocusId?: string | null;
+  onConnect?: (connection: Connection) => void;
+  onDeleteNodes?: (nodes: Node[]) => void;
+  onDeleteEdges?: (edges: Edge[]) => void;
+  onContextMenu?: (id: string, x: number, y: number) => void;
 }
 
-function FocusStep({ selectedId, focusRequest }: { selectedId?: string | null; focusRequest: number }) {
+function FocusStep({
+  selectedId,
+  focusRequest,
+}: {
+  selectedId?: string | null;
+  focusRequest: number;
+}) {
   const initialized = useNodesInitialized();
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (initialized && selectedId) void fitView({ nodes: [{ id: selectedId }], padding: 0.6, minZoom: 0.8, maxZoom: 1 });
+    if (initialized && selectedId)
+      void fitView({
+        nodes: [{ id: selectedId }],
+        padding: 0.6,
+        minZoom: 0.25,
+        maxZoom: 1,
+      });
   }, [initialized, selectedId, focusRequest, fitView]);
   return null;
 }
 
-function InitialRunViewport({ container }: { container: RefObject<HTMLDivElement | null> }) {
+function InitialViewport({
+  container,
+  runMode,
+}: {
+  container: RefObject<HTMLDivElement | null>;
+  runMode: boolean;
+}) {
   const initialized = useNodesInitialized();
   const positioned = useRef(false);
   const { getNodes, fitView, setViewport } = useReactFlow();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!initialized || positioned.current || !container.current) return;
     const nodes = getNodes();
     const first = nodes[0];
@@ -53,18 +80,48 @@ function InitialRunViewport({ container }: { container: RefObject<HTMLDivElement
     positioned.current = true;
     const bounds = getNodesBounds(nodes);
     const available = container.current;
-    const zoom = Math.min(available.clientWidth / (bounds.width * 1.4), available.clientHeight / (bounds.height * 1.4));
-    if (zoom < 0.65) {
-      void setViewport({ x: 24 - first.position.x * 0.8, y: 24 - first.position.y * 0.8, zoom: 0.8 });
+    const zoom = Math.min(
+      available.clientWidth / (bounds.width * 1.4),
+      available.clientHeight / (bounds.height * 1.4),
+    );
+    const ready = () => available.setAttribute("data-viewport-ready", "true");
+    if (runMode && zoom < 0.65) {
+      void setViewport(
+        {
+          x: 24 - first.position.x * 0.8,
+          y: 24 - first.position.y * 0.8,
+          zoom: 0.8,
+        },
+        { duration: 0 },
+      ).then(ready);
     } else {
-      void fitView({ padding: 0.2, minZoom: 0.65, maxZoom: 1 });
+      void fitView({
+        padding: runMode ? 0.2 : 0.1,
+        minZoom: 0.25,
+        maxZoom: 1,
+        duration: 0,
+      }).then(ready);
     }
-  }, [initialized, container, getNodes, fitView, setViewport]);
+  }, [initialized, container, runMode, getNodes, fitView, setViewport]);
   return null;
 }
 
-export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect, followSelection = false, focusRequest = 0, initialFocusId }: FlowCanvasProps) {
+export function FlowCanvas({
+  runMode = false,
+  nodes,
+  edges,
+  selectedId,
+  onSelect,
+  followSelection = false,
+  focusRequest = 0,
+  initialFocusId,
+  onConnect,
+  onDeleteEdges,
+  onDeleteNodes,
+  onContextMenu,
+}: FlowCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
+  const lastConnection = useRef(0);
   const [visibleNodes, setNodes, onNodesChange] = useNodesState(nodes);
   const [visibleEdges, setEdges, onEdgesChange] = useEdgesState(edges);
 
@@ -76,8 +133,15 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
         // A status refresh keeps the same renderer and its measured handles.
         // ResizeObserver reports actual size changes; clearing measurements
         // can hide edges when the node's size has not changed.
-        measured: node.measured ?? (previous.get(node.id)?.type === node.type ? previous.get(node.id)?.measured : undefined),
-        position: followSelection || runMode ? node.position : previous.get(node.id)?.position ?? node.position,
+        measured:
+          node.measured ??
+          (previous.get(node.id)?.type === node.type
+            ? previous.get(node.id)?.measured
+            : undefined),
+        position:
+          followSelection || runMode
+            ? node.position
+            : (previous.get(node.id)?.position ?? node.position),
         selected: node.id === selectedId,
       }));
     });
@@ -85,38 +149,101 @@ export function FlowCanvas({ runMode = false, nodes, edges, selectedId, onSelect
 
   useEffect(() => setEdges(edges), [edges, setEdges]);
 
-  const selectNode: NodeMouseHandler = (_event, node) => onSelect?.(node.id);
+  const selectNode: NodeMouseHandler = (_event, node) => {
+    if (performance.now() - lastConnection.current > 300) onSelect?.(node.id);
+  };
 
   return (
-    <div ref={container} className="flow-canvas" onKeyDown={runMode ? (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const target = event.target;
-      if (!(target instanceof HTMLElement) || !target.classList.contains("react-flow__node")) return;
-      const id = target.dataset.id;
-      if (id) { event.preventDefault(); onSelect?.(id); }
-    } : undefined}>
+    <div
+      ref={container}
+      data-viewport-ready="false"
+      role="application"
+      aria-label={
+        runMode ? "Read-only workflow graph" : "Workflow graph editor"
+      }
+      className="flow-canvas"
+      onKeyDownCapture={
+        runMode
+          ? (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              const target = event.target;
+              if (
+                !(target instanceof HTMLElement) ||
+                !target.classList.contains("react-flow__node")
+              )
+                return;
+              const id = target.dataset.id;
+              if (id) {
+                event.preventDefault();
+                onSelect?.(id);
+              }
+            }
+          : undefined
+      }
+    >
       <ReactFlow
         nodes={visibleNodes}
         edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={selectNode}
-        nodeTypes={runMode ? RUN_NODE_TYPES : undefined}
+        onConnect={runMode ? undefined : onConnect}
+        onConnectEnd={() => {
+          lastConnection.current = performance.now();
+        }}
+        onNodesDelete={runMode ? undefined : onDeleteNodes}
+        onEdgesDelete={runMode ? undefined : onDeleteEdges}
+        onNodeContextMenu={
+          runMode
+            ? undefined
+            : (event, node) => {
+                if (onContextMenu) {
+                  event.preventDefault();
+                  onContextMenu(node.id, event.clientX, event.clientY);
+                }
+              }
+        }
+        nodeTypes={runMode ? RUN_NODE_TYPES : EDITOR_NODE_TYPES}
+        edgeTypes={runMode ? undefined : EDITOR_EDGE_TYPES}
+        nodesConnectable={!runMode}
+        edgesFocusable={!runMode}
+        deleteKeyCode={runMode ? null : ["Backspace", "Delete"]}
+        ariaLabelConfig={
+          runMode
+            ? {
+                "node.a11yDescription.default": "Press Enter to open this job.",
+                "node.a11yDescription.keyboardDisabled":
+                  "Press Enter to open this job.",
+                "edge.a11yDescription.default": "Job dependency. Read-only.",
+                "controls.interactive.ariaLabel": "Read-only graph",
+              }
+            : undefined
+        }
         nodesDraggable={!runMode}
-        zoomOnScroll={!runMode}
-        preventScrolling={!runMode}
+        zoomOnScroll={false}
+        zoomActivationKeyCode={["Meta", "Control"]}
+        preventScrolling={false}
         panOnScroll={false}
         zoomOnDoubleClick={!runMode}
-        fitViewOptions={runMode ? { padding: 0.2, minZoom: 0.65, maxZoom: 1 } : undefined}
-        fitView={!runMode}
+        fitViewOptions={
+          runMode ? { padding: 0.2, minZoom: 0.25, maxZoom: 1 } : undefined
+        }
         minZoom={0.25}
         maxZoom={1.75}
       >
-        {runMode && <InitialRunViewport container={container} />}
+        <InitialViewport container={container} runMode={runMode} />
         {/* Authoring can focus a stage while retaining manually dragged positions. */}
-        {(followSelection || initialFocusId) && <FocusStep selectedId={selectedId ?? initialFocusId} focusRequest={focusRequest} />}
-        {!runMode && <MiniMap pannable zoomable />}
-        <Controls position={runMode ? "bottom-right" : "bottom-left"} showInteractive={!runMode} />
+        {(followSelection || initialFocusId) && (
+          <FocusStep
+            selectedId={selectedId ?? initialFocusId}
+            focusRequest={focusRequest}
+          />
+        )}
+        {!runMode && nodes.length > 5 && <MiniMap pannable zoomable />}
+        <Controls
+          position={runMode ? "bottom-right" : "bottom-left"}
+          showInteractive={!runMode}
+        />
         {!runMode && <Background gap={20} size={1} />}
       </ReactFlow>
     </div>

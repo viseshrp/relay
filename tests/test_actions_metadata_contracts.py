@@ -1,7 +1,6 @@
 """Local action metadata is validated before source freezing or Node execution."""
 
 from io import StringIO
-from typing import Any
 
 import pytest
 from ruamel.yaml import YAML
@@ -9,7 +8,7 @@ from ruamel.yaml import YAML
 from relay.errors import WorkflowValidationError
 from relay.workflows.actions.metadata import load_action, validate_action_inputs
 
-BASE: dict[str, Any] = {
+BASE: dict[str, object] = {
     "name": "Local",
     "description": "Metadata",
     "runs": {"using": "node20", "main": "main.js"},
@@ -26,8 +25,7 @@ BASE: dict[str, Any] = {
         {"inputs": {"value": {"description": "Value", "required": "true"}}},
         {"inputs": {"value": {"description": "Value", "default": 1}}},
         {"inputs": {"value": {"required": False}}},
-        {"branding": {"unsupported": "value"}},
-        {"branding": {"icon": 1}},
+        {"branding": {"icon": "activity", "color": "blue"}},
         {"runs": {"using": "composite", "unknown": True, "steps": []}},
         {"runs": {"using": "composite", "steps": []}},
         {"runs": {"using": "composite", "steps": [{"run": "echo"}]}},
@@ -42,7 +40,7 @@ BASE: dict[str, Any] = {
     ],
 )
 def test_invalid_metadata_rejects_unsupported_or_incomplete_contracts(
-    change: dict[str, Any],
+    change: dict[str, object],
 ) -> None:
     stream = StringIO()
     YAML().dump({**BASE, **change}, stream)

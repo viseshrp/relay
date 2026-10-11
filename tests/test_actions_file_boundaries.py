@@ -140,3 +140,19 @@ def test_unavailable_explicit_shell_fails_without_fallback(
     monkeypatch.setattr(action_files.shutil, "which", lambda name: None)
     with pytest.raises(NodeExecutionError, match="not installed"):
         action_files.shell_script(tmp_path, "ready", "bash")
+
+
+@pytest.mark.parametrize("shell", [None, "bash", "sh", "pwsh", "powershell", "cmd", "python"])
+def test_browser_script_preview_uses_the_execution_argument_planner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str | None
+) -> None:
+    monkeypatch.setattr(action_files.shutil, "which", lambda name: sys.executable)
+    preview = action_files.script_previews()[shell or "default"]
+    assert isinstance(preview, dict)
+    assert preview["installed"] is True
+    arguments = preview["argv"]
+    assert isinstance(arguments, list)
+    argv = action_files.shell_script(tmp_path, "quoted = '王秀英'\n", shell)
+    assert argv == [
+        str(argument).replace("<private attempt>", str(tmp_path)) for argument in arguments
+    ]

@@ -23,7 +23,7 @@ from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import CleanupPolicy, RunStatus
 from relay.owner_settings import effective_config
-from relay.projects.folders import browse_folders
+from relay.projects.folders import browse_folders, common_repositories, inspect_folder
 from relay.projects.service import list_registered_projects, project_launch_source
 from relay.workflows.editor import (
     list_workflow_documents,
@@ -101,6 +101,15 @@ def project_folders(request: HttpRequest) -> HttpResponse:
         request.GET.get("path"), since=request.GET.get("since", ""), limit=_page_limit(request)
     )
     return JsonResponse(asdict(listing))
+
+
+@api_errors
+@owner_required
+@require_GET
+def project_candidates(request: HttpRequest) -> HttpResponse:
+    if request.GET.get("path"):
+        return JsonResponse(inspect_folder(request.GET["path"]))
+    return JsonResponse({"repositories": [asdict(entry) for entry in common_repositories()]})
 
 
 @api_errors
@@ -197,8 +206,15 @@ def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
 @require_GET
 def workflows(request: HttpRequest) -> HttpResponse:
     relay_root, project = current_project(request)
+    metadata = DjangoWorkflowStore().workflow_metadata(project.id)
     return JsonResponse(
-        {"workflows": list_workflow_documents(relay_root), "project": asdict(project)}
+        {
+            "workflows": [
+                {**item, **metadata.get(item["key"], {})}
+                for item in list_workflow_documents(relay_root)
+            ],
+            "project": asdict(project),
+        }
     )
 
 
@@ -390,6 +406,7 @@ def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
         scope_path=request.GET.get("job"),
         attempt_number=_attempt_parameter(request),
         latest=request.GET.get("latest") == "true",
+        summary=request.GET.get("summary") == "true",
         before=_nonnegative_int(
             request.GET.get("before"), field="before", default=0, maximum=DATABASE_INTEGER_MAX
         )
@@ -432,6 +449,7 @@ def run_artifacts(request: HttpRequest, run_id: str) -> HttpResponse:
         canonical_uuid(run_id, resource="run"),
         since,
         limit,
+        visible_only=request.GET.get("visible") == "true",
     )
     return JsonResponse({"artifacts": artifacts, "next": next_value})
 
@@ -445,6 +463,23 @@ def artifact(request: HttpRequest, artifact_id: str) -> FileResponse:
         canonical_record_id(artifact_id, resource="artifact")
     )
     return FileResponse(path.open("rb"), as_attachment=True, filename=name, content_type=media_type)
+
+
+@api_errors
+@owner_required
+@require_GET
+def artifact_archive(request: HttpRequest, run_id: str) -> FileResponse:
+    from ..artifact_downloads import run_artifact_archive
+
+    del request
+    run_id = canonical_uuid(run_id, resource="run")
+    archive = run_artifact_archive(run_id)
+    return FileResponse(
+        archive,
+        as_attachment=True,
+        filename=f"relay-{run_id}-artifacts.zip",
+        content_type="application/zip",
+    )
 
 
 @api_errors

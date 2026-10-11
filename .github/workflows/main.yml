@@ -2,6 +2,11 @@ name: Main
 
 on:
   workflow_dispatch:
+    inputs:
+      refresh_visual_baselines:
+        description: Generate Linux visual baselines for review
+        type: boolean
+        default: false
   pull_request:
   push:
     tags:
@@ -19,6 +24,7 @@ env:
 
 jobs:
   quality:
+    if: inputs.refresh_visual_baselines != true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -36,10 +42,21 @@ jobs:
       - name: Set up Python + Environment
         uses: ./.github/actions/setup-python-env
 
+      - name: Set up Node for frontend quality checks
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
       - name: Run code quality checks
         run: make check
 
   tests:
+    if: inputs.refresh_visual_baselines != true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -136,6 +153,22 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
+
+      - name: Generate Linux visual baselines for review
+        if: inputs.refresh_visual_baselines == true
+        run: |
+          npm --prefix frontend run build
+          cd frontend
+          npx playwright test --config playwright.visual.config.ts --update-snapshots --grep 'visual .* at'
+
+      - name: Retain generated Linux visual baselines
+        if: inputs.refresh_visual_baselines == true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: linux-visual-baselines
+          path: frontend/e2e/baselines/linux/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Run browser tests against the isolated Relay server
         run: make test-frontend

@@ -46,7 +46,7 @@ check-dev-version:
 	fi
 
 .PHONY: check
-check: ## Run all code quality checks
+check: check-frontend ## Run all code quality checks
 	@echo "🚀 Checking lock file consistency"
 	@if [ -f uv.lock ]; then \
 		uv lock --locked; \
@@ -55,6 +55,11 @@ check: ## Run all code quality checks
 	fi
 	@echo "🚀 Running pre-commit hooks"
 	uv run pre-commit run --all-files
+
+.PHONY: check-frontend
+check-frontend: ## Check frontend hooks, accessibility, and formatting
+	npm --prefix frontend run lint
+	npm --prefix frontend run format:check
 
 .PHONY: test
 test: ## Run tests using tox

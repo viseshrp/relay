@@ -124,8 +124,19 @@ def test_independent_issues_are_reported_together(tmp_path: Path) -> None:
     with pytest.raises(WorkflowValidationError) as caught:
         _validate(root)
 
-    # Ten independent defects each add at least one listed issue to the single error.
-    assert caught.value.message.count("\n- ") >= 10
+    for defect in (
+        "RE2-compatible",
+        "Scope node id",
+        "unknown node 'ghost'",
+        "unknown input 'nothing'",
+        "dependency cycle detected at root",
+        "unknown node 'nope'",
+        "unknown input 'extra'",
+        "requires input 'target'",
+        "unknown child output 'check.absent'",
+        "prompts/missing.md",
+    ):
+        assert defect in caught.value.message
 
 
 def test_the_expansion_limit_counts_nested_loops_and_children(tmp_path: Path) -> None:

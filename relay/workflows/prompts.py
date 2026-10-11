@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
-from hashlib import sha256
 from pathlib import Path
 
 from relay.errors import PathSafetyError, PromptResolutionError
 from relay.paths import global_prompts_dir, safe_resolve
 
 from .schema import ActionsJobNode, AgentNode, GlobalPrompt, LocalPrompt, LoopNode, NodeDefinition
+from .source_text import read_source
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,12 +61,11 @@ def resolve_prompt(reference: LocalPrompt | GlobalPrompt, relay_root: Path) -> R
             next_action="Create the prompt file or correct the workflow reference.",
         )
     try:
-        content = path.read_text(encoding="utf-8")
+        document = read_source(path)
     except (OSError, UnicodeError):
         message = f"{source.capitalize()} prompt {value!r} could not be read as UTF-8."
         raise PromptResolutionError(message, context={"workflow": str(relay_root)}) from None
-    digest = sha256(content.encode("utf-8")).hexdigest()
-    return ResolvedPrompt(source, value, str(path), content, digest)
+    return ResolvedPrompt(source, value, str(path), document.raw_text, document.base_hash)
 
 
 __all__ = ["ResolvedPrompt", "iter_agent_nodes", "resolve_prompt"]

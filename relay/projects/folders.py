@@ -87,3 +87,45 @@ def browse_folders(
         folders,
         folders[-1].name if more and folders else None,
     )
+
+
+def inspect_folder(path: str) -> dict[str, object]:
+    """Validate a candidate under the same boundary as the folder browser."""
+    from relay.vcs.git import run_git
+
+    directory = Path(browse_folders(path, limit=1).path)
+    result = run_git(directory, ["rev-parse", "--show-toplevel"], check=False)
+    repository = result.returncode == 0
+    return {
+        "path": str(directory),
+        "repository": repository,
+        "git_root": result.stdout.strip() if repository else None,
+        "message": "Git repository ready to open."
+        if repository
+        else "This folder is not a Git repository. Initialize Git here to open it.",
+    }
+
+
+def initialize_git_folder(path: str) -> dict[str, object]:
+    """Initialize Git only after an explicit owner action, preserving existing files."""
+    from relay.vcs.git import run_git
+
+    candidate = inspect_folder(path)
+    if not candidate["repository"]:
+        run_git(Path(str(candidate["path"])), ["init"])
+    return inspect_folder(path)
+
+
+def common_repositories() -> list[FolderEntry]:
+    """Discover at most 100 immediate repositories in common development folders."""
+    root = _home_directory().resolve()
+    found: dict[str, FolderEntry] = {}
+    for relative in ("Documents/GitHub", "GitHub", "Code", "Projects", "Developer", "src"):
+        try:
+            listing = browse_folders(str(root / relative), limit=25)
+        except (ConfigError, PathSafetyError, OSError):
+            continue
+        for entry in listing.folders:
+            if entry.repository and len(found) < 100:
+                found[entry.path] = entry
+    return sorted(found.values(), key=lambda entry: (entry.name.casefold(), entry.path))

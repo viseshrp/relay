@@ -99,6 +99,9 @@ exclude = ["relay/static/**"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "docs/getting-started.md",
+  "docs/coming-from-github-actions.md",
+  "docs/keyboard-shortcuts.md",
   "relay/**",
   "frontend/**",
   "hatch_build.py",
@@ -106,7 +109,13 @@ include = [
   "LICENSE",
   "CHANGELOG.md",
 ]
-exclude = ["certification/**"]
+exclude = [
+  "certification/**",
+  "frontend/node_modules/**",
+  "frontend/test-results/**",
+  "frontend/playwright-report/**",
+  "relay/static/**",
+]
 
 [tool.hatch.build.hooks.custom]
 

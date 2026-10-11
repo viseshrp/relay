@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -24,7 +24,7 @@ from relay.vcs.cleanliness import require_launch_clean
 from relay.vcs.commits import current_head
 from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
-from relay.workflows.defaults import WorkflowDefaults, apply_workflow_defaults
+from relay.workflows.defaults import apply_workflow_defaults
 from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
@@ -32,28 +32,13 @@ from relay.workflows.scope import parse_scope_path
 from relay.workflows.snapshot import SnapshotBundle, build_snapshot
 from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
+from .launch_request import FrozenLaunchBindings, LaunchRequest
 from .preflight import launch_source_files, load_launch_workflow
 from .scheduler import SchedulingStore, dispatch_ready_nodes
 from .state import CleanupPolicy
 
 _HASH_CHUNK_BYTES = 1024 * 1024
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class LaunchRequest:
-    """Owner-selected values accepted by the browser launch surface."""
-
-    workflow_key: str
-    inputs: Mapping[str, object]
-    model: str | None
-    cleanup_policy: str
-    entry_point: str | None
-    owner_agents: Sequence[str]
-    launcher: str
-    source_branch: str | None = None
-    defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
-    event_context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +50,9 @@ class LaunchResult:
 
 class LaunchStore(SchedulingStore, AgentObservationStore, Protocol):
     """Persistence boundary needed by the launch transaction sequence."""
+
+    def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
+        """Capture variables, secret references, and environment approval settings."""
 
     def replace_model_observations(
         self,
@@ -204,80 +192,86 @@ def launch_workflow(
     enqueue: Callable[[str], object],
 ) -> LaunchResult:
     """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
-    workflow = load_launch_workflow(relay_root, request.workflow_key)
-    actions_context = {}
-    if workflow.root.definition.actions:
-        from relay.web.actions_bindings import freeze_bindings
-        from relay.workflows.actions.compiler import bind_routes, validate_commands
-        from relay.workflows.actions.language import resolve_inputs as actions_inputs
-        from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
+    from relay.workflows.source_bundle import source_lock
 
-        actions_context = freeze_bindings(project_id)
-        from relay.workflows.schema import ActionsJobNode
+    with source_lock(relay_root):
+        workflow = load_launch_workflow(relay_root, request.workflow_key)
+        actions_context: dict[str, object] = {}
+        if workflow.root.definition.actions:
+            from relay.workflows.actions.compiler import bind_routes, validate_commands
+            from relay.workflows.actions.language import resolve_inputs as actions_inputs
+            from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
 
-        node = next(iter(workflow.root.definition.nodes.values()))
-        if isinstance(node, ActionsJobNode):
-            validate_commands(
-                workflow.root.definition.actions, node.sources, request.defaults.commands
+            bindings = store.freeze_launch_bindings(project_id)
+            actions_context.update(bindings)
+            from relay.workflows.schema import ActionsJobNode
+
+            node = next(iter(workflow.root.definition.nodes.values()))
+            if isinstance(node, ActionsJobNode):
+                validate_commands(
+                    workflow.root.definition.actions, node.sources, request.defaults.commands
+                )
+            typed_inputs = actions_inputs(
+                workflow.root.definition.actions,
+                request.inputs,
+                environments=tuple(bindings["environments"]),
             )
-        typed_inputs = actions_inputs(
-            workflow.root.definition.actions,
-            request.inputs,
-            environments=tuple(actions_context["environments"]),
-        )
-        source = project_launch_source(relay_root.parent)
-        actions_context["relay"] = {
-            "workflow": workflow.root.definition.name,
-            "workflow_ref": request.workflow_key,
-            "actor": request.launcher,
-            "repository": relay_root.parent.name,
-            "event_name": "workflow_dispatch",
-            "ref": f"refs/heads/{source.branch}" if source.branch else "",
-            "ref_name": source.branch or "",
-            "ref_type": "branch" if source.branch else "",
-            "sha": source.commit,
-            "event": {"inputs": typed_inputs},
-            **request.event_context,
-        }
-        if request.event_context.get("event_name") == "push" and (
-            request.event_context.get("sha") != source.commit
-            or (
-                not str(request.event_context.get("ref", "")).startswith("refs/tags/")
-                and request.event_context.get("ref") != f"refs/heads/{source.branch}"
-            )
-        ):
-            message = "The observed Git ref is not the current owner checkout source."
-            raise WorkflowValidationError(message)
-        from relay.workflows.actions import expressions
+            source = project_launch_source(relay_root.parent)
+            actions_context["relay"] = {
+                "workflow": workflow.root.definition.name,
+                "workflow_ref": request.workflow_key,
+                "actor": request.launcher,
+                "repository": relay_root.parent.name,
+                "event_name": "workflow_dispatch",
+                "ref": f"refs/heads/{source.branch}" if source.branch else "",
+                "ref_name": source.branch or "",
+                "ref_type": "branch" if source.branch else "",
+                "sha": source.commit,
+                "event": {"inputs": typed_inputs},
+                **request.event_context,
+            }
+            if request.event_context.get("event_name") == "push" and (
+                request.event_context.get("sha") != source.commit
+                or (
+                    not str(request.event_context.get("ref", "")).startswith("refs/tags/")
+                    and request.event_context.get("ref") != f"refs/heads/{source.branch}"
+                )
+            ):
+                message = "The observed Git ref is not the current owner checkout source."
+                raise WorkflowValidationError(message)
+            from relay.workflows.actions import expressions
 
-        actions_context["run_name"] = expressions.string(
-            expressions.interpolate(
-                workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
+            actions_context["run_name"] = expressions.string(
+                expressions.interpolate(
+                    workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
+                    {
+                        "relay": actions_context["relay"],
+                        "inputs": typed_inputs,
+                        "vars": actions_context["vars"],
+                    },
+                )
+            )
+            from relay.workflows.titles import truncate_run_title
+
+            actions_context["run_name"] = truncate_run_title(str(actions_context["run_name"]))
+            workflow = bind_routes(
+                workflow,
                 {
-                    "relay": actions_context["relay"],
                     "inputs": typed_inputs,
                     "vars": actions_context["vars"],
+                    "relay": actions_context["relay"],
                 },
             )
-        )
-        workflow = bind_routes(
-            workflow,
-            {
-                "inputs": typed_inputs,
-                "vars": actions_context["vars"],
-                "relay": actions_context["relay"],
-            },
-        )
-        workflow = replace(
-            workflow,
-            prompts=tuple(
-                resolve_prompt(reference, relay_root)
-                for agent in iter_agent_nodes(workflow.root.definition.nodes)
-                for reference in agent.prompts
-            ),
-        )
-    else:
-        typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
+            workflow = replace(
+                workflow,
+                prompts=tuple(
+                    resolve_prompt(reference, relay_root)
+                    for agent in iter_agent_nodes(workflow.root.definition.nodes)
+                    for reference in agent.prompts
+                ),
+            )
+        else:
+            typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
     workflow = apply_workflow_defaults(
         workflow, request.defaults, tuple(request.owner_agents), request.model
     )

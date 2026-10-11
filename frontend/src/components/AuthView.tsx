@@ -1,8 +1,17 @@
-import { Alert, Box, Button, Paper, Stack, TextField, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 import { type FormEvent, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import type { AuthState } from "../types";
+type ReadResponse1 = { authenticated: boolean; username: string };
 
 interface AuthViewProps {
   state: AuthState;
@@ -20,8 +29,10 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
     setBusy(true);
     setError(null);
     try {
-      const path = state.owner_created ? "/api/auth/login" : "/api/auth/onboard";
-      await api<{ authenticated: boolean; username: string }>(path, {
+      const path = state.owner_created
+        ? "/api/auth/login"
+        : "/api/auth/onboard";
+      await api<ReadResponse1>(path, {
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
@@ -35,10 +46,17 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
 
   return (
     <Box className="auth-shell">
-      <Paper component="form" onSubmit={submit} className="auth-card" elevation={8}>
+      <Paper
+        component="form"
+        onSubmit={submit}
+        className="auth-card"
+        elevation={8}
+      >
         <Stack spacing={3}>
           <Box>
-            <Typography variant="h4" sx={{ fontWeight: 760 }}>Relay</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 760 }}>
+              Relay
+            </Typography>
             <Typography color="text.secondary">
               {state.owner_created
                 ? "Sign in to Relay on this computer."
@@ -59,15 +77,21 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            autoComplete={state.owner_created ? "current-password" : "new-password"}
+            autoComplete={
+              state.owner_created ? "current-password" : "new-password"
+            }
             required
           />
           {!state.owner_created && (
             <Box>
-              <Typography variant="body2">Choose a password that follows these rules:</Typography>
+              <Typography variant="body2">
+                Choose a password that follows these rules:
+              </Typography>
               <Box component="ul" sx={{ pl: 3, my: 1 }}>
                 {(state.password_rules ?? []).map((rule) => (
-                  <Typography component="li" variant="body2" key={rule}>{rule}</Typography>
+                  <Typography component="li" variant="body2" key={rule}>
+                    {rule}
+                  </Typography>
                 ))}
               </Box>
               <Typography variant="body2" color="text.secondary">
@@ -75,8 +99,17 @@ export function AuthView({ state, onAuthenticated }: AuthViewProps) {
               </Typography>
             </Box>
           )}
-          <Button type="submit" variant="contained" size="large" disabled={busy}>
-            {busy ? "Working…" : state.owner_created ? "Sign in" : "Create password"}
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            disabled={busy}
+          >
+            {busy
+              ? "Working…"
+              : state.owner_created
+                ? "Sign in"
+                : "Create password"}
           </Button>
         </Stack>
       </Paper>

@@ -12,17 +12,10 @@ from relay.errors import ConfigError
 from relay.execution.masking import redactor
 from relay.execution.native_credentials import credential
 
-from .models import WorkflowBinding, WorkflowEnvironment
+from .binding_snapshots import freeze_bindings, scopes
+from .models import WorkflowBinding
 
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def scopes(project_id: str, environment: str | None = None) -> tuple[str, ...]:
-    return (
-        "installation",
-        f"project:{project_id}",
-        *((f"environment:{project_id}:{environment}",) if environment else ()),
-    )
 
 
 def put_binding(
@@ -67,55 +60,6 @@ def put_binding(
         kind=kind,
         defaults={"value": value, "source": source, "reference": reference, "revision": revision},
     )
-
-
-def freeze_bindings(project_id: str) -> dict[str, Any]:
-    allowed = [
-        *scopes(project_id),
-        *(
-            f"environment:{project_id}:{name}"
-            for name in WorkflowEnvironment.objects.filter(project_id=project_id).values_list(
-                "name", flat=True
-            )
-        ),
-    ]
-    variables: dict[str, str] = {}
-    secret_refs: dict[str, Any] = {}
-    environment_bindings: dict[str, Any] = {}
-    rows = list(
-        WorkflowBinding.objects.filter(scope__in=allowed).values(
-            "scope", "name", "kind", "value", "source", "reference", "revision"
-        )
-    )
-    for scope in allowed:
-        target: dict[str, Any] = (
-            environment_bindings.setdefault(scope.split(":", 2)[-1], {"vars": {}, "secrets": {}})
-            if scope.startswith("environment:")
-            else {"vars": variables, "secrets": secret_refs}
-        )
-        for row in rows:
-            if row["scope"] != scope:
-                continue
-            if row["kind"] == "variable":
-                target["vars"][row["name"]] = row["value"]
-            else:
-                target["secrets"][row["name"]] = {
-                    "source": row["source"],
-                    "reference": row["reference"],
-                    "revision": str(row["revision"]),
-                }
-    environments = {
-        row["name"]: {**row, "id": str(row["id"])}
-        for row in WorkflowEnvironment.objects.filter(project_id=project_id).values(
-            "id", "name", "approval_required", "wait_minutes", "branches", "url"
-        )
-    }
-    return {
-        "vars": variables,
-        "secret_refs": secret_refs,
-        "environment_bindings": environment_bindings,
-        "environments": environments,
-    }
 
 
 def resolve_secrets(
@@ -192,3 +136,6 @@ def job_secrets(
     for value in result.values():
         redactor(run_id).register(value)
     return result
+
+
+__all__ = ["freeze_bindings", "job_secrets", "put_binding", "resolve_secrets", "scopes"]

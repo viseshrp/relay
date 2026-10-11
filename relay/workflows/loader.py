@@ -15,6 +15,7 @@ from relay.paths import safe_resolve
 
 from .repairs import compile_repairs
 from .schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
+from .source_text import read_source
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +47,7 @@ def load_workflow(path: Path) -> LoadedWorkflow:
     """Load one UTF-8 workflow without changing its round-trip YAML shape."""
     resolved = path.resolve()
     try:
-        text = resolved.read_text(encoding="utf-8")
+        text = read_source(resolved).raw_text
     except (OSError, UnicodeError):
         message = f"Workflow {resolved} could not be read as UTF-8."
         raise WorkflowValidationError(message, context={"workflow": str(resolved)}) from None

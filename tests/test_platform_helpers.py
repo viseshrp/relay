@@ -257,7 +257,7 @@ def test_migration_failures_are_logged_with_a_trace_and_wrapped(
         if isinstance(handler, logging.FileHandler)
     ]
     assert any(
-        "RuntimeError" in Path(handler.baseFilename).read_text(encoding="utf-8")
+        "migration exploded" in Path(handler.baseFilename).read_text(encoding="utf-8")
         for handler in handlers
     )
 

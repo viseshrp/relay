@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 import json
 from typing import NoReturn
 
@@ -11,6 +11,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.auth.models import User
 from django.core.exceptions import RequestDataTooBig
 from django.db import connection, connections
+from django.db.models.query import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.test import AsyncClient, RequestFactory, override_settings
 import pytest
@@ -80,6 +81,43 @@ def test_a_terminal_run_replays_every_event_and_ends(finished_run: str) -> None:
     assert status == 200
     assert frame_ids(chunks) == stored
     assert json.loads(chunks[0].split("data: ", 1)[1])["type"] == "run.created"
+
+
+def test_terminal_events_committed_after_an_empty_read_are_replayed(
+    finished_run: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cursor = (
+        RunEvent.objects.filter(run_id=finished_run)
+        .order_by("id")
+        .values_list("id", flat=True)
+        .last()
+    )
+    committed: list[int] = []
+    original_iterator = QuerySet.aiterator
+
+    def commit_tail() -> None:
+        for event_type in ("wait.answered", "attempt.ended", "run.succeeded"):
+            event = RunEvent.objects.create(
+                run_id=finished_run, type=event_type, source="system", payload={}
+            )
+            committed.append(event.pk)
+
+    async def complete_after_read(
+        query: QuerySet[RunEvent], chunk_size: int = 2000
+    ) -> AsyncIterator[RunEvent]:
+        async for row in original_iterator(query, chunk_size=chunk_size):
+            yield row
+        if not committed:
+            # Completion can commit between the event read and the status read.
+            await sync_to_async(commit_tail)()
+
+    monkeypatch.setattr(QuerySet, "aiterator", complete_after_read)
+
+    status, chunks, _body = stream(f"/api/runs/{finished_run}/stream?since={cursor}")
+
+    assert status == 200
+    assert len(committed) == 3
+    assert frame_ids(chunks) == committed
 
 
 @override_settings(RELAY_LOGIN_REQUIRED=False)
