@@ -99,9 +99,11 @@ def test_staged_initial_files_still_block_first_launch(
     assert not Run.objects.exists()
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_launch_preserves_owner_reports_and_snapshots_an_uncommitted_workflow(
     project: RelayProject,
     engine: InlineEngine,
+    newline: str,
 ) -> None:
     from relay.web.models import RunSnapshot
 
@@ -109,10 +111,11 @@ def test_launch_preserves_owner_reports_and_snapshots_an_uncommitted_workflow(
     report.write_text("Owner's review\n", encoding="utf-8")
     workflow = project.relay_root / "workflows" / "new.yaml"
     text = "version: 1\nname: New\nnodes:\n  check: {type: command, run: [git, status]}\n"
-    workflow.write_text(text, encoding="utf-8")
+    raw = text.replace("\n", newline).encode("utf-8")
+    workflow.write_bytes(raw)
     run_id = engine.launch(project, "new")
     engine.drain(run_id)
-    assert RunSnapshot.objects.get(run_id=run_id).workflow_yaml == text
+    assert RunSnapshot.objects.get(run_id=run_id).workflow_yaml.encode("utf-8") == raw
     assert report.read_text(encoding="utf-8") == "Owner's review\n"
     assert set(status_porcelain(project.repository)) == {
         "?? REVIEW.md",

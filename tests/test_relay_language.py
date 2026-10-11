@@ -23,6 +23,34 @@ def test_local_jobs_require_steps_and_have_no_runner_selector() -> None:
     }
 
 
+def test_local_start_points_and_recovery_compile_without_changing_job_sources() -> None:
+    from relay.workflows.actions.compiler import definition
+
+    document = load(
+        "recovery: {enabled: true, max_retries: 2}\n"
+        "entrypoints: [{scope_path: root.check}]\n"
+        "jobs: {check: {steps: [{run: echo Ready}]}}\n"
+    )
+    compiled = definition(document)
+    assert compiled.recovery.enabled and compiled.recovery.max_retries == 2
+    assert compiled.entrypoints[0].scope_path == "root.check"
+    assert compiled.actions["jobs"] == document.value["jobs"]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("name", "n" * 257),
+        ("run-name", "r" * 1001),
+        ("recovery", {"enabled": True, "max_retries": 1000}),
+        ("entrypoints", [{"scope_path": "root.missing"}]),
+    ],
+)
+def test_editor_contract_bounds_are_validated(field: str, value: object) -> None:
+    with pytest.raises(WorkflowValidationError):
+        load(source({field: value, "jobs": {"check": {"steps": [{"run": "echo Ready"}]}}}))
+
+
 @pytest.mark.parametrize(
     "selector",
     ["self-hosted", "ubuntu-latest", ["self-hosted"], {"labels": "local"}, "${{ host.os }}"],
@@ -227,3 +255,27 @@ def test_local_filters_and_queue_enums_have_exact_semantics() -> None:
     ):
         with pytest.raises(WorkflowValidationError, match="Expected one of"):
             load(header + "\njobs: {check: {steps: [{run: echo}]}}")
+
+
+@pytest.mark.parametrize(
+    "options",
+    ['["Approve","Reject"]', '["", "Approve"]', '["Same","Same"]', "[1]", '{"Approve":true}'],
+)
+def test_human_wait_answer_buttons_are_bounded(options: str) -> None:
+    value = {
+        "jobs": {
+            "main": {
+                "steps": [
+                    {
+                        "uses": "relay/human-wait@v1",
+                        "with": {"prompt": "Continue?", "options": options},
+                    }
+                ]
+            }
+        }
+    }
+    if options == '["Approve","Reject"]':
+        assert load(source(value)).value["jobs"]
+    else:
+        with pytest.raises(WorkflowValidationError, match="answer strings"):
+            load(source(value))

@@ -1,0 +1,32 @@
+name: Read a generated prompt
+description: Pass a root artifact verbatim to the next agent turn.
+inputs:
+  file:
+    description: Generated prompt filename in the run workspace root
+    required: true
+outputs:
+  prompt:
+    description: Complete generated prompt text
+    value: ${{ fromJSON(steps.read.outputs.text) }}
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: python
+      env:
+        PROMPT_FILE: ${{ inputs.file }}
+      run: |
+        import json
+        import os
+        from pathlib import Path
+
+        path = Path(os.environ['PROMPT_FILE'])
+        if path.parent != Path('.') or path.is_symlink():
+            raise SystemExit('Expected a root-level regular prompt file.')
+        prompt = path.read_bytes().decode('utf-8')
+        if not prompt.strip():
+            raise SystemExit('The generated prompt is empty.')
+        with Path(os.environ['RELAY_OUTPUT']).open(
+            'a', encoding='utf-8', newline='\n'
+        ) as out:
+            out.write('text=' + json.dumps(prompt, ensure_ascii=False) + '\n')

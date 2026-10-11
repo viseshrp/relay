@@ -1030,6 +1030,47 @@ def test_event_pages_have_a_cursor_for_remaining_history(owner: Client, finished
     assert first["events"][0]["id"] < second["events"][0]["id"]
 
 
+def test_monitor_summaries_bound_transfer_and_preserve_full_logs_and_evidence(
+    owner: Client, finished_run: str
+) -> None:
+    node = NodeRun.objects.get(run_id=finished_run, scope_path="root.a")
+    attempt = node.attempts.get()
+    text = "quoted output 王秀英\n" * 20_000
+    output = RunEvent.objects.create(
+        run_id=finished_run,
+        node_run=node,
+        attempt=attempt,
+        type="command.stdout",
+        source="node",
+        payload={"chunk": text},
+    )
+    RunEvent.objects.create(
+        run_id=finished_run,
+        node_run=node,
+        attempt=attempt,
+        type="node.failed",
+        source="node",
+        payload={"scope_path": "root.a", "status": "failed", "message": text},
+    )
+    url = f"/api/runs/{finished_run}/events?since={output.pk - 1}"
+    summary = owner.get(url + "&summary=true")
+    assert len(summary.content) < 16_384
+    assert [event["type"] for event in summary.json()["events"]] == ["node.failed"]
+    assert summary.json()["events"][0]["summary_truncated"] is True
+    full = owner.get(url + "&job=root.a&attempt=1").json()
+    assert full["events"][0]["payload"]["chunk"] == text
+    evidence = owner.get(f"/api/runs/{finished_run}/artifacts").json()["artifacts"]
+    visible = owner.get(f"/api/runs/{finished_run}/artifacts?visible=true").json()["artifacts"]
+    assert visible == [
+        item
+        for item in evidence
+        if item["preservation_state"] == "preserved"
+        and not (item["name"] == "worktree_diff" and item["bytes"] == 0)
+        and not (item["name"] in {"commits", "commits.json"} and item["bytes"] <= 3)
+    ]
+    assert Artifact.objects.filter(attempt__node_run__run_id=finished_run).count() == len(evidence)
+
+
 @pytest.mark.parametrize(
     "query",
     ["collection=edges", "since=-1", "since=x", "limit=0", f"since={DATABASE_INTEGER_MAX + 1}"],
@@ -1398,7 +1439,7 @@ def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
     assert Client().get("/api/workflow-templates").status_code == 401
     gallery = owner.get("/api/workflow-templates")
     assert gallery.status_code == 200
-    assert len(gallery.json()["templates"]) == 6
+    assert len(gallery.json()["templates"]) == 7
     created = post(
         owner,
         "/api/workflows",
@@ -1573,6 +1614,9 @@ jobs:
         )
     )
     served.write(".relay/prompts/owner.md", "Changed after launch\n")
+    monitor = owner.get(f"/api/runs/{run_id}").json()["run"]["nodes"]
+    selected = next(node for node in monitor if node["scope_path"] == "root.check.agent")
+    assert (selected["agent_id"], selected["model_value"]) == ("codex", "m1")
     for step, activity_type, display_name in (
         ("script", "command", "Named script"),
         ("command", "command", "command"),
@@ -2090,3 +2134,24 @@ def test_named_artifact_download_verifies_bytes_and_project_access(
     )
     (Path(artifact.directory) / "evidence.txt").write_text("tampered")
     assert owner.get(f"/api/workflow-artifacts/{artifact.pk}/download").status_code == 500
+
+
+def test_download_all_artifacts_verifies_every_digest(owner: Client, finished_run: str) -> None:
+    from hashlib import sha256
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    response = owner.get(f"/api/runs/{finished_run}/artifacts/download")
+    assert response.status_code == 200
+    rows = Artifact.objects.filter(attempt__node_run__run_id=finished_run)
+    with ZipFile(BytesIO(b"".join(response.streaming_content))) as archive:
+        assert len(archive.namelist()) == rows.count()
+        for row in rows:
+            name = next(name for name in archive.namelist() if f"/{row.pk}-" in name)
+            assert ".." not in name.split("/") and not name.startswith("/")
+            assert sha256(archive.read(name)).hexdigest() == row.sha256
+    first = rows.first()
+    assert first is not None
+    retained, _, _ = DjangoReadStore().artifact_file(str(first.pk))
+    retained.write_bytes(b"changed retained bytes")
+    assert owner.get(f"/api/runs/{finished_run}/artifacts/download").status_code == 400

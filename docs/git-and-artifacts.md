@@ -29,6 +29,18 @@ workflow sources without staging, stashing, or committing anything. Launch
 checks again before creating a snapshot or working copy, so a preview never
 authorizes changes made later.
 
+An unrelated untracked workflow can be committed through **Commit workflow
+files** in that panel. Relay first validates its sources and displays every
+candidate's contents. Explicit confirmation repeats the validation, checks
+the reviewed hashes and Git head, and requires an empty index. It verifies
+staged blob contents against those hashes and commits the checked index,
+so a later working-file edit cannot enter the commit. Invalid unrelated
+workflow candidates are skipped with a notice; invalid sources referenced by
+the launch still fail validation. The resulting commit contains only those
+workflow and referenced prompt paths. Root reports,
+unused prompt files, and unrelated code are excluded. This action does not
+change any launch or writer cleanliness exemption.
+
 These report exemptions apply to writing-node cleanliness too, so a report
 can be preserved and passed to the next stage without a documentation commit.
 Autonomous workflows can also leave `E2E_VERIFICATION.md`,

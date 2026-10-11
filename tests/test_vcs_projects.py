@@ -162,7 +162,7 @@ def test_a_checkout_from_another_project_cannot_be_used_for_execution(
 def test_a_writer_must_commit_its_changes(repository: Path) -> None:
     start = current_head(repository)
     (repository / "loose.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(CommitValidationError):
+    with pytest.raises(CommitValidationError, match="uncommitted"):
         validate_writer_result(repository, start)
 
 

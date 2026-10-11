@@ -43,6 +43,11 @@ jobs:
         with: {argv: '["git", "diff", "--check"]'}
 ```
 
+A literal `run-name` must contain at most 1,000 characters. A title rendered
+from expressions is shortened to that limit at a grapheme boundary with a
+trailing ellipsis when necessary. The complete input remains in the immutable
+run inputs; combining marks and joined emoji remain intact in the title.
+
 The root accepts `name`, `description`, `run-name`, `on`, `env`, `defaults`,
 `concurrency`, `cache-mode`, and `jobs`. A job accepts `name`, `needs`, `if`,
 `strategy`, `env`, `defaults`, `outputs`, `environment`, `concurrency`,
@@ -116,7 +121,8 @@ isolated run job and does not authorize staging unrelated owner changes.
 and `environment`. The browser provides typed controls and configured
 environment choices. `inputs` and the manual event payload preserve JSON
 types. Unknown supplied names and invalid defaults fail validation.
-Dispatch declarations are limited to 25 inputs.
+Input counts are bounded by the YAML size/node limits; resolved inputs must
+fit within 65,535 bytes. There is no separate hosted-service field count.
 
 `on.workflow_call.inputs` supports `string`, `boolean`, and `number`.
 `relay/validate-input@v1` provides explicit constraints: `value`, `type`, and
@@ -247,7 +253,9 @@ Copilot CLI, and Cursor CLI; Antigravity uses its native headless adapter.
 
 ## Automatic recovery
 
-The owner can enable bounded recovery in defaults or an active run's controls.
+The owner can enable bounded recovery in defaults, an active run's controls,
+or workflow `recovery: {enabled: true, max_retries: 2}`. The lifetime retry
+budget stays bounded by the existing recovery limit.
 `with.auto-retry: true` explicitly enables bounded agent repair; `false` opts
 that step out. Omission follows the run policy. Eligible report, protocol, and
 timeout failures retain rejected evidence and append a separate repair
@@ -277,7 +285,9 @@ are not silently converted to a different repair contract.
 ## Human waits
 
 `relay/human-wait@v1` accepts a rendered `prompt` and optional
-`timeout-minutes`. It creates one durable interaction on the current step
+`timeout-minutes` and `options`. Supply `options` as a JSON string array of
+1–10 distinct strings, each at most 256 characters. Omitting it allows a free
+text answer. It creates one durable interaction on the current step
 attempt and exports `steps.ID.outputs.answer`. Restart preserves that request
 and completed steps. Duplicate, stale, expired, or mismatched responses cannot
 resume another attempt.
@@ -290,7 +300,8 @@ jobs:
       - id: approval
         uses: relay/human-wait@v1
         with:
-          prompt: Review the change. Type Approved to continue.
+          prompt: Review the change and choose an answer.
+          options: '["Approved", "Request changes"]'
           timeout-minutes: 30
       - if: steps.approval.outputs.answer == 'Approved'
         run: echo Approved
@@ -505,10 +516,12 @@ provider, input, and environment gates. Delivery identities are deduplicated.
 Blocked and uncertain launches remain visible for owner review.
 
 `on.schedule` uses POSIX five-field cron, optional IANA `timezone` (UTC by
-default), and at least five minutes between occurrences. Ranges, lists, steps,
+default), and one-minute resolution. Ranges, lists, steps,
 and Sunday 0 or 7 are supported. Day-of-month/day-of-week use POSIX OR.
 Missing DST times advance to the first valid time; ambiguous folds fire once.
 Downtime coalesces the latest due occurrence instead of replaying the backlog.
+Reconciliation searches from the latest calendar time so a frequent schedule
+does not allocate all missed occurrences after downtime.
 
 <!-- relay-example: valid local-schedule -->
 ```yaml
@@ -523,12 +536,15 @@ jobs:
 
 `on.push` observes changed local branch/tag refs, without watching GitHub,
 fetching remotes, or checking out another source. `branches`, `tags`, `paths`,
-their `-ignore` forms, and ordered negative patterns filter changes. Observed
+their `-ignore` forms, and ordered negative patterns filter changes.
+Path filters apply to both branches and tags. The observed
 ref/SHA must match the launch source; other deliveries block for review.
 
 `on.repository_dispatch` accepts optional `types`. The authenticated loopback
-API accepts `event_type` up to 100 characters, at most ten `client_payload`
-properties within 65,535 bytes, and a bounded `idempotency_key`. Normal owner
+API requires a nonempty `event_type` and an object `client_payload`. The
+complete delivery payload must fit within 65,535 bytes; neither property
+count nor event-name length has a separate hosted-service limit.
+The `idempotency_key` must contain 1 to 200 characters. Normal owner
 and CSRF requirements apply in both login modes.
 
 `on.workflow_run` supports completed local runs, workflow name/key and branch
@@ -575,11 +591,39 @@ jobs:
 
 ## Starter workflows
 
-**Get started** and **Create workflow** offer six editable starters: Ask an
-agent; Plan, approve, implement; Implement and test; Review my branch; Fix
-until tests pass; and Write docs for a change. All use ordered local actions
-and typed task inputs. Implement and test also offers a test-runner choice.
-Writing starters commit at the job end. Existing owner files are never replaced.
+**Get started** and **Create workflow** preselect **AI coding workflow**.
+Enter the task once, such as `Add dark mode`. The task tells the agent what
+to build; the copied phase files tell it how to work. Choose an exact coding
+model and an advertised Claude Opus model before launch. The full starter
+needs Claude Code plus Codex, Claude Code, Copilot, or Cursor for the general
+phases. Saved model-specific effort and permission settings still apply.
+
+The full workflow includes exploration, Opus planning, plan critique and
+verification, approved implementation, branch review and fixes, the human
+walkthrough, agreed follow-up, focused tests, and an independent test audit.
+Plan, review, and test cycles each stop after three rounds. Implementation
+waits for `IMPLEMENT`; the walkthrough waits for `FOLLOWUP` or `TESTS`; the
+final test review waits for `ACCEPT`. It never merges the pull request.
+Audit findings requiring production changes, documentation, or a human
+decision stop the run for owner follow-up instead of repeating test edits.
+Questions and walkthrough decisions use native form elicitation; an agent
+without that capability must report the blocker and preserve the human gates.
+
+The ten original phase files come from
+[ai-coding-workflow](https://github.com/viseshrp/ai-coding-workflow/tree/7a0bf4ec37ab87946acb4ae5c218e433837cd9cd).
+They remain byte-exact. Two small Relay instruction files describe interaction
+and audit routing. Local reusable workflows and a composite action carry
+generated prompts verbatim into subsequent agent turns. Creation copies all
+required files under `.relay/workflows/`, `.relay/prompts/`, and
+`.relay/actions/`. The workflow includes the upstream MIT notice; the package
+also retains its license and prompt hashes. The copied files are editable.
+
+Six smaller starters remain available: Ask an agent; Plan, approve, implement;
+Implement and test; Review my branch; Fix until tests pass; and Write docs for
+a change. **Blank workflow** remains available. All starters use ordered local
+actions and typed task inputs. Implement and test also offers a test-runner
+choice. Writing starters commit at the job end. Existing owner files are
+never replaced.
 
 The owner library imports/exports bounded JSON bundles containing `yaml`,
 `sources`, and gallery `metadata` (`name`, `description`, `iconName`,
@@ -599,3 +643,29 @@ settings manage scoped variables and secret references.
 Sources are portable. Databases, claims, credentials, logs, artifacts, caches,
 private state, and worktrees stay in platform-specific installation storage.
 See [projects and storage](projects-and-storage.md) and [HTTP API](http-api.md).
+
+## Declared start points
+
+`entrypoints` declares local top-level job start points, for example
+`[{scope_path: root.check, inputs: [task]}]`. Each entry can also declare
+`artifacts`, mapping names to `{path, sha256}`. Launch verifies required
+inputs and exact retained artifact hashes before starting from that job.
+Existing scheduling rules select downstream work and preserve skipped
+upstream distinctions. **Run from here** in the editor saves a declaration
+before opening the launch panel. Workflow names allow 256 characters and
+run titles allow 1000 characters, including the resolved expression result.
+
+### Answer buttons at approval steps
+
+`relay/human-wait@v1` accepts optional `options`, a JSON list of 1–10 unique
+answer strings, each at most 256 characters. For example,
+`options: '["Approve", "Reject"]'` adds explicit answer buttons beside the
+free-text response. Clicking a button sends that exact value to the current
+interaction; it does not approve another request. The response remains available
+as `steps.<id>.outputs.answer`. The request explains whether its expiry comes
+from an approval, step, job, or default job timeout.
+
+A `relay/agent@v1` step can set `retry-limit: 1` or `retry-limit: 2` beside
+`auto-retry: true`. The limit is literal and bounded; expressions are not
+accepted. It caps the captured workflow recovery budget for that step,
+without resetting retries already used across restart or owner retry.

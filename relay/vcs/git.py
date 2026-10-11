@@ -78,13 +78,15 @@ def run_git_bytes(
     arguments: Sequence[str],
     *,
     check: bool = True,
+    input_bytes: bytes | None = None,
 ) -> GitBytesResult:
-    """Capture raw bytes when Git emits NUL-separated filesystem paths."""
+    """Exchange exact bytes with Git for paths and source content."""
     try:
         process = subprocess.run(  # noqa: S603
             _argv(repository, arguments),
             check=False,
             capture_output=True,
+            input=input_bytes,
         )
     except OSError:
         message = "Git could not be started."

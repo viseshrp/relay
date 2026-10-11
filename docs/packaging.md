@@ -46,7 +46,11 @@ the files directly from the installed package.
 The source-distribution target includes `frontend/**`, `hatch_build.py`, the
 Python package, and package metadata. In particular, it carries both
 `frontend/package.json` and `frontend/package-lock.json`. It does not run npm
-during source-distribution assembly.
+during source-distribution assembly. The three Markdown guides imported by
+`HelpGuides.tsx` also ship as build inputs so the installed browser can display
+its in-app help without fetching external documentation.
+Installed frontend dependencies, browser test reports, and generated static
+assets are excluded; the wheel hook rebuilds assets from the locked sources.
 
 Building a wheel from the resulting source distribution invokes the wheel
 hook in the unpacked source tree. This produces the same static layout as a
@@ -65,10 +69,13 @@ make check-dist
 `make build` builds the source distribution and wheel. `make check-dist` runs
 Twine metadata checks and `scripts/check_distribution_contents.py`. The
 content check requires compiled static files in the wheel, requires the
-frontend lockfile and hook in the source distribution, rejects certification
+frontend lockfile, hook, and help guides in the source distribution, rejects
+installed dependencies and generated artifacts there, rejects certification
 evidence, and rejects workflow or prompt templates outside the exact allow-list
-for the six [starter workflows](workflows.md#starter-workflows). Their twelve
-source files live under `relay/workflows/starters/` and ship in both archives.
+for the seven [starter workflows](workflows.md#starter-workflows). Approved
+sources live under `relay/workflows/starters/` and ship in both archives,
+including the full AI coding workflow's helper workflows, local action,
+original phase prompts, Relay instructions, MIT license, and provenance hashes.
 The content gate still rejects every other YAML or template path. The blank
 files created by `relay init` remain separate from these opt-in starters.
 
@@ -112,3 +119,15 @@ Wheel builds use `npm run build:dist`, which cleans the asset output before
 building. Releases therefore contain one build, without older checkout chunks.
 `npm --prefix frontend run test:build` checks publication failure and a browser
 tab loading an earlier lazy chunk after publication.
+
+Development publication keeps assets for the latest three builds so recently
+opened tabs can finish loading their chunks. Each successful entry-page swap
+records its assets before pruning older generations. Release builds contain no
+source maps or build manifests. JavaScript, CSS, HTML, and other compressible
+assets include Brotli and gzip alternatives; the static server negotiates the
+encoding while retaining the original media type and cache policy.
+
+Optional compressed companions do not trigger an asset-catalog rescan when
+absent. New original asset requests still discover newly published files and
+their companions. This keeps uncompressed font requests from delaying lazy
+modules while preserving path containment and encoding negotiation.

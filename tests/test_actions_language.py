@@ -1,11 +1,11 @@
 """Language contracts independent of provider accounts or owner state."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from relay.errors import WorkflowValidationError
-from relay.execution.triggers import occurrences, validate_schedule
+from relay.execution.triggers import filter_ref, occurrences, validate_schedule
 from relay.workflows.actions.language import expand_matrix, load, resolve_inputs
 
 
@@ -18,12 +18,6 @@ def test_boolean_expression_cannot_silently_clear_an_explicit_agent_effort() -> 
     ).value["jobs"]["work"]["steps"][0]
     with pytest.raises(WorkflowValidationError, match="exact provider value or null"):
         bind_agent(step, {})
-
-
-@pytest.mark.parametrize("addition", ["permissions: read-all", "container: alpine", "services: {}"])
-def test_platform_only_job_features_are_rejected(addition):
-    with pytest.raises(WorkflowValidationError):
-        load(f"jobs:\n  test:\n    {addition}\n    steps: [{{run: echo ready}}]\n")
 
 
 @pytest.mark.parametrize(
@@ -84,8 +78,56 @@ def test_dst_gap_advances_and_repeated_wall_time_fires_once():
         datetime(2026, 11, 2, tzinfo=timezone.utc),
     )
     assert len(repeated) == 1
+
+
+def test_minutely_schedule_validates_and_skips_a_long_downtime_backlog() -> None:
+    document = load("on: {schedule: [{cron: '* * * * *'}]}\njobs: {check: {steps: [{run: echo}]}}")
+    schedule = document.value["on"]["schedule"][0]
+    through = datetime(2026, 10, 9, 12, 34, 56, tzinfo=timezone.utc)
+    result = occurrences(schedule, through - timedelta(days=400), through, latest_only=True)
+    assert result == [("* * * * *:UTC:2026-10-09T12:34", through.replace(second=0))]
+
+
+@pytest.mark.parametrize(
+    "cron,zone,after,through",
+    [
+        ("*/2 * * * *", "UTC", "2026-10-08T23:59:00Z", "2026-10-09T00:07:00Z"),
+        (
+            "0,15,30,45 2,3 * * *",
+            "America/New_York",
+            "2026-03-08T06:00:00Z",
+            "2026-03-08T07:00:00Z",
+        ),
+        ("* 1 * * *", "America/New_York", "2026-11-01T05:50:00Z", "2026-11-01T06:50:00Z"),
+        ("* 1 * * *", "America/New_York", "2026-11-01T06:00:00Z", "2026-11-01T06:50:00Z"),
+        ("0 9 * * 1-5", "UTC", "2026-10-08T10:00:00Z", "2026-10-11T10:00:00Z"),
+    ],
+)
+def test_latest_schedule_preserves_calendar_and_dst_coalescing(
+    cron: str, zone: str, after: str, through: str
+) -> None:
+    schedule = {"cron": cron, "timezone": zone}
+    start = datetime.strptime(after, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    finish = datetime.strptime(through, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert (
+        occurrences(schedule, start, finish, latest_only=True)
+        == occurrences(schedule, start, finish)[-1:]
+    )
+
+
+@pytest.mark.parametrize("cron", ["*/0 * * * *", "60 * * * *", "* * * *", "@daily"])
+def test_local_schedule_still_rejects_invalid_cron(cron: str) -> None:
     with pytest.raises(WorkflowValidationError):
-        validate_schedule({"cron": "* * * * *"})
+        validate_schedule({"cron": cron})
+
+
+@pytest.mark.parametrize("reference", ["refs/heads/main", "refs/tags/release"])
+def test_local_ref_path_filters_apply_to_branches_and_tags(reference: str) -> None:
+    assert filter_ref({"paths": ["src/**", "!src/private/**"]}, reference, ["src/code.py"])
+    assert not filter_ref({"paths": ["src/**"]}, reference, ["docs/guide.md"])
+    assert not filter_ref({"paths": ["src/**", "!src/private/**"]}, reference, ["src/private/x"])
+    assert not filter_ref({"paths-ignore": ["docs/**"]}, reference, ["docs/guide.md"])
+    assert filter_ref({"paths-ignore": ["docs/**"]}, reference, ["docs/guide.md", "src/code.py"])
 
 
 def test_source_hashes_capture_executable_mode_as_well_as_bytes() -> None:

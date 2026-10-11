@@ -62,10 +62,17 @@ def test_push_observes_new_changed_and_deleted_refs_with_path_filters(
     "event_type,payload,identity",
     [
         ("", {}, "id"),
-        ("x" * 101, {}, "id"),
-        ("build", {str(i): i for i in range(11)}, "id"),
+        ("x" * 65536, {}, "id"),
+        ("build", {"value": "x" * 65536}, "id"),
         ("build", {}, ""),
         ("build", {}, "x" * 201),
+    ],
+    ids=[
+        "empty-event",
+        "oversized-event",
+        "oversized-payload",
+        "empty-identity",
+        "oversized-identity",
     ],
 )
 def test_dispatch_contract_bounds_reject_before_delivery(
@@ -74,6 +81,39 @@ def test_dispatch_contract_bounds_reject_before_delivery(
     with pytest.raises(ConfigError):
         repository_dispatch(project.project_id, event_type, payload, identity)
     assert not TriggerDelivery.objects.exists()
+
+
+@pytest.mark.parametrize("filter_kind", ["paths", "paths-ignore"])
+def test_local_tag_delivery_honors_path_filters(
+    project: RelayProject, monkeypatch: pytest.MonkeyPatch, filter_kind: str
+) -> None:
+    pattern = "src/**" if filter_kind == "paths" else "docs/**"
+    project.write_workflow(
+        "tag", f"on: {{push: {{tags: [release], {filter_kind}: ['{pattern}']}}}}\n" + BASE
+    )
+    project.commit("Provide the local tag workflow")
+    git(project.repository, "tag", "release")
+    activate(project.project_id, project.relay_root, "tag", "push", True, True)
+    monkeypatch.setattr("relay.web.actions_automation.launch_delivery", lambda _delivery: None)
+    project.write("docs/guide.md", "Ignored change\n")
+    project.commit("Change an ignored path")
+    git(project.repository, "tag", "-f", "release")
+    reconcile()
+    assert not TriggerDelivery.objects.exists()
+    before = git(project.repository, "rev-parse", "HEAD")
+    project.write("src/code.py", "print('local')\n")
+    project.commit("Change an included path")
+    git(project.repository, "tag", "-f", "release")
+    after = git(project.repository, "rev-parse", "HEAD")
+    reconcile()
+    delivery = TriggerDelivery.objects.get()
+    assert delivery.payload["ref"] == "refs/tags/release"
+    assert delivery.payload["ref_type"] == "tag"
+    assert delivery.payload["event"]["before"] == before
+    assert delivery.payload["sha"] == after
+    assert delivery.payload["event"]["paths"] == ["src/code.py"]
+    reconcile()
+    assert TriggerDelivery.objects.count() == 1
 
 
 def test_activation_and_payload_validation_remain_opt_in(project: RelayProject) -> None:

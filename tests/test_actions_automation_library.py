@@ -71,19 +71,23 @@ def test_activation_freezes_transitive_sources_and_blocks_changed_calls(
 def test_schedule_downtime_coalesces_latest_and_reconciliation_is_idempotent(
     project: RelayProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    now = timezone.now().replace(second=30, microsecond=0)
+    monkeypatch.setattr("relay.web.actions_automation.timezone.now", lambda: now)
     project.write_workflow(
         "scheduled",
-        "on: {schedule: [{cron: '*/5 * * * *'}]}\njobs: {main: {steps: [{run: echo scheduled}]}}\n",
+        "on: {schedule: [{cron: '* * * * *'}]}\njobs: {main: {steps: [{run: echo scheduled}]}}\n",
     )
     activate(project.project_id, project.relay_root, "scheduled", "schedule", True, True)
     trigger = WorkflowTrigger.objects.get()
     WorkflowTrigger.objects.filter(pk=trigger.pk).update(
-        cursor={"at": (timezone.now() - timedelta(hours=5)).isoformat()}
+        cursor={"at": (now - timedelta(days=400)).isoformat()}
     )
     monkeypatch.setattr("relay.web.actions_automation.launch_delivery", lambda _delivery: None)
     reconcile()
     reconcile()
     assert TriggerDelivery.objects.count() == 1
+    delivery = TriggerDelivery.objects.get()
+    assert delivery.payload["scheduled_at"] == now.replace(second=0).isoformat()
 
 
 def test_completed_run_cursor_pages_equal_timestamps_without_losing_deliveries(

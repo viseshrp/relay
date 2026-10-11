@@ -171,6 +171,7 @@ from .models import (
     RunLock,
     RunSnapshot,
     UsageRetry,
+    WorkflowControl,
     WorkflowDraft,
 )
 
@@ -227,6 +228,15 @@ class _ClaimContext(NamedTuple):
     prompt_contents: tuple[str, ...]
     route: dict[str, object]
     subworkflows: dict[str, object]
+
+
+@lru_cache(maxsize=RECONCILE_MAX_ITEMS)
+def _captured_workflow_name(source: str) -> str:
+    """Older snapshots keep their display name only in the frozen YAML."""
+    try:
+        return load_workflow_text(source, source=Path("snapshot:workflow")).definition.name or ""
+    except RelayError:
+        return ""
 
 
 @lru_cache(maxsize=RECONCILE_MAX_ITEMS)
@@ -329,6 +339,14 @@ def _integer(instance: models.Model, name: str) -> int:
         message = f"Stored field {name} is not an integer."
         raise PersistenceError(message)
     return value
+
+
+def _number(instance: models.Model, name: str) -> float:
+    value = getattr(instance, name)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        message = f"Stored field {name} is not a number."
+        raise PersistenceError(message)
+    return float(value)
 
 
 def _mapping(instance: models.Model, name: str) -> dict[str, object]:
@@ -482,11 +500,11 @@ def _require_artifact(artifact: Artifact | None) -> Artifact:
 
 
 def _reject_lease_holder(project_id: str, workflow_key: str) -> NoReturn:
-    message = "Another browser holds the workflow editor lease."
+    message = "This workflow is open in another tab or browser."
     raise PermissionFlowError(
         message,
         context={"project": project_id, "workflow": workflow_key},
-        next_action="Wait for the lease to expire or return to its open tab.",
+        next_action="Choose Edit here instead to move editing to this tab.",
     )
 
 
@@ -606,6 +624,62 @@ def _foreign_key_text(instance: models.Model, name: str) -> str:
 class DjangoWorkflowStore:
     """Recovery drafts and renewable editor leases for project YAML files."""
 
+    def require_enabled(self, project_id: str, workflow_key: str) -> None:
+        key = "/".join(workflow_key_parts(workflow_key))
+        if WorkflowControl.objects.filter(
+            project_id=project_id, workflow_key=key, disabled=True
+        ).exists():
+            message = "This workflow is disabled."
+            raise PermissionFlowError(
+                message, next_action="Enable it from the workflow menu before running."
+            )
+
+    def workflow_metadata(self, project_id: str) -> dict[str, dict[str, object]]:
+        rows: dict[str, dict[str, object]] = {
+            str(row["workflow_key"]): {"disabled": bool(row["disabled"])}
+            for row in WorkflowControl.objects.filter(project_id=project_id).values(
+                "workflow_key", "disabled"
+            )
+        }
+        latest = (
+            Run.objects.filter(project_id=project_id)
+            .values("workflow_key")
+            .annotate(latest=Max("number"))
+        )
+        for run in (
+            Run.objects.filter(project_id=project_id, number__in=[row["latest"] for row in latest])
+            .order_by("-number")
+            .values("id", "workflow_key", "status")
+        ):
+            key = "/".join(workflow_key_parts(str(run["workflow_key"])))
+            record = rows.setdefault(key, {"disabled": False})
+            if "last_run" not in record:
+                record.update(last_run=str(run["id"]), last_status=str(run["status"]))
+        return rows
+
+    def set_disabled(self, project_id: str, workflow_key: str, disabled: bool) -> None:
+        WorkflowControl.objects.update_or_create(
+            project_id=project_id, workflow_key=workflow_key, defaults={"disabled": disabled}
+        )
+        if disabled:
+            from .models import WorkflowTrigger
+
+            WorkflowTrigger.objects.filter(project_id=project_id, workflow_key=workflow_key).update(
+                enabled=False
+            )
+
+    def move_editor_state(self, project_id: str, old_key: str, new_key: str) -> None:
+        from .models import WorkflowTrigger
+
+        with transaction.atomic():
+            WorkflowTrigger.objects.filter(project_id=project_id, workflow_key=old_key).update(
+                enabled=False
+            )
+            for model in (WorkflowDraft, EditorLease, WorkflowControl):
+                model.objects.filter(project_id=project_id, workflow_key=old_key).update(
+                    workflow_key=new_key
+                )
+
     def get_draft(self, project_id: str, workflow_key: str) -> dict[str, object] | None:
         try:
             row = WorkflowDraft.objects.filter(
@@ -618,6 +692,7 @@ class DjangoWorkflowStore:
                 "base_hash": _string(row, "base_file_hash"),
                 "validation_state": _string(row, "validation_state"),
                 "updated_at": _datetime_text(row.updated_at),
+                **({"prompts": _mapping(row, "prompt_edits")} if row.prompt_edits else {}),
             }
         except DatabaseError:
             message = "Relay could not read the workflow recovery draft."
@@ -630,6 +705,8 @@ class DjangoWorkflowStore:
         yaml_text: str,
         base_hash: str,
         validation_state: DraftValidationState,
+        *,
+        prompts: dict[str, object] | None = None,
     ) -> dict[str, object]:
         try:
             project = _project_by_id(project_id)
@@ -640,6 +717,7 @@ class DjangoWorkflowStore:
                     "recovery_yaml": yaml_text,
                     "base_file_hash": base_hash,
                     "validation_state": validation_state.value,
+                    **({"prompt_edits": prompts} if prompts is not None else {}),
                 },
             )
             return {
@@ -647,6 +725,7 @@ class DjangoWorkflowStore:
                 "base_hash": _string(row, "base_file_hash"),
                 "validation_state": _string(row, "validation_state"),
                 "updated_at": _datetime_text(row.updated_at),
+                **({"prompts": _mapping(row, "prompt_edits")} if row.prompt_edits else {}),
             }
         except ProjectDiscoveryError:
             raise
@@ -666,6 +745,8 @@ class DjangoWorkflowStore:
         project_id: str,
         workflow_key: str,
         holder: str,
+        *,
+        takeover: bool = False,
     ) -> dict[str, object]:
         try:
             with transaction.atomic():
@@ -679,7 +760,7 @@ class DjangoWorkflowStore:
                 )
                 if lease is not None and lease.expires_at > now:
                     current_holder = _string(lease, "holder")
-                    if current_holder != holder:
+                    if current_holder != holder and not takeover:
                         _reject_lease_holder(project_id, workflow_key)
                 if lease is None:
                     lease = EditorLease.objects.create(
@@ -703,6 +784,35 @@ class DjangoWorkflowStore:
             raise
         except (DatabaseError, IntegrityError):
             message = "Relay could not acquire the workflow editor lease."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def release_lease(self, project_id: str, workflow_key: str, holder: str) -> None:
+        """A closing or superseded tab can release only its own lease."""
+        try:
+            EditorLease.objects.filter(
+                project_id=project_id, workflow_key=workflow_key, holder=holder
+            ).delete()
+        except DatabaseError:
+            message = "Relay could not release the workflow editor."
+            raise PersistenceError(message, context={"workflow": workflow_key}) from None
+
+    def discard_recovery_draft(self, project_id: str, workflow_key: str, updated_at: str) -> None:
+        """Discard an observed draft without deleting another tab's newer edits."""
+        try:
+            with transaction.atomic():
+                row = (
+                    WorkflowDraft.objects.select_for_update()
+                    .filter(project_id=project_id, workflow_key=workflow_key)
+                    .first()
+                )
+                if row is None:
+                    return
+                if _datetime_text(row.updated_at) != updated_at:
+                    message = "The recovery draft changed in another tab."
+                    raise PermissionFlowError(message, next_action="Reload before discarding it.")
+                row.delete()
+        except DatabaseError:
+            message = "Relay could not discard the recovery draft."
             raise PersistenceError(message, context={"workflow": workflow_key}) from None
 
     def require_lease(self, project_id: str, workflow_key: str, holder: str) -> None:
@@ -745,6 +855,8 @@ def _run_record(run: Run) -> dict[str, object]:
         "failure_summary": run.failure_summary,
         "entry_point": run.entry_point,
         "dispatch_paused": _boolean(run, "dispatch_paused"),
+        "dispatch_paused_at": _datetime_text(_datetime_field(run, "dispatch_paused_at")),
+        "dispatch_paused_seconds": _number(run, "dispatch_paused_seconds"),
         "waiting_count": _integer(run, "read_waiting_count"),
     }
 
@@ -935,6 +1047,7 @@ def _node_record(
     # Monitor summaries omit outputs; paged events retain their visible source bytes.
     frozen = _mapping(node, "frozen_def")
     scope = _string(node, "scope_path")
+    route = _effective_route(node, snapshot)
     # root.build#2.check + needs ["plan"] becomes root.build#2.plan, never root.plan.
     parent = scope.rsplit(".", 1)[0]
     needs = frozen.get("needs", [])
@@ -992,6 +1105,11 @@ def _node_record(
         "step_id": str(frozen.get("step_id", "")),
         "matrix_index": frozen.get("matrix_index"),
         "status": _string(node, "status"),
+        **(
+            {"agent_id": route["selected_agent"], "model_value": route.get("model_value")}
+            if route.get("selected_agent")
+            else {}
+        ),
         "started_at": _datetime_text(_datetime_field(node, "latest_started_at")),
         "ended_at": _datetime_text(_datetime_field(node, "latest_ended_at")),
         "writes": _boolean(node, "writes"),
@@ -1058,6 +1176,21 @@ def _event_record(event: RunEvent) -> dict[str, object]:
     }
 
 
+def _event_summary_record(event: RunEvent) -> dict[str, object]:
+    """Bound monitor summaries without changing retained event or job-log bytes."""
+    record = _event_record(event)
+    if len(json.dumps(record, ensure_ascii=False).encode("utf-8")) > 8192:
+        payload = _mapping(event, "payload")
+        record["payload"] = {
+            key: value[:256] if isinstance(value, str) else value
+            for key, value in payload.items()
+            if key in {"scope_path", "attempt_number", "status", "error_code", "message"}
+            and isinstance(value, (str, int, float, bool, type(None)))
+        }
+        record["summary_truncated"] = True
+    return record
+
+
 def _artifact_record(artifact: Artifact) -> dict[str, object]:
     attempt = _related(artifact, "attempt", NodeAttempt)
     node = _related(attempt, "node_run", NodeRun)
@@ -1072,6 +1205,9 @@ def _artifact_record(artifact: Artifact) -> dict[str, object]:
         "bytes": _integer(artifact, "bytes"),
         "media_type": _string(artifact, "media_type"),
         "preservation_state": _string(artifact, "preservation_state"),
+        "created_at": _datetime_text(_datetime_field(attempt, "ended_at"))
+        if attempt.ended_at is not None
+        else _datetime_text(_datetime_field(attempt, "started_at")),
     }
 
 
@@ -1545,6 +1681,12 @@ class DjangoReadStore:
             )
             snapshot = _related(run, "snapshot", RunSnapshot)
             result = _run_record(run)
+            name = _mapping(snapshot, "resolved_definition").get("name")
+            result["workflow_name"] = (
+                name
+                if isinstance(name, str) and name
+                else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
+            ) or _string(run, "workflow_key")
             result["working_folder"] = _string(run, "worktree_path")
             result["problem"] = _run_problem(run)
             result["recovery"] = _run_recovery(run)
@@ -1632,11 +1774,16 @@ class DjangoReadStore:
         attempt_number: int | None = None,
         latest: bool = False,
         before: int | None = None,
+        summary: bool = False,
     ) -> tuple[list[dict[str, object]], int | None]:
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
             query = RunEvent.objects.filter(run_id=run_id, id__gt=since).order_by("id")
+            if summary:
+                query = query.exclude(type__startswith="agent.").exclude(
+                    type__in=("command.stdout", "command.stderr", "actions.summary")
+                )
             if scope_path is not None:
                 parse_scope_path(scope_path)
                 query = query.filter(node_run__scope_path=scope_path)
@@ -1649,7 +1796,12 @@ class DjangoReadStore:
             if latest:
                 query = query.order_by("-id")
             rows = list(query[: bounded + 1])
-            events, more = _bounded_page(rows, bounded, _event_record)
+            events, more = _bounded_page(
+                rows,
+                min(bounded, 50) if summary else bounded,
+                _event_summary_record if summary else _event_record,
+                byte_budget=16_384 if summary else API_MAX_PAGE_BYTES,
+            )
             next_value = int(str(events[-1]["id"])) if more and events else None
             if latest:
                 events.reverse()
@@ -1778,19 +1930,23 @@ class DjangoReadStore:
         run_id: str,
         since: int,
         limit: int,
+        *,
+        visible_only: bool = False,
     ) -> tuple[list[dict[str, object]], int | None]:
         """Read retained artifact metadata by monotonic primary-key cursor."""
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
             _require_run(Run.objects.filter(pk=run_id).first(), run_id)
-            rows = list(
-                Artifact.objects.filter(
-                    attempt__node_run__run_id=run_id,
-                    pk__gt=since,
-                )
-                .select_related("attempt__node_run")
-                .order_by("pk")[: bounded + 1]
+            query = Artifact.objects.filter(
+                attempt__node_run__run_id=run_id,
+                pk__gt=since,
             )
+            if visible_only:
+                query = query.filter(preservation_state=PreservationState.PRESERVED.value).exclude(
+                    Q(declared_name="worktree_diff", bytes=0)
+                    | Q(declared_name__in=("commits", "commits.json"), bytes__lte=3)
+                )
+            rows = list(query.select_related("attempt__node_run").order_by("pk")[: bounded + 1])
             records, more = _bounded_page(rows, bounded, _artifact_record)
             next_value = int(str(records[-1]["id"])) if more and records else None
         except (ProjectDiscoveryError, PersistenceError):
@@ -2234,6 +2390,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         branch = run_branch(run_id)
         worktree = run_worktree_path(run_id)
         policy = load_workflow_text(snapshot.workflow_yaml, source=Path(request.workflow_key))
+        context = snapshot.launch_defaults.get("actions_context", {})
+        title = (
+            context.get("run_name", policy.definition.name)
+            if isinstance(context, Mapping)
+            else policy.definition.name
+        )
+        if not isinstance(title, str):
+            message = "The captured run title is invalid."
+            raise PersistenceError(message, context={"run": run_id})
         try:
             with transaction.atomic():
                 instance = Instance.objects.select_for_update().filter(singleton_key=1).first()
@@ -2246,6 +2411,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         next_action="Start Relay again, then relaunch the workflow.",
                     )
                 project = _project_by_id(project_id)
+                DjangoWorkflowStore().require_enabled(project_id, request.workflow_key)
                 number = _integer(project, "next_run_number")
                 Project.objects.filter(pk=project.pk).update(next_run_number=number + 1)
                 run_transition = transition_run(None, "launch")
@@ -2254,9 +2420,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     project=project,
                     workflow_key=request.workflow_key,
                     number=number,
-                    title=cast(dict, snapshot.launch_defaults.get("actions_context", {})).get(
-                        "run_name", policy.definition.name
-                    ),
+                    title=title,
                     source_branch=request.source_branch,
                     status=run_transition.status,
                     source_commit=source_commit,
@@ -2305,6 +2469,9 @@ class DjangoExecutionStore(DjangoAgentStore):
         except (ProjectDiscoveryError, PersistenceError):
             raise
         except (DatabaseError, IntegrityError):
+            LOGGER.exception(
+                "Could not persist the pending run and immutable snapshot", extra={"run": run_id}
+            )
             message = "Relay could not persist the pending run and immutable snapshot."
             raise PersistenceError(message, context={"run": run_id}) from None
 
@@ -3427,6 +3594,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                 status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
             ).update(heartbeat_at=now)
         except DatabaseError:
+            LOGGER.exception(
+                "Attempt heartbeat database update failed", extra={"attempt_id": attempt_id}
+            )
             message = "Relay could not update the attempt heartbeat."
             raise PersistenceError(message) from None
         else:
@@ -4092,6 +4262,11 @@ class DjangoExecutionStore(DjangoAgentStore):
             frozen.get("bound_agent"), dict
         )
         explicit_retry = cast(dict, frozen.get("step", {})).get("with", {}).get("auto-retry")
+        retry_limit = policy.max_retries
+        if actions_agent:
+            configured_limit = cast(dict, frozen.get("step", {})).get("with", {}).get("retry-limit")
+            if str(configured_limit) in {"1", "2"}:
+                retry_limit = min(retry_limit, int(configured_limit))
         existing = AutomaticRetry.objects.filter(attempt=attempt).first()
         if not policy.enabled and not (actions_agent and explicit_retry in (True, "true")):
             return
@@ -4122,13 +4297,13 @@ class DjangoExecutionStore(DjangoAgentStore):
             AttemptStopReason.SOFT_DENIED.value,
         }:
             state, reason = "blocked", "This failure requires an owner decision or safe recovery."
-        elif used >= policy.max_retries:
+        elif used >= retry_limit:
             state, reason = "exhausted", "The automatic retry budget for this step is exhausted."
         instruction, digest = recovery_instruction(_string(node, "scope_path"), error_code, message)
         retry, _created = AutomaticRetry.objects.update_or_create(
             attempt=attempt,
             defaults={
-                "retry_number": min(used + 1, policy.max_retries),
+                "retry_number": min(used + 1, retry_limit),
                 "state": state,
                 "instruction": instruction,
                 "instruction_sha256": digest,
@@ -5573,13 +5748,37 @@ class DjangoExecutionStore(DjangoAgentStore):
                     RunStatus.CANCELING.value,
                 }:
                     return ControlResult.STALE
+                now = timezone.now()
+                if paused and not _boolean(run, "dispatch_paused"):
+                    _set_model_field(run, "dispatch_paused_at", now)
+                elif not paused and isinstance(run.dispatch_paused_at, datetime):
+                    elapsed = max(0, (now - run.dispatch_paused_at).total_seconds())
+                    _set_model_field(
+                        run,
+                        "dispatch_paused_seconds",
+                        _number(run, "dispatch_paused_seconds") + elapsed,
+                    )
+                    _set_model_field(run, "dispatch_paused_at", None)
                 _set_model_field(run, "dispatch_paused", paused)
-                run.save(update_fields=("dispatch_paused",))
+                run.save(
+                    update_fields=(
+                        "dispatch_paused",
+                        "dispatch_paused_at",
+                        "dispatch_paused_seconds",
+                    )
+                )
                 _append_event(
                     run,
                     "run.dispatch_changed",
                     EventSource.RUN,
-                    {"paused": paused, "idempotency_key": idempotency_key},
+                    {
+                        "paused": paused,
+                        "idempotency_key": idempotency_key,
+                        "dispatch_paused_at": _datetime_text(
+                            _datetime_field(run, "dispatch_paused_at")
+                        ),
+                        "dispatch_paused_seconds": _number(run, "dispatch_paused_seconds"),
+                    },
                 )
                 return ControlResult.ACCEPTED
         except DatabaseError:

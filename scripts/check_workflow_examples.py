@@ -9,7 +9,7 @@ import tempfile
 
 from relay.errors import RelayError
 from relay.workflows.loader import load_workflow
-from relay.workflows.starters import STARTER_ROOT, STARTERS
+from relay.workflows.starters import STARTERS, _sources
 from relay.workflows.validation import validate_loaded_workflow
 
 EXAMPLE_PATTERN = re.compile(
@@ -69,10 +69,11 @@ def check_examples(path: Path) -> int:
                 actual = "rejected" if rejected else "accepted"
                 failures.append(f"{name}: expected {expectation}, validator {actual} it")
         for starter in STARTERS:
-            for name in starter.prompts:
-                (prompts / name).write_bytes((STARTER_ROOT / name).read_bytes())
+            for relative, text in _sources(starter, f"{starter.id}.yaml"):
+                target = relay_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8", newline="")
             path = workflows / f"{starter.id}.yaml"
-            path.write_bytes((STARTER_ROOT / path.name).read_bytes())
             try:
                 validate_loaded_workflow(load_workflow(path), relay_root)
             except RelayError:

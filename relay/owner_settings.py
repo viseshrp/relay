@@ -46,7 +46,7 @@ def validate_project_defaults(raw: object) -> dict[str, object]:
         validate_config({key: value for key, value in values.items() if key != "workflow_defaults"})
     except ValidationError as error:
         issues = [
-            f"{'.'.join(str(p) for p in row['loc'])}: {row['msg']}"
+            f"{'.'.join(str(p) for p in row['loc'])}: {row['msg'].removeprefix('Value error, ')}"
             for row in error.errors(include_url=False, include_context=False)
         ]
         message = "Invalid project defaults:\n" + "\n".join(issues)

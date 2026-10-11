@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,7 +10,12 @@ from django.http import FileResponse, HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from relay.errors import ConfigError, RelayError
-from relay.workflows.actions.language import capture_sources, load, support_manifest
+from relay.workflows.actions.language import (
+    capture_sources,
+    load,
+    support_manifest,
+    workflow_diagnostics,
+)
 
 from ..actions_bindings import put_binding, scopes
 from ..actions_repository import approve_environment
@@ -30,7 +36,38 @@ from . import api_errors, current_project, json_body, required_text
 @owner_required
 @require_GET
 def manifest(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(support_manifest())
+    from relay.execution.action_files import script_previews
+
+    return JsonResponse({**support_manifest(), "host_scripts": script_previews()})
+
+
+@api_errors
+@owner_required
+@require_GET
+def prompt_inventory(request: HttpRequest) -> JsonResponse:
+    from relay.constants import API_MAX_PAGE
+    from relay.paths import global_prompts_dir
+
+    root, _ = current_project(request)
+    records = []
+    for prefix, directory in (("prompts/", root / "prompts"), ("global:", global_prompts_dir())):
+        for parent, children, files in os.walk(directory, followlinks=False):
+            children[:] = sorted(
+                name for name in children if not (Path(parent) / name).is_symlink()
+            )
+            for name in sorted(files):
+                path = Path(parent) / name
+                if path.is_symlink() or path.stat().st_size > 1_048_576:
+                    continue
+                records.append(
+                    {
+                        "reference": prefix + path.relative_to(directory).as_posix(),
+                        "readonly": prefix == "global:",
+                    }
+                )
+                if len(records) >= API_MAX_PAGE:
+                    return JsonResponse({"prompts": records, "truncated": True})
+    return JsonResponse({"prompts": records, "truncated": False})
 
 
 @api_errors
@@ -66,10 +103,15 @@ def library(request: HttpRequest) -> JsonResponse:
 def validate(request: HttpRequest) -> JsonResponse:
     body = json_body(request)
     root, _ = current_project(request)
-    try:
-        document = load(
-            required_text(body, "yaml"), source=Path(str(body.get("source", "workflow.yml")))
+    text = required_text(body, "yaml")
+    source = Path(str(body.get("source", "workflow.yml")))
+    diagnostics = workflow_diagnostics(text, source=source)
+    if diagnostics:
+        return JsonResponse(
+            {"valid": False, "diagnostics": [item.to_envelope() for item in diagnostics]}
         )
+    try:
+        document = load(text, source=source)
         sources = capture_sources(document, root.parent)
         return JsonResponse(
             {
@@ -320,10 +362,26 @@ def products(request: HttpRequest, run_id: str) -> JsonResponse:
     return JsonResponse(
         {
             "artifacts": [
-                {**row, "id": str(row["id"])}
+                {
+                    **{
+                        key: value
+                        for key, value in row.items()
+                        if key != "attempt__node_run__scope_path"
+                    },
+                    "id": str(row["id"]),
+                    "scope_path": row["attempt__node_run__scope_path"],
+                }
                 for row in ActionsArtifact.objects.filter(
                     run_id=run_id, run__project_id=project.id
-                ).values("id", "name", "digest", "bytes", "manifest", "expires_at")
+                ).values(
+                    "id",
+                    "name",
+                    "digest",
+                    "bytes",
+                    "created_at",
+                    "expires_at",
+                    "attempt__node_run__scope_path",
+                )
             ],
             "queues": list(
                 ActionsQueue.objects.filter(run_id=run_id, run__project_id=project.id).values(
@@ -370,3 +428,68 @@ def download_product(request: HttpRequest, artifact_id: str) -> FileResponse:
     except Exception:
         stream.close()
         raise
+
+
+@api_errors
+@owner_required
+@require_GET
+def preview_product(request: HttpRequest, artifact_id: str) -> JsonResponse:
+    """Preview one bounded retained file, verifying ownership and its recorded digest."""
+    import codecs
+    import mimetypes
+
+    from django.utils import timezone
+
+    from relay.execution.action_products import checked_path, verify
+
+    from . import canonical_uuid
+
+    artifact_id = canonical_uuid(artifact_id, resource="artifact")
+    _, project = current_project(request)
+    artifact = ActionsArtifact.objects.filter(pk=artifact_id, run__project_id=project.id).first()
+    if artifact is None or (
+        artifact.expires_at is not None and artifact.expires_at <= timezone.now()
+    ):
+        message = "The named artifact is unavailable."
+        raise ConfigError(message)
+    manifest = cast(list[dict[str, Any]], artifact.manifest)
+    offset_text = request.GET.get("offset", "0")
+    if not offset_text.isdigit() or len(offset_text) > 8:
+        message = "Choose a valid artifact file page."
+        raise ConfigError(message)
+    offset = int(offset_text)
+    selected = next((item for item in manifest if item["path"] == request.GET.get("path")), None)
+    if selected is None:
+        selected = manifest[0] if manifest and not request.GET.get("path") else None
+    if selected is None:
+        message = "The retained file is unavailable."
+        raise ConfigError(message)
+    directory = Path(cast(str, artifact.directory))
+    verify(directory, [selected], "artifacts", str(artifact.run_id))
+    with checked_path(directory, selected["path"]).open("rb") as source:
+        data = source.read(128 * 1024 + 1)
+    media = mimetypes.guess_type(selected["path"])[0] or "application/octet-stream"
+    try:
+        text = codecs.getincrementaldecoder("utf-8")().decode(
+            data[: 128 * 1024], final=len(data) <= 128 * 1024
+        )
+        previewable = "\x00" not in text
+    except UnicodeDecodeError:
+        text, previewable = "", False
+    return JsonResponse(
+        {
+            "files": [
+                {"path": item["path"], "bytes": item["bytes"]}
+                for item in [
+                    *manifest[offset : offset + 100],
+                    *([] if selected in manifest[offset : offset + 100] else [selected]),
+                ]
+            ],
+            "next": offset + 100 if offset + 100 < len(manifest) else None,
+            "path": selected["path"],
+            "media_type": media,
+            "text": text if previewable else "",
+            "previewable": previewable,
+            "truncated": len(data) > 128 * 1024,
+        }
+    )

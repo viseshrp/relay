@@ -200,10 +200,15 @@ def consume(
     return outputs, retained, file_text(paths["RELAY_STEP_SUMMARY"])
 
 
+def default_shell() -> str:
+    """Choose the host default without changing an explicitly selected shell."""
+    return "pwsh" if os.name == "nt" else "bash" if shutil.which("bash") else "sh"
+
+
 def shell_script(directory: Path, source: str, shell: str | None) -> list[str]:
     """Render a private script, then select an explicit interpreter argument vector."""
     if shell is None:
-        shell = "pwsh" if os.name == "nt" else "bash" if shutil.which("bash") else "sh"
+        shell = default_shell()
         implicit = True
     else:
         implicit = False
@@ -227,6 +232,13 @@ def shell_script(directory: Path, source: str, shell: str | None) -> list[str]:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
         stream.write(source)
+    return script_arguments(path, shell, implicit=implicit)
+
+
+def script_arguments(
+    path: Path, shell: str, *, implicit: bool = False, require_installed: bool = True
+) -> list[str]:
+    """Plan the same interpreter vector for execution and read-only browser previews."""
     if shell == "bash":
         arguments = (
             ["bash", "-e", str(path)]
@@ -250,8 +262,35 @@ def shell_script(directory: Path, source: str, shell: str | None) -> list[str]:
             raise NodeExecutionError(message)
         arguments = [argument.replace("{0}", str(path)) for argument in arguments]
     executable = shutil.which(arguments[0])
-    if executable is None:
+    if executable is None and require_installed:
         message = "The requested shell is not installed."
         raise NodeExecutionError(message)
-    arguments[0] = executable
+    arguments[0] = executable or arguments[0]
     return arguments
+
+
+def script_previews() -> dict[str, object]:
+    """Describe host defaults; the unique private attempt directory is allocated later."""
+    default = default_shell()
+    choices = {}
+    for key in ("default", "bash", "sh", "pwsh", "powershell", "cmd", "python"):
+        shell = default if key == "default" else key
+        suffix = (
+            ".py"
+            if shell == "python"
+            else ".ps1"
+            if shell in {"pwsh", "powershell"}
+            else ".cmd"
+            if shell == "cmd"
+            else ".sh"
+        )
+        path = Path("<private attempt>") / f"script{suffix}"
+        arguments = script_arguments(
+            path, shell, implicit=key == "default", require_installed=False
+        )
+        choices[key] = {
+            "shell": shell,
+            "argv": arguments,
+            "installed": shutil.which(arguments[0]) is not None,
+        }
+    return choices

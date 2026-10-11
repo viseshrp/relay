@@ -103,7 +103,7 @@ def validate_defaults(raw: object) -> WorkflowDefaults:
         defaults = WorkflowDefaults.model_validate(raw)
     except ValidationError as error:
         issues = [
-            f"{'.'.join(str(p) for p in row['loc'])}: {row['msg']}"
+            f"{'.'.join(str(p) for p in row['loc'])}: {row['msg'].removeprefix('Value error, ')}"
             for row in error.errors(include_url=False, include_context=False)
         ]
         message = "Invalid workflow defaults:\n" + "\n".join(issues)

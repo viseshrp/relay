@@ -15,7 +15,6 @@ import shutil
 import sys
 import tempfile
 from threading import Event, Thread
-import time
 from types import SimpleNamespace
 from typing import TypeVar
 from uuid import uuid4
@@ -125,39 +124,60 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     )
     patch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     stopped = Event()
+    reset_requested = Event()
+    consumer_idle = Event()
+    fixture_ready = Event()
+    fixture_ready.set()
 
     @owner_required
     @require_POST
     def reset(request: HttpRequest) -> JsonResponse:
-        del request
+        crlf = bool(request.body) and json_body(request).get("line_endings") == "crlf"
         from relay.execution.cancellation import request_cancellation
+        from relay.web.models import WorkflowControl
+        from tests.ui_fixtures import clear_ui_fixtures
 
-        for run_id in Run.objects.filter(
-            status__in=("running", "paused_wait", "pending", "canceling")
-        )[:100].values_list("pk", flat=True):
-            request_cancellation(engine.store, str(run_id), "browser-fixture-reset")
-        deadline = time.monotonic() + 10
-        while Run.objects.filter(status="canceling").exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if Run.objects.filter(status="canceling").exists():
-            return JsonResponse({"message": "The preceding fixture has not stopped."}, status=503)
-        # The feedback scenario replaces Codex and the shared ACP mode.
-        # Restore its configuration so later tests get the normal capabilities.
-        shutil.rmtree(providers.directory)
-        providers.directory.mkdir()
-        for agent_id in ("codex", "claude", "antigravity"):
-            providers.install(agent_id, mode="configuration")
-        WorkflowDraft.objects.all().delete()
-        EditorLease.objects.all().delete()
-        settings_path().unlink(missing_ok=True)
-        Project.objects.filter(pk=project.project_id).update(defaults={})
-        project.write_workflow("workflow", WORKFLOW)
-        return JsonResponse({"ok": True, "python": sys.executable})
+        reset_requested.set()
+        fixture_ready.clear()
+        try:
+            for run_id in (
+                Run.objects.filter(status__in=("running", "paused_wait", "pending", "canceling"))
+                .exclude(run_branch__startswith="relay/ui-fixture/")
+                .values_list("pk", flat=True)
+            ):
+                request_cancellation(engine.store, str(run_id), "browser-fixture-reset")
+            if not consumer_idle.wait(10):
+                return JsonResponse(
+                    {"message": "The preceding fixture has not stopped."}, status=503
+                )
+            clear_ui_fixtures()
+            WorkflowControl.objects.all().delete()
+            # The feedback scenario replaces Codex and the shared ACP mode.
+            # Restore its configuration so later tests get the normal capabilities.
+            shutil.rmtree(providers.directory)
+            providers.directory.mkdir()
+            for agent_id in ("codex", "claude", "antigravity"):
+                providers.install(agent_id, mode="configuration")
+            WorkflowDraft.objects.all().delete()
+            EditorLease.objects.all().delete()
+            settings_path().unlink(missing_ok=True)
+            Project.objects.filter(pk=project.project_id).update(defaults={})
+            project.write_workflow("workflow", WORKFLOW)
+            if crlf:
+                (project.relay_root / "workflows/workflow.yaml").write_bytes(
+                    WORKFLOW.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+                )
+            return JsonResponse({"ok": True, "python": sys.executable})
+        finally:
+            reset_requested.clear()
+            fixture_ready.set()
 
     @owner_required
     @require_POST
     def starter_project(request: HttpRequest) -> JsonResponse:
-        fresh_owner = json_body(request).get("fresh_owner") is True
+        body = json_body(request)
+        fresh_owner = body.get("fresh_owner") is True
+        full_workflow = body.get("full_workflow") is True
         WorkflowDraft.objects.all().delete()
         EditorLease.objects.all().delete()
         # Only this server owns the scratch repository and fake-provider directory.
@@ -166,7 +186,15 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Restore untouched initialization files")
         shutil.rmtree(providers.directory)
         providers.directory.mkdir()
-        providers.install("codex", mode="configuration-starters")
+        if full_workflow:
+            counters = root / "ai-starter-counters"
+            shutil.rmtree(counters, ignore_errors=True)
+            counters.mkdir()
+            patch.setenv("FAKE_AI_COUNTER_ROOT", str(counters))
+            for agent in ("codex", "claude"):
+                providers.install(agent, mode="configuration-ai-starter")
+        else:
+            providers.install("codex", mode="configuration-starters")
         fake_executable(
             providers.directory,
             "python",
@@ -356,6 +384,17 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         )
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def worst_case(request: HttpRequest) -> JsonResponse:
+        from tests.ui_fixtures import seed_ui_fixture
+
+        return JsonResponse(
+            seed_ui_fixture(root, worst=json_body(request).get("enabled", True) is True)
+        )
+
+    urlpatterns.insert(0, path("__test__/worst-case", worst_case))
     urlpatterns.insert(0, path("__test__/reset", reset))
     urlpatterns.insert(0, path("__test__/starter-project", starter_project))
     urlpatterns.insert(0, path("__test__/commit", commit))
@@ -391,9 +430,23 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
             while not stopped.wait(0.02):
                 engine.store.resolve_human_wait_controls()
                 engine.store.resume_automatic_retries()
+                if (
+                    reset_requested.is_set()
+                    and not Run.objects.filter(status__in=("running", "canceling"))
+                    .exclude(run_branch__startswith="relay/ui-fixture/")
+                    .exists()
+                ):
+                    consumer_idle.set()
+                    fixture_ready.wait()
+                    consumer_idle.clear()
+                    continue
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
-                for run_id in Run.objects.filter(status="running").values_list("id", flat=True):
+                for run_id in (
+                    Run.objects.filter(status="running")
+                    .exclude(run_branch__startswith="relay/ui-fixture/")
+                    .values_list("id", flat=True)
+                ):
                     dispatch_ready_nodes(engine.store, str(run_id), engine.tokens.append)
         finally:
             connections.close_all()
@@ -404,6 +457,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         uvicorn.run("relay.web.asgi:application", host="127.0.0.1", port=port, log_level="warning")
     finally:
         stopped.set()
+        fixture_ready.set()
         consumer.join(timeout=10)
         connections.close_all()
         patch.undo()

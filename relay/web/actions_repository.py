@@ -420,17 +420,32 @@ def display_name(attempt_id: str, value: str) -> None:
         state = dict(run.actions_state)
         state.setdefault("display_names", {})[cast(str, record.node_run.scope_path)] = redactor(
             str(run.pk)
-        ).text(value)[:1024]
+        ).text(value)[:256]
         Run.objects.filter(pk=run.pk).update(actions_state=state)
 
 
-def request_human_wait(attempt_id: str, prompt: str, timeout: float | None) -> None:
+def request_human_wait(
+    attempt_id: str, prompt: str, timeout: float | None, options: list[str]
+) -> None:
     from .models import HumanInteraction
 
     record = NodeAttempt.objects.select_related("node_run__run").get(pk=attempt_id)
     deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout) if timeout else None
     if record.deadline_at is not None:
         deadline = min(deadline, record.deadline_at) if deadline else record.deadline_at
+    frozen = cast(dict[str, Any], record.node_run.frozen_def)
+    parent = NodeRun.objects.filter(
+        run_id=record.node_run.run_id, scope_path=frozen.get("state_scope")
+    ).first()
+    job = cast(dict[str, Any], parent.frozen_def).get("job", {}) if parent else {}
+    explicit_job_timeout = isinstance(job, dict) and "timeout-minutes" in job
+    deadline_source = (
+        "approval timeout"
+        if timeout and deadline and (record.deadline_at is None or deadline < record.deadline_at)
+        else "step timeout"
+        if "timeout-minutes" in frozen.get("step", {})
+        else ("job timeout" if explicit_job_timeout else "default job timeout")
+    )
     HumanInteraction.objects.get_or_create(
         attempt=record,
         kind="wait",
@@ -438,7 +453,11 @@ def request_human_wait(attempt_id: str, prompt: str, timeout: float | None) -> N
         defaults={
             "run": record.node_run.run,
             "node_run": record.node_run,
-            "request_payload": {"prompt": prompt},
+            "request_payload": {
+                "prompt": prompt,
+                "options": options,
+                "deadline_source": deadline_source,
+            },
             "deadline": deadline,
         },
     )

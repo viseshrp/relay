@@ -44,6 +44,12 @@ Relay binds only to loopback. `--host 0.0.0.0` and non-loopback names are
 rejected. IPv6 `::1` is rendered in the browser URL as
 `http://[::1]:7845/`; `127.0.0.1` becomes `http://127.0.0.1:7845/`.
 
+Initial workspace rendering waits for project setup visibility, so loading a
+successful project cannot briefly insert and remove the welcome banner above
+its content. Runs history also waits for its workflow sidebar inventory. The
+header reserves its project picker and final button label while projects load,
+then enables the controls without moving them.
+
 ## First login
 
 Login is required by default. The first browser session shows owner onboarding.
@@ -76,6 +82,10 @@ Restart Relay to apply the saved choice. `relay up --login` overrides it and
 restores the existing owner login, or onboarding if no owner was created.
 Disabling login leaves stored passwords, sessions, projects, and runs intact.
 Actions started without a login are attributed to `local`.
+
+Workflow and prompt editors show normalized LF text, but conflict hashes use
+the exact saved UTF-8 bytes. Saving an existing source preserves its LF or
+CRLF newline style; immutable launch snapshots retain the original bytes.
 
 ## Home and navigation
 
@@ -168,15 +178,29 @@ models; it does not prove the account is signed in. Only a structured
 authentication error gets the sign-in label. Cards provide install links and
 commands to copy; Relay never installs an agent or signs it in.
 
-Choose **Start from a template**, select a starter, and create the workflow.
-The checklist shows its sample inputs and an exact model from a fresh probe.
-You can edit those inputs or change the model before pressing **Run workflow**.
+Choose **Start from a template** to open the gallery with **AI coding workflow**
+selected. Create it, enter your task once, and choose the coding agent's exact
+model and a Claude Opus model from fresh connection results. The workflow
+follows its phase instruction files and pauses for human approvals. Both
+models must be available before **Run workflow** becomes enabled. Smaller
+starters use one exact model and show their sample inputs instead.
 Launch uses the existing validation and preflight services. With no working
 agent, the checklist explains the fix and disables the run button.
-**Blank workflow** opens the same gallery with the blank option available;
+**Blank workflow** opens the same gallery with the blank option selected;
 close the checklist and add its jobs in the editor before running it.
 
 ## Choose a project and workflow
+
+The editor and run history share a workflow sidebar with file names and the
+latest run status. **Manage workflow** offers rename, duplicate, disable,
+enable, and confirmed deletion. These actions require the current editing
+lease. Rename and delete refuse files referenced by another workflow.
+Deletion retains run history and shared prompts. Disabling a workflow blocks
+manual runs and disables its automatic triggers; enabling it leaves those
+triggers off until explicitly activated again. Rename disables the old
+file name's triggers and retains their activation records, cursors, and
+delivery history. Activate each desired trigger at the new file name after
+reviewing the renamed workflow.
 
 The project bar stays visible above both views. Choose a registered project,
 or use **Open another project** and enter its local Git repository path. Relay
@@ -189,9 +213,9 @@ shows its run number and source branch, and states what happens next.
 Internal IDs and provider JSON are under advanced views. Cleanup controls live
 in **Settings > Storage**.
 
-**New workflow** opens the same six-starter gallery as the checklist. Each
+**New workflow** opens the same seven-starter gallery as the checklist. Each
 card shows its purpose, job graph preview, required agent, and input types.
-Selection copies sources into `.relay/workflows/` and `.relay/prompts/` without
+Selection copies workflow, prompt, and local action sources into `.relay/` without
 overwriting owner files. The editor and launch use those copies. A blank
 workflow accepts a name and opens with one safe echo job.
 
@@ -199,7 +223,7 @@ workflow accepts a name and opens with one safe echo job.
 
 Choose a saved workflow or **Create workflow**. New sources use `jobs` and
 ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
-six-starter gallery copies selected sources without overwriting owner files.
+seven-starter gallery copies selected sources without overwriting owner files.
 
 **Add job** adds a local job. Select its graph node to edit its name,
 dependencies, condition, timeout, environment, matrix, outputs, concurrency,
@@ -209,15 +233,16 @@ action steps expose their local action reference and input mapping. Agent steps
 provide an exact model override, prompt files, runtime prompt, and the selected
 provider's current effort choices. Permission modes are owner settings.
 
-The CodeMirror YAML editor remains visible. Form edits and YAML edits share one
+Choose **Visual**, **YAML**, or **Split**. Form edits and YAML edits share one
 CST document. Comments and unrelated fields survive edits; editing an alias
 detaches that occurrence. Server validation reports invalid fields before Save
 or Run. Pure validation never executes a command or probes an agent.
 
 Drafts autosave after editing and before navigation. A renewed editing lease and
 saved-file hash protect publication. A recovered draft can be inspected or
-replaced with the saved source. Saving validates and publishes only that
-workflow. Saved sources and drafts use the current jobs-and-steps format.
+replaced with the saved source. Saving validates and publishes that workflow
+and every pending local prompt edit together. Saved sources and drafts use
+the current jobs-and-steps format.
 Historical run snapshots remain inspectable.
 
 JSON-formatted current workflow sources appear as block YAML in the editor and
@@ -243,6 +268,22 @@ Environment approval uses its own attempt-specific control; a generic human
 answer cannot bypass it. Job failure tolerance retains the raw outcome beside
 the effective conclusion.
 
+Job settings open in a drawer. Connect graph handles to add a dependency;
+select an edge and press Delete to remove it. The plus button between jobs
+inserts a job. Right-click a card to duplicate, delete, or run from that job.
+**Run from here** saves a declared start point before opening launch options.
+Undo and redo reverse document edits. **Format as YAML** previews changes
+before applying them to the draft. YAML completion and hover help use the
+server language manifest; diagnostics underline their source position.
+
+**Workflow settings** edits names, launch inputs, defaults, environment,
+concurrency, events, recovery, and declared start points. Job forms use
+key/value tables and lists. Agent prompts support Markdown preview, ordered
+local or shared global files, reuse, and reordering. Global files are read
+only. Renaming a prompt copies this job's instructions and retains the shared
+original for other workflows. **What the agent receives** explains prompt,
+input, output, and run context.
+
 See [Workflow language](workflows.md) for exact YAML keys and limits.
 
 ## Drafts, leases, and conflicts
@@ -250,7 +291,10 @@ See [Workflow language](workflows.md) for exact YAML keys and limits.
 Each browser tab gets an opaque holder ID in session storage. Loading a
 workflow acquires its 60-second editor lease; the tab renews the lease every 30
 seconds. Draft and Save requests must present that live holder ID. Another tab
-can read the file but cannot autosave or replace it until the lease expires.
+can read the file and run its saved source. **Edit here instead** takes over
+editing explicitly; the previous holder can no longer save. A closing tab
+releases only its own lease through a CSRF-protected beacon. Failed workflow
+creation does not acquire a lease.
 
 Changed editor text autosaves to the database after 600 milliseconds without
 changing the Git-owned workflow file. Invalid YAML is retained as an `invalid`
@@ -259,16 +303,21 @@ validation state.
 
 Switching views, workflows, or projects flushes the recovery draft first.
 Requests are serialized so an older draft cannot overwrite a newer one.
-**Discard changes** restores the saved YAML bytes and replaces the recovery
-draft without rewriting the workflow file. Restoring the saved text directly
-in the YAML editor also updates the recovery draft.
+**Restore saved source** discards the observed recovery draft without requiring
+the editing lease or rewriting the workflow file. A newer draft from another
+tab causes a conflict. The editor shows the saved source beside the draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
-Save validates the complete workflow, prompts, and subworkflows, then replaces
-one file atomically. It also sends the SHA-256 hash of the exact bytes loaded by
-the tab. If another process changed the file, Relay returns a conflict and
+Save validates the complete workflow, prompts, and subworkflows, then publishes
+YAML and local prompt edits as one recoverable bundle. A portable source lock
+protects readers and launch capture; an interrupted publication rolls back
+before the next source operation. Save sends the SHA-256 hashes loaded by the
+tab. If another process changed a file, Relay returns a conflict and
 keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
 again. A successful Save clears the draft and refreshes the base hash.
+Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
+position, and a hint; independent invalid fields appear together. An invalid
+edit keeps the last valid graph visible with an explanation.
 
 ## Launch a run
 
@@ -285,11 +334,10 @@ and enums show their declared values. An untouched input stays omitted so the
 server applies its default or resolves an optional input to `null`. Edited
 values preserve their JSON types.
 
-The panel explains each blocked state beside **Run workflow**: loading or
-saving, no selected workflow, unsaved instructions, invalid YAML, unsaved
-workflow changes, an empty workflow, unavailable Git source, or a missing first
-commit. Unsaved workflow changes offer **Save** when this browser can save;
-lease conflicts and unsaved instructions explain what to fix in the editor.
+The panel runs the saved workflow even when an unsaved or invalid draft exists,
+and explains that the draft is excluded. Missing or invalid saved sources,
+unavailable Git source, and a missing first commit still block launch.
+Required inputs show inline errors; submitting focuses the first invalid field.
 Launch failures appear in the panel, and the owner can retry after fixing them.
 
 When the saved workflow is ready, **Project files** checks launch cleanliness
@@ -304,6 +352,19 @@ them in the project folder. Stashing with `-u` also removes untracked workflow
 files and reports until restored. The preview uses saved sources. After
 **Save**, the panel checks them again. A later file change can still block the
 server's launch check and appears as an error in the panel.
+
+**Commit workflow files** opens a bounded preview of validated untracked
+workflow sources and their complete contents. The action is available even
+when the selected workflow is the only untracked source.
+It includes the selected workflow when untracked, plus its captured prompt
+files. An explicit confirmation commits exactly those reviewed paths.
+Changed bytes, a changed Git head, or a nonempty index reject the operation.
+Root reports, unrelated prompts, and unrelated code remain untouched.
+Invalid unrelated workflow candidates appear as notices and are omitted;
+required invalid sources still block the preview.
+Relay verifies staged blobs against Git's conversion of the confirmed bytes,
+including configured newline conversion, before committing the reviewed index.
+The panel repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. Historical workflows can also expose **Start from job**.
@@ -467,6 +528,9 @@ The monitor combines the SSE stream with paginated database reads:
 - pending permission, elicitation, and human-wait records show distinct forms;
 - failed nodes expose a manual rerun action;
 - retained artifacts expose authenticated download links.
+
+Loading earlier activity places the revealed messages below the sticky header.
+When the paging button disappears, keyboard focus moves to the activity region.
 
 Activity renders Markdown headings, emphasis, lists, quotes, tables, and code
 blocks through React. Raw HTML and images stay inert; links accept only HTTP,
@@ -926,3 +990,104 @@ An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested
 and rechecks path containment. Reload the browser after the build finishes.
 A Python service change still requires an orderly server restart.
+
+Run navigation lists jobs. Open a job to expand its ordered steps, each with its
+own attempt, output, exit code, and duration. Step links still open captured
+historical attempts. Finished runs read saved pages without opening a live
+stream. Disclosure choices are remembered separately for each run and job.
+Elapsed duration includes waits; recorded dispatch holds appear separately.
+
+The Artifacts section hides empty internal commit and diff evidence, while the
+original evidence remains retained. Preview text or Markdown before downloading
+an individual file. Download all produces a bounded ZIP of retained files,
+verifying every recorded size and digest before returning it. Large runs above
+1,000 retained files or 256 MiB require individual downloads.
+
+Browser reads share in-flight requests, with independent cancellation for each
+consumer. Hidden tabs stop background polling. An unchanged visible dashboard
+and attention feed slow to one refresh every 30 seconds after a minute; focus
+or a deliberate action refreshes immediately. Signed-out polling stops until
+authentication is restored. Workspace code is preloaded after authentication so
+the Run workflow panel does not wait for a first chunk download.
+
+### Help, keyboard access, and settings validation
+
+The Help menu includes [Getting started](getting-started.md),
+[Coming from GitHub Actions](coming-from-github-actions.md), and
+[keyboard shortcuts](keyboard-shortcuts.md). Welcome slides close on Escape;
+starting a tour is an explicit choice. A successful project run hides the
+first-run banner. Navigation links support opening another tab. Skip links
+move keyboard focus into the current page or run summary.
+
+Settings validate durations, retry limits, ports, and worker counts next to
+the field. Invalid values disable Save. Switching sections with unsaved
+changes offers Keep editing or Discard changes. Restart-only settings retain
+their restart notices.
+
+Job settings use key/value tables, matrix axes, a concurrency group with a
+cancel-in-progress switch, and searchable expression helpers. The failure
+tab selects the saved workflow recovery default, Stop and tell me, or a
+literal limit of one or two automatic retries per agent step. The smaller
+of the step limit and captured workflow limit applies; retries never reset
+the lifetime budget. A fix-and-check loop remains an explicit bounded step
+calling a local reusable workflow and preserves existing conclusions.
+
+Opening a project includes a home-bounded folder browser, common development
+folders, and live Git validation. Initialize Git is an explicit action for
+a selected non-repository folder; it preserves the folder's existing files.
+Named artifact uploads show their job and creation time, offer verified
+text or Markdown previews, and join retained reports in Download all.
+
+### Authoring and monitor boundaries
+
+Script steps use a syntax-highlighted multiline editor and the host's selected
+shell. Expand **Process arguments** to inspect the interpreter vector from the
+execution planner. The private attempt-directory placeholder becomes an owned
+path at execution. Missing interpreters are reported; Relay does not switch an
+explicit shell. Named shared commands and exact argv remain separate choices.
+
+Loop and reusable-workflow cards expand a read-only child graph and link to the
+child source for editing. The initial editor viewport fits its nodes; selecting
+a job explicitly focuses it. Small graphs omit the minimap. Job deletion removes
+inbound dependencies in the same undoable source edit.
+
+Structured environment, output and input controls include an **Advanced JSON**
+option. The JSON editor applies valid values on blur and reports parse errors
+inline. Both the workflow header and the open job drawer invoke the same Save,
+which publishes the workflow and changed prompts together.
+
+Finished summaries request bounded state events and visible artifact metadata.
+They do not replay agent or command logs or open a live stream. Open a job for
+its complete paged log; explicitly load activity history to inspect the complete
+recorded event stream. Read failures in a job's metadata and output remain
+independent, so a successful metadata refresh cannot hide a failed log read.
+
+[Browser view states](ui-states.md) records loading, empty, error, success and
+access-denied behavior. [Backlog implementation](backlog-implementation.md)
+connects the remaining findings to their implementation and regression tests.
+
+### Browser regression gates
+
+Visual tests use a separate disposable server and database on port 4176,
+so functional test runs cannot appear on the Home dashboard. Baselines live
+under `frontend/e2e/baselines/{platform}`. Linux CI is the reference for CI
+screenshots; macOS baselines support local checks. Relative times and private
+paths are masked rather than relaxing the pixel-difference threshold.
+
+To refresh Linux baselines, dispatch the Main workflow on the working branch
+with **Generate Linux visual baselines for review** enabled. Review the
+`linux-visual-baselines` artifact before committing its PNG files. Generate
+macOS baselines only from an isolated checkout with the visual Playwright
+configuration and `--update-snapshots`.
+
+Every normal and worst-case fixture screen receives an axe audit with WCAG
+2.0, 2.1, and 2.2 tags, failing on serious or critical violations. The previous
+gate omitted WCAG 2.1 A and 2.2 AA and only audited the final screen in loops;
+that missed link-name and target-size defects. History typography checks also
+require visible text of at least 12 px and weights 400, 500, or 600.
+
+Delayed-response CLS checks capture `layout-shift` sources at 375 and 1440 px.
+Editor skeletons reserve the final sidebar geometry, initial run collections
+and history publish together, and graphs keep their height and fit once before
+revealing the viewport. Optional self-hosted fonts and a metric-adjusted
+fallback prevent a late font response from moving already painted content.

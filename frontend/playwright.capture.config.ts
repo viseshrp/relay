@@ -9,10 +9,19 @@ export default defineConfig(base, {
     viewport: { width: 1440, height: 1000 },
     deviceScaleFactor: 2,
     reducedMotion: "reduce",
-    storageState: { cookies: [], origins: [{ origin: "http://127.0.0.1:4175", localStorage: [
-      { name: "relay.welcome-seen", value: "true" }, { name: "relay.tour-seen", value: "true" },
-      { name: "relay.setup-dismissed", value: "true" },
-    ] }] },
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: "http://127.0.0.1:4175",
+          localStorage: [
+            { name: "relay.welcome-seen", value: "true" },
+            { name: "relay.tour-seen", value: "true" },
+            { name: "relay.setup-dismissed", value: "true" },
+          ],
+        },
+      ],
+    },
   },
   webServer: {
     ...base.webServer,

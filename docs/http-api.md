@@ -1,5 +1,12 @@
 # HTTP API
 
+`POST /api/workflows/<key>/manage` requires the editing `holder` and accepts
+`action`: `rename`, `duplicate`, `disable`, `enable`, or `delete`. File changes
+also require `base_hash`; rename and duplicate take `new_key` and an optional
+display `name`. Delete requires `confirmed: true`. History and shared prompts
+are retained. Workflow inventory includes `disabled`, `last_run`, and
+`last_status` when present. Disabled workflows cannot be launched.
+
 Relay exposes this API only through `relay up` on a loopback address. The
 browser uses ordinary Django session cookies. It does not send bearer tokens,
 and the API is not a remote-service contract.
@@ -40,6 +47,14 @@ cookie value in `X-CSRFToken`. A missing or expired token gets
 `403 csrf_failed`. For example, if the cookie is `relay_csrftoken=abc`, the
 request header is `X-CSRFToken: abc`.
 
+Workflow draft and Save bodies also accept `prompts`, a mapping of local
+`prompts/<file>` references to `{text, base_hash}`. Use `base_hash: null` for
+a new prompt. One Save publishes the YAML and up to 32 prompt edits together,
+rejecting any stale file before publication. The complete prompt edits are
+retained with the recovery draft. Edits allow 1 MiB of new prompt text.
+`GET /api/workflow-prompts` lists bounded local and global references. The
+workflow prompt read endpoint accepts `global:<file>` for read-only preview.
+
 ## Workflow language and local automation
 
 These owner routes use the same login and CSRF rules. Select a project with the
@@ -73,6 +88,13 @@ file sizes, and hashes before returning bytes. Expired optional artifacts are
 unavailable; required report evidence retains its existing preservation rules.
 Automatic activation is an owner operation. Deliveries remain deduplicated in
 SQLite, and writing triggers never activate merely by saving YAML.
+
+Local dispatch requires a nonempty `event_type`, an object `client_payload`,
+and an `idempotency_key` of 1 to 200 characters. The complete delivery payload
+is limited to 65,535 bytes, including the event name and envelope. Property
+counts and event names have no separate GitHub service limit. Oversized
+deliveries fail before inserting any record, including when no activated
+trigger matches the event.
 
 See [Workflow language](workflows.md) and the
 [local language audit](workflow-language-compatibility.md) for event semantics,
@@ -124,7 +146,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/projects/relink` | `{"old":"/old","new":"/new"}` | `200 {"project":...}` |
 | `GET /api/workflows` | optional `?project={id}` | `200 {"workflows":[{"key":"review.yaml","name":"Review"}],"project":...}` |
 | `POST /api/workflows` | `{"key":"review","holder":"tab-id"}`; optional `yaml`, `name`, `template_id` | `201`; creates a validated workflow without overwriting an existing file |
-| `GET /api/workflow-templates` | none | `200 {"templates":[...]}`; the six starter bundles and their typed inputs |
+| `GET /api/workflow-templates` | none | `200 {"templates":[...]}`; seven starter bundles with typed inputs and a `default` selection flag |
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
@@ -132,6 +154,18 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
+| `POST /api/workflows/{key}/lease/release` | `holder`; JSON or a CSRF-protected form beacon | Releases only this holder's lease |
+| `POST /api/workflows/{key}/draft/discard` | `updated_at` from the observed draft | Discards without a lease; rejects a newer draft |
+| `GET /api/workflows/{key}/commit` | none | Current `head` and validated untracked source `files`, including `path`, `hash`, and `text` |
+| `POST /api/workflows/{key}/commit` | `confirmed: true`, `head`, `hashes` mapping | Commits exactly the reviewed sources; rejects changed bytes, a changed head, or staged changes |
+
+Lease acquisition accepts `takeover: true` for an explicit move between tabs.
+`soft_conflict: true` returns a normal `200` response with `lease: null` and
+the conflict envelope when another holder is active. Ordinary contested
+acquisition keeps its `409` envelope. Takeover invalidates the old holder's
+writes; an old release cannot remove the new holder's lease.
+Language validation returns every independent field diagnostic up to 100,
+including source positions and suggestions for unsupported hosted syntax.
 
 `launch_source` is a fresh read of the selected project's Git branch and commit.
 `branch` is `null` for a detached checkout; `commit` is `null` before the first
@@ -214,6 +248,15 @@ renews it; another holder gets `409` until expiry.
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
 | `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
+
+Finished-run monitors use `events?summary=true`: at most 50 state events and
+16 KiB per page, excluding agent output, command output and step summaries.
+Oversized state payloads retain bounded identity/status/error fields and set
+`summary_truncated`. Ordinary event and job-log reads retain the original
+recorded payloads. Explicit full-history loading starts from the earliest
+recorded event.
+`artifacts?visible=true` omits empty internal commit/diff evidence from the
+presentation page without deleting retained artifact records or bytes.
 
 Readiness checks require owner access and CSRF protection. Each row contains
 `id`, `display_name`, `install_url`, `installed`, `ready`, `error_code`,
@@ -830,3 +873,9 @@ Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 50,000 entries and 1,000 run roots; incomplete counts are lower bounds.
 It reads metadata only, follows no inner symlinks, and never returns file
 contents. The existing confirmed `POST /api/data/clean` remains unchanged.
+
+`GET /api/runs/<id>/artifacts/download` downloads retained attempt files as a
+ZIP. The archive is limited to 1,000 files and 256 MiB and rejects changed
+retained bytes. Artifact records include their attempt's completion or start
+time as `created_at`. Run records expose `dispatch_paused_at` and accumulated
+`dispatch_paused_seconds`; pause changes retain these counters transactionally.
