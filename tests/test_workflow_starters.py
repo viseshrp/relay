@@ -283,7 +283,7 @@ def test_full_starter_executes_handoffs_gates_and_bounded_loops(
 ) -> None:
     from relay.execution.nodes import node_executors
     from relay.execution.scheduler import dispatch_ready_nodes
-    from relay.web.models import HumanInteraction, Run
+    from relay.web.models import HumanInteraction, NodeAttempt, Run, RunEvent
     from tests.fake_agent import AI_HANDOFF
 
     counters = tmp_path / "phase-counters"
@@ -334,16 +334,41 @@ def test_full_starter_executes_handoffs_gates_and_bounded_loops(
         dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
         engine.drain(run_id)
         answered += 1
-    from relay.web.models import RunEvent
-
-    assert run_status(run_id) == status, (
-        Run.objects.get(pk=run_id).failure_summary,
-        list(RunEvent.objects.filter(run_id=run_id, type="error").values("type", "payload")),
+    failures = list(
+        NodeAttempt.objects.filter(node_run__run_id=run_id, error_code__isnull=False).values_list(
+            "node_run__scope_path", "error_code"
+        )
     )
+    diagnostics = {
+        "failure_summary": Run.objects.get(pk=run_id).failure_summary,
+        "errors": list(
+            RunEvent.objects.filter(run_id=run_id, type="error").values("type", "payload")
+        ),
+        "failed_attempts": [
+            event.payload
+            for event in RunEvent.objects.filter(run_id=run_id, type="attempt.ended")
+            if isinstance(event.payload, dict) and event.payload.get("error_code")
+        ],
+    }
+    assert run_status(run_id) == status, diagnostics
+    if status == "failed":
+        if audit_next:
+            expected_failure = (
+                "root.tests.step_1.iteration_1.cycle.step_3",
+                "workflow_validation_error",
+            )
+        else:
+            phase = "refine_plan" if plan_ready > 3 else "review" if review_ready > 3 else "tests"
+            expected_failure = (f"root.{phase}.step_1", "loop_exhausted")
+        # An unrelated earlier failure must expose its cause before counter assertions.
+        assert expected_failure in failures, diagnostics
+    assert (counters / "plan").is_file(), diagnostics
     assert int((counters / "plan").read_text()) == min(plan_ready, 3)
     if plan_ready <= 3:
+        assert (counters / "review").is_file(), diagnostics
         assert int((counters / "review").read_text()) == min(review_ready, 3)
     if plan_ready <= 3 and review_ready <= 3:
+        assert (counters / "audit").is_file(), diagnostics
         assert int((counters / "audit").read_text()) == (1 if audit_next else min(audit_ready, 3))
     turns = [
         message["params"]["prompt"]
