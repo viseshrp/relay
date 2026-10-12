@@ -6,16 +6,17 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 
-test("theme tokens agree between theme.tsx and styles.css without drift", async () => {
+test("theme tokens agree between tokens.ts, theme.tsx, and styles.css without drift", async () => {
+  const tokensSrc = await readFile(join(rootDir, "src/tokens.ts"), "utf8");
   const themeSrc = await readFile(join(rootDir, "src/theme.tsx"), "utf8");
   const stylesSrc = await readFile(join(rootDir, "src/styles.css"), "utf8");
   const indexSrc = await readFile(join(rootDir, "index.html"), "utf8");
 
   const extractTokens = (constName) => {
-    const match = themeSrc.match(
+    const match = tokensSrc.match(
       new RegExp(`export const ${constName} = \\{([\\s\\S]*?)\\};`),
     );
-    assert(match, `Could not find ${constName} in theme.tsx`);
+    assert(match, `Could not find ${constName} in tokens.ts`);
     const tokens = {};
     for (const line of match[1].split("\n")) {
       const lineMatch = line.match(
@@ -56,7 +57,7 @@ test("theme tokens agree between theme.tsx and styles.css without drift", async 
     assert.equal(
       rootCss[key],
       val,
-      `Light token drift for ${key}: theme.tsx has "${val}", styles.css :root has "${rootCss[key]}"`,
+      `Light token drift for ${key}: tokens.ts has "${val}", styles.css :root has "${rootCss[key]}"`,
     );
   }
 
@@ -64,12 +65,12 @@ test("theme tokens agree between theme.tsx and styles.css without drift", async 
     assert.equal(
       darkThemeCss[key],
       val,
-      `Dark token drift for ${key}: theme.tsx has "${val}", styles.css [data-theme="dark"] has "${darkThemeCss[key]}"`,
+      `Dark token drift for ${key}: tokens.ts has "${val}", styles.css [data-theme="dark"] has "${darkThemeCss[key]}"`,
     );
     assert.equal(
       darkMediaCss[key],
       val,
-      `Dark media query drift for ${key}: theme.tsx has "${val}", styles.css prefers-color-scheme has "${darkMediaCss[key]}"`,
+      `Dark media query drift for ${key}: tokens.ts has "${val}", styles.css prefers-color-scheme has "${darkMediaCss[key]}"`,
     );
   }
 
@@ -78,9 +79,13 @@ test("theme tokens agree between theme.tsx and styles.css without drift", async 
     "index.html must use the shared relay-theme-preference key",
   );
   assert(
-    themeSrc.includes(
+    tokensSrc.includes(
       'export const THEME_STORAGE_KEY = "relay-theme-preference";',
     ),
-    "theme.tsx must export THEME_STORAGE_KEY as relay-theme-preference",
+    "tokens.ts must export THEME_STORAGE_KEY as relay-theme-preference",
+  );
+  assert(
+    themeSrc.includes('export * from "./tokens";'),
+    "theme.tsx must re-export tokens.ts",
   );
 });

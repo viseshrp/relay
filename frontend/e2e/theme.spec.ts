@@ -136,70 +136,66 @@ test("browser theme-color meta tags honor active theme across OS and preference 
   }
 });
 
+async function verifyInputContrast(page: Page): Promise<void> {
+  const contrastResults = await page.evaluate(() => {
+    function parseRgb(color: string): [number, number, number] {
+      const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!m) return [0, 0, 0];
+      return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+    }
+
+    function luminance([r, g, b]: [number, number, number]): number {
+      const srgb = [r, g, b].map((c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+    }
+
+    function contrastRatio(c1: string, c2: string): number {
+      const l1 = luminance(parseRgb(c1));
+      const l2 = luminance(parseRgb(c2));
+      const brightest = Math.max(l1, l2);
+      const darkest = Math.min(l1, l2);
+      return (brightest + 0.05) / (darkest + 0.05);
+    }
+
+    function getEffectiveBg(el: HTMLElement): string {
+      let current: HTMLElement | null = el;
+      while (current) {
+        const bg = window.getComputedStyle(current).backgroundColor;
+        if (bg && bg !== "transparent" && !bg.startsWith("rgba(0, 0, 0, 0)")) {
+          return bg;
+        }
+        current = current.parentElement;
+      }
+      return "rgb(255, 255, 255)";
+    }
+
+    const outlines = Array.from(
+      document.querySelectorAll(".MuiOutlinedInput-notchedOutline"),
+    );
+    return outlines.map((outline) => {
+      const style = window.getComputedStyle(outline);
+      const borderColor = style.borderColor || style.borderTopColor;
+      const surfaceColor = getEffectiveBg(outline as HTMLElement);
+      return {
+        borderColor,
+        surfaceColor,
+        ratio: contrastRatio(borderColor, surfaceColor),
+      };
+    });
+  });
+
+  expect(contrastResults.length).toBeGreaterThan(0);
+  for (const result of contrastResults) {
+    expect(result.ratio).toBeGreaterThanOrEqual(3.0);
+  }
+}
+
 test("form inputs maintain WCAG 1.4.11 boundary contrast >= 3:1 in both light and dark modes", async ({
   page,
 }) => {
-  const verifyInputContrast = async () => {
-    const contrastResults = await page.evaluate(() => {
-      function parseRgb(color: string): [number, number, number] {
-        const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-        if (!m) return [0, 0, 0];
-        return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
-      }
-
-      function luminance([r, g, b]: [number, number, number]): number {
-        const srgb = [r, g, b].map((c) => {
-          const s = c / 255;
-          return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-        });
-        return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
-      }
-
-      function contrastRatio(c1: string, c2: string): number {
-        const l1 = luminance(parseRgb(c1));
-        const l2 = luminance(parseRgb(c2));
-        const brightest = Math.max(l1, l2);
-        const darkest = Math.min(l1, l2);
-        return (brightest + 0.05) / (darkest + 0.05);
-      }
-
-      function getEffectiveBg(el: HTMLElement): string {
-        let current: HTMLElement | null = el;
-        while (current) {
-          const bg = window.getComputedStyle(current).backgroundColor;
-          if (
-            bg &&
-            bg !== "transparent" &&
-            !bg.startsWith("rgba(0, 0, 0, 0)")
-          ) {
-            return bg;
-          }
-          current = current.parentElement;
-        }
-        return "rgb(255, 255, 255)";
-      }
-
-      const outlines = Array.from(
-        document.querySelectorAll(".MuiOutlinedInput-notchedOutline"),
-      );
-      return outlines.map((outline) => {
-        const style = window.getComputedStyle(outline);
-        const borderColor = style.borderColor || style.borderTopColor;
-        const surfaceColor = getEffectiveBg(outline as HTMLElement);
-        return {
-          borderColor,
-          surfaceColor,
-          ratio: contrastRatio(borderColor, surfaceColor),
-        };
-      });
-    });
-
-    expect(contrastResults.length).toBeGreaterThan(0);
-    for (const result of contrastResults) {
-      expect(result.ratio).toBeGreaterThanOrEqual(3.0);
-    }
-  };
-
   // Check Settings inputs in light mode
   await page.goto("/?view=settings");
   await expect(page.getByRole("main")).toBeVisible();
@@ -208,7 +204,7 @@ test("form inputs maintain WCAG 1.4.11 boundary contrast >= 3:1 in both light an
   );
   await page.reload();
   await expect(page.getByRole("main")).toBeVisible();
-  await verifyInputContrast();
+  await verifyInputContrast(page);
 
   // Check Settings inputs in dark mode
   await page.evaluate(() =>
@@ -216,7 +212,7 @@ test("form inputs maintain WCAG 1.4.11 boundary contrast >= 3:1 in both light an
   );
   await page.reload();
   await expect(page.getByRole("main")).toBeVisible();
-  await verifyInputContrast();
+  await verifyInputContrast(page);
 });
 
 test("guided tour passes accessibility audits in both light and dark themes", async ({
@@ -295,4 +291,67 @@ for (const view of ["home", "workflows", "runs", "settings"] as const) {
     }
     await assertAccessible(page);
   });
+}
+
+for (const mode of ["light", "dark"] as const) {
+  for (const width of [320, 1440] as const) {
+    test(`worst-case screens in ${mode} theme at ${width}px stay contained, accessible, and have valid inputs`, async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width, height: 960 });
+      await page.addInitScript(
+        (pref) => localStorage.setItem("relay-theme-preference", pref),
+        mode,
+      );
+      const response = await post(page, "/__test__/worst-case", {
+        enabled: true,
+      });
+      expect(response.ok()).toBeTruthy();
+      const fixture = await response.json();
+
+      const screens = ["home", "workflows", "runs", "settings"] as const;
+      for (const screen of screens) {
+        const query = new URLSearchParams({
+          view: screen,
+          project: fixture.project,
+        });
+        if (screen === "workflows") query.set("workflow", fixture.workflow);
+        if (screen === "runs") query.set("run", fixture.run);
+        await page.goto(`/?${query}`);
+        await expect(page.getByRole("main")).toBeVisible();
+        await expect(page.locator("html")).toHaveAttribute("data-theme", mode);
+
+        // Fail on horizontal scroll
+        const scrollWidth = await page.evaluate(
+          () => document.documentElement.scrollWidth,
+        );
+        expect(scrollWidth).toBeLessThanOrEqual(width);
+
+        // Fail on clipped primary actions
+        const outside = await page
+          .getByRole("main")
+          .locator("button:visible, a.MuiButton-root:visible")
+          .evaluateAll((items) =>
+            items
+              .filter((item) => {
+                const rect = item.getBoundingClientRect();
+                return (
+                  rect.width > 0 &&
+                  (rect.left < -1 || rect.right > window.innerWidth + 1)
+                );
+              })
+              .map((item) => item.textContent),
+          );
+        expect(outside).toEqual([]);
+
+        // Fail on input outlines below 3:1 on screens with inputs
+        if (screen === "settings") {
+          await verifyInputContrast(page);
+        }
+
+        await assertAccessible(page);
+      }
+    });
+  }
 }

@@ -1768,7 +1768,7 @@ QA-13 makes every form unusable in dark mode, and QA-14 fails CI.
     and style Back, close, and progress with Relay tokens in both themes.
   - **Done when:** axe passes on the tour in both themes.
 
-- [ ] **QA-16. Dark mode has no automated visual or accessibility gate.**
+- [x] **QA-16. Dark mode has no automated visual or accessibility gate.**
   - **Evidence:** `frontend/e2e/baselines/linux` holds 21 light baselines and
     no dark ones. `theme.spec.ts` contains no axe check, although commit
     `44119a7` says it asserts WCAG 2.2 AA across theme states.
@@ -1838,13 +1838,13 @@ Fix locations: `frontend/src/theme.tsx` and `frontend/src/styles.css`
 
 - [x] **BR-12. Clamp the editor's workflow title** (row 3).
 - [x] **BR-13. Shorten commit IDs in Changes** (row 4).
-- [ ] **BR-14. Show step output directly** (row 7). Remove the nested job
+- [x] **BR-14. Show step output directly** (row 7). Remove the nested job
   chrome; keep attempts at the job level.
 - [x] **BR-15. Fix the finished-job Changes copy and the Storage name
   tooltip** (rows 6, 8).
 - [x] **BR-16. Restore Markdown table and quote borders in dark mode**
   (row 5).
-- [ ] **BR-17. Add the dark theme to the worst-case fixture.** Run the
+- [x] **BR-17. Add the dark theme to the worst-case fixture.** Run the
   `/__test__/worst-case` screens in both themes at 320 and 1440 pixels and
   fail on horizontal scroll, clipped primary actions, or input outlines
   below 3:1.
@@ -1890,11 +1890,11 @@ visible but quiet.
 - [x] **DE-08. Give dark mode real borders and elevation** (rows 1, 2).
 - [x] **DE-09. Theme the graph, editor highlighting, and tour** (rows 3–5).
 - [x] **DE-10. Make the theme control compact and single** (rows 6, 7).
-- [ ] **DE-11. Mark destructive actions and flatten step logs** (rows 8, 9).
+- [x] **DE-11. Mark destructive actions and flatten step logs** (rows 8, 9).
 
 ### frontend-ui-engineering, dark mode
 
-- [ ] **FE-09. Keep theme tokens in one source.**
+- [x] **FE-09. Keep theme tokens in one source.**
   - **Evidence:** The 26 dark tokens exist in four hand-maintained copies:
     `theme.tsx`, `:root[data-theme="dark"]` and
     `@media (prefers-color-scheme: dark)` in `styles.css`, plus colours in
@@ -1905,7 +1905,7 @@ visible but quiet.
     add a test that fails on drift.
   - **Done when:** Changing a token in one place updates every theme surface.
 
-- [ ] **FE-10. Split `theme.tsx` by responsibility.**
+- [x] **FE-10. Split `theme.tsx` by responsibility.**
   - **Evidence:** At 537 lines it holds tokens, MUI overrides, the theme
     context, storage, media listeners, and document side effects (class,
     `color-scheme`, `theme-color`).

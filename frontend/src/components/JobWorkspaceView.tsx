@@ -22,6 +22,7 @@ import { JobLog } from "./JobLog";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 
 import { JobChangesView } from "./JobWorkspaceShared";
+import { StepLogEmbedded } from "./StepLogEmbedded";
 import type { JobWorkspaceState } from "./useJobWorkspace";
 export function JobWorkspaceView({ state }: { state: JobWorkspaceState }) {
   const {
@@ -51,11 +52,15 @@ export function JobWorkspaceView({ state }: { state: JobWorkspaceState }) {
     changesOpen,
     setChangesOpen,
   } = state;
+  if (embedded) {
+    return <StepLogEmbedded state={state} />;
+  }
+
   return (
     <Stack
       spacing={0}
       component="section"
-      aria-label={embedded ? "Step log" : "Job log"}
+      aria-label="Job log"
       className="job-workspace"
     >
       <JobHeader state={state} />
