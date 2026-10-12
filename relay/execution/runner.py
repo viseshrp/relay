@@ -9,12 +9,10 @@ from datetime import datetime, timezone
 from enum import Enum
 import logging
 from pathlib import Path
-import threading
 import time
 from typing import Protocol, TypeAlias
 
 from relay.agents.usage_limits import ProviderUsageLimit
-from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
 from relay.errors import NodeExecutionError, RelayError, log_persistence_failure
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import (
@@ -27,6 +25,7 @@ from relay.vcs.worktree import create_reader_worktree, remove_worktree, require_
 
 from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
+from .heartbeat import HeartbeatStore, heartbeat_registration
 from .resources import AttemptResources, allocate_attempt_resources
 from .state import AttemptStopReason, EventSensitivity, EventSource, NodeType
 from .timing import attempt_deadline, remaining_seconds
@@ -54,14 +53,13 @@ class AttemptContext:
     registered_cleanup: bool = False
 
     def heartbeat(self) -> bool:
-        """Renew this attempt and every enclosing synchronous-scope owner."""
+        """Check ownership with reads; the process coordinator renews leases."""
         owners = (
             (self.attempt.attempt_id, self.attempt.worker_id),
             *self.heartbeat_owners,
         )
         return all(
-            self.runtime.heartbeat_attempt(attempt_id, worker_id)
-            for attempt_id, worker_id in owners
+            self.runtime.attempt_owned(attempt_id, worker_id) for attempt_id, worker_id in owners
         )
 
     def remaining_seconds(self) -> float | None:
@@ -97,7 +95,7 @@ class AttemptRuntime(DispatchStore, Protocol):
         sensitivity: EventSensitivity = EventSensitivity.NORMAL,
     ) -> None: ...
 
-    def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool: ...
+    def attempt_owned(self, attempt_id: str, worker_id: str) -> bool: ...
 
     def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None: ...
 
@@ -186,9 +184,7 @@ class AttemptExecutor(Protocol):
     def execute(self, context: AttemptContext) -> ExecutionOutcome: ...
 
 
-class RunnerStore(AttemptRuntime, Protocol):
-    def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool: ...
-
+class RunnerStore(AttemptRuntime, HeartbeatStore, Protocol):
     def mark_attempt_waiting(self, attempt_id: str, timeout_seconds: float | None) -> None: ...
 
     def record_preservation(self, attempt_id: str, preservation: PreservationResult) -> None: ...
@@ -210,28 +206,8 @@ def _heartbeat_lease(
     store: RunnerStore, claim: ClaimedAttempt, owners: HeartbeatOwners
 ) -> Iterator[None]:
     """Renew ownership while subprocess, output, Git, and preservation work runs."""
-    stop = threading.Event()
-
-    def renew() -> None:
-        try:
-            while not stop.wait(ATTEMPT_HEARTBEAT_INTERVAL_SECONDS):
-                for attempt_id, worker_id in ((claim.attempt_id, claim.worker_id), *owners):
-                    if not store.heartbeat_attempt(attempt_id, worker_id):
-                        return
-        except Exception:
-            LOGGER.exception(
-                "Attempt heartbeat renewal failed", extra={"attempt_id": claim.attempt_id}
-            )
-        finally:
-            store.close_heartbeat_connections()
-
-    thread = threading.Thread(target=renew, name="relay-attempt-heartbeat", daemon=True)
-    thread.start()
-    try:
+    with heartbeat_registration(store, ((claim.attempt_id, claim.worker_id), *owners)):
         yield
-    finally:
-        stop.set()
-        thread.join()
 
 
 def _uses_git(node_type: str) -> bool:

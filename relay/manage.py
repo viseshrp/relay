@@ -153,7 +153,9 @@ def main(argv: list[str] | None = None) -> None:
         from huey.bin.huey_consumer import consumer_main
 
         django.setup()
+        from relay.execution.heartbeat import worker_heartbeats
         from relay.execution.huey_app import reconciliation_loop
+        from relay.web.repositories import DjangoExecutionStore
 
         stop = threading.Event()
         reconciler = threading.Thread(
@@ -166,7 +168,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.argv = [arguments[0], *arguments[2:], "relay.execution.huey_app.huey"]
         reconciler.start()
         try:
-            consumer_main()
+            with worker_heartbeats(DjangoExecutionStore()):
+                consumer_main()
         finally:
             stop.set()
             reconciler.join(timeout=RECONCILE_INTERVAL_SECONDS + 1.0)

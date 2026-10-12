@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import Callable, Generator, Iterator
 from datetime import datetime, tzinfo
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import time
@@ -146,6 +147,24 @@ def isolated_relay(
     # API launches enqueue claim tokens in the shared session queue; no consumer runs them.
     huey_app.huey.flush()
     huey_app.huey.storage.close()
+
+
+@pytest.fixture
+def short_busy_timeout(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    from django.conf import settings
+    from django.db import connections
+
+    connections.close_all()
+    for database in settings.DATABASES.values():
+        options = dict(database.get("OPTIONS", {}))
+        options["timeout"] = 0.05
+        options["init_command"] = re.sub(
+            r"PRAGMA busy_timeout=\d+;?", "", str(options.get("init_command", ""))
+        )
+        monkeypatch.setitem(database, "OPTIONS", options)
+
+    yield
+    connections.close_all()
 
 
 @pytest.fixture

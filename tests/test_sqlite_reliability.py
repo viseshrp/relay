@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import re
 
-from django.conf import settings
 from django.db import DatabaseError, OperationalError, connection, connections, transaction
 from django.utils import timezone
 import pytest
@@ -18,18 +16,6 @@ from relay.web.models import Project, WorkflowTrigger
 from relay.web.repositories import DjangoExecutionStore, DjangoReadStore
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
 from tests.support import RelayProject
-
-
-@pytest.fixture
-def short_busy_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    connections.close_all()
-    for database in settings.DATABASES.values():
-        options = dict(database.get("OPTIONS", {}))
-        options["timeout"] = 0.05
-        options["init_command"] = re.sub(
-            r"PRAGMA busy_timeout=\d+;?", "", str(options.get("init_command", ""))
-        )
-        monkeypatch.setitem(database, "OPTIONS", options)
 
 
 def test_lock_gate_and_probe_measure_real_sqlite_waiting(
@@ -126,6 +112,16 @@ def test_empty_control_poll_takes_no_write_lock(
     with SqliteWriteProbe() as probe, hold_write_lock(Path(connection.settings_dict["NAME"])):
         assert DjangoExecutionStore().claim_next_control(claim.attempt_id, claim.worker_id) is None
     assert probe.transactions == 0
+
+
+def test_ownership_checks_survive_a_held_write_lock(
+    agent_context: AgentExecutionContext, short_busy_timeout: None
+) -> None:
+    del short_busy_timeout
+    with SqliteWriteProbe() as probe, hold_write_lock(Path(connection.settings_dict["NAME"])):
+        assert agent_context.attempt.heartbeat()
+    assert probe.transactions == 0
+    assert probe.autocommit_writes == 0
 
 
 def test_idle_reconciliation_has_no_writes() -> None:

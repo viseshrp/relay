@@ -394,6 +394,10 @@ class WireAgent:
             if self.mode == "hold":
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
             else:
+                if self.mode.startswith("quiet-until:"):
+                    gate = Path(self.mode.removeprefix("quiet-until:"))
+                    while not gate.exists():
+                        time.sleep(0.01)
                 reason = "refusal" if self.mode == "refusal" else "end_turn"
                 self.reply(request_id, {"stopReason": reason})
         elif method == "session/cancel":

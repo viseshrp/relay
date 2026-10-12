@@ -141,6 +141,7 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
@@ -2384,6 +2385,7 @@ class DjangoExecutionStore(DjangoAgentStore):
 
         return freeze_bindings(project_id)
 
+    @retry_database_busy
     def create_pending_run(
         self,
         project_id: str,
@@ -2482,6 +2484,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not persist the pending run and immutable snapshot."
             raise PersistenceError(message, context={"run": run_id}) from None
 
+    @retry_database_busy
     def mark_run_started(
         self,
         run_id: str,
@@ -3610,6 +3613,41 @@ class DjangoExecutionStore(DjangoAgentStore):
             if updated:
                 RunLock.objects.filter(attempt_id=attempt_id).update(heartbeat_at=now)
             return updated == 1
+
+    def attempt_owned(self, attempt_id: str, worker_id: str) -> bool:
+        """Provider/command checks never reserve or renew SQLite's writer."""
+        try:
+            return NodeAttempt.objects.filter(
+                pk=attempt_id,
+                worker_id=worker_id,
+                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+            ).exists()
+        except DatabaseError:
+            message = "Relay could not read the attempt's worker ownership."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def renew_attempts(self, owners: tuple[tuple[str, str], ...]) -> None:
+        """Renew each registered attempt and admission once per worker cycle."""
+        retry_database_busy(self._renew_attempts, budget=ATTEMPT_STALE_AFTER_SECONDS)(owners)
+
+    def _renew_attempts(self, owners: tuple[tuple[str, str], ...]) -> None:
+        try:
+            identity = models.Q(pk__in=[])
+            for attempt_id, worker_id in set(owners):
+                identity |= models.Q(pk=attempt_id, worker_id=worker_id)
+            active = NodeAttempt.objects.filter(
+                identity, status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
+            )
+            if not owners or not active.exists():
+                return
+            with transaction.atomic():
+                ids = list(active.values_list("pk", flat=True))
+                now = timezone.now()
+                NodeAttempt.objects.filter(pk__in=ids).update(heartbeat_at=now)
+                RunLock.objects.filter(attempt_id__in=ids).update(heartbeat_at=now)
+        except DatabaseError:
+            message = "Relay could not renew the worker's active attempts."
+            raise PersistenceError(message) from None
 
     def owned_attempt_processes(self) -> tuple[tuple[str, ProcessIdentity], ...]:
         """Only identities recorded at spawn may authorize later escalation."""
@@ -4888,6 +4926,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             AttemptStatus.WAITING.value,
         }
 
+    @retry_database_busy
     def submit_control(
         self,
         attempt_id: str,
@@ -4952,6 +4991,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not persist the control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
+    @retry_database_busy
     def claim_next_control(
         self,
         attempt_id: str,
@@ -5018,6 +5058,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not claim the next control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
+    @retry_database_busy
     def apply_control(self, request_id: str, worker_id: str) -> bool:
         try:
             with transaction.atomic():

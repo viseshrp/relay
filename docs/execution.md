@@ -281,9 +281,19 @@ Human-wait nodes have no subprocess. Their attempt stays durable while the run
 is paused. A deadline takes the declared `on_timeout` edge; without that edge,
 the node fails with `timeout`.
 
-Worker ownership is renewed throughout command-output retention, commit
-validation, evidence preservation, and reader-worktree removal. These phases
-can outlast the stale-attempt threshold without being mistaken for worker loss.
+One coordinator in the worker process renews all registered attempts and their
+admission locks once every five seconds, in one short transaction. Nested
+scopes share registrations; each attempt renews once per cycle. Registrations
+cover execution, command-output retention, Git validation, evidence
+preservation, and reader-worktree removal. Provider and command loops check
+ownership through reads.
+
+Heartbeat renewal retries transient SQLite busy errors within a 30-second
+total budget. Exhaustion stops the worker so the supervisor can prove it has
+exited before recovery. Launch persistence and control transactions retry only
+rolled-back SQLite busy failures within a 15-second total budget, including
+SQLite's own waiting. Git operations, provider calls, and agent execution are
+never repeated by a database retry. Other database errors propagate unchanged.
 
 ## Node execution
 
@@ -323,9 +333,8 @@ Relay copies them to central evidence storage with their SHA-256 hashes. An
 
 Loop and subworkflow child graphs execute inline in the enclosing consumer
 thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
-default single worker. Each child heartbeat also renews its bounded chain of
-enclosing attempts, so a long child cannot make its owning loop or subworkflow
-look abandoned. When a child waits for the owner or for worktree admission,
+single worker. The shared coordinator keeps the child and enclosing attempts
+renewed together. When a child waits for the owner or for worktree admission,
 the parent scope yields its worker. A child settlement redispatches the same
 parent attempt, which reads the saved child rows and continues without repeating
 successful children. Suspended scopes retain their original durable deadline;
