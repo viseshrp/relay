@@ -40,7 +40,7 @@ export function WorkflowSourceSettings({
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>Workflow settings</DialogTitle>
       <DialogContent>
-        <Stack spacing={2} sx={{ pt: 2 }}>
+        <Stack spacing={2} sx={{ pt: 2.5 }}>
           <TextField
             label="Workflow name"
             margin="dense"

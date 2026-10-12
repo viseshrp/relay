@@ -410,6 +410,40 @@ def test_require_launch_clean_names_untracked_workflow(
     )
 
 
+def test_require_launch_clean_treats_root_yaml_as_code_change(
+    project: RelayProject,
+) -> None:
+    from relay.errors import DirtyRepositoryError
+    from relay.vcs.cleanliness import require_launch_clean
+
+    project.write("docker-compose.yml", "version: '3'\n")
+    with pytest.raises(DirtyRepositoryError) as exc_info:
+        require_launch_clean(project.repository, frozenset())
+    assert "The Git worktree has code or staged changes before starting this run." in str(
+        exc_info.value
+    )
+    assert "An untracked workflow file" not in str(exc_info.value)
+
+
+def test_require_launch_clean_mentions_both_code_and_workflow_changes(
+    project: RelayProject,
+) -> None:
+    from relay.errors import DirtyRepositoryError
+    from relay.vcs.cleanliness import require_launch_clean
+
+    project.write("main.py", "print('hello')\n")
+    project.write(".relay/workflows/custom.yaml", "name: Custom\n")
+    with pytest.raises(DirtyRepositoryError) as exc_info:
+        require_launch_clean(project.repository, frozenset())
+    assert (
+        "The Git worktree has code or staged changes, and an untracked workflow file "
+        "blocks this run: .relay/workflows/custom.yaml." in str(exc_info.value)
+    )
+    assert exc_info.value.next_action == (
+        "Commit or set aside code changes and workflow files before starting this run."
+    )
+
+
 def test_cleanup_without_selection_has_nothing_to_clean() -> None:
     result = invoke("data", "clean")
     assert (result.exit_code, report(result)) == (EXIT_NOTHING_TO_CLEAN, {"deleted": {}})

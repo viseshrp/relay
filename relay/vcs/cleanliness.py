@@ -172,15 +172,25 @@ def require_launch_clean(repository: Path, snapshot_files: frozenset[str]) -> No
             change.path
             for change in disallowed
             if change.status == "??"
-            and (
-                change.path.startswith(".relay/workflows/")
-                or change.path.endswith((".yaml", ".yml"))
-            )
+            and change.path.startswith(".relay/workflows/")
+            and change.path.endswith((".yaml", ".yml"))
         )
-        if untracked_workflows:
+        other_disallowed = tuple(
+            change for change in disallowed if change.path not in untracked_workflows
+        )
+        if untracked_workflows and not other_disallowed:
             files_desc = ", ".join(untracked_workflows)
             message = f"An untracked workflow file blocks this run: {files_desc}."
             next_action = "Commit workflow files or set them aside before starting this run."
+        elif untracked_workflows and other_disallowed:
+            files_desc = ", ".join(untracked_workflows)
+            message = (
+                f"The Git worktree has code or staged changes, and an untracked workflow file "
+                f"blocks this run: {files_desc}."
+            )
+            next_action = (
+                "Commit or set aside code changes and workflow files before starting this run."
+            )
         else:
             message = "The Git worktree has code or staged changes before starting this run."
             next_action = (

@@ -30,7 +30,7 @@ export function StepLogEmbedded({ state }: { state: JobWorkspaceState }) {
         <Alert severity="error">
           <Typography>
             {attempt?.error_message ??
-              `Step failed${attempt?.exit_code !== null ? ` with exit code ${attempt?.exit_code}` : ""}.`}
+              `Step failed${attempt?.exit_code !== null && attempt?.exit_code !== undefined ? ` with exit code ${attempt?.exit_code}` : ""}.`}
           </Typography>
           {attempt?.provider_message && (
             <Typography sx={{ whiteSpace: "pre-wrap" }}>

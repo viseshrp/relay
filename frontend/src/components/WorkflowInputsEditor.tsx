@@ -26,12 +26,13 @@ export function WorkflowInputsEditor({
           onChange({ ...inputs, [name]: { ...definition, [field]: entry } });
         return (
           <Stack key={name} spacing={2} sx={{ border: 0, p: 0, mt: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
               Input {name}
             </Typography>
             <TextField
               label="Input name"
               margin="dense"
+              sx={{ mt: 0.5 }}
               defaultValue={name}
               onBlur={(event) => {
                 const next = event.target.value.trim();
