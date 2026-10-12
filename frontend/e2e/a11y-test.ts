@@ -12,6 +12,7 @@ export const test = base.extend<{ accessibility: void }>({
         info.status !== "passed"
       )
         return;
+      await page.evaluate(() => window.scrollTo(0, 0));
       await assertAccessible(page);
     },
     { auto: true },
@@ -22,7 +23,6 @@ export async function assertAccessible(page: Page): Promise<void> {
   // Audit final colors rather than an intermediate enable/disable transition.
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.evaluate(async () => {
-    window.scrollTo(0, 0);
     await Promise.all(
       document
         .getAnimations()
