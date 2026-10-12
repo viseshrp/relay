@@ -1,11 +1,13 @@
 import { yaml } from "@codemirror/lang-yaml";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { hoverTooltip } from "@codemirror/view";
 import { autocompletion } from "@codemirror/autocomplete";
 import { lintGutter, setDiagnostics } from "@codemirror/lint";
 import { basicSetup } from "codemirror";
+import { useTheme } from "@mui/material/styles";
 import { useEffect, useRef } from "react";
+import { createCodeMirrorTheme } from "../theme";
 import type { LanguageManifest } from "../workflow-language";
 
 interface YamlEditorProps {
@@ -26,6 +28,11 @@ export function YamlEditor({
   manifest,
   diagnostics = [],
 }: YamlEditorProps) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === "dark";
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
+  const themeCompartment = useRef(new Compartment());
   const parent = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const changeHandler = useRef(onChange);
@@ -47,6 +54,7 @@ export function YamlEditor({
         doc: currentValue.current,
         extensions: [
           basicSetup,
+          themeCompartment.current.of(createCodeMirrorTheme(isDarkRef.current)),
           yaml(),
           lintGutter(),
           autocompletion({
@@ -155,6 +163,16 @@ export function YamlEditor({
       view.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const editor = view.current;
+    if (!editor) return;
+    editor.dispatch({
+      effects: themeCompartment.current.reconfigure(
+        createCodeMirrorTheme(isDark),
+      ),
+    });
+  }, [isDark]);
 
   useEffect(() => {
     const editor = view.current;

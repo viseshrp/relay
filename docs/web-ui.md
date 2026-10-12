@@ -110,6 +110,38 @@ and **Sign out**. Without login, Settings and Help remain in the header.
 Account ownership, authentication, CLI storage, and browser-local first-use
 preferences keep their existing behavior.
 
+## Theme and appearance
+
+Relay provides a single theme control in the application header supporting
+**System**, **Light**, and **Dark** modes. The theme preference is stored in
+browser `localStorage` under `relay-theme-preference` and defaults to
+**System**.
+
+In **System** mode, Relay follows the operating system appearance dynamically
+via `prefers-color-scheme` media queries. Setting an explicit preference
+(**Light** or **Dark**) overrides the system setting and updates all
+`<meta name="theme-color">` elements so mobile browser bars honor the chosen
+palette.
+
+To prevent flash of unstyled theme (FOIT) on page load and hydration, an early
+inline boot script in `index.html` inspects the saved preference and system media
+query before stylesheets and JavaScript bundles parse, applying `data-theme`,
+native `color-scheme`, and corresponding `theme-color` tags immediately.
+
+Semantic design tokens define surface colors, text, focus rings, and structural
+borders. In dark mode:
+
+- Elevated surfaces (dialogs, menus, tooltips, popovers) use `#273449` over
+  card surfaces (`#1e293b`) with 1-pixel structural borders (`#334155`).
+- Outlined form inputs and controls provide WCAG 2.2 AA compliant boundaries
+  with at least 3:1 non-text contrast against their surrounding surfaces.
+- YAML, Markdown, and script editors apply high-contrast, structured syntax
+  highlighting without error-like red strings.
+- Interactive workflow graphs map React Flow canvas, controls, and edges
+  directly to Relay slate tokens.
+- The guided tour styles its popovers, progress indicator, and action buttons
+  with Relay theme tokens and accessible on-primary text contrast.
+
 ## Get started
 
 After sign-in, or immediately with login disabled, a new browser shows four

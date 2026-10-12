@@ -123,6 +123,11 @@ export function GuidedTour({
         // Keep the skip action visible, including for keyboard and touch users.
         popover.closeButton.textContent = "Skip";
         popover.closeButton.setAttribute("aria-label", "Skip tour");
+        popover.closeButton.style.setProperty(
+          "color",
+          "var(--relay-text)",
+          "important",
+        );
         popover.wrapper.setAttribute("aria-modal", "true");
         popover.nextButton.focus();
       },

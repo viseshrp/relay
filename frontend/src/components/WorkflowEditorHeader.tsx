@@ -48,11 +48,18 @@ export function WorkflowEditorHeader({
       <Typography
         component="h1"
         variant="h5"
+        title={
+          parsed.value?.name ||
+          inventory.find((item) => item.key === key)?.name ||
+          "Choose a workflow"
+        }
         sx={{ flex: "1 1 100%", overflowWrap: "anywhere" }}
       >
-        {parsed.value?.name ||
-          inventory.find((item) => item.key === key)?.name ||
-          "Choose a workflow"}
+        <span className="run-title">
+          {parsed.value?.name ||
+            inventory.find((item) => item.key === key)?.name ||
+            "Choose a workflow"}
+        </span>
       </Typography>
       <TextField
         select

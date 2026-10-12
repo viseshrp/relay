@@ -55,10 +55,10 @@ export function HelpTip({ topic }: { topic: HelpTopic }) {
           slotProps={{
             tooltip: {
               sx: {
-                bgcolor: "background.paper",
+                bgcolor: "var(--relay-surface-elevated)",
                 color: "text.primary",
                 border: "1px solid",
-                borderColor: "divider",
+                borderColor: "var(--relay-border)",
                 boxShadow: 3,
                 fontSize: 14,
                 lineHeight: 1.5,
@@ -67,7 +67,7 @@ export function HelpTip({ topic }: { topic: HelpTopic }) {
                 maxWidth: "min(360px, calc(100vw - 32px))",
               },
             },
-            arrow: { sx: { color: "background.paper" } },
+            arrow: { sx: { color: "var(--relay-surface-elevated)" } },
             popper: {
               modifiers: [
                 { name: "offset", options: { offset: [0, 8] } },

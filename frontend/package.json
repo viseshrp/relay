@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs",
     "build:dist": "tsc --noEmit && vite build && node scripts/compress.mjs",
+    "sync:tokens": "node scripts/sync-theme-tokens.mjs",
     "test:build": "node --test scripts/*.test.mjs",
     "test": "npm run lint && npm run format:check && npm run test:build && npm run build && playwright test && playwright test --config playwright.no-login.config.ts && playwright test --config playwright.visual.config.ts",
     "test:e2e": "npm test",

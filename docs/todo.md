@@ -1216,7 +1216,7 @@ Evidence comes from your instance unless it says "isolated".
 - INCONCLUSIVE: no committed screenshot baselines exist (QA-12).
 - [✗] Run pages overflow at 320 px, and the phone header clips its tabs
   (BR-02, BR-03).
-- [✗] Dark mode: the app ignores `prefers-color-scheme` (BR-13).
+- [✓] Dark mode: the app supports System, Light, and Dark themes (PR #17).
 
 ##### Accessibility
 
@@ -1408,7 +1408,7 @@ code; BR-14 adds it.
 | 11 | Ugly | Durations | 67 hours | "67h 11m 36s"; paused time counts as run time | Roll over to days ("2d 19h"); show paused time separately |
 | 12 | Fragile | `name`, `run-name`, job `name`, input `description` | — | Unbounded in the schema and in `Run.title` | Add limits (e.g. 256 characters for names, 1,000 for run titles) and match them in the UI |
 | 13 | Fragile | Counts | `{n} jobs`, `runs`, `working copies` | Hardcoded plurals (`RunWorkspace.tsx:894`, `StorageSettings.tsx:45,74`) | `Intl.PluralRules` |
-| 14 | Fragile | Dark mode | `prefers-color-scheme: dark` | Ignored; about 104 hex colors in `styles.css` and 23 in TSX | Token-based theme first (FE-03), dark mode later |
+| 14 | Fragile | Dark mode | `prefers-color-scheme: dark` | Supported via System, Light, and Dark mode tokens; no flash on boot | Implemented in `feat/dark-mode` (PR #17) |
 
 Fix locations: `frontend/src/components/RunWorkspace.tsx` (rows 1, 2, 4, 5,
 10, 11), `frontend/src/run-graph.ts:7-37` (row 6), `frontend/src/App.tsx`
@@ -1601,3 +1601,339 @@ Production engineering benchmarks applied to `frontend/src`.
 4. DT-07 to DT-12, FE-08: accessibility to a clean axe run.
 5. QA-11, DE-01 to DE-07, DT-02 to DT-05: stability and feel.
 6. FE-01 to FE-07 and the remaining BR and DT items.
+
+## Skill-based UI audit: dark mode
+
+This second audit ran on 2026-10-11 against `feat/dark-mode` at `651bb08`
+(PR #17), which adds Auto, Light, and Dark themes on top of `main` at
+`a8c8c37`. It repeats the first audit's method: map every flow, then run
+the five review skills one at a time, each in light and dark. Item numbers
+continue from the first audit.
+
+How it was run:
+
+- **Isolated instances only.** A clean export of `651bb08` was built and
+  served by `tests/e2e_server.py` on port 4190 (login off) and 4191 (login
+  on), with scratch storage and fake agents. Fixtures went in through the
+  public API: worst-case names and projects, a failed 20,000-line log, a
+  41-job fan-out, a committed diff, ANSI output, a waiting approval, and an
+  untracked workflow.
+- **Owner instance not used.** The instance on port 17945 still runs the
+  backend started on 2026-10-09, while `relay/static` in the checkout was
+  rebuilt on 2026-10-11, so it serves today's frontend against an older
+  API. Restart it from the current checkout before relying on it.
+- **Tools:** Playwright with Chromium, the Chrome DevTools Protocol, and
+  axe-core 4.14. Themes were forced through `relay-theme-preference` and
+  through emulated `prefers-color-scheme`.
+- **Widths:** 320, 375, 600, 760, 900, 1024, and 1440 pixels, plus 200%
+  root text size and `dir="rtl"`.
+- **Limit:** agent Markdown could not be rendered live, because the test
+  server's single inline worker is held by a waiting approval. Its dark
+  styling was checked in `styles.css` instead (BR-16).
+
+### Flow map, updated
+
+The first audit's flows F01 to F32 still apply. These flows are new or
+changed, and every row was exercised in both themes.
+
+| # | Flow | Entry point | What the user does | Passes |
+| --- | --- | --- | --- | --- |
+| F33 | Choose a theme | Header **Theme mode** menu (System, Light, Dark); Help › **Switch to dark mode** | Pick a theme; it persists across reloads | DT, QA, DE |
+| F34 | Follow the operating system | System choice; OS appearance change | Theme follows the OS live | DT, QA |
+| F35 | Manage a workflow | **Manage workflow** | Rename, duplicate, disable, delete | QA, DE |
+| F36 | Edit in modes | **Editor mode** (Visual, YAML, Split); Undo, Redo, **Format as YAML** | Switch views, undo, format | QA, DE |
+| F37 | Workflow settings | **Workflow settings** dialog | Name, run title, launch inputs, triggers | QA, BR, FE |
+| F38 | Commit new workflow files | Run workflow › **Commit workflow files** | Review, confirm, commit only those files | QA |
+| F39 | Read a job and its steps | Job page › numbered step | Expand a step to read its output | BR, DE |
+| F40 | Read committed changes | Job › **Changes** | Diff viewer, inline or side by side | BR |
+| F41 | Help guides | Help › Getting started, Coming from GitHub Actions, Keyboard shortcuts | Read in-app guides | QA |
+
+### browser-testing-with-devtools, dark mode
+
+Held up: there is no flash of the wrong theme (the boot script sets
+`data-theme="dark"` and the dark background before any app JavaScript
+loads); System mode follows a live OS change; the console is clean; no
+request fails or repeats in either theme; and no visible element in dark
+mode has a bright surface or text below 3:1.
+
+- [x] **DT-13. The browser's theme colour ignores the chosen theme.**
+  - **Evidence:** `index.html` has two `theme-color` tags keyed to
+    `prefers-color-scheme`, and `theme.tsx` (around line 449) only updates a
+    tag without `media`. Browsers use the first matching tag, so with the
+    OS on light and Relay on Dark the effective colour is `#f4f6fb`, and with
+    the OS on dark and Relay on Light it is `#0f172a`. Mobile browser chrome
+    shows the wrong colour.
+  - **Fix:** When the preference is explicit, set every `theme-color` tag's
+    `content` to the resolved colour (or remove their `media` attributes).
+    Restore the media-keyed values only when the preference returns to
+    System.
+  - **Done when:** A test covers all six OS and preference combinations and
+    checks the effective tag.
+
+- [x] **DT-14. The workflow graph uses React Flow's grey theme, not Relay's.**
+  - **Evidence:** `FlowCanvas.tsx:187` passes `colorMode`, so the dark canvas
+    is `#141414` with `#2b2b2b` controls, a neutral grey inside Relay's
+    blue-slate surfaces (`#0f172a`, `#1e293b`).
+  - **Fix:** Set React Flow's CSS variables (`--xy-background-color`,
+    controls, edges, minimap, attribution) from Relay tokens in both themes.
+  - **Done when:** The canvas, controls, and edges use only Relay tokens.
+
+- [x] **DT-15. YAML highlighting loses its structure in dark mode.**
+  - **Evidence:** Dark YAML shows keys in `#e2e8f0` beside plain text in
+    `#cbd5e1`, and only strings are coloured. Light YAML colours keys blue
+    and strings red (`#aa1111`), and red strings read as errors.
+  - **Fix:** One highlight style per theme with distinct key, string,
+    number, comment, and expression colours, all at least 4.5:1, and no red
+    for ordinary strings.
+  - **Done when:** Keys, strings, and `${{ }}` expressions are visibly
+    distinct in both themes.
+
+### browser-qa, dark mode
+
+#### QA report: isolated dark-mode build, 2026-10-11
+
+##### Smoke test
+
+- **Console:** no errors or warnings in either theme on any view.
+- **Network:** no 4xx or 5xx responses; no duplicate requests.
+- **Core Web Vitals:** CLS 0 on every view at 320, 375, and 1440 pixels in
+  both themes. LCP was not re-measured. INP was not measured.
+- **CI for PR #17:** browser-tests fails 2 of 246 tests (QA-14).
+
+##### Interactions
+
+- [✓] Theme menu: System, Light, Dark; choice persists after reload.
+- [✓] System mode follows the OS, including a live change.
+- [✓] Keyboard: the toggle is reachable by Tab, opens with Enter, changes
+  with the arrow keys, and returns focus to the toggle.
+- [✓] Phone: the toggle stays visible at 375 pixels.
+- [✓] The YAML editor keeps unsaved text and undo history across a theme
+  change.
+- [✓] Sign-in page follows the OS theme.
+- [✗] Form fields are invisible in dark mode (QA-13).
+- [✗] Header wraps to three rows at 600 to 1,023 pixels (QA-14).
+- [✗] Guided tour fails contrast in dark mode (QA-15).
+
+##### Visual
+
+- INCONCLUSIVE for dark mode: the 21 committed baselines are light only.
+- [✗] Fields, inputs, and Markdown tables lose their outlines (QA-13,
+  BR-16).
+
+##### Accessibility
+
+- Dark mode passes axe colour contrast on every page, menu, dialog,
+  tooltip, and select, except the guided tour. `label-content-name-mismatch`
+  flags path disclosures in both themes once axe 4.14 runs it by default.
+- axe does not test WCAG 1.4.11 (non-text contrast), which is why QA-13
+  passed every automated check.
+
+##### Verdict: DO NOT SHIP dark mode yet
+
+QA-13 makes every form unusable in dark mode, and QA-14 fails CI.
+
+- [x] **QA-13. Form fields are invisible in dark mode. Blocker.**
+  - **Evidence:** Text fields, selects, and text areas in dialogs and
+    Settings have an outline of `rgb(30, 41, 59)` on a `rgb(30, 41, 59)`
+    surface (1.00:1). Empty fields such as **Shared default model** render
+    as a blank gap; filled fields read as plain text. Root cause:
+    `border-subtle` and `surface` are both `#1e293b` in dark mode
+    (`theme.tsx` lines 64 and 69; `styles.css` `--relay-border-subtle`), and
+    `MuiOutlinedInput` uses `border-subtle`. Light mode is weak too: inputs
+    are `#dce1ec` on white (1.31:1), below the 3:1 WCAG 1.4.11 minimum.
+  - **Fix:** Add an input-boundary token that meets 3:1 on every surface it
+    sits on: about `#748299` in dark (3.76:1 on `#1e293b`) and `#7b879c` in
+    light (3.63:1 on white). Use it for outlined inputs and selects. Raise
+    dark `border-subtle` to `#334155` for structural lines.
+  - **Done when:** A browser test measures the outline-to-surface contrast of
+    every input in dialogs and Settings at 3:1 or more in both themes.
+
+- [x] **QA-14. The theme toggle breaks the header at tablet widths.**
+  - **Evidence:** CI for PR #17 fails `control-layout.spec.ts:498` at 760
+    and 900 pixels: the header is 143 pixels tall against a 116 limit.
+    Measured: 143 pixels from 600 to 1,023 pixels wide; **Help** wraps onto a
+    third row.
+  - **Fix:** Below 1,024 pixels render the toggle as an icon button with a
+    tooltip, or move the theme choice into the Help (or account) menu as a
+    radio group.
+  - **Done when:** The header is at most two rows from 320 to 1,023 pixels
+    and the layout spec passes.
+
+- [x] **QA-15. The guided tour fails contrast in dark mode.**
+  - **Evidence:** `.relay-tour .driver-popover-next-btn` sets `color: white`
+    on `var(--relay-primary)` (`#93c5fd` in dark): 1.80:1. axe also reports
+    the close button at 1.06:1 and the progress text "1 of 27" at 3.04:1;
+    **Back** keeps Driver.js's light default.
+  - **Fix:** Use an on-primary text token (`#0f172a` on `#93c5fd` is 9.9:1)
+    and style Back, close, and progress with Relay tokens in both themes.
+  - **Done when:** axe passes on the tour in both themes.
+
+- [x] **QA-16. Dark mode has no automated visual or accessibility gate.**
+  - **Evidence:** `frontend/e2e/baselines/linux` holds 21 light baselines and
+    no dark ones. `theme.spec.ts` contains no axe check, although commit
+    `44119a7` says it asserts WCAG 2.2 AA across theme states.
+  - **Fix:** Run `assertAccessible` for every view in both themes, add dark
+    baselines for the visual set, and add a non-text-contrast check for
+    input boundaries (QA-13), which axe does not cover.
+  - **Done when:** `make test-frontend` fails if dark mode regresses visually
+    or on contrast.
+
+- [x] **QA-17. Two theme controls disagree.**
+  - **Evidence:** The header menu offers System, Light, and Dark. Help also
+    offers **Switch to dark mode** or **Switch to light mode**, which ignores
+    System and silently replaces it with an explicit choice. The toggle's
+    accessible name says "Theme mode: dark" while its menu says "Dark".
+  - **Fix:** Keep one control. Remove the Help item, or make it open the same
+    three-way choice. Use the same capitalised labels in names and menus.
+  - **Done when:** There is one way to choose a theme, with three options.
+
+- [x] **QA-18. Workflow settings shows the raw schema tree.**
+  - **Evidence (both themes):** The dialog lists "on value type: Key/value
+    table", "on key", "on.workflow_dispatch value type", and
+    "on.workflow_dispatch.inputs key". The "Input task" heading overlaps the
+    "Input name" label, and the "Workflow name" label is clipped at the top.
+  - **Fix:** Replace the tree with a **Triggers** section (manual run with
+    inputs, local triggers) in plain words. Keep the generic tree behind an
+    **Advanced** disclosure, and fix the label spacing.
+  - **Done when:** A beginner can add a launch input without seeing a YAML
+    path.
+
+- [x] **QA-19. Destructive and blocked actions read like ordinary ones.**
+  - **Evidence:** In **Manage workflow**, **Delete** has the same style and
+    position as Rename, Duplicate, and Disable. A launch blocked by an
+    untracked workflow returns "The Git worktree has code or staged changes"
+    with "Relay leaves workflow reports untouched", which describes neither
+    the file nor the fix.
+  - **Fix:** Style Delete as destructive and set it apart from the other
+    actions. Say "An untracked workflow file blocks this run" and offer
+    **Commit workflow files** in the error.
+  - **Done when:** Delete is visually distinct, and the error names the file
+    and the fix.
+
+### break-ui, dark mode
+
+The worst-case data from the first audit was replayed in light and dark at
+320 and 1440 pixels, at 200% text size in dark, and with `dir="rtl"` in dark.
+
+#### Part 1: What broke
+
+| # | Severity | Field | Worst-case value | What happens | Fix |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Broken | Every outlined input (dark) | Any form | Outline equals the surface (1.00:1); empty fields disappear | QA-13 |
+| 2 | Broken | Header (both) | Width 600–1,023 pixels | Three rows, 143 pixels; Help wraps alone | QA-14 |
+| 3 | Ugly | Editor workflow title (both) | 90-character name with markup and emoji | `h1` is 147 pixels (5 lines) at 320 pixels; run titles are clamped, editor titles are not | Apply the run-title clamp and full-title disclosure to the editor heading |
+| 4 | Ugly | Job **Changes** commit ID (both) | 40-character SHA | Runs off-screen at 320 pixels (x up to 369) | Show 7 characters with a copy button; break the full ID anywhere |
+| 5 | Ugly | Agent Markdown tables and quotes (dark) | Table, blockquote | Cell borders and the quote bar use `--relay-border-subtle` on `#1e293b`, so they vanish (from `styles.css`) | Use the raised structural border token |
+| 6 | Ugly | Storage project name (both) | 72-character project name | Truncated with no tooltip or title | Add a title and the copyable full value, like paths |
+| 7 | Ugly | Step panel (both) | Any job | Expanding "1. Step 1" opens a nested job view: raw `step_1` heading, a second Attempt picker, and repeated Set up and Instructions | Show the step's output directly under its row, as GitHub does |
+| 8 | Fragile | Finished job **Changes** (both) | Job with no commits | "No committed code changes yet." | Say "This job committed no changes." once the job has finished |
+| 9 | Fragile | Layout direction | `dir="rtl"` | "Find a project" overflows the left edge (-41 pixels) | Out of scope until RTL is supported; use logical CSS properties when touching layout |
+
+Fix locations: `frontend/src/theme.tsx` and `frontend/src/styles.css`
+(rows 1, 5), `frontend/src/AppHeader.tsx` and
+`frontend/src/components/ThemeToggle.tsx` (row 2),
+`frontend/src/components/WorkflowEditorHeader.tsx` (row 3),
+`frontend/src/components/JobWorkspaceView.tsx` and `JobLogView.tsx`
+(rows 4, 7, 8), `frontend/src/components/StorageSettings.tsx` (row 6).
+
+- [x] **BR-12. Clamp the editor's workflow title** (row 3).
+- [x] **BR-13. Shorten commit IDs in Changes** (row 4).
+- [x] **BR-14. Show step output directly** (row 7). Remove the nested job
+  chrome; keep attempts at the job level.
+- [x] **BR-15. Fix the finished-job Changes copy and the Storage name
+  tooltip** (rows 6, 8).
+- [x] **BR-16. Restore Markdown table and quote borders in dark mode**
+  (row 5).
+- [x] **BR-17. Add the dark theme to the worst-case fixture.** Run the
+  `/__test__/worst-case` screens in both themes at 320 and 1440 pixels and
+  fail on horizontal scroll, clipped primary actions, or input outlines
+  below 3:1.
+
+#### Part 2: Decisions for you
+
+- **Header theme control:** an icon button with a tooltip is recommended
+  over the labelled menu button, because the label is what forces the wrap
+  (QA-14).
+- **ANSI black:** it renders like default text in dark mode. Keep that
+  (readable) rather than true black (invisible).
+- **Default theme:** keep System as the default for new users.
+
+#### Part 3: What held up
+
+- No flash of the wrong theme on load; System follows the OS live.
+- No horizontal scroll at 320 pixels on any view in either theme.
+- ANSI colours, including black, dim, and bright, measure at least 4.5:1 on
+  both terminal backgrounds; diff additions and removals stay readable.
+- Run titles clamp to two lines with `#number` visible in both themes.
+- CLS is 0 on normal loads; a theme change causes no layout shift.
+- Literal `<script>`, `&amp;`, and `**` still render as text.
+
+### emil-design-eng, dark mode
+
+| Before | After | Why |
+| --- | --- | --- |
+| Dark `border-subtle` equals `surface` (`#1e293b`) | Structural lines `#334155`; input outlines `#748299` | In dark mode boundaries come from lightness; equal values erase them |
+| Dark `surface-elevated` equals `surface`; menus, tooltips, and dialogs over cards are the same `#1e293b` | Elevated `#273449` plus a 1-pixel `#334155` border | Shadows barely show on dark backgrounds, so elevation must be a lighter surface |
+| React Flow canvas `#141414`, controls `#2b2b2b` | Relay slate tokens for canvas, controls, edges, minimap | A neutral grey panel inside blue-slate reads as a different material |
+| Dark YAML keys `#e2e8f0` beside text `#cbd5e1`; light strings `#aa1111` | Distinct key hue per theme; strings green or teal | Syntax colour should show structure; red means error |
+| Tour **Next**: white on `#93c5fd`; **Back** is Driver.js light grey | On-primary text token; secondary buttons from surface tokens | Overlays must belong to the active theme |
+| Labelled "Dark ▾" button in the header | Icon button with tooltip; menu holds System, Light, Dark | A rarely used control should not cost a header row |
+| Help menu repeats the theme switch as a two-way toggle | One three-way control | Two controls that disagree erode trust |
+| **Delete** looks like **Rename** in Manage workflow | Destructive colour, separated, last | Dangerous actions need a different shape and place |
+| Step row expands into a nested job panel | Step row expands straight to its log | Every extra layer is another click before the answer |
+
+Held up: the theme change is instant with no animated background; focus
+rings measure 8.11:1 in dark; press feedback (`scale(0.98)`), tabular
+figures, and reduced-motion rules apply in both themes; hover tints are
+visible but quiet.
+
+- [x] **DE-08. Give dark mode real borders and elevation** (rows 1, 2).
+- [x] **DE-09. Theme the graph, editor highlighting, and tour** (rows 3–5).
+- [x] **DE-10. Make the theme control compact and single** (rows 6, 7).
+- [x] **DE-11. Mark destructive actions and flatten step logs** (rows 8, 9).
+
+### frontend-ui-engineering, dark mode
+
+- [x] **FE-09. Keep theme tokens in one source.**
+  - **Evidence:** The 26 dark tokens exist in four hand-maintained copies:
+    `theme.tsx`, `:root[data-theme="dark"]` and
+    `@media (prefers-color-scheme: dark)` in `styles.css`, plus colours in
+    `index.html`. They agree today, but nothing enforces it; the storage key
+    `relay-theme-preference` is also typed in two files.
+  - **Fix:** Generate the CSS variables from the TypeScript tokens (MUI CSS
+    variables or a build step), share the storage key from one module, and
+    add a test that fails on drift.
+  - **Done when:** Changing a token in one place updates every theme surface.
+
+- [x] **FE-10. Split `theme.tsx` by responsibility.**
+  - **Evidence:** At 537 lines it holds tokens, MUI overrides, the theme
+    context, storage, media listeners, and document side effects (class,
+    `color-scheme`, `theme-color`).
+  - **Fix:** Separate tokens, the MUI theme factory, the provider, and a
+    small `applyThemeToDocument` function with its own tests (DT-13).
+  - **Done when:** Each part can be tested alone.
+
+- [x] **FE-11. Theme third-party surfaces through adapters.**
+  - **Evidence:** React Flow (DT-14), Driver.js (QA-15), and CodeMirror
+    highlighting (DT-15) are each themed differently, and two of the three
+    miss tokens.
+  - **Fix:** One adapter per library that reads Relay tokens, with a
+    dark-mode test for each.
+  - **Done when:** No third-party surface uses its own default palette.
+
+- [x] **FE-12. Document theme behaviour.**
+  - **Evidence:** `docs/web-ui.md` does not mention the theme menu, System
+    mode, persistence, the boot script, or `theme-color`, although AGENTS.md
+    requires the behaviour reference to change with the feature. BR row 14
+    of the first audit still says dark mode is ignored.
+  - **Fix:** Add a **Theme** section to `docs/web-ui.md` and update the
+    first audit's dark-mode row.
+  - **Done when:** The docs describe every theme behaviour tested in QA-16.
+
+### Suggested order for these findings
+
+1. QA-13 and QA-14: usable forms and a passing CI.
+2. QA-15, BR-16, DE-08: contrast and borders everywhere in dark mode.
+3. DT-13, DT-14, DT-15, FE-11: browser chrome and third-party theming.
+4. QA-16, BR-17, FE-09, FE-12: gates, single token source, and docs.
+5. QA-17, QA-18, QA-19, BR-12 to BR-15, DE-09 to DE-11, FE-10.

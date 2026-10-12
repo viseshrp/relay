@@ -9,11 +9,11 @@ import {
 } from "@mui/material";
 
 import { ActionIcon } from "./components/ActionIcon";
-
+import { ThemeToggle } from "./components/ThemeToggle";
 import { type HelpGuide } from "./components/HelpGuides";
 import { viewHref } from "./navigation";
-
 import type { AppState } from "./useApp";
+
 export function AppHeader({ state }: { state: AppState }) {
   const {
     header,
@@ -157,18 +157,21 @@ export function AppHeader({ state }: { state: AppState }) {
             </MenuItem>
           ))}
         </Menu>
-        <Button
-          ref={helpButton}
-          aria-label={
-            loginRequired ? `Account menu for ${auth.username}` : "Help"
-          }
-          aria-haspopup="menu"
-          aria-expanded={helpAnchor !== null}
-          endIcon={<ActionIcon name="down" />}
-          onClick={(event) => setHelpAnchor(event.currentTarget)}
-        >
-          {loginRequired ? auth.username : "Help"}
-        </Button>
+        <Box className="header-actions">
+          <ThemeToggle />
+          <Button
+            ref={helpButton}
+            aria-label={
+              loginRequired ? `Account menu for ${auth.username}` : "Help"
+            }
+            aria-haspopup="menu"
+            aria-expanded={helpAnchor !== null}
+            endIcon={<ActionIcon name="down" />}
+            onClick={(event) => setHelpAnchor(event.currentTarget)}
+          >
+            {loginRequired ? auth.username : "Help"}
+          </Button>
+        </Box>
         <Menu
           anchorEl={helpAnchor}
           open={helpAnchor !== null}
