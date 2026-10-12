@@ -141,6 +141,7 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.web.db_routing import read_snapshot
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
@@ -1284,7 +1285,7 @@ class DjangoReadStore:
             raise ConfigError(message)
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 runs = Run.objects.select_related("project").annotate(
                     read_waiting_count=models.Count(
                         "interactions", filter=_waiting_filter("interactions__")
@@ -1462,7 +1463,7 @@ class DjangoReadStore:
     def attention(self, since: int | None) -> dict[str, object]:
         """Read owner requests and new completion facts without event payloads."""
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 pending = HumanInteraction.objects.filter(_waiting_filter())
                 waiting_runs = pending.values_list("run_id", flat=True).distinct()
                 latest = RunEvent.objects.order_by("-id").first()
@@ -1820,7 +1821,7 @@ class DjangoReadStore:
         parse_scope_path(scope_path)
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 run = _require_run(
                     Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
                 )
@@ -4958,6 +4959,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         kinds: tuple[str, ...] | None = None,
     ) -> ClaimedControl | None:
         try:
+            candidates = ControlRequest.objects.filter(
+                attempt_id=attempt_id, state=ControlState.PENDING.value
+            )
+            if kinds is not None:
+                candidates = candidates.filter(kind__in=kinds)
+            # Include expired candidates so cleanup still runs; recheck all
+            # ownership, expiry and session predicates after acquiring the lock.
+            if not candidates.exists():
+                return None
             with transaction.atomic():
                 attempt = (
                     NodeAttempt.objects.select_for_update()
@@ -5305,6 +5315,18 @@ class DjangoExecutionStore(DjangoAgentStore):
     def expire_scope_waits(self) -> int:
         """Enforce enclosing deadlines even while a scope owns no worker."""
         try:
+            due = NodeAttempt.objects.filter(
+                status=AttemptStatus.WAITING.value,
+                node_run__node_type__in=(
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                ),
+                deadline_at__lte=timezone.now(),
+            )
+            if not due.exists():
+                return 0
             with transaction.atomic():
                 attempts = list(
                     NodeAttempt.objects.select_for_update()

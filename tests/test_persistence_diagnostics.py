@@ -32,6 +32,7 @@ def test_http_logs_suppressed_database_cause_without_exposing_it(
         return HttpResponse()  # pragma: no cover
 
     response = failing(RequestFactory().get("/api/runs/example"))
+    assert isinstance(response, HttpResponse)
     assert response.status_code == 503
     assert b"private database diagnostic" not in response.content
     assert any(
@@ -48,7 +49,7 @@ def test_nested_suppressed_cause_is_logged(caplog: pytest.LogCaptureFixture) -> 
         wrapper.__cause__ = error
         log_persistence_failure(logging.getLogger(__name__), wrapper, worker_id="test")
         assert isinstance(persistence_cause(wrapper), OperationalError)
-    assert caplog.records[-1].worker_id == "test"
+    assert caplog.records[-1].__dict__["worker_id"] == "test"
     assert caplog.records[-1].exc_info
 
 

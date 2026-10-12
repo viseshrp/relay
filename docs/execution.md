@@ -266,6 +266,12 @@ attempt's request. It applies the request before recording the corresponding
 answer event. An expired request or one for an older attempt becomes `stale`.
 Posting the same idempotency key again does not apply the answer twice.
 
+Empty control polls check with a read before reserving SQLite's writer. The
+claim transaction rechecks ownership, expiry, and request state. Periodic
+reconciliation runs once per second and checks for due work before writing.
+An installation with no active or due work writes only its supervisor lease;
+unchanged trigger observations do not write new cursor values.
+
 A claimed control has a heartbeat lease. Reconciliation returns it to `pending`
 only while the same attempt remains live. If its owner is gone, the request is
 stale and the attempt follows interruption or worker-loss handling. Pending

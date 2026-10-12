@@ -134,7 +134,8 @@ def isolated_relay(
     database = tmp_path / "database" / "relay.db"
     database.parent.mkdir()
     shutil.copyfile(migrated_template, database)
-    monkeypatch.setitem(settings.DATABASES["default"], "NAME", str(database))
+    for alias in ("default", "snapshot"):
+        monkeypatch.setitem(settings.DATABASES[alias], "NAME", str(database))
     # A web process caches its served project and a consumer caches its event cursor for
     # their whole lifetime; each test starts both from its own fresh database.
     monkeypatch.setattr(views, "_PROJECT", None)

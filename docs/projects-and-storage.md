@@ -109,14 +109,18 @@ the web settings read `login_required` from the saved file.
 `relay.db` is the durable source for projects, drafts, editor leases, runs,
 snapshots, scoped nodes, attempts, dispatch claims, events, artifacts,
 interactions, control requests, agent observations, and run locks. SQLite uses
-foreign keys, WAL mode, and a five-second busy timeout. Transactions use
+foreign keys, WAL mode, FULL durability, and a 15-second busy timeout. Writes use
 `IMMEDIATE` mode to reserve the write lock before reading. Competing writers
-wait for that reservation for up to five seconds; contention beyond that limit
+wait for that reservation for up to 15 seconds; contention beyond that limit
 becomes a Relay persistence error. Transactions contain short database changes;
 Git subprocesses, network requests, and worktree cleanup run outside them.
 This follows [Django's SQLite transaction guidance](https://docs.djangoproject.com/en/5.2/ref/databases/#transactions-behavior).
-The Django SQLite `OPTIONS.init_command` applies WAL, foreign keys, and the
-busy timeout to each connection.
+The default Django connection applies WAL, FULL durability, foreign keys, and
+the busy timeout. Dashboard, attention, job, and monitor reads use a separate
+`snapshot` connection to the same database. Its deferred, query-only
+transaction reads one consistent WAL snapshot without reserving the writer.
+Read results are materialized before leaving the snapshot. Model writes and
+explicit default-connection access are rejected inside that context.
 
 The installation's Django secret key is written and flushed in a temporary
 file, then published through an atomic link that cannot overwrite another

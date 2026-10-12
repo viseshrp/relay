@@ -167,7 +167,8 @@ def reconcile() -> None:
                             "scheduled_at": instant.isoformat(),
                         },
                     )
-                cursor["at"] = now.isoformat()
+                if found:
+                    cursor["at"] = now.isoformat()
             elif trigger.event == "push":
                 refs = local_refs(root.parent)
                 for reference, head in refs.items():
@@ -261,10 +262,11 @@ def reconcile() -> None:
                             },
                         },
                     )
-                if len(settled) < 100:
+                if settled and len(settled) < 100:
                     cursor["at"] = now.isoformat()
                     cursor.pop("run_id", None)
-            WorkflowTrigger.objects.filter(pk=trigger.pk).update(cursor=cursor)
+            if cursor != trigger.cursor:
+                WorkflowTrigger.objects.filter(pk=trigger.pk).update(cursor=cursor)
         except (RelayError, OSError, ValueError):
             continue
     for delivery in TriggerDelivery.objects.filter(state="pending").select_related(
@@ -293,7 +295,7 @@ def reconcile() -> None:
     terminal = ActionsQueue.objects.filter(
         state="active", run__status__in=("succeeded", "failed", "canceled")
     )
-    if terminal.update(state="complete"):
+    if terminal.exists() and terminal.update(state="complete"):
         release_serial_admission()
 
 
