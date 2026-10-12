@@ -390,6 +390,13 @@ provider and command output remains available through the event history.
 Node summaries also include the latest attempt's `started_at` and `ended_at`
 as UTC timestamps, or null before that attempt starts or finishes.
 
+Owner interaction transitions also emit `wait.expired`, `wait.discarded`,
+`permission.discarded`, and `elicitation.discarded`. Each event identifies the
+interaction, scope, and attempt number. Expiry includes its deadline.
+Environment approval emits `wait.answered` with `result: {"approved": true}`
+and `environment.approved`. Status changes and their events commit together;
+an event persistence failure rolls back the corresponding interaction change.
+
 ### Job history
 
 `GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job

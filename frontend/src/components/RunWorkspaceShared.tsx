@@ -90,10 +90,14 @@ const EVENT_TYPES = [
   "command.exit",
   "permission.requested",
   "permission.answered",
+  "permission.discarded",
   "elicitation.requested",
   "elicitation.answered",
+  "elicitation.discarded",
   "wait.requested",
   "wait.answered",
+  "wait.expired",
+  "wait.discarded",
   "artifact.preserved",
 ] as const;
 const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled"]);

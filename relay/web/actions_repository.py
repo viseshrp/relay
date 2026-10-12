@@ -770,9 +770,10 @@ def publish_environment(attempt_id: str, name: str, url: str) -> None:
 
 def approve_environment(attempt_id: str) -> bool:
     from relay.execution.dispatch import dispatch_node, notify_dispatch
+    from relay.execution.machine import transition_interaction
 
     from .models import HumanInteraction
-    from .repositories import DjangoExecutionStore
+    from .repositories import DjangoExecutionStore, _append_event
 
     with transaction.atomic():
         record = NodeAttempt.objects.select_related("node_run__run").get(pk=attempt_id)
@@ -783,9 +784,29 @@ def approve_environment(attempt_id: str) -> bool:
         gate = state.get("environment_gates", {}).get(attempt_id)
         if gate is None:
             return False
+        was_approved = gate["approved"]
         gate["approved"] = True
         Run.objects.filter(pk=run.pk).update(actions_state=state)
-        HumanInteraction.objects.filter(attempt=record, status="pending").update(status="answered")
+        for interaction in HumanInteraction.objects.select_for_update().filter(
+            attempt=record, status="pending"
+        ):
+            interaction.status = transition_interaction("pending", "answer").status
+            interaction.response_payload = {"approved": True}
+            interaction.answered_at = datetime.now(timezone.utc)
+            interaction.save(update_fields=("status", "response_payload", "answered_at"))
+            _append_event(
+                run,
+                f"{interaction.kind}.answered",
+                EventSource.SYSTEM,
+                {
+                    "scope_path": record.node_run.scope_path,
+                    "attempt_number": record.attempt_number,
+                    "interaction_id": str(interaction.pk),
+                    "result": {"approved": True},
+                },
+                node=record.node_run,
+                attempt=record,
+            )
         configuration = dict(run.snapshot.launch_defaults)["actions_context"]["environments"][
             gate["environment"]
         ]
@@ -798,12 +819,17 @@ def approve_environment(attempt_id: str) -> bool:
                     DjangoExecutionStore(), str(record.node_run.pk), notify_dispatch
                 )
             )
-        transaction.on_commit(
-            lambda: DjangoExecutionStore().append_attempt_event(
-                attempt_id,
+        if not was_approved:
+            _append_event(
+                run,
                 "environment.approved",
                 EventSource.SYSTEM,
-                {"environment": gate["environment"]},
+                {
+                    "scope_path": record.node_run.scope_path,
+                    "attempt_number": record.attempt_number,
+                    "environment": gate["environment"],
+                },
+                node=record.node_run,
+                attempt=record,
             )
-        )
     return True

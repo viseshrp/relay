@@ -5344,6 +5344,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                     attempt = _related(interaction, "attempt", NodeAttempt)
                     node = _related(attempt, "node_run", NodeRun)
                     run = _related(node, "run", Run)
+                    _append_event(
+                        run,
+                        f"{_string(interaction, 'kind')}.expired",
+                        EventSource.SYSTEM,
+                        {
+                            "scope_path": _string(node, "scope_path"),
+                            "attempt_number": _integer(attempt, "attempt_number"),
+                            "interaction_id": _identifier(interaction),
+                            "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
                     on_timeout = _mapping(node, "frozen_def").get("on_timeout")
                     if isinstance(on_timeout, str):
                         outcome = ExecutionOutcome(
@@ -5461,13 +5474,32 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not scan durable dispatch claims."
             raise PersistenceError(message) from None
 
+    @transaction.atomic
     def _discard_attempt_mailbox(self, attempt: NodeAttempt) -> None:
         interaction_transition = transition_interaction(
             InteractionStatus.PENDING.value, "attempt_lost"
         )
-        HumanInteraction.objects.filter(
-            attempt=attempt, status=InteractionStatus.PENDING.value
-        ).update(status=interaction_transition.status)
+        interactions = (
+            HumanInteraction.objects.select_for_update()
+            .select_related("node_run__run")
+            .filter(attempt=attempt, status=InteractionStatus.PENDING.value)
+        )
+        for interaction in interactions:
+            _set_model_field(interaction, "status", interaction_transition.status)
+            interaction.save(update_fields=("status",))
+            node = _related(interaction, "node_run", NodeRun)
+            _append_event(
+                _related(node, "run", Run),
+                f"{_string(interaction, 'kind')}.discarded",
+                EventSource.SYSTEM,
+                {
+                    "scope_path": _string(node, "scope_path"),
+                    "attempt_number": _integer(attempt, "attempt_number"),
+                    "interaction_id": _identifier(interaction),
+                },
+                node=node,
+                attempt=attempt,
+            )
         requests = ControlRequest.objects.select_for_update().filter(
             attempt=attempt,
             state__in=(ControlState.PENDING.value, ControlState.CLAIMED.value),
