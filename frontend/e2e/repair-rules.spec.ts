@@ -479,4 +479,5 @@ test("paused repair roles show saved model overrides instead of workflow default
     idempotency_key: "clean-test-hold",
   });
   expect(canceled.ok(), await canceled.text()).toBeTruthy();
+  await page.evaluate(() => window.scrollTo(0, 0));
 });
