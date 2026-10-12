@@ -101,11 +101,16 @@ test("a long run starts at its entry job and Refresh preserves the chosen viewpo
   const nodes = Object.fromEntries(
     Array.from({ length: 14 }, (_value, index) => [
       `job_${index}`,
-      {
-        type: "command",
-        run: ["git", "status"],
-        ...(index ? { needs: [`job_${index - 1}`] } : {}),
-      },
+      index
+        ? {
+            type: "command",
+            run: ["git", "status"],
+            needs: [`job_${index - 1}`],
+          }
+        : {
+            type: "human_wait",
+            prompt: "Hold the graph while its viewport is inspected.",
+          },
     ]),
   );
   const created = await post(page, "/api/workflows", {
@@ -121,31 +126,44 @@ test("a long run starts at its entry job and Refresh preserves the chosen viewpo
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: runId } = await launched.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${runId}`)).json()).run
-          .status,
-    )
-    .toBe("succeeded");
-  await page.goto(`/?view=runs&run=${runId}`);
-  const graph = page.getByRole("region", {
-    name: "Step progress",
-    exact: true,
-  });
-  await graph.scrollIntoViewIfNeeded();
-  await expect(
-    graph.locator('.react-flow__node[data-id="root.job_0"]'),
-  ).toBeInViewport();
-  const viewport = graph.locator(".react-flow__viewport");
-  await graph.getByRole("button", { name: "Zoom Out", exact: true }).click();
-  const before = await viewport.getAttribute("style");
-  const read = page.waitForResponse((response) =>
-    response.url().includes(`/api/runs/${runId}/monitor?`),
-  );
-  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  await refresh.click();
-  await read;
-  await expect(refresh).toBeEnabled();
-  await expect(viewport).toHaveAttribute("style", before ?? "");
+  try {
+    // A declared wait fixes the graph's state without timing 14 subprocesses.
+    await expect
+      .poll(
+        async () =>
+          (await (await page.request.get(`/api/runs/${runId}`)).json()).run
+            .status,
+      )
+      .toBe("paused_wait");
+    await page.goto(`/?view=runs&run=${runId}`);
+    const graph = page.getByRole("region", {
+      name: "Step progress",
+      exact: true,
+    });
+    await graph.scrollIntoViewIfNeeded();
+    await expect(graph.locator(".react-flow__node")).toHaveCount(14);
+    await expect(graph.locator(".react-flow__edge")).toHaveCount(13);
+    await expect(
+      graph.locator('.react-flow__node[data-id="root.job_0"]'),
+    ).toBeInViewport();
+    const viewport = graph.locator(".react-flow__viewport");
+    await graph.getByRole("button", { name: "Zoom Out", exact: true }).click();
+    const before = await viewport.getAttribute("style");
+    const read = page.waitForResponse((response) =>
+      response.url().includes(`/api/runs/${runId}/monitor?`),
+    );
+    const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+    await refresh.click();
+    await read;
+    await expect(refresh).toBeEnabled();
+    await expect(viewport).toHaveAttribute("style", before ?? "");
+  } finally {
+    expect(
+      (
+        await post(page, `/api/runs/${runId}/cancel`, {
+          idempotency_key: `graph-cleanup-${runId}`,
+        })
+      ).ok(),
+    ).toBeTruthy();
+  }
 });
