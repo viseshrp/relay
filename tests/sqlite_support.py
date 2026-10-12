@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
+import traceback
 from typing import Any
 from unittest.mock import patch
 
@@ -34,7 +35,9 @@ class SqliteWriteProbe:
     transactions: int = 0
     empty_transactions: int = 0
     autocommit_writes: int = 0
+    unexpected_writes: list[str] = field(default_factory=list)
     failed_begins: int = 0
+    first_busy: threading.Event = field(default_factory=threading.Event)
     lock_waits: list[float] = field(default_factory=list)
     lock_holds: list[float] = field(default_factory=list)
     _active: dict[int, tuple[float, bool]] = field(default_factory=dict)
@@ -86,6 +89,7 @@ class SqliteWriteProbe:
             if beginning:
                 with self._guard:
                     self.failed_begins += 1
+                    self.first_busy.set()
                     self.lock_waits.append(time.monotonic() - started)
             raise
         with self._guard:
@@ -100,6 +104,9 @@ class SqliteWriteProbe:
                     self._active[key] = (acquired, True)
                 else:
                     self.autocommit_writes += 1
+                    self.unexpected_writes.append(
+                        command + "\n" + "".join(traceback.format_stack(limit=25))
+                    )
         return result
 
     def _finish(self, connection: Any, *, committed: bool) -> None:
@@ -110,6 +117,9 @@ class SqliteWriteProbe:
                 self.lock_holds.append(time.monotonic() - acquired)
                 if committed and not written:
                     self.empty_transactions += 1
+                    self.unexpected_writes.append(
+                        "EMPTY\n" + "".join(traceback.format_stack(limit=25))
+                    )
 
     def report(self) -> dict[str, int | float]:
         """Return small serializable measurements for pytest evidence."""

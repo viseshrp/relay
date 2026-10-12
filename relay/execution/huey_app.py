@@ -29,7 +29,7 @@ _DELIVERY_CURSOR: int | None = None
 
 
 class ActiveSchedulingStore(SchedulingStore, Protocol):
-    """Scheduler adapter that can enumerate the bounded active-run set."""
+    """Scheduler adapter that enumerates every durable active run at startup."""
 
     def active_run_ids(self) -> tuple[str, ...]: ...
 

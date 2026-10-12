@@ -44,7 +44,7 @@ class WindowsProcessEntry(ctypes.Structure):
 
 
 def _windows_descendants(root: ProcessIdentity) -> tuple[ProcessIdentity, ...]:
-    from ctypes import WinDLL, wintypes
+    from ctypes import WinDLL, get_last_error, wintypes
 
     kernel = WinDLL("kernel32", use_last_error=True)
     kernel.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
@@ -67,6 +67,9 @@ def _windows_descendants(root: ProcessIdentity) -> tuple[ProcessIdentity, ...]:
         while found:
             parents[entry.pid] = entry.parent_pid
             found = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+        if get_last_error() != 18:  # ERROR_NO_MORE_FILES is the only complete enumeration.
+            message = "Relay could not finish observing its Windows process tree."
+            raise PersistenceError(message)
         descendants = {root.pid}
         while True:
             added = {pid for pid, parent in parents.items() if parent in descendants}

@@ -92,3 +92,26 @@ def test_settings_api_rejects_new_parallel_worker_values(monkeypatch: pytest.Mon
     assert response.status_code == 422
     assert response.json()["code"] == "config_error"
     assert client.get("/api/settings").json()["settings"]["workers"] == 1
+
+
+def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(
+    project: RelayProject,
+) -> None:
+    from relay.web.models import Run
+
+    Run.objects.bulk_create(
+        [
+            Run(
+                project_id=project.project_id,
+                workflow_key="queued.yaml",
+                status="running",
+                source_commit="0" * 40,
+                recorded_head="0" * 40,
+                run_branch=f"relay/queued-{index}",
+                worktree_path=str(project.repository / f"queued-{index}"),
+                launcher="owner",
+            )
+            for index in range(205)
+        ]
+    )
+    assert len(DjangoExecutionStore().active_run_ids()) == 205

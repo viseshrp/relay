@@ -2804,6 +2804,20 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def settle_run(self, run_id: str) -> None:
         try:
+            status = Run.objects.values_list("status", flat=True).get(pk=run_id)
+            if status not in (
+                RunStatus.RUNNING.value,
+                RunStatus.PAUSED_WAIT.value,
+                RunStatus.CANCELING.value,
+            ):
+                return
+            if (
+                status != RunStatus.CANCELING.value
+                and NodeRun.objects.filter(run_id=run_id)
+                .exclude(status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES))
+                .exists()
+            ):
+                return
             with transaction.atomic():
                 run = Run.objects.select_for_update().get(pk=run_id)
                 self._finish_run_if_terminal(run)
@@ -2820,7 +2834,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     status__in=(RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value)
                 )
                 .order_by("started_at", "pk")
-                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+                .values_list("pk", flat=True)
             )
             return tuple(str(value) for value in values)
         except DatabaseError:
@@ -3434,10 +3448,11 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def mark_dispatch_enqueued(self, claim_token: str) -> None:
         try:
-            DispatchClaim.objects.filter(
-                claim_token=claim_token,
-                state=DispatchState.DISPATCHED.value,
-            ).update(enqueued_at=timezone.now())
+            with transaction.atomic():
+                DispatchClaim.objects.filter(
+                    claim_token=claim_token,
+                    state=DispatchState.DISPATCHED.value,
+                ).update(enqueued_at=timezone.now())
         except DatabaseError:
             message = "Relay could not record the Huey enqueue time."
             raise PersistenceError(message) from None
@@ -3714,10 +3729,11 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def mark_dispatch_consumed(self, claim_token: str) -> None:
         try:
-            DispatchClaim.objects.filter(
-                claim_token=claim_token,
-                state=DispatchState.CLAIMED.value,
-            ).update(state=DispatchState.CONSUMED.value, consumed_at=timezone.now())
+            with transaction.atomic():
+                DispatchClaim.objects.filter(
+                    claim_token=claim_token,
+                    state=DispatchState.CLAIMED.value,
+                ).update(state=DispatchState.CONSUMED.value, consumed_at=timezone.now())
         except DatabaseError:
             message = "Relay could not mark the dispatch claim consumed."
             raise PersistenceError(message) from None
@@ -3796,10 +3812,13 @@ class DjangoExecutionStore(DjangoAgentStore):
     def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None:
         identity = process_identity(process_id) if process_id is not None else None
         try:
-            NodeAttempt.objects.filter(
-                pk=attempt_id,
-                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(process_pid=process_id, process_started=identity.started if identity else None)
+            with transaction.atomic():
+                NodeAttempt.objects.filter(
+                    pk=attempt_id,
+                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                ).update(
+                    process_pid=process_id, process_started=identity.started if identity else None
+                )
         except DatabaseError:
             message = "Relay could not record the attempt process."
             raise PersistenceError(message, context={"node": attempt_id}) from None
@@ -3816,16 +3835,17 @@ class DjangoExecutionStore(DjangoAgentStore):
         """Persist process/session correlation without changing attempt ownership."""
         identity = process_identity(process_id) if process_id is not None else None
         try:
-            NodeAttempt.objects.filter(
-                pk=attempt_id,
-                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(
-                process_pid=process_id,
-                process_started=identity.started if identity else None,
-                acp_session_id=session_id,
-                agent_version=agent_version,
-                config_ids=dict(config_ids),
-            )
+            with transaction.atomic():
+                NodeAttempt.objects.filter(
+                    pk=attempt_id,
+                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                ).update(
+                    process_pid=process_id,
+                    process_started=identity.started if identity else None,
+                    acp_session_id=session_id,
+                    agent_version=agent_version,
+                    config_ids=dict(config_ids),
+                )
         except DatabaseError:
             message = "Relay could not record the agent session."
             raise PersistenceError(message, context={"node": attempt_id}) from None

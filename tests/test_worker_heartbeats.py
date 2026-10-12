@@ -235,3 +235,42 @@ def test_renewal_exhaustion_stops_the_worker_instead_of_abandoning_renewal(
         finally:
             coordinator.stop()
     assert NodeAttempt.objects.get(pk=claim.attempt_id).status == "running"
+
+
+def test_streaming_step_lock_profile(
+    project: RelayProject,
+    tmp_path: Path,
+    fake_agents: FakeAgents,
+    registry_network: RegistryNetwork,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Profile real ACP output and nested execution without provider accounts."""
+    import json
+
+    from relay.web.models import RunEvent
+
+    del registry_network
+    fake_agents.install("codex", mode="stream-200")
+    project.write_workflow(
+        "stream-child",
+        "version: 1\nname: Stream\nagents: [codex]\nmodel: m1\nnodes:\n"
+        "  agent: {type: agent, prompts: [{local: prompts/prompt.md}], writes: false}\n",
+    )
+    project.write_workflow(
+        "stream-parent",
+        "version: 1\nname: Parent\nagents: [codex]\nmodel: m1\nnodes:\n"
+        "  child: {type: subworkflow, workflow: stream-child}\n",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "stream-parent")
+    with SqliteWriteProbe() as probe:
+        engine.drain(run_id)
+    report = probe.report()
+    request.node.add_report_section("call", "SQLite streaming measurements", json.dumps(report))
+    request.node.user_properties.append(("sqlite_profile", json.dumps(report)))
+    request.node.add_report_section(
+        "call", "Unexpected SQLite writes", "\n".join(probe.unexpected_writes)
+    )
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    assert RunEvent.objects.filter(run_id=run_id, type="agent.message").count() >= 200
+    assert probe.empty_transactions == probe.autocommit_writes == 0

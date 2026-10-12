@@ -148,3 +148,13 @@ def test_idle_activated_triggers_write_nothing(project: RelayProject, event: str
         reconcile_dispatch()
     assert probe.transactions == 0
     assert probe.autocommit_writes == 0
+
+
+def test_settling_an_active_run_takes_no_write_lock(
+    agent_context: AgentExecutionContext,
+    short_busy_timeout: None,
+) -> None:
+    del short_busy_timeout
+    with SqliteWriteProbe() as probe, hold_write_lock(Path(connection.settings_dict["NAME"])):
+        DjangoExecutionStore().settle_run(agent_context.attempt.attempt.run_id)
+    assert probe.transactions == probe.autocommit_writes == 0
