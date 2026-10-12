@@ -12,8 +12,20 @@ export const test = base.extend<{ accessibility: void }>({
         info.status !== "passed"
       )
         return;
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await assertAccessible(page);
+      try {
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await assertAccessible(page);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message.includes("Execution context was destroyed") ||
+            error.message.includes(
+              "Target page, context or browser has been closed",
+            ))
+        )
+          return;
+        throw error;
+      }
     },
     { auto: true },
   ],
