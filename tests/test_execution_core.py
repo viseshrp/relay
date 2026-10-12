@@ -269,7 +269,7 @@ class _DispatchStore:
         del claim_token
 
 
-def test_launch_commits_the_claim_before_enqueuing_its_token(
+def test_worker_commits_the_claim_before_enqueuing_its_token(
     project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow(
@@ -290,7 +290,7 @@ def test_launch_commits_the_claim_before_enqueuing_its_token(
         with ThreadPoolExecutor(max_workers=1) as reader:
             observed.append(reader.submit(read_committed_claim, token).result(timeout=10))
 
-    launch_workflow(
+    launch = launch_workflow(
         engine.store,
         project.relay_root,
         project.project_id,
@@ -298,6 +298,8 @@ def test_launch_commits_the_claim_before_enqueuing_its_token(
         enqueue,
     )
 
+    assert observed == []
+    dispatch_ready_nodes(engine.store, launch.run_id, enqueue)
     assert observed == [("dispatched", "dispatched")]
 
 

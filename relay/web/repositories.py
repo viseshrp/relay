@@ -70,6 +70,7 @@ from relay.execution.dispatch import (
     notify_dispatch,
     release_admission,
 )
+from relay.execution.events import OUTPUT_EVENT_TYPES
 from relay.execution.launch_request import FrozenLaunchBindings, LaunchRequest
 from relay.execution.locks import decide_admission
 from relay.execution.machine import (
@@ -1225,7 +1226,7 @@ def _bounded_page(
     byte_count = 0
     for row in rows[:limit]:
         record = serialize(row)
-        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(record).encode("utf-8")
         if records and byte_count + len(encoded) > byte_budget:
             more = True
             break
@@ -1646,6 +1647,128 @@ class DjangoReadStore:
         else:
             return records, next_value
 
+    @staticmethod
+    def _monitor_run(run_id: str) -> Run:
+        events = RunEvent.objects.filter(run_id=run_id).order_by("-id")
+        return _require_run(
+            Run.objects.select_related("snapshot", "project")
+            .annotate(
+                read_waiting_count=models.Count(
+                    "interactions",
+                    filter=Q(
+                        interactions__status="pending", interactions__attempt__status="waiting"
+                    ),
+                ),
+                read_event_cursor=Coalesce(
+                    models.Subquery(events.values("id")[:1]),
+                    0,
+                    output_field=models.BigIntegerField(),
+                ),
+                read_state_cursor=Coalesce(
+                    models.Subquery(events.exclude(type__in=OUTPUT_EVENT_TYPES).values("id")[:1]),
+                    0,
+                    output_field=models.BigIntegerField(),
+                ),
+            )
+            .filter(pk=run_id)
+            .first(),
+            run_id,
+        )
+
+    @staticmethod
+    def _run_metadata(run: Run) -> dict[str, object]:
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        result = _run_record(run)
+        name = _mapping(snapshot, "resolved_definition").get("name")
+        result["workflow_name"] = (
+            name
+            if isinstance(name, str) and name
+            else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
+        ) or _string(run, "workflow_key")
+        result["working_folder"] = _string(run, "worktree_path")
+        result["problem"] = _run_problem(run)
+        result["recovery"] = _run_recovery(run)
+        result["event_cursor"] = _integer(run, "read_event_cursor")
+        result["project"] = asdict(_record(_related(run, "project", Project)))
+        result["snapshot"] = {
+            "relay_version": _string(snapshot, "relay_version"),
+            "runtime_versions": _mapping(snapshot, "runtime_versions"),
+            "hashes": _mapping(snapshot, "hashes"),
+            "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
+        }
+        result["state_cursor"] = _integer(run, "read_state_cursor")
+        return result
+
+    @staticmethod
+    def _node_records(
+        run: Run, since: int, limit: int, byte_budget: int
+    ) -> tuple[list[dict[str, object]], int | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        repair_groups = _repair_groups(run)
+        # Legacy exhaustion sentinels belong to the explicitly grouped
+        # repair loop. Their execution and frozen definitions stay intact.
+        for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
+            target = _mapping(coordinator, "frozen_def").get("exhausted")
+            if isinstance(target, str) and target:
+                repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
+                    repair_groups[_string(coordinator, "scope_path")]
+                )
+        nodes = list(
+            NodeRun.objects.filter(run=run, pk__gt=since)
+            .annotate(
+                has_attempt=models.Exists(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                ),
+                latest_started_at=models.Subquery(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                    .order_by("-attempt_number")
+                    .values("started_at")[:1]
+                ),
+                latest_ended_at=models.Subquery(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                    .order_by("-attempt_number")
+                    .values("ended_at")[:1]
+                ),
+            )
+            .order_by("pk")[: bounded + 1]
+        )
+        records, more = _bounded_page(
+            nodes,
+            bounded,
+            lambda node: _node_record(
+                node,
+                snapshot,
+                dispatch_paused=_boolean(run, "dispatch_paused"),
+                repair_groups=repair_groups,
+            ),
+            byte_budget=byte_budget,
+        )
+        return records, int(str(records[-1]["id"])) if more and records else None
+
+    @staticmethod
+    def _interaction_records(
+        run: Run,
+        since: int,
+        limit: int,
+        pending_only: bool,
+        interaction_id: str | None,
+        byte_budget: int,
+    ) -> tuple[list[dict[str, object]], int | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
+            run=run, pk__gt=since
+        )
+        if pending_only:
+            query = query.filter(status=InteractionStatus.PENDING.value)
+        if interaction_id is not None:
+            query = query.filter(pk=interaction_id)
+        interactions = list(query.order_by("pk")[: bounded + 1])
+        records, more = _bounded_page(
+            interactions, bounded, _interaction_record, byte_budget=byte_budget
+        )
+        return records, int(str(records[-1]["id"])) if more and records else None
+
     def run_detail(
         self,
         run_id: str,
@@ -1656,114 +1779,70 @@ class DjangoReadStore:
         pending_only: bool = False,
         interaction_id: str | None = None,
     ) -> tuple[dict[str, object], int | None]:
-        """Read one bounded node or interaction page plus stable run metadata."""
-        bounded = min(max(limit, 1), API_MAX_PAGE)
+        """Preserve the original collection endpoint using read-only snapshots."""
         try:
-            # Read the run and its cursor in one statement. A retry committed
-            # before this read cannot leave its old terminal event above the cursor.
-            latest_event = RunEvent.objects.filter(run_id=run_id).order_by("-id").values("id")[:1]
-            run = _require_run(
-                Run.objects.select_related("snapshot", "project")
-                .annotate(
-                    read_waiting_count=models.Count(
-                        "interactions",
-                        filter=models.Q(
-                            interactions__status=InteractionStatus.PENDING.value,
-                            interactions__attempt__status=AttemptStatus.WAITING.value,
-                        ),
-                    ),
-                    read_event_cursor=Coalesce(
-                        models.Subquery(latest_event), 0, output_field=models.BigIntegerField()
-                    ),
-                )
-                .filter(pk=run_id)
-                .first(),
-                run_id,
-            )
-            snapshot = _related(run, "snapshot", RunSnapshot)
-            result = _run_record(run)
-            name = _mapping(snapshot, "resolved_definition").get("name")
-            result["workflow_name"] = (
-                name
-                if isinstance(name, str) and name
-                else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
-            ) or _string(run, "workflow_key")
-            result["working_folder"] = _string(run, "worktree_path")
-            result["problem"] = _run_problem(run)
-            result["recovery"] = _run_recovery(run)
-            result["event_cursor"] = _integer(run, "read_event_cursor")
-            result["project"] = asdict(_record(_related(run, "project", Project)))
-            result["snapshot"] = {
-                "relay_version": _string(snapshot, "relay_version"),
-                "runtime_versions": _mapping(snapshot, "runtime_versions"),
-                "hashes": _mapping(snapshot, "hashes"),
-                "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
-            }
-            result["nodes"] = []
-            result["interactions"] = []
-            # Reserve half the response ceiling for run and snapshot metadata.
-            byte_budget = API_MAX_PAGE_BYTES // 2
-            if collection == "nodes":
-                repair_groups = _repair_groups(run)
-                # Legacy exhaustion sentinels belong to the explicitly grouped
-                # repair loop. Their execution and frozen definitions stay intact.
-                for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
-                    target = _mapping(coordinator, "frozen_def").get("exhausted")
-                    if isinstance(target, str) and target:
-                        repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
-                            repair_groups[_string(coordinator, "scope_path")]
-                        )
-                nodes = list(
-                    NodeRun.objects.filter(run=run, pk__gt=since)
-                    .annotate(
-                        has_attempt=models.Exists(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                        ),
-                        latest_started_at=models.Subquery(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                            .order_by("-attempt_number")
-                            .values("started_at")[:1]
-                        ),
-                        latest_ended_at=models.Subquery(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                            .order_by("-attempt_number")
-                            .values("ended_at")[:1]
-                        ),
+            with read_snapshot():
+                run = self._monitor_run(run_id)
+                result = {**self._run_metadata(run), "nodes": [], "interactions": []}
+                if collection == "nodes":
+                    rows, cursor = self._node_records(run, since, limit, API_MAX_PAGE_BYTES // 2)
+                else:
+                    rows, cursor = self._interaction_records(
+                        run, since, limit, pending_only, interaction_id, API_MAX_PAGE_BYTES // 2
                     )
-                    .order_by("pk")[: bounded + 1]
-                )
-                records, more = _bounded_page(
-                    nodes,
-                    bounded,
-                    lambda node: _node_record(
-                        node,
-                        snapshot,
-                        dispatch_paused=_boolean(run, "dispatch_paused"),
-                        repair_groups=repair_groups,
-                    ),
-                    byte_budget=byte_budget,
-                )
-            else:
-                query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
-                    run=run, pk__gt=since
-                )
-                if pending_only:
-                    query = query.filter(status=InteractionStatus.PENDING.value)
-                if interaction_id is not None:
-                    query = query.filter(pk=interaction_id)
-                interactions = list(query.order_by("pk")[: bounded + 1])
-                records, more = _bounded_page(
-                    interactions, bounded, _interaction_record, byte_budget=byte_budget
-                )
-            result[collection] = records
-            next_value = int(str(records[-1]["id"])) if more and records else None
-        except (ProjectDiscoveryError, PersistenceError):
-            raise
+                result[collection] = rows
+                return result, cursor
         except DatabaseError:
             message = "Relay could not read run detail."
             raise PersistenceError(message, context={"run": run_id}) from None
-        else:
-            return result, next_value
+
+    def monitor(
+        self,
+        run_id: str,
+        *,
+        nodes_since: int = 0,
+        interactions_since: int = 0,
+        limit: int = API_MAX_PAGE,
+        interaction_id: str | None = None,
+    ) -> dict[str, object]:
+        """Read metadata, pages, and a linked request from one database version."""
+        try:
+            with read_snapshot():
+                run = self._monitor_run(run_id)
+                linked = (
+                    HumanInteraction.objects.select_related("node_run", "attempt")
+                    .filter(run=run, pk=interaction_id)
+                    .first()
+                    if interaction_id is not None
+                    else None
+                )
+                result: dict[str, object] = {
+                    "run": self._run_metadata(run),
+                    "nodes": [],
+                    "interactions": [],
+                    "nodes_next": None,
+                    "interactions_next": None,
+                    "linked_interaction": _interaction_record(linked) if linked else None,
+                    "event_cursor": _integer(run, "read_event_cursor"),
+                    "state_cursor": _integer(run, "read_state_cursor"),
+                }
+                budget = API_MAX_PAGE_BYTES - len(json.dumps(result).encode("utf-8")) - 2048
+                if budget < 0:
+                    message = "Run metadata exceeds the monitor response limit."
+                    raise PersistenceError(message, context={"run": run_id})
+                result["nodes"], result["nodes_next"] = self._node_records(
+                    run, nodes_since, limit, budget // 2
+                )
+                result["interactions"], result["interactions_next"] = self._interaction_records(
+                    run, interactions_since, limit, True, None, budget // 2
+                )
+                if len(json.dumps(result).encode("utf-8")) > API_MAX_PAGE_BYTES:
+                    message = "A monitor record exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id})
+                return result
+        except DatabaseError:
+            message = "Relay could not read the run monitor."
+            raise PersistenceError(message, context={"run": run_id}) from None
 
     def page_events(
         self,
@@ -1863,7 +1942,18 @@ class DjangoReadStore:
                     ]
                 )
                 records, more = _bounded_page(attempts, bounded, _job_attempt_record)
+                event_cursor = (
+                    RunEvent.objects.filter(run=run).aggregate(value=Max("id"))["value"] or 0
+                )
+                state_cursor = (
+                    RunEvent.objects.filter(run=run)
+                    .exclude(type__in=OUTPUT_EVENT_TYPES)
+                    .aggregate(value=Max("id"))["value"]
+                    or 0
+                )
                 result = {
+                    "event_cursor": event_cursor,
+                    "state_cursor": state_cursor,
                     "scope_path": scope_path,
                     "working_folder": _string(run, "worktree_path"),
                     "node_type": _string(node, "node_type"),
@@ -2054,7 +2144,7 @@ def _bounded_interaction_request(
     byte_count = len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     for option in options:
         record = dict(option)
-        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(record).encode("utf-8")
         # Each option is encoded once; later options add one JSON comma byte.
         added_bytes = len(encoded) + (1 if retained else 0)
         if byte_count + added_bytes > budget:

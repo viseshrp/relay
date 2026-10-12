@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -420,19 +421,37 @@ def test_run_status_and_replay_cursor_agree_when_a_retry_commits_during_the_read
         nonlocal advanced
         if not advanced and sql.startswith("SELECT") and f'FROM "{Run._meta.db_table}"' in sql:
             advanced = True
+
             # A worker finishes and retries before the run row is read. Its old
             # terminal event must already be covered by the returned cursor.
-            with transaction.atomic():
-                RunEvent.objects.create(
-                    run_id=run_id, type="run.failed", source="run", payload={"status": "failed"}
-                )
-                Run.objects.filter(pk=run_id).update(status="running")
-                RunEvent.objects.create(
-                    run_id=run_id, type="run.resumed", source="run", payload={"status": "running"}
-                )
+            def retry() -> None:
+                from django.db import connections
+
+                try:
+                    with transaction.atomic():
+                        RunEvent.objects.create(
+                            run_id=run_id,
+                            type="run.failed",
+                            source="run",
+                            payload={"status": "failed"},
+                        )
+                        Run.objects.filter(pk=run_id).update(status="running")
+                        RunEvent.objects.create(
+                            run_id=run_id,
+                            type="run.resumed",
+                            source="run",
+                            payload={"status": "running"},
+                        )
+                finally:
+                    connections.close_all()
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(retry).result(timeout=5)
         return execute(sql, params, many, context)
 
-    with connection.execute_wrapper(commit_retry_before_read):
+    from django.db import connections
+
+    with connections["snapshot"].execute_wrapper(commit_retry_before_read):
         detail = owner.get(f"/api/runs/{run_id}").json()["run"]
 
     assert advanced
@@ -1505,6 +1524,7 @@ def test_job_history_filters_tail_events_and_keeps_attempts_separate(
         {"scope_path": "root.check", "idempotency_key": "second-job-attempt"},
     )
     assert retry.status_code == 202
+    engine.advance(run_id)
     second = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
     assert second is not None
     engine.store.append_attempt_event(
