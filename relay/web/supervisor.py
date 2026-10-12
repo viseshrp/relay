@@ -190,7 +190,7 @@ def _spawn_children(
                     "-k",
                     "thread",
                     "-w",
-                    str(config.workers),
+                    "1",
                     "-t",
                     str(int(SHUTDOWN_TIMEOUT_SECONDS)),
                     "-g",

@@ -161,6 +161,7 @@ class InlineEngine:
         result = launch_workflow(
             self.store, project.relay_root, project.project_id, request, self.tokens.append
         )
+        dispatch_ready_nodes(self.store, result.run_id, self.tokens.append)
         return result.run_id
 
     def run_token(self, token: str) -> ExecutionOutcome | None:
@@ -173,6 +174,11 @@ class InlineEngine:
         """Run every dispatched token, scheduling successors after each attempt."""
         outcomes = []
         steps = 0
+        dispatch_ready_nodes(self.store, run_id, self.tokens.append)
+        queued = set(self.tokens)
+        self.tokens.extend(
+            token for token in self.store.pending_dispatch_tokens(run_id) if token not in queued
+        )
         while self.tokens:
             if steps >= max_steps:
                 message = f"Run {run_id} did not settle within {max_steps} attempts."

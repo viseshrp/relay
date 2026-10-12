@@ -99,6 +99,9 @@ applicable; do not silently change adjacent behavior.
 - `relay.db` is authoritative. Huey's separate `huey.db` carries opaque claim
   tokens. Commit dispatch intent before enqueueing; atomically claim admission
   and create one attempt. Duplicate delivery must not create another attempt.
+- Use one Huey execution thread. Web launch, resume, and rerun handlers commit
+  events; scheduling follows those events in the worker. Keep FULL durability,
+  read-only monitoring snapshots, and database-only bounded busy retries.
 - Keep state transitions and their events in one transaction. Use
   [state.py](relay/execution/state.py) and [machine.py](relay/execution/machine.py)
   rather than ad hoc status assignments. Keep transactions short; run Git,

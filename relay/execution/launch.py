@@ -34,7 +34,7 @@ from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
 
 from .launch_request import FrozenLaunchBindings, LaunchRequest
 from .preflight import launch_source_files, load_launch_workflow
-from .scheduler import SchedulingStore, dispatch_ready_nodes
+from .scheduler import SchedulingStore
 from .state import CleanupPolicy
 
 _HASH_CHUNK_BYTES = 1024 * 1024
@@ -191,7 +191,8 @@ def launch_workflow(
     request: LaunchRequest,
     enqueue: Callable[[str], object],
 ) -> LaunchResult:
-    """Run preflight, persist the snapshot, create isolation, and dispatch roots."""
+    """Persist a launch and its started event; the worker schedules its roots."""
+    del enqueue  # Retained for callers of the launch service's existing interface.
     from relay.workflows.source_bundle import source_lock
 
     with source_lock(relay_root):
@@ -344,7 +345,6 @@ def launch_workflow(
     except RelayError as error:
         store.mark_run_launch_failed(run_id, error)
         raise
-    dispatch_ready_nodes(store, run_id, enqueue)
     return LaunchResult(run_id)
 
 

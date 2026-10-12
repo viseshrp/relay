@@ -141,6 +141,7 @@ def isolated_relay(
     # their whole lifetime; each test starts both from its own fresh database.
     monkeypatch.setattr(views, "_PROJECT", None)
     monkeypatch.setattr(huey_app, "_SCHEDULE_CURSOR", None)
+    monkeypatch.setattr(huey_app, "_DELIVERY_CURSOR", None)
     yield
     set_dispatch_notifier(None)
     connections.close_all()

@@ -117,7 +117,7 @@ def init_command(context: click.Context) -> None:
 @click.option("--host", default=DEFAULT_HOST, show_default=True)
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=click.IntRange(1, 65_535))
 @click.option("--no-browser", is_flag=True, help="Do not open the browser after startup.")
-@click.option("--workers", default=DEFAULT_WORKERS, show_default=True, type=click.IntRange(min=1))
+@click.option("--workers", default=DEFAULT_WORKERS, hidden=True, type=click.IntRange(min=1))
 @click.option(
     "--login/--no-login",
     "login_required",
@@ -140,6 +140,8 @@ def up_command(
 
     try:
         stored = load_config()
+        if context.get_parameter_source("workers") is not ParameterSource.DEFAULT and workers != 1:
+            click.echo("Warning: Relay uses one worker; --workers is ignored.", err=True)
         effective = RelayConfig(
             stored.agent_preferences,
             stored.cleanup_policy,
@@ -153,11 +155,7 @@ def up_command(
                 if context.get_parameter_source("port") is ParameterSource.DEFAULT
                 else port
             ),
-            (
-                stored.workers
-                if context.get_parameter_source("workers") is ParameterSource.DEFAULT
-                else workers
-            ),
+            1,
             (
                 stored.login_required
                 if context.get_parameter_source("login_required") is ParameterSource.DEFAULT

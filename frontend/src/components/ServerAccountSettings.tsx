@@ -37,7 +37,7 @@ export function ServerAccountSettings({ state }: { state: SettingsPageState }) {
         />
       </HelpControl>
       <Alert severity="info">
-        Restart Relay after changing login, address, port, or workers.
+        Restart Relay after changing login, address, or port.
         Command-line flags override saved values for that process. Your existing
         account and data remain saved.
       </Alert>
@@ -71,23 +71,6 @@ export function ServerAccountSettings({ state }: { state: SettingsPageState }) {
             setDraft({ ...draft, port: Number(event.target.value) })
           }
           slotProps={{ htmlInput: { min: 1, max: 65535 } }}
-        />
-        <HelpTextField
-          topic="workers"
-          tour
-          label="Workers"
-          error={Boolean(fieldErrors.workers)}
-          type="number"
-          value={draft.workers}
-          disabled={busy}
-          onChange={(event) =>
-            setDraft({ ...draft, workers: Number(event.target.value) })
-          }
-          slotProps={{ htmlInput: { min: 1 } }}
-          helperText={
-            fieldErrors.workers ??
-            "Local jobs that can run at once. Git write locks still apply."
-          }
         />
       </Box>
     </Stack>

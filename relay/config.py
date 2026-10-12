@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
+import logging
 from pathlib import Path
 
 from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS, LOOPBACK_HOSTS
@@ -11,6 +12,8 @@ from .errors import ConfigError
 from .execution.state import CleanupPolicy
 from .paths import settings_path
 from .workflows.defaults import WorkflowDefaults, validate_defaults
+
+LOGGER = logging.getLogger(__name__)
 
 _ALLOWED_KEYS: set[str] = {
     "agent_preferences",
@@ -81,6 +84,9 @@ def validate_config(raw: object) -> RelayConfig:
     if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
         message = "workers must be a positive integer."
         raise ConfigError(message)
+    if workers != 1:
+        LOGGER.warning("Relay uses one worker; the legacy workers=%s setting is ignored.", workers)
+        workers = 1
     login_required = raw.get("login_required", True)
     if not isinstance(login_required, bool):
         message = "login_required must be true or false."

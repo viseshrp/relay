@@ -275,7 +275,7 @@ The complete settings inventory is:
 | Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |
 | Loopback address | Server and account | Explicit `relay up --host` | Restart required |
 | Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
-| Worker count | Server and account, positive integer | Explicit `relay up --workers` | Restart required |
+| Worker count | One execution worker | Legacy settings and flags warn and use one | New API values above one rejected |
 | Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
 | Welcome slides and guided tour | Welcome and guided tour provides replay and reset | This browser and installation address; no project override | Reset applies on next opening |
 | Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |

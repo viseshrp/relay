@@ -2647,6 +2647,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "run.started",
                         "run.rerun",
                         "run.resumed",
+                        "run.dispatch_changed",
                         "node.ready",
                         "node.succeeded",
                         "node.failed",
@@ -2673,6 +2674,43 @@ class DjangoExecutionStore(DjangoAgentStore):
             return RunEvent.objects.aggregate(value=Max("id"))["value"] or 0
         except DatabaseError:
             message = "Relay could not read the scheduling cursor."
+            raise PersistenceError(message) from None
+
+    def delivery_changes(self, after: int) -> tuple[int, tuple[str, ...]]:
+        """Read durable delivery intent, including resumed scopes with an attempt."""
+        try:
+            upper = self.latest_event_id()
+            events = list(
+                RunEvent.objects.filter(
+                    id__gt=after,
+                    id__lte=upper,
+                    type__in=("node.dispatched", "run.dispatch_changed"),
+                )
+                .order_by("id")
+                .values("id", "run_id", "node_run_id", "type")[:RECONCILE_MAX_ITEMS]
+            )
+            cursor = events[-1]["id"] if len(events) == RECONCILE_MAX_ITEMS else upper
+            if not events:
+                return cursor, ()
+            nodes = [row["node_run_id"] for row in events if row["type"] == "node.dispatched"]
+            runs = [row["run_id"] for row in events if row["type"] == "run.dispatch_changed"]
+            tokens = (
+                DispatchClaim.objects.filter(
+                    Q(node_run_id__in=nodes) | Q(node_run__run_id__in=runs),
+                    state=DispatchState.DISPATCHED.value,
+                    node_run__status=NodeStatus.DISPATCHED.value,
+                    node_run__run__dispatch_paused=False,
+                    node_run__run__status__in=(
+                        RunStatus.RUNNING.value,
+                        RunStatus.PAUSED_WAIT.value,
+                    ),
+                )
+                .order_by("created_at", "pk")
+                .values_list("claim_token", flat=True)
+            )
+            return int(cursor), tuple(tokens)
+        except DatabaseError:
+            message = "Relay could not read committed delivery intent."
             raise PersistenceError(message) from None
 
     def settle_run(self, run_id: str) -> None:
@@ -5417,7 +5455,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     | models.Q(enqueued_at__isnull=True, created_at__lte=cutoff)
                 )
                 .order_by("created_at")
-                .values_list("claim_token", flat=True)[:RECONCILE_MAX_ITEMS]
+                .values_list("claim_token", flat=True)
             )
             return tuple(str(token) for token in tokens)
         except DatabaseError:

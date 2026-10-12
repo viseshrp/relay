@@ -144,6 +144,12 @@ Dispatch has two database files and no cross-database transaction. Relay first
 commits `ready` to `dispatched` with a new `DispatchClaim` in `relay.db`. It then
 enqueues only the claim token in `huey.db` and records `enqueued_at`.
 
+Launch, resume, and rerun HTTP handlers commit their state and events without
+scheduling. The worker follows those events and schedules eligible nodes. At
+startup it also delivers existing dispatched claims, including suspended scopes
+that reuse an attempt. Committed delivery events repair a missing web-process
+notifier; duplicate Huey delivery still cannot create a second attempt.
+
 The consumer atomically claims a still-dispatched token, acquires admission, and
 creates one `NodeAttempt` in the same Relay transaction. Duplicate tokens exit
 without another attempt. A bounded reconciliation pass re-enqueues old,
@@ -518,8 +524,9 @@ through the single consumer. Stale-dispatch reconciliation remains the repair
 path after enqueue loss or consumer restart. Nested admission waits yield their
 worker and remain bounded by the enclosing deadline.
 
-One Huey consumer process uses thread workers on Linux, Windows, and macOS. The
-default is one worker; a configured count permits read-only parallelism while
-the durable admission lock still excludes writers. SQLite transactions are
-short, use WAL, and fail after the configured busy timeout rather than retrying
-without a bound.
+One Huey consumer process uses exactly one execution thread on Linux, Windows,
+and macOS. Legacy positive `workers` settings and `--workers` flags warn and use
+one. The settings UI omits this field; new API values above one return `422`.
+The reconciler and heartbeat coordinator remain separate background threads.
+SQLite transactions stay short, use WAL with FULL durability, and have bounded
+busy waiting.

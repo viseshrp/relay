@@ -293,7 +293,7 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
     assert web.arguments[1:5] == ("-m", "uvicorn", "relay.web.asgi:application", "--host")
     assert web.arguments[web.arguments.index("--port") + 1] == "9001"
     assert consumer.arguments[consumer.arguments.index("-k") + 1] == "thread"
-    assert consumer.arguments[consumer.arguments.index("-w") + 1] == "3"
+    assert consumer.arguments[consumer.arguments.index("-w") + 1] == "1"
     assert all(
         options["env"]["RELAY_PROJECT_ROOT"] == str(project.repository)
         for options in boundary.launches

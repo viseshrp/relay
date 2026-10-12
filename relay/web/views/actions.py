@@ -27,7 +27,6 @@ from relay.execution.resume import (
     RetryPermissionMode,
     rerun_failed_node,
 )
-from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import CleanupPolicy, ControlKind
 from relay.execution.step_settings import UnstartedAgentTarget, change_unstarted_agent_settings
 from relay.owner_settings import effective_config
@@ -230,10 +229,6 @@ def configure_dispatch_pause(request: HttpRequest, run_id: str) -> HttpResponse:
         raise ConfigError(message)
     store = DjangoExecutionStore()
     result = store.configure_dispatch_pause(run_id, paused, required_text(body, "idempotency_key"))
-    if result is ControlResult.ACCEPTED and not paused:
-        dispatch_ready_nodes(store, run_id, _enqueue_claim)
-        for token in store.pending_dispatch_tokens(run_id):
-            _enqueue_claim(token)
     return _control_response(result)
 
 
@@ -801,8 +796,6 @@ def rerun_node(request: HttpRequest, run_id: str) -> HttpResponse:
         agent=agent,
         permission_mode=permission_mode,
     )
-    if result is ControlResult.ACCEPTED:
-        dispatch_ready_nodes(store, run_id, _enqueue_claim)
     return _control_response(result)
 
 

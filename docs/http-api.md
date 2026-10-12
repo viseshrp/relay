@@ -297,8 +297,8 @@ mismatch returns `400 config_error` before creating a run. Launch validates the
 workflow tree, inputs, clean Git state, declared entry-point artifacts, and all
 exact-model routes before creating a run. Independent route failures are
 returned together. A successful preflight atomically records the run and
-snapshot, creates `relay/run/{run-id}` in an isolated worktree, and durably
-dispatches eligible nodes.
+snapshot and creates `relay/run/{run-id}` in an isolated worktree. Its committed
+`run.started` event triggers scheduling in the Huey worker.
 
 `cleanup_policy` additionally accepts `merge_on_success`, inherited from
 project/global settings when omitted. It requires a strictly clean checkout
@@ -811,6 +811,9 @@ services. They never mutate an existing run's snapshot or provider session.
 
 `settings` contains the existing `agent_preferences`, `cleanup_policy`, `host`,
 `port`, `workers`, and `login_required`, plus `workflow_defaults`:
+
+`workers` is always one in responses. Legacy saved counts warn and use one
+without rewriting the file. New saves above one return `422 config_error`.
 
 ```json
 {
