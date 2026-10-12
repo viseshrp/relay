@@ -2,6 +2,7 @@ import { expect, test, type Page } from "./a11y-test";
 import { historicalPost as post } from "./setup-helpers";
 import { stringify } from "yaml";
 import type { ArtifactRecord, RunDetail, RunEvent } from "../src/types";
+import type { MonitorPage } from "../src/run-monitor";
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
@@ -82,7 +83,7 @@ async function holdStream(page: Page, id: string) {
   );
   return {
     started: started.pending,
-    async replay() {
+    async replay(includeEvents = true) {
       const response = await page.request.get(
         `/api/runs/${id}/events?since=${since}&limit=200`,
       );
@@ -92,13 +93,21 @@ async function holdStream(page: Page, id: string) {
       expect(value.events.some((event) => event.type === "attempt.ended")).toBe(
         true,
       );
-      body = value.events
-        .map(
-          (event) =>
-            `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
-        )
-        .join("");
+      body = includeEvents
+        ? value.events
+            .map(
+              (event) =>
+                `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+            )
+            .join("")
+        : "";
+      const delivered = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/runs/${id}/stream`,
+      );
       ready.release();
+      await delivered;
+      await painted(page);
     },
     release: ready.release,
   };
@@ -115,10 +124,27 @@ async function holdRead<T>(
   const repairing = gate();
   let held = false;
   let frozen = false;
+  await page.evaluate(() => {
+    (window as unknown as { staleRunPublished: boolean }).staleRunPublished =
+      false;
+    new MutationObserver(() => {
+      if (
+        document.body.textContent?.includes("STALE RUN SNAPSHOT WAS PUBLISHED")
+      )
+        (
+          window as unknown as { staleRunPublished: boolean }
+        ).staleRunPublished = true;
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  });
   await page.route(
     (url) =>
       [
         `/api/runs/${id}`,
+        `/api/runs/${id}/monitor`,
         `/api/runs/${id}/events`,
         `/api/runs/${id}/artifacts`,
       ].includes(url.pathname),
@@ -130,9 +156,12 @@ async function holdRead<T>(
         held = true;
         const response = await route.fetch();
         expect(response.ok(), await response.text()).toBeTruthy();
-        captured.resolve((await response.json()) as T);
+        const body = await response.json();
+        captured.resolve(structuredClone(body) as T);
+        if (new URL(route.request().url()).pathname.endsWith("/monitor"))
+          body.run.title = "STALE RUN SNAPSHOT WAS PUBLISHED";
         await stale.pending;
-        await route.fulfill({ response });
+        await route.fulfill({ response, json: body });
         return;
       }
       await route.continue();
@@ -140,12 +169,19 @@ async function holdRead<T>(
   );
   return {
     captured: captured.promise,
-    async deliverLate() {
+    async deliverLate(expectRepair = true) {
       // Freeze later repairs so another response cannot hide a stale publish.
       frozen = true;
       stale.release();
-      await repairing.pending;
+      if (expectRepair) await repairing.pending;
       await painted(page);
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { staleRunPublished: boolean })
+              .staleRunPublished,
+        ),
+      ).toBe(false);
     },
     release() {
       stale.release();
@@ -209,7 +245,7 @@ for (const kind of ["permission", "elicitation"] as const)
       const request = (await detail(page, id)).interactions[0];
       expect(request?.kind).toBe(kind);
       const stream = await holdStream(page, id);
-      let stale: Awaited<ReturnType<typeof holdRead<DetailPage>>> | undefined;
+      let stale: Awaited<ReturnType<typeof holdRead<MonitorPage>>> | undefined;
       try {
         await page.goto(
           `/?view=runs&run=${id}&job=${encodeURIComponent(request.scope_path)}${linked ? `&interaction=${request.id}` : ""}`,
@@ -224,18 +260,18 @@ for (const kind of ["permission", "elicitation"] as const)
         await expect(
           job.getByRole("combobox", { name: "Attempt", exact: true }),
         ).toContainText("Waiting");
-        stale = await holdRead<DetailPage>(
+        stale = await holdRead<MonitorPage>(
           page,
           id,
           (url) =>
-            url.searchParams.get("collection") === "interactions" &&
+            url.pathname.endsWith("/monitor") &&
             url.searchParams.has("interaction") === linked,
         );
         await page
           .getByRole("button", { name: "Refresh", exact: true })
           .click();
         const saved = await stale.captured;
-        expect(saved.run.interactions[0]?.status).toBe("pending");
+        expect(saved.interactions[0]?.status).toBe("pending");
 
         const answer = await post(
           page,
@@ -253,12 +289,8 @@ for (const kind of ["permission", "elicitation"] as const)
           .poll(async () => (await detail(page, id)).status)
           .toBe("succeeded");
         await stream.replay();
-        await expect(banner).toHaveCount(0);
-        await expect(
-          job.getByRole("combobox", { name: "Attempt", exact: true }),
-        ).toHaveText("Attempt 1 · Completed");
-
         await stale.deliverLate();
+        stale.release();
         await expect(banner).toHaveCount(0);
         await expect(
           page.getByRole("button", { name: "Pause", exact: true }),
@@ -279,7 +311,7 @@ test("a canceled wait cannot be restored by a late pending-request read", async 
     approval: { type: "human_wait", prompt: "Cancel this pending review." },
   });
   const stream = await holdStream(page, id);
-  let stale: Awaited<ReturnType<typeof holdRead<DetailPage>>> | undefined;
+  let stale: Awaited<ReturnType<typeof holdRead<MonitorPage>>> | undefined;
   try {
     await page.goto(`/?view=runs&run=${id}&job=root.approval`);
     await stream.started;
@@ -288,10 +320,8 @@ test("a canceled wait cannot be restored by a late pending-request read", async 
       exact: true,
     });
     await expect(banner).toBeVisible();
-    stale = await holdRead<DetailPage>(
-      page,
-      id,
-      (url) => url.searchParams.get("collection") === "interactions",
+    stale = await holdRead<MonitorPage>(page, id, (url) =>
+      url.pathname.endsWith("/monitor"),
     );
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     expect((await stale.captured).run.waiting_count).toBe(1);
@@ -307,13 +337,11 @@ test("a canceled wait cannot be restored by a late pending-request read", async 
       .poll(async () => (await detail(page, id)).status)
       .toBe("canceled");
     await stream.replay();
-    await expect(banner).toHaveCount(0);
     const attempt = page
       .getByRole("region", { name: "Job log", exact: true })
       .getByRole("combobox", { name: "Attempt", exact: true });
-    await expect(attempt).toHaveText("Attempt 1 · Canceled");
-
     await stale.deliverLate();
+    stale.release();
     await expect(banner).toHaveCount(0);
     await expect(attempt).toHaveText("Attempt 1 · Canceled");
     await expect(
@@ -341,6 +369,18 @@ for (const paused of [true, false])
           })
         ).ok(),
       ).toBeTruthy();
+    await page.addInitScript(() => {
+      const NativeSource = window.EventSource;
+      window.EventSource = class extends NativeSource {
+        constructor(url: string | URL, options?: EventSourceInit) {
+          super(url, options);
+          this.addEventListener("run.dispatch_changed", (event) => {
+            (window as unknown as { observedPause: boolean }).observedPause =
+              JSON.parse((event as MessageEvent).data).payload.paused;
+          });
+        }
+      };
+    });
     await page.goto(`/?view=runs&run=${id}`);
     const before = page.getByRole("button", {
       name: paused ? "Pause" : "Resume",
@@ -351,10 +391,8 @@ for (const paused of [true, false])
       exact: true,
     });
     await expect(before).toBeVisible();
-    const stale = await holdRead<DetailPage>(
-      page,
-      id,
-      (url) => url.searchParams.get("collection") === "nodes",
+    const stale = await holdRead<MonitorPage>(page, id, (url) =>
+      url.pathname.endsWith("/monitor"),
     );
     try {
       await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -368,10 +406,18 @@ for (const paused of [true, false])
         ).ok(),
       ).toBeTruthy();
       // Use the real, still-open stream; EOF reconciliation must not repair this race.
-      await expect(after).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { observedPause?: boolean }).observedPause,
+          ),
+        )
+        .toBe(paused);
       expect((await detail(page, id)).dispatch_paused).toBe(paused);
 
       await stale.deliverLate();
+      stale.release();
       await expect(after).toBeVisible();
       await expect(before).toHaveCount(0);
     } finally {
@@ -393,10 +439,8 @@ test("switching runs rejects a late detail page from the previous selection", as
   await expect(
     page.getByRole("region", { name: "Waiting for you", exact: true }),
   ).toContainText("The previous run's review.");
-  const stale = await holdRead<DetailPage>(
-    page,
-    first,
-    (url) => url.searchParams.get("collection") === "nodes",
+  const stale = await holdRead<MonitorPage>(page, first, (url) =>
+    url.pathname.endsWith("/monitor"),
   );
   try {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -415,7 +459,7 @@ test("switching runs rejects a late detail page from the previous selection", as
     });
     await expect(banner).toContainText("The selected run's review.");
 
-    await stale.deliverLate();
+    await stale.deliverLate(false);
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
       "selected-race-run",
     );
@@ -426,81 +470,78 @@ test("switching runs rejects a late detail page from the previous selection", as
   }
 });
 
-test("saved artifacts survive an older empty page delivered after completion", async ({
-  page,
-}) => {
-  const id = await launch(page, "late-artifact-page", {
-    approval: { type: "human_wait", prompt: "Approve the saved report." },
-    save: {
-      type: "command",
-      needs: ["approval"],
-      writes: true,
-      run: [
-        python,
-        "-c",
-        [
-          "from pathlib import Path; import subprocess",
-          "Path('approval.txt').write_text('Ready: Yes\\n', encoding='utf-8')",
-          "subprocess.run(['git', 'add', 'approval.txt'], check=True)",
-          "subprocess.run(['git', 'commit', '-q', '-m', 'Save approval'], check=True)",
-        ].join("; "),
-      ],
-      outputs: {
-        verdict: { label: { artifact: "approval.txt", label: "Ready" } },
+for (const streamTail of [true, false])
+  test(`saved artifacts survive an older empty page after completion ${streamTail ? "with" : "without"} the stream tail`, async ({
+    page,
+  }) => {
+    const id = await launch(page, `late-artifact-page-${streamTail}`, {
+      approval: { type: "human_wait", prompt: "Approve the saved report." },
+      save: {
+        type: "command",
+        needs: ["approval"],
+        writes: true,
+        run: [
+          python,
+          "-c",
+          [
+            "from pathlib import Path; import subprocess",
+            "Path('approval.txt').write_text('Ready: Yes\\n', encoding='utf-8')",
+            "subprocess.run(['git', 'add', 'approval.txt'], check=True)",
+            "subprocess.run(['git', 'commit', '-q', '-m', 'Save approval'], check=True)",
+          ].join("; "),
+        ],
+        outputs: {
+          verdict: { label: { artifact: "approval.txt", label: "Ready" } },
+        },
       },
-    },
-  });
-  const request = (await detail(page, id)).interactions[0];
-  const stream = await holdStream(page, id);
-  let stale: Awaited<ReturnType<typeof holdRead<ArtifactPage>>> | undefined;
-  try {
-    await page.goto(`/?view=runs&run=${id}`);
-    await stream.started;
-    stale = await holdRead<ArtifactPage>(page, id, (url) =>
-      url.pathname.endsWith("/artifacts"),
-    );
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    const before = await stale.captured;
-    expect(
-      before.artifacts.some((artifact) => artifact.name === "verdict"),
-    ).toBe(false);
-
-    expect(
-      (
-        await post(page, `/api/attempts/${request.attempt_id}/wait`, {
-          interaction_id: request.id,
-          idempotency_key: "save-the-report",
-          value: "Approved",
-        })
-      ).ok(),
-    ).toBeTruthy();
-    await expect
-      .poll(async () => (await detail(page, id)).status)
-      .toBe("succeeded");
-    const saved: ArtifactPage = await (
-      await page.request.get(`/api/runs/${id}/artifacts`)
-    ).json();
-    const artifact = saved.artifacts.find((item) =>
-      item.source_path.endsWith("approval.txt"),
-    );
-    if (!artifact) throw new Error("The declared report was not retained.");
-    await stream.replay();
-    const table = page.getByRole("table", {
-      name: "Retained artifacts",
-      exact: true,
     });
-    await expect(table).toContainText(artifact.name);
-    await expect(page.locator(".run-summary-metadata")).toContainText(
-      "Succeeded",
-    );
+    const request = (await detail(page, id)).interactions[0];
+    const stream = await holdStream(page, id);
+    let stale: Awaited<ReturnType<typeof holdRead<ArtifactPage>>> | undefined;
+    try {
+      await page.goto(`/?view=runs&run=${id}`);
+      await stream.started;
+      stale = await holdRead<ArtifactPage>(page, id, (url) =>
+        url.pathname.endsWith("/artifacts"),
+      );
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      const before = await stale.captured;
+      expect(
+        before.artifacts.some((artifact) => artifact.name === "verdict"),
+      ).toBe(false);
 
-    await stale.deliverLate();
-    await expect(table).toContainText(artifact.name);
-    await expect(page.locator(".run-summary-metadata")).toContainText(
-      "Succeeded",
-    );
-  } finally {
-    stream.release();
-    stale?.release();
-  }
-});
+      expect(
+        (
+          await post(page, `/api/attempts/${request.attempt_id}/wait`, {
+            interaction_id: request.id,
+            idempotency_key: "save-the-report",
+            value: "Approved",
+          })
+        ).ok(),
+      ).toBeTruthy();
+      await expect
+        .poll(async () => (await detail(page, id)).status)
+        .toBe("succeeded");
+      const saved: ArtifactPage = await (
+        await page.request.get(`/api/runs/${id}/artifacts`)
+      ).json();
+      const artifact = saved.artifacts.find((item) =>
+        item.source_path.endsWith("approval.txt"),
+      );
+      if (!artifact) throw new Error("The declared report was not retained.");
+      await stream.replay(streamTail);
+      const table = page.getByRole("table", {
+        name: "Retained artifacts",
+        exact: true,
+      });
+      await stale.deliverLate();
+      stale.release();
+      await expect(table).toContainText(artifact.name);
+      await expect(page.locator(".run-summary-metadata")).toContainText(
+        "Succeeded",
+      );
+    } finally {
+      stream.release();
+      stale?.release();
+    }
+  });

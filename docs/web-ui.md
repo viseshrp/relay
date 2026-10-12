@@ -772,12 +772,16 @@ records and 1 MiB; load-more controls continue beyond 1,000 records.
 Output-only events advance `event_cursor` without advancing `state_cursor`,
 so a busy output stream cannot continually invalidate state reads. Failed
 reads retry four times after 0.5, 1, 2, and 5 seconds. The last accepted view
-stays visible with an error and a manual retry. Before accepting completion,
-Relay drains saved log events through the terminal snapshot's event cursor
-and checks for pending recovery. Reconnects refresh state; a manual refresh
-also detects retries started from another browser. Artifact events retain
-the append-only artifact merge, and selected historical requests still show
-through their linked interaction.
+stays visible with an error and a manual retry. Before accepting live
+completion, Relay drains saved log events through the terminal snapshot's
+event cursor and checks for pending recovery. An already-finished run opens
+with a small summary; historical logs load when requested. Reconnects refresh
+state; a manual refresh also detects retries started from another browser.
+Artifact events retain
+the append-only artifact merge, including events recovered from saved history.
+An event arriving during an older artifact read requests another read before
+that refresh settles. Selected historical requests still show through their
+linked interaction.
 
 ## Automatic step recovery
 

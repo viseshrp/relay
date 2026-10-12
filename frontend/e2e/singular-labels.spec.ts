@@ -41,15 +41,12 @@ test("one repair round and one artifact byte use singular labels", async ({
       roles: {},
     },
   };
-  await page.route(
-    `**/api/runs/${fixture.run}?collection=nodes*`,
-    async (route) => {
-      const response = await route.fetch();
-      const body: { run: { nodes: RunNode[] } } = await response.json();
-      body.run.nodes.push(repair);
-      await route.fulfill({ response, json: body });
-    },
-  );
+  await page.route(`**/api/runs/${fixture.run}/monitor?*`, async (route) => {
+    const response = await route.fetch();
+    const body: { nodes: RunNode[] } = await response.json();
+    body.nodes.push(repair);
+    await route.fulfill({ response, json: body });
+  });
   await page.route(`**/api/runs/${fixture.run}/artifacts?*`, async (route) => {
     const response = await route.fetch();
     const body: { artifacts: ArtifactRecord[] } = await response.json();

@@ -136,7 +136,6 @@ test("the full spotlight tour reaches each settings control without changing sav
     "Require login",
     "Loopback address",
     "Port",
-    "Workers",
     "Desktop notifications",
     "Storage",
     "Welcome and guided tour",

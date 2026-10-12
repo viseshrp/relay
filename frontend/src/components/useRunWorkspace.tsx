@@ -161,6 +161,7 @@ export function useRunWorkspace({
   const flushRef = useRef<(() => void) | null>(null);
   const eventAfter = useRef(0);
   const persistedAfter = useRef(0);
+  const artifactAfter = useRef(0);
   const streamComplete = useRef(false);
   const stepProgress = useRef<HTMLDivElement>(null);
   const jobContent = useRef<HTMLDivElement>(null);
@@ -205,7 +206,7 @@ export function useRunWorkspace({
       if (selectedRun === null) return [];
       const summary = summaryOnly.current && !full;
       const response = await api<ReadResponse2>(
-        `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=${summary ? 50 : 200}${summary ? "&summary=true" : ""}`,
+        `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=${summary ? 50 : 100}${summary ? "&summary=true" : ""}`,
         { signal, share: false },
       );
       if (currentRun.current !== selectedRun || signal?.aborted) return [];
@@ -236,18 +237,24 @@ export function useRunWorkspace({
           limit: "50",
           visible: "true",
         });
-        const response = await retryRunRead(
-          () =>
-            api<ArtifactPage>(`/api/runs/${selectedRun}/artifacts?${query}`, {
-              signal,
-              share: false,
-            }),
-          signal,
-          (caught) => setError(errorMessage(caught)),
-        );
-        if (signal.aborted || currentRun.current !== selectedRun) return;
-        setArtifacts((current) => mergeRecords(current, response.artifacts));
-        setArtifactCursor(response.next);
+        while (!signal.aborted) {
+          const observed = artifactAfter.current;
+          const response = await retryRunRead(
+            () =>
+              api<ArtifactPage>(`/api/runs/${selectedRun}/artifacts?${query}`, {
+                signal,
+                share: false,
+              }),
+            signal,
+            (caught) => setError(errorMessage(caught)),
+          );
+          if (signal.aborted || currentRun.current !== selectedRun) return;
+          setArtifacts((current) => mergeRecords(current, response.artifacts));
+          setArtifactCursor(response.next);
+          // Coalescing must not consume an artifact event that arrived while
+          // an older page was in flight. Append-only records remain visible.
+          if (observed === artifactAfter.current) return;
+        }
       });
     },
     [selectedRun],
@@ -260,6 +267,20 @@ export function useRunWorkspace({
     try {
       return await queue.enqueue("monitor", async (signal) => {
         queue.clock = startRead(queue.clock);
+        const observeHistory = (history: RunEvent[]) => {
+          for (const event of history) {
+            queue.observe(event);
+            if (
+              event.type === "artifact.preserved" &&
+              event.id > artifactAfter.current
+            ) {
+              artifactAfter.current = event.id;
+              void loadArtifacts(0, "refresh").catch((caught: unknown) => {
+                if (!isAborted(caught)) setError(errorMessage(caught));
+              });
+            }
+          }
+        };
         try {
           while (!signal.aborted) {
             const snapshot = await readMonitorPages(
@@ -284,18 +305,24 @@ export function useRunWorkspace({
               () => ({ ...targets.current, linkedId: linkedId.current }),
               signal,
             );
-            if (owner.initial) {
-              summaryOnly.current = TERMINAL_RUNS.has(snapshot.run.status);
-              const history = await loadEvents(0, false, signal);
-              for (const event of history) queue.observe(event);
-              owner.initial = false;
-            }
             const terminal =
               TERMINAL_RUNS.has(snapshot.run.status) &&
               snapshot.run.problem?.retry?.state !== "scheduled" &&
               !PENDING_RECOVERY.has(
                 snapshot.run.recovery?.current?.state ?? "",
               );
+            if (owner.initial) {
+              summaryOnly.current = terminal;
+              if (terminal) {
+                // An already-finished run opens with lazy historical logs.
+                // Drain new output from this boundary if it is retried later.
+                persistedAfter.current = snapshot.event_cursor;
+                eventAfter.current = snapshot.event_cursor;
+              }
+              const history = await loadEvents(0, false, signal);
+              observeHistory(history);
+              owner.initial = false;
+            }
             if (terminal) {
               flushRef.current?.();
               while (
@@ -308,7 +335,7 @@ export function useRunWorkspace({
                   signal,
                   (caught) => setError(errorMessage(caught)),
                 );
-                for (const event of tail) queue.observe(event);
+                observeHistory(tail);
                 if (persistedAfter.current <= before)
                   throw new Error(
                     "Relay could not finish loading the run's saved output.",
@@ -350,7 +377,7 @@ export function useRunWorkspace({
         setError(errorMessage(caught));
       return null;
     }
-  }, [loadEvents, selectedRun]);
+  }, [loadArtifacts, loadEvents, selectedRun]);
 
   const refresh = useCallback(async () => {
     const owner = queueOwner.current;
@@ -379,6 +406,7 @@ export function useRunWorkspace({
     currentRun.current = selectedRun;
     eventAfter.current = 0;
     persistedAfter.current = 0;
+    artifactAfter.current = 0;
     streamComplete.current = false;
     targets.current = { nodes: 200, interactions: 200 };
     setStreamRun(null);
@@ -429,6 +457,7 @@ export function useRunWorkspace({
     let incoming: RunEvent[] = [];
     let frame: number | null = null;
     let disposed = false;
+    let connected = false;
     const flush = () => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
@@ -441,7 +470,10 @@ export function useRunWorkspace({
     setStreamState("connecting");
     source.onopen = () => {
       setStreamState("live");
-      void requestMonitor();
+      // The first connection replays from the accepted history cursor.
+      // Reconnects must also recover state when their event tail is missing.
+      if (connected) void requestMonitor();
+      connected = true;
     };
     const receive = (event: Event) => {
       if (disposed) return;
@@ -461,10 +493,12 @@ export function useRunWorkspace({
           attentionChanged();
           void requestMonitor();
         }
-        if (item.type === "artifact.preserved")
+        if (item.type === "artifact.preserved") {
+          artifactAfter.current = Math.max(artifactAfter.current, item.id);
           void loadArtifacts(0, "refresh").catch((caught: unknown) => {
             if (!isAborted(caught)) setError(errorMessage(caught));
           });
+        }
       } catch {
         setError("Relay received an invalid event frame.");
       }

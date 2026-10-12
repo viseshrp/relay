@@ -68,7 +68,7 @@ for (const automatic of [false, true])
     // Inject a native provider response while the real failed command run
     // continues to own state transitions and retry behavior.
     let retryState = "scheduled";
-    await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
+    await page.route(`**/api/runs/${runId}/monitor?*`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       if (body.run.status === "failed")
@@ -170,7 +170,7 @@ for (const automatic of [false, true])
       .getByRole("button", { name: "Open job log", exact: true })
       .click();
     await page.getByRole("button", { name: "Re-run job", exact: true }).click();
-    await page.unroute(`**/api/runs/${runId}?collection=*`);
+    await page.unroute(`**/api/runs/${runId}/monitor?*`);
     releaseRetry();
     await expect(
       page.getByText("You've hit your session limit · resets 1:50pm (UTC)", {
@@ -360,7 +360,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const refreshGate = new Promise<void>((resolve) => {
     releaseRefresh = resolve;
   });
-  await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
+  await page.route(`**/api/runs/${runId}/monitor?*`, async (route) => {
     const response = await route.fetch();
     markRefreshStarted();
     await refreshGate;
@@ -473,15 +473,18 @@ for (const native of [false, true])
     ).json();
     const before = beforeResponse.run;
     if (!native) {
+      const monitor = await (
+        await page.request.get(`/api/runs/${runId}/monitor`)
+      ).json();
       // The first problem notice can describe a different concurrent failure.
       // Retry settings must still come from the selected failed step's own route.
       // Fulfill the captured state directly so aborted reads cannot outlive route.fetch.
-      await page.route(`**/api/runs/${runId}?collection=*`, (route) =>
+      await page.route(`**/api/runs/${runId}/monitor?*`, (route) =>
         route.fulfill({
           json: {
-            ...beforeResponse,
+            ...monitor,
             run: {
-              ...before,
+              ...monitor.run,
               problem: { ...before.problem, scope_path: "root.other" },
             },
           },
