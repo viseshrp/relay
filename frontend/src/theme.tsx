@@ -32,12 +32,14 @@ export const lightPaletteTokens = {
   "danger-on-dark": "#fca5a5",
   primary: "#3156d3",
   "primary-strong": "#233d96",
+  "primary-contrast": "#ffffff",
   surface: "#ffffff",
   "surface-muted": "#f4f6fb",
   "surface-hover": "#eef2ff",
   "surface-elevated": "#ffffff",
   border: "#c4cddd",
   "border-subtle": "#dce1ec",
+  "border-input": "#7b879c",
   focus: "#3156d3",
   success: "#176b35",
   "success-surface": "#eefbf3",
@@ -61,12 +63,14 @@ export const darkPaletteTokens = {
   "danger-on-dark": "#fca5a5",
   primary: "#93c5fd",
   "primary-strong": "#bfdbfe",
+  "primary-contrast": "#0f172a",
   surface: "#1e293b",
   "surface-muted": "#0f172a",
   "surface-hover": "#243147",
-  "surface-elevated": "#1e293b",
+  "surface-elevated": "#273449",
   border: "#334155",
-  "border-subtle": "#1e293b",
+  "border-subtle": "#334155",
+  "border-input": "#748299",
   focus: "#93c5fd",
   success: "#86efac",
   "success-surface": "rgba(134, 239, 172, 0.14)",
@@ -163,6 +167,33 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
           enterNextDelay: 0,
           disableTouchListener: true,
         },
+        styleOverrides: {
+          tooltip: {
+            backgroundColor: tokens["surface-elevated"],
+            color: tokens.text,
+            border: `1px solid ${tokens.border}`,
+            boxShadow: `0 4px 12px ${tokens.shadow}`,
+            fontSize: ".75rem",
+          },
+        },
+      },
+      MuiDialog: {
+        styleOverrides: {
+          paper: {
+            backgroundColor: tokens["surface-elevated"],
+            border: `1px solid ${tokens.border}`,
+            backgroundImage: "none",
+          },
+        },
+      },
+      MuiPopover: {
+        styleOverrides: {
+          paper: {
+            backgroundColor: tokens["surface-elevated"],
+            border: `1px solid ${tokens.border}`,
+            backgroundImage: "none",
+          },
+        },
       },
       MuiButton: {
         defaultProps: { disableElevation: true, size: "small" },
@@ -184,10 +215,10 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
           multiline: { padding: "8px 12px" },
           root: {
             "& .MuiOutlinedInput-notchedOutline": {
-              borderColor: tokens["border-subtle"],
+              borderColor: tokens["border-input"],
             },
             "&:hover .MuiOutlinedInput-notchedOutline": {
-              borderColor: tokens.border,
+              borderColor: tokens.primary,
             },
             "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
               borderColor: tokens.primary,
@@ -242,8 +273,9 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
           paper: {
             maxWidth: "calc(100vw - 32px)",
             maxHeight: "min(320px, calc(100dvh - 32px))",
-            border: `1px solid ${tokens["border-subtle"]}`,
+            border: `1px solid ${tokens.border}`,
             backgroundColor: tokens["surface-elevated"],
+            backgroundImage: "none",
           },
         },
       },
@@ -299,7 +331,7 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
       MuiPaper: {
         styleOverrides: {
           root: { backgroundImage: "none" },
-          outlined: { borderColor: tokens["border-subtle"] },
+          outlined: { borderColor: tokens.border },
         },
       },
     },
@@ -308,15 +340,16 @@ export function createRelayTheme(mode: "light" | "dark"): Theme {
 
 export const relayTheme = createRelayTheme("light");
 
-export const relayDarkHighlightStyle = HighlightStyle.define([
-  { tag: t.keyword, color: "#93c5fd" },
+export const relayLightHighlightStyle = HighlightStyle.define([
+  { tag: t.keyword, color: "#1d4ed8" },
+  { tag: t.propertyName, color: "#2563eb", fontWeight: "600" },
   {
-    tag: [t.name, t.deleted, t.character, t.propertyName, t.macroName],
-    color: "#e2e8f0",
+    tag: [t.name, t.character],
+    color: "#1e293b",
   },
-  { tag: [t.function(t.variableName), t.labelName], color: "#67e8f9" },
-  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#fde047" },
-  { tag: [t.definition(t.name), t.separator], color: "#cbd5e1" },
+  { tag: [t.function(t.variableName), t.labelName], color: "#0284c7" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#92400e" },
+  { tag: [t.definition(t.name), t.separator], color: "#475569" },
   {
     tag: [
       t.typeName,
@@ -328,7 +361,7 @@ export const relayDarkHighlightStyle = HighlightStyle.define([
       t.self,
       t.namespace,
     ],
-    color: "#fca5a5",
+    color: "#7c3aed",
   },
   {
     tag: [
@@ -339,8 +372,56 @@ export const relayDarkHighlightStyle = HighlightStyle.define([
       t.regexp,
       t.link,
       t.special(t.string),
+      t.macroName,
     ],
-    color: "#d8b4fe",
+    color: "#92400e",
+  },
+  { tag: [t.meta, t.comment], color: "#64748b", fontStyle: "italic" },
+  { tag: t.strong, fontWeight: "bold" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  { tag: t.link, color: "#2563eb", textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: "#1d4ed8" },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#7c3aed" },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: "#0d766e" },
+  { tag: t.invalid, color: "#b42324" },
+]);
+
+export const relayDarkHighlightStyle = HighlightStyle.define([
+  { tag: t.keyword, color: "#93c5fd" },
+  { tag: t.propertyName, color: "#93c5fd", fontWeight: "600" },
+  {
+    tag: [t.name, t.character],
+    color: "#f1f5f9",
+  },
+  { tag: [t.function(t.variableName), t.labelName], color: "#67e8f9" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#fde047" },
+  { tag: [t.definition(t.name), t.separator], color: "#94a3b8" },
+  {
+    tag: [
+      t.typeName,
+      t.className,
+      t.number,
+      t.changed,
+      t.annotation,
+      t.modifier,
+      t.self,
+      t.namespace,
+    ],
+    color: "#fde047",
+  },
+  {
+    tag: [
+      t.operator,
+      t.operatorKeyword,
+      t.url,
+      t.escape,
+      t.regexp,
+      t.link,
+      t.special(t.string),
+      t.macroName,
+    ],
+    color: "#f472b6",
   },
   { tag: [t.meta, t.comment], color: "#94a3b8", fontStyle: "italic" },
   { tag: t.strong, fontWeight: "bold" },
@@ -355,6 +436,9 @@ export const relayDarkHighlightStyle = HighlightStyle.define([
 
 export function createCodeMirrorTheme(isDark: boolean) {
   return [
+    syntaxHighlighting(
+      isDark ? relayDarkHighlightStyle : relayLightHighlightStyle,
+    ),
     EditorView.theme(
       {
         "&": {
@@ -387,7 +471,6 @@ export function createCodeMirrorTheme(isDark: boolean) {
       },
       { dark: isDark },
     ),
-    ...(isDark ? [syntaxHighlighting(relayDarkHighlightStyle)] : []),
   ];
 }
 
@@ -429,7 +512,10 @@ export function resolveTheme(pref: ThemePreference): ResolvedTheme {
   return pref === "system" ? getSystemTheme() : pref;
 }
 
-export function applyThemeToDocument(resolved: ResolvedTheme): void {
+export function applyThemeToDocument(
+  resolved: ResolvedTheme,
+  preference: ThemePreference = "system",
+): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   root.setAttribute("data-theme", resolved);
@@ -441,25 +527,33 @@ export function applyThemeToDocument(resolved: ResolvedTheme): void {
   }
 
   const themeColors: Record<ResolvedTheme, string> = {
-    light: "#f4f6fb",
-    dark: "#0f172a",
+    light: lightPaletteTokens["surface-muted"],
+    dark: darkPaletteTokens["surface-muted"],
   };
 
-  const metaTags = document.querySelectorAll<HTMLMetaElement>(
-    'meta[name="theme-color"]',
+  const metaLight = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"][media*="light"]',
   );
-  let hasGenericMeta = false;
-  for (const meta of metaTags) {
-    if (!meta.media) {
+  const metaDark = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"][media*="dark"]',
+  );
+  const genericMetas = document.querySelectorAll<HTMLMetaElement>(
+    'meta[name="theme-color"]:not([media])',
+  );
+
+  if (preference === "system") {
+    if (metaLight) metaLight.content = themeColors.light;
+    if (metaDark) metaDark.content = themeColors.dark;
+    for (const meta of genericMetas) {
       meta.content = themeColors[resolved];
-      hasGenericMeta = true;
     }
-  }
-  if (!hasGenericMeta) {
-    const activeMeta = document.createElement("meta");
-    activeMeta.name = "theme-color";
-    activeMeta.content = themeColors[resolved];
-    document.head.appendChild(activeMeta);
+  } else {
+    const metaTags = document.querySelectorAll<HTMLMetaElement>(
+      'meta[name="theme-color"]',
+    );
+    for (const meta of metaTags) {
+      meta.content = themeColors[resolved];
+    }
   }
 }
 
@@ -502,8 +596,8 @@ export function RelayThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    applyThemeToDocument(resolvedTheme);
-  }, [resolvedTheme]);
+    applyThemeToDocument(resolvedTheme, preference);
+  }, [resolvedTheme, preference]);
 
   const setPreference = useCallback((newPref: ThemePreference) => {
     setPrefState(newPref);

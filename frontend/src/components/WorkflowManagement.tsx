@@ -5,6 +5,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Stack,
   TextField,
   Typography,
@@ -95,18 +96,23 @@ export function WorkflowManagement({
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             {action === "manage" ? (
-              <>
-                {[
-                  "rename",
-                  "duplicate",
-                  disabled ? "enable" : "disable",
-                  "delete",
-                ].map((value) => (
-                  <Button key={value} onClick={() => open(value)}>
-                    {value.charAt(0).toUpperCase() + value.slice(1)}
-                  </Button>
-                ))}
-              </>
+              <Stack spacing={1}>
+                {["rename", "duplicate", disabled ? "enable" : "disable"].map(
+                  (value) => (
+                    <Button key={value} onClick={() => open(value)}>
+                      {value.charAt(0).toUpperCase() + value.slice(1)}
+                    </Button>
+                  ),
+                )}
+                <Divider sx={{ my: 1 }} />
+                <Button
+                  color="error"
+                  variant="outlined"
+                  onClick={() => open("delete")}
+                >
+                  Delete
+                </Button>
+              </Stack>
             ) : (
               <>
                 <Typography sx={{ overflowWrap: "anywhere" }}>

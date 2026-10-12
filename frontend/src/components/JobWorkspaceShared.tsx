@@ -1,4 +1,4 @@
-import { Alert, Box, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 
@@ -52,18 +52,50 @@ function JobChangesView({
       {changes && (
         <>
           {changes.commits.map((commit) => (
-            <Box key={commit.sha}>
-              <Typography>{commit.title}</Typography>
-              <Box component="details">
-                <Box component="summary">Commit details</Box>
-                <Box component="code">{commit.sha}</Box>
+            <Box key={commit.sha} sx={{ minWidth: 0 }}>
+              <Typography sx={{ overflowWrap: "anywhere" }}>
+                {commit.title}
+              </Typography>
+              <Box component="details" sx={{ minWidth: 0, mt: 0.5 }}>
+                <Box component="summary" sx={{ cursor: "pointer" }}>
+                  Commit {commit.sha.slice(0, 7)}
+                </Box>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  sx={{ alignItems: "center", mt: 0.5, flexWrap: "wrap" }}
+                >
+                  <Box
+                    component="code"
+                    sx={{
+                      wordBreak: "break-all",
+                      overflowWrap: "anywhere",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    {commit.sha}
+                  </Box>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      void navigator.clipboard?.writeText(commit.sha)
+                    }
+                    aria-label={`Copy commit ${commit.sha.slice(0, 7)}`}
+                  >
+                    Copy
+                  </Button>
+                </Stack>
               </Box>
             </Box>
           ))}
           {changes.commits.length >= 100 && (
             <Typography>Showing the latest 100 commits.</Typography>
           )}
-          <DiffViewer text={changes.text} truncated={changes.truncated} />
+          <DiffViewer
+            text={changes.text}
+            truncated={changes.truncated}
+            finished={Boolean(attempt.ended_at)}
+          />
         </>
       )}
     </Stack>

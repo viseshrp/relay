@@ -12,11 +12,9 @@ import { ActionIcon } from "./components/ActionIcon";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { type HelpGuide } from "./components/HelpGuides";
 import { viewHref } from "./navigation";
-import { useThemeMode } from "./theme";
-
 import type { AppState } from "./useApp";
+
 export function AppHeader({ state }: { state: AppState }) {
-  const { resolvedTheme, toggleTheme } = useThemeMode();
   const {
     header,
     navigateSafely,
@@ -158,37 +156,22 @@ export function AppHeader({ state }: { state: AppState }) {
                     : "Settings"}
             </MenuItem>
           ))}
-          <Divider />
-          <MenuItem
-            onClick={() => {
-              toggleTheme();
-              setMobileNav(null);
-            }}
-          >
-            <ActionIcon
-              name={resolvedTheme === "dark" ? "sun" : "moon"}
-              size={16}
-            />
-            <Box component="span" sx={{ ml: 1 }}>
-              {resolvedTheme === "dark"
-                ? "Switch to light mode"
-                : "Switch to dark mode"}
-            </Box>
-          </MenuItem>
         </Menu>
-        <ThemeToggle />
-        <Button
-          ref={helpButton}
-          aria-label={
-            loginRequired ? `Account menu for ${auth.username}` : "Help"
-          }
-          aria-haspopup="menu"
-          aria-expanded={helpAnchor !== null}
-          endIcon={<ActionIcon name="down" />}
-          onClick={(event) => setHelpAnchor(event.currentTarget)}
-        >
-          {loginRequired ? auth.username : "Help"}
-        </Button>
+        <Box className="header-actions">
+          <ThemeToggle />
+          <Button
+            ref={helpButton}
+            aria-label={
+              loginRequired ? `Account menu for ${auth.username}` : "Help"
+            }
+            aria-haspopup="menu"
+            aria-expanded={helpAnchor !== null}
+            endIcon={<ActionIcon name="down" />}
+            onClick={(event) => setHelpAnchor(event.currentTarget)}
+          >
+            {loginRequired ? auth.username : "Help"}
+          </Button>
+        </Box>
         <Menu
           anchorEl={helpAnchor}
           open={helpAnchor !== null}
@@ -264,16 +247,6 @@ export function AppHeader({ state }: { state: AppState }) {
             {attention.notifications
               ? "Disable desktop notifications"
               : "Enable desktop notifications"}
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              toggleTheme();
-              setHelpAnchor(null);
-            }}
-          >
-            {resolvedTheme === "dark"
-              ? "Switch to light mode"
-              : "Switch to dark mode"}
           </MenuItem>
           {loginRequired && <Divider />}
           {loginRequired && (

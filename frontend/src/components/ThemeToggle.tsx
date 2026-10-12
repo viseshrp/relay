@@ -1,19 +1,28 @@
 import { ActionIcon } from "./ActionIcon";
 import { useThemeMode } from "../theme";
-import { Box, Button, Menu, MenuItem } from "@mui/material";
+import { Box, IconButton, Menu, MenuItem, Tooltip } from "@mui/material";
 import { useState } from "react";
 
 export function ThemeToggle() {
   const { preference, resolvedTheme, setPreference } = useThemeMode();
   const [themeAnchor, setThemeAnchor] = useState<HTMLElement | null>(null);
 
+  const displayLabel =
+    preference === "system"
+      ? `System (${resolvedTheme})`
+      : preference === "dark"
+        ? "Dark"
+        : "Light";
+
   return (
     <>
-      <Button
-        aria-label={`Theme mode: ${preference === "system" ? `System (${resolvedTheme})` : preference}`}
-        aria-haspopup="menu"
-        aria-expanded={themeAnchor !== null}
-        startIcon={
+      <Tooltip title={`Theme mode: ${displayLabel}`}>
+        <IconButton
+          aria-label={`Theme mode: ${displayLabel}`}
+          aria-haspopup="menu"
+          aria-expanded={themeAnchor !== null}
+          onClick={(event) => setThemeAnchor(event.currentTarget)}
+        >
           <ActionIcon
             name={
               preference === "system"
@@ -22,18 +31,10 @@ export function ThemeToggle() {
                   ? "moon"
                   : "sun"
             }
-            size={16}
+            size={18}
           />
-        }
-        endIcon={<ActionIcon name="down" size={12} />}
-        onClick={(event) => setThemeAnchor(event.currentTarget)}
-      >
-        {preference === "system"
-          ? "Auto"
-          : preference === "dark"
-            ? "Dark"
-            : "Light"}
-      </Button>
+        </IconButton>
+      </Tooltip>
       <Menu
         anchorEl={themeAnchor}
         open={themeAnchor !== null}

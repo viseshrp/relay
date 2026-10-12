@@ -393,6 +393,23 @@ def test_doctor_shares_launch_cleanliness_without_broadening_exemptions(
         )
 
 
+def test_require_launch_clean_names_untracked_workflow(
+    project: RelayProject,
+) -> None:
+    from relay.errors import DirtyRepositoryError
+    from relay.vcs.cleanliness import require_launch_clean
+
+    project.write(".relay/workflows/custom.yaml", "name: Custom\n")
+    with pytest.raises(DirtyRepositoryError) as exc_info:
+        require_launch_clean(project.repository, frozenset())
+    assert "An untracked workflow file blocks this run: .relay/workflows/custom.yaml." in str(
+        exc_info.value
+    )
+    assert exc_info.value.next_action == (
+        "Commit workflow files or set them aside before starting this run."
+    )
+
+
 def test_cleanup_without_selection_has_nothing_to_clean() -> None:
     result = invoke("data", "clean")
     assert (result.exit_code, report(result)) == (EXIT_NOTHING_TO_CLEAN, {"deleted": {}})

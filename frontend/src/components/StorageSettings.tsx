@@ -148,7 +148,11 @@ export function StorageSettings({
   }
   return (
     <Stack component="section" aria-label="Project storage" spacing={2}>
-      <Typography variant="h6">
+      <Typography
+        variant="h6"
+        title={`${project.display_name} storage`}
+        sx={{ overflowWrap: "anywhere" }}
+      >
         <HelpLabel topic="storage">{project.display_name} storage</HelpLabel>
       </Typography>
       {notice && <Alert severity="success">{notice}</Alert>}

@@ -40,6 +40,13 @@
           } else {
             document.documentElement.classList.remove("dark");
           }
+          if (stored === "dark" || stored === "light") {
+            var color = stored === "dark" ? "#0f172a" : "#f4f6fb";
+            var metas = document.querySelectorAll('meta[name="theme-color"]');
+            for (var i = 0; i < metas.length; i++) {
+              metas[i].setAttribute("content", color);
+            }
+          }
         } catch (e) {}
       })();
     </script>

@@ -162,17 +162,34 @@ def execution_changes(
 
 def require_launch_clean(repository: Path, snapshot_files: frozenset[str]) -> None:
     """Reject code/index changes while retaining owner documents in place."""
-    changes = execution_changes(
+    status_records = execution_status(
         repository, snapshot_files=snapshot_files, allow_initial_surface=True
     )
-    if changes:
-        message = "The Git worktree has code or staged changes before starting this run."
+    disallowed = tuple(change for change in status_records if not change.allowed)
+    if disallowed:
+        changes = tuple(f"{change.status} {change.path}" for change in disallowed)
+        untracked_workflows = tuple(
+            change.path
+            for change in disallowed
+            if change.status == "??"
+            and (
+                change.path.startswith(".relay/workflows/")
+                or change.path.endswith((".yaml", ".yml"))
+            )
+        )
+        if untracked_workflows:
+            files_desc = ", ".join(untracked_workflows)
+            message = f"An untracked workflow file blocks this run: {files_desc}."
+            next_action = "Commit workflow files or set them aside before starting this run."
+        else:
+            message = "The Git worktree has code or staged changes before starting this run."
+            next_action = (
+                "Commit or set aside these code changes. Relay leaves workflow reports untouched."
+            )
         raise DirtyRepositoryError(
             message,
             context={"project": str(repository), "changes": "\n".join(changes)},
-            next_action=(
-                "Commit or set aside these code changes. Relay leaves workflow reports untouched."
-            ),
+            next_action=next_action,
         )
 
 

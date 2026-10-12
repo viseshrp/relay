@@ -25,17 +25,13 @@ export function WorkflowInputsEditor({
         const update = (field: string, entry: unknown) =>
           onChange({ ...inputs, [name]: { ...definition, [field]: entry } });
         return (
-          <Stack
-            key={name}
-            spacing={1}
-            component="fieldset"
-            sx={{ border: 0, p: 0 }}
-          >
-            <Typography component="legend" variant="subtitle2">
+          <Stack key={name} spacing={2} sx={{ border: 0, p: 0, mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
               Input {name}
             </Typography>
             <TextField
               label="Input name"
+              margin="dense"
               defaultValue={name}
               onBlur={(event) => {
                 const next = event.target.value.trim();

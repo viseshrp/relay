@@ -1,4 +1,5 @@
 import {
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -39,15 +40,17 @@ export function WorkflowSourceSettings({
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>Workflow settings</DialogTitle>
       <DialogContent>
-        <Stack spacing={2} sx={{ pt: 1 }}>
+        <Stack spacing={2} sx={{ pt: 2 }}>
           <TextField
             label="Workflow name"
+            margin="dense"
             slotProps={{ htmlInput: { maxLength: 256 } }}
             value={value?.name ?? ""}
             onChange={(event) => change(["name"], event.target.value)}
           />
           <TextField
             label="Run title expression"
+            margin="dense"
             slotProps={{ htmlInput: { maxLength: 1000 } }}
             value={value?.["run-name"] ?? ""}
             onChange={(event) =>
@@ -67,13 +70,24 @@ export function WorkflowSourceSettings({
             }
           />
           {manifest && (
-            <SchemaFields
-              manifest={manifest}
-              type="workflow-root"
-              value={value}
-              omit={["jobs", "name", "run-name"]}
-              onChange={(field, entry) => change([field], entry)}
-            />
+            <Box component="details" sx={{ mt: 1 }}>
+              <Box component="summary" sx={{ cursor: "pointer", mb: 1 }}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  component="span"
+                >
+                  Advanced workflow schema fields
+                </Typography>
+              </Box>
+              <SchemaFields
+                manifest={manifest}
+                type="workflow-root"
+                value={value}
+                omit={["jobs", "name", "run-name", "on"]}
+                onChange={(field, entry) => change([field], entry)}
+              />
+            </Box>
           )}
         </Stack>
       </DialogContent>

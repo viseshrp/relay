@@ -123,9 +123,11 @@ function FilePatch({
 export function DiffViewer({
   text,
   truncated,
+  finished,
 }: {
   text: string;
   truncated: boolean;
+  finished?: boolean;
 }) {
   const files = useMemo(() => parseGitDiff(text), [text]);
   const [selected, setSelected] = useState(0);
@@ -155,7 +157,13 @@ export function DiffViewer({
     [files],
   );
   if (!text.trim())
-    return <Typography>No committed code changes yet.</Typography>;
+    return (
+      <Typography>
+        {finished
+          ? "This job committed no changes."
+          : "No committed code changes yet."}
+      </Typography>
+    );
   const content = (
     <div className={`diff-viewer ${expanded ? "diff-expanded" : ""}`}>
       <div className="diff-toolbar">
