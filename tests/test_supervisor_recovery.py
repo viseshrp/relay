@@ -67,6 +67,7 @@ def process_boundary(monkeypatch: pytest.MonkeyPatch) -> ProcessBoundary:
     data_dir(create=True)
     monkeypatch.setattr(process_ownership, "process_identity", boundary.identity)
     monkeypatch.setattr(process_ownership, "signal_process_tree", boundary.stop)
+    monkeypatch.setattr(process_ownership, "process_group_members", lambda _: ())
     return boundary
 
 

@@ -102,6 +102,9 @@ applicable; do not silently change adjacent behavior.
 - Use one Huey execution thread. Web launch, resume, and rerun handlers commit
   events; scheduling follows those events in the worker. Keep FULL durability,
   read-only monitoring snapshots, and database-only bounded busy retries.
+- Heartbeat age never authorizes workspace handoff. Only the supervisor may
+  recover lost attempts, after creation-identity checks and confirmed exit of
+  the worker and its owned process trees. Retain admission if proof fails.
 - Keep state transitions and their events in one transaction. Use
   [state.py](relay/execution/state.py) and [machine.py](relay/execution/machine.py)
   rather than ad hoc status assignments. Keep transactions short; run Git,

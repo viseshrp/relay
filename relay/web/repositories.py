@@ -79,7 +79,6 @@ from relay.execution.machine import (
     transition_run,
 )
 from relay.execution.process_identity import ProcessIdentity, process_identity
-from relay.execution.reconcile import AttemptRecovery
 from relay.execution.relaunch import PreviousRunInputs
 from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import (
@@ -5477,82 +5476,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             control_transition = transition_control(_string(request, "state"), "supersede")
             _set_model_field(request, "state", control_transition.status)
             request.save(update_fields=("state",))
-
-    def _reap_stale_attempt(
-        self,
-        attempt_id: int,
-        cutoff: datetime,
-        *,
-        orderly_shutdown: bool,
-    ) -> AttemptStopReason | None:
-        with transaction.atomic():
-            attempt = (
-                NodeAttempt.objects.select_for_update()
-                .select_related("node_run")
-                .filter(pk=attempt_id)
-                .first()
-            )
-            if attempt is None or _string(attempt, "status") not in {
-                AttemptStatus.RUNNING.value,
-                AttemptStatus.WAITING.value,
-            }:
-                return None
-            if attempt.heartbeat_at > cutoff:
-                return None
-            node = _related(attempt, "node_run", NodeRun)
-            if (
-                not orderly_shutdown
-                and _string(node, "node_type")
-                in {
-                    NodeType.HUMAN_WAIT.value,
-                    NodeType.LOOP.value,
-                    NodeType.SUBWORKFLOW.value,
-                    NodeType.ACTIONS_JOB.value,
-                    NodeType.ACTIONS_STEP.value,
-                }
-                and _string(attempt, "status") == AttemptStatus.WAITING.value
-            ):
-                return None
-            self._discard_attempt_mailbox(attempt)
-            reason = (
-                AttemptStopReason.INTERRUPTED if orderly_shutdown else AttemptStopReason.WORKER_LOST
-            )
-            outcome = ExecutionOutcome(
-                OutcomeKind.FAILED,
-                stop_reason=reason,
-                error_code=reason.value,
-            )
-            self.finish_attempt(_identifier(attempt), outcome, _string(attempt, "starting_head"))
-            self.release_attempt_lock(_identifier(attempt))
-            return reason
-
-    def reap_stale_attempts(self, *, orderly_shutdown: bool) -> AttemptRecovery:
-        cutoff = timezone.now() - timedelta(seconds=ATTEMPT_STALE_AFTER_SECONDS)
-        try:
-            attempt_ids = list(
-                NodeAttempt.objects.filter(
-                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-                    heartbeat_at__lte=cutoff,
-                )
-                .order_by("heartbeat_at")
-                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
-            )
-            interrupted = 0
-            lost = 0
-            for attempt_id in attempt_ids:
-                reason = self._reap_stale_attempt(
-                    attempt_id, cutoff, orderly_shutdown=orderly_shutdown
-                )
-                if reason is AttemptStopReason.INTERRUPTED:
-                    interrupted += 1
-                elif reason is AttemptStopReason.WORKER_LOST:
-                    lost += 1
-            return AttemptRecovery(interrupted, lost)
-        except PersistenceError:
-            raise
-        except DatabaseError:
-            message = "Relay could not reconcile stale attempts."
-            raise PersistenceError(message) from None
 
     def _attempt_for_claim(self, claim_token: str) -> NodeAttempt | None:
         claim = (

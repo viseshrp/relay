@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 from types import FrameType, SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -22,7 +23,7 @@ from relay.paths import shutdown_marker_path
 from relay.projects.service import INITIAL_PROJECT_FILES
 from relay.vcs.git import run_git
 from relay.web import process_ownership, supervisor
-from relay.web.models import Instance, NodeAttempt, Run
+from relay.web.models import Instance, NodeAttempt, Run, RunLock
 from relay.web.repositories import DjangoExecutionStore
 from tests.support import Clock, InlineEngine, RelayProject
 
@@ -147,7 +148,7 @@ class SupervisorBoundary:
 
     def send_stop(self, number: int = signal.SIGINT) -> None:
         handler = self.get_handler(number)
-        if not callable(handler):
+        if handler is None or isinstance(handler, int):
             message = "The supervisor did not install its signal handler"
             raise TypeError(message)
         handler(number, None)
@@ -246,7 +247,9 @@ def supervisor_boundary(
     monkeypatch.setattr(supervisor, "threading", SimpleNamespace(Event=boundary.event))
     monkeypatch.setattr(supervisor, "HTTPConnection", boundary.connection)
     monkeypatch.setattr(supervisor, "signal_process_tree", boundary.stop_tree)
+    monkeypatch.setattr(supervisor, "process_group_members", lambda _: ())
     monkeypatch.setattr(process_ownership, "process_identity", boundary.process_identity)
+    monkeypatch.setattr(process_ownership, "process_group_members", lambda _: ())
     monkeypatch.setattr(
         supervisor,
         "time",
@@ -290,16 +293,23 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
         on_ready=boundary.stop_when_ready,
     )
     web, consumer = boundary.children
-    assert web.arguments[1:5] == ("-m", "uvicorn", "relay.web.asgi:application", "--host")
+    uvicorn = web.arguments.index("uvicorn")
+    assert web.arguments[uvicorn - 1 : uvicorn + 3] == (
+        "-m",
+        "uvicorn",
+        "relay.web.asgi:application",
+        "--host",
+    )
     assert web.arguments[web.arguments.index("--port") + 1] == "9001"
     assert consumer.arguments[consumer.arguments.index("-k") + 1] == "thread"
     assert consumer.arguments[consumer.arguments.index("-w") + 1] == "1"
     assert all(
-        options["env"]["RELAY_PROJECT_ROOT"] == str(project.repository)
+        cast(dict[str, str], options["env"])["RELAY_PROJECT_ROOT"] == str(project.repository)
         for options in boundary.launches
     )
     assert all(
-        options["env"]["RELAY_LOGIN_REQUIRED"] == ("true" if login_required else "false")
+        cast(dict[str, str], options["env"])["RELAY_LOGIN_REQUIRED"]
+        == ("true" if login_required else "false")
         for options in boundary.launches
     )
     assert not boundary.browser_urls
@@ -382,16 +392,18 @@ def test_supervisor_child_failure_settles_the_claim_and_releases_the_lease(
         "version: 1\nname: Running\nnodes:\n  work: {type: command, run: [git, status]}\n",
     )
     run_id = engine.launch(project, "running")
-    claim = engine.store.claim_dispatch(engine.tokens.popleft(), "active-worker").attempt
-    assert claim is not None
     boundary = supervisor_boundary
+    attempts: list[str] = []
 
     def child_exits(_url: str) -> None:
+        claim = engine.store.claim_dispatch(engine.tokens.popleft(), "active-worker").attempt
+        assert claim is not None
+        attempts.append(claim.attempt_id)
         boundary.children[failed_child].returncode = 7
 
     with pytest.raises(PersistenceError):
         supervisor.run_supervisor(RelayConfig(), open_browser=False, on_ready=child_exits)
-    attempt = NodeAttempt.objects.get(pk=claim.attempt_id)
+    attempt = NodeAttempt.objects.get(pk=attempts[0])
     assert (attempt.status, attempt.stop_reason) == (
         ("terminal", "interrupted") if failed_child == 0 else ("terminal", "worker_lost")
     )
@@ -561,11 +573,14 @@ def test_startup_marker_never_authorizes_signaling_a_previous_attempt_pid(
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("{}", encoding="utf-8")
     boundary = supervisor_boundary
-    supervisor.run_supervisor(RelayConfig(), open_browser=False, on_ready=boundary.stop_when_ready)
+    with pytest.raises(PersistenceError, match="unsafe recorded attempt"):
+        supervisor.run_supervisor(
+            RelayConfig(), open_browser=False, on_ready=boundary.stop_when_ready
+        )
     assert os.getpid() not in boundary.forced_pids
-    assert NodeAttempt.objects.get(pk=claim.attempt_id).stop_reason == "interrupted"
-    assert Run.objects.get(pk=run_id).status == "interrupted"
-    assert not marker.exists()
+    assert NodeAttempt.objects.get(pk=claim.attempt_id).status == "running"
+    assert Run.objects.get(pk=run_id).status == "running"
+    assert marker.exists()
 
 
 def test_orphan_recovery_preserves_workspaces_when_a_live_legacy_attempt_is_unverified(
@@ -594,3 +609,39 @@ def test_orphan_recovery_preserves_workspaces_when_a_live_legacy_attempt_is_unve
     assert supervisor_boundary.children == []
     assert process_ownership.read_ownership() == record
     assert NodeAttempt.objects.get(pk=claim.attempt_id).status == "running"
+
+
+def test_shutdown_preserves_workspace_admission_until_worker_exit_is_confirmed(
+    supervisor_boundary: SupervisorBoundary,
+    project: RelayProject,
+    engine: InlineEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project.write_workflow(
+        "held",
+        "version: 1\nname: Held\nnodes:\n"
+        "  work: {type: command, writes: true, run: [git, status]}\n",
+    )
+    run_id = engine.launch(project, "held")
+    boundary = supervisor_boundary
+    attempts: list[str] = []
+
+    def refuse_worker_stop(
+        pid: int, *, graceful_signal: signal.Signals = signal.SIGTERM, force: bool = False
+    ) -> None:
+        if len(boundary.children) < 2 or pid != boundary.children[1].pid:
+            boundary.stop_tree(pid, graceful_signal=graceful_signal, force=force)
+
+    monkeypatch.setattr(supervisor, "signal_process_tree", refuse_worker_stop)
+
+    def stop_with_live_writer(_url: str) -> None:
+        claim = engine.store.claim_dispatch(engine.tokens.popleft(), "live-worker").attempt
+        assert claim is not None
+        attempts.append(claim.attempt_id)
+        boundary.send_stop()
+
+    with pytest.raises(PersistenceError, match="children have not exited"):
+        supervisor.run_supervisor(RelayConfig(), open_browser=False, on_ready=stop_with_live_writer)
+    assert NodeAttempt.objects.get(pk=attempts[0]).status == "running"
+    assert RunLock.objects.filter(run_id=run_id).exists()
+    assert process_ownership.read_ownership() is not None

@@ -25,7 +25,11 @@ from relay.constants import (
 )
 from relay.errors import ConfigError, PersistenceError
 from relay.execution.cancellation import signal_process_tree
-from relay.execution.process_identity import ProcessIdentity, process_identity
+from relay.execution.process_identity import (
+    ProcessIdentity,
+    process_group_members,
+    process_identity,
+)
 from relay.paths import data_dir
 
 _VERSION = 1
@@ -188,6 +192,14 @@ def abandoned_ownership() -> SupervisorOwnership | None:
 def stop_owned_children(record: SupervisorOwnership) -> None:
     """Stop only children whose birth still matches; recheck before escalation."""
     identities = [child.identity for child in record.children]
+    observed: set[ProcessIdentity] = set()
+    for identity in identities:
+        current = process_identity(identity.pid)
+        if current == identity:
+            observed.update((identity, *process_group_members(identity.pid)))
+        elif current is None and process_group_members(identity.pid):
+            message = "An exited worker left unverified children; workspace recovery is blocked."
+            raise PersistenceError(message)
     for identity in identities:
         if process_identity(identity.pid) == identity:
             try:
@@ -199,13 +211,17 @@ def stop_owned_children(record: SupervisorOwnership) -> None:
     deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         remaining = [
-            identity for identity in identities if process_identity(identity.pid) == identity
+            identity for identity in observed if process_identity(identity.pid) == identity
         ]
         if not remaining:
+            _verify_empty_groups(identities)
             return
         threading.Event().wait(PROCESS_EXIT_POLL_SECONDS)
     for identity in identities:
-        if process_identity(identity.pid) == identity:
+        current = process_identity(identity.pid)
+        if current == identity or (
+            current is None and set(process_group_members(identity.pid)) & observed
+        ):
             try:
                 signal_process_tree(identity.pid, force=True)
             except (OSError, subprocess.SubprocessError):
@@ -213,8 +229,16 @@ def stop_owned_children(record: SupervisorOwnership) -> None:
                 raise PersistenceError(message) from None
     deadline = time.monotonic() + PROCESS_EXIT_GRACE_SECONDS
     while time.monotonic() < deadline:
-        if not any(process_identity(identity.pid) == identity for identity in identities):
+        if not any(process_identity(identity.pid) == identity for identity in observed):
+            _verify_empty_groups(identities)
             return
         threading.Event().wait(PROCESS_EXIT_POLL_SECONDS)
     message = "Relay could not stop its abandoned children within the shutdown deadline."
     raise PersistenceError(message)
+
+
+def _verify_empty_groups(identities: list[ProcessIdentity]) -> None:
+    for identity in identities:
+        if process_identity(identity.pid) is None and process_group_members(identity.pid):
+            message = "A stopped worker left a live process tree; workspace recovery is blocked."
+            raise PersistenceError(message)

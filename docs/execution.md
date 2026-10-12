@@ -455,13 +455,18 @@ During orderly shutdown, interrupted attempts in canceling runs end as
 the run drains to the owner's canceled result or fail-fast failure.
 Other active attempts end as `interrupted` and their nodes
 return to `pending`. Restart reconciliation validates retained inputs and
-artifacts, then creates new attempts. An unmarked stale heartbeat ends as
-`worker_lost` and triggers fail-fast instead.
+artifacts, then creates new attempts. Unexpected worker exit ends its active
+attempts as `worker_lost` and triggers fail-fast after process exit is proved.
+An old heartbeat alone never releases a live worker's admission or workspace.
+Sleep and wall-clock changes do not authorize a replacement writer.
 
 The supervisor stops its web and worker children even if it loses its lease
 or cannot persist shutdown intent. A marker written before a persistence
 failure stays available for restart reconciliation. The supervisor releases
 its own lease after child cleanup and reports a shutdown failure.
+If a child refuses to exit, attempts and their admission remain held and the
+ownership record stays available for the next startup. No worker restarts
+automatically.
 
 ### Restart after a lost supervisor
 
@@ -482,6 +487,10 @@ and process start ticks; Windows uses `GetProcessTimes`; macOS uses
 `PROC_PIDTBSDINFO`. Active command and agent attempts also retain their creation
 time. Recovery waits for verified attempts to exit before reconciling their
 worktrees.
+The supervisor checks surviving POSIX group members and Windows job
+descendants as well as the recorded process. If an exited POSIX leader left
+children whose creation identities were never observed, recovery stops and
+retains the workspace. A saved group number alone cannot authorize a kill.
 
 After cleanup, Relay reclaims the requested port, reconciles interrupted work,
 and starts fresh children. Completed runs, successful nodes, recorded commits,

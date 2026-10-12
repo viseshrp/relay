@@ -100,7 +100,6 @@ def unavailable_database(
         ("execution", "expire_human_waits", (), {}),
         ("execution", "expire_scope_waits", (), {}),
         ("execution", "orphaned_dispatch_tokens", (), {}),
-        ("execution", "reap_stale_attempts", (), {"orderly_shutdown": False}),
         ("execution", "request_run_cancellation", (MISSING_UUID, "owner"), {}),
         ("execution", "manual_rerun_target", (MISSING_UUID, "root.work", "owner"), {}),
         ("execution", "interrupted_targets", (), {}),

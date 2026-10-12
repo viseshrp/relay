@@ -422,7 +422,7 @@ def test_reconciliation_repairs_lost_delivery_in_active_runs(
     assert repaired == [token]
 
 
-def test_reconciliation_reaps_a_lost_worker(
+def test_reconciliation_preserves_a_worker_with_an_old_heartbeat(
     project: RelayProject, engine: InlineEngine, clock: Clock
 ) -> None:
     project.write_workflow("one", CHAIN)
@@ -433,7 +433,7 @@ def test_reconciliation_reaps_a_lost_worker(
     reconcile_once(engine.store, engine.tokens.append, orderly_shutdown=False)
 
     run = Run.objects.get(pk=run_id)
-    assert (run.status, run.failure_code) == ("failed", "worker_lost")
+    assert (run.status, run.failure_code) == ("running", None)
 
 
 def test_a_failing_enqueue_leaves_the_claim_available_for_repair(

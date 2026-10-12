@@ -33,13 +33,17 @@ from relay.errors import (
     RelayError,
     log_persistence_failure,
 )
-from relay.execution.cancellation import signal_process_tree
+from relay.execution.cancellation import owned_process_argv, signal_process_tree
 from relay.execution.huey_app import enqueue_claim
-from relay.execution.process_identity import ProcessIdentity, process_identity
+from relay.execution.process_identity import (
+    ProcessIdentity,
+    process_group_members,
+    process_identity,
+)
 from relay.execution.reconcile import ReconcileStore, reconcile_once
 from relay.execution.recovery import RecoveryEvidenceStore, prepare_recovery_workspace
 from relay.execution.resume import ResumeStore, resume_interrupted
-from relay.execution.scheduler import SchedulingStore, dispatch_ready_nodes
+from relay.execution.scheduler import SchedulingStore
 from relay.manage import MigrationLock, apply_migrations
 from relay.paths import data_dir, shutdown_marker_path
 from relay.projects.discovery import discover_relay_root
@@ -72,6 +76,8 @@ class SupervisorStore(
     def owned_attempt_processes(self) -> tuple[tuple[str, ProcessIdentity], ...]: ...
 
     def interrupt_active_attempts(self) -> int: ...
+
+    def fail_worker_attempts(self) -> int: ...
 
 
 def _browser_url(host: str, port: int) -> str:
@@ -131,7 +137,7 @@ def _spawn_child(
 ) -> subprocess.Popen[bytes]:
     if os.name == "nt":
         return subprocess.Popen(  # noqa: S603
-            arguments,
+            owned_process_argv(arguments),
             cwd=str(repository),
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -231,8 +237,9 @@ def _kill_child(process: subprocess.Popen[bytes]) -> None:
 
 
 def _force_attempt_processes(
-    rows: tuple[tuple[str, ProcessIdentity], ...], *, require_exit: bool = False
+    rows: tuple[tuple[str, ProcessIdentity], ...], *, require_exit: bool = True
 ) -> None:
+    observed: set[ProcessIdentity] = set()
     for attempt_id, identity in rows:
         process_id = identity.pid
         if process_id <= 1 or process_id == os.getpid():
@@ -240,10 +247,21 @@ def _force_attempt_processes(
                 "Refusing unsafe recorded attempt pid",
                 extra={"attempt_id": attempt_id, "process_id": process_id},
             )
-            continue
+            message = "Relay cannot stop an unsafe recorded attempt; its workspace is retained."
+            raise PersistenceError(message)
         try:
-            if process_identity(process_id) != identity:
+            current = process_identity(process_id)
+            if current is not None and current != identity:
                 continue
+            members = process_group_members(process_id)
+            if current is None:
+                if members:
+                    message = (
+                        "An exited attempt left unverified children; its workspace is retained."
+                    )
+                    raise PersistenceError(message)
+                continue
+            observed.update((identity, *members))
             signal_process_tree(process_id, force=True)
         except (OSError, subprocess.SubprocessError):
             LOGGER.exception(
@@ -255,11 +273,27 @@ def _force_attempt_processes(
                 raise PersistenceError(message) from None
     if require_exit:
         deadline = time.monotonic() + _ESCALATION_TIMEOUT_SECONDS
-        while any(process_identity(identity.pid) == identity for _, identity in rows):
+        while any(process_identity(identity.pid) == identity for identity in observed):
             if time.monotonic() >= deadline:
                 message = "An abandoned attempt is still running; Relay preserved its worktree."
                 raise PersistenceError(message)
             threading.Event().wait(PROCESS_EXIT_POLL_SECONDS)
+        for _, identity in rows:
+            if process_identity(identity.pid) is None and process_group_members(identity.pid):
+                message = "An attempt still has surviving children; its workspace is retained."
+                raise PersistenceError(message)
+
+
+def _stop_abandoned_attempts(store: SupervisorStore) -> None:
+    processes = store.owned_attempt_processes()
+    verified = {identity.pid for _, identity in processes}
+    for _, pid in store.active_attempt_processes():
+        if pid not in verified and process_identity(pid) is not None:
+            message = "Relay cannot verify an older attempt's process before recovery."
+            raise PersistenceError(
+                message, next_action="Stop the older Relay worker normally before restarting."
+            )
+    _force_attempt_processes(processes)
 
 
 def _wait_until_ready(
@@ -316,22 +350,15 @@ def _write_shutdown_marker(instance_id: str) -> None:
 def _startup_reconcile(store: SupervisorStore) -> None:
     marker = shutdown_marker_path()
     orderly_shutdown = marker.exists()
-    reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
     if orderly_shutdown:
-        # A previous instance's PID may now identify an unrelated process.
-        # Retain diagnostics for the owner; this boot cannot prove ownership.
-        for attempt_id, process_id in store.active_attempt_processes():
-            LOGGER.warning(
-                "Skipping unverified process from a previous Relay instance",
-                extra={"attempt_id": attempt_id, "process_id": process_id},
-            )
         store.interrupt_active_attempts()
-    resumed = resume_interrupted(
+    else:
+        store.fail_worker_attempts()
+    reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
+    resume_interrupted(
         store,
         lambda target: prepare_recovery_workspace(store, target),
     )
-    for run_id in dict.fromkeys((*store.active_run_ids(), *resumed)):
-        dispatch_ready_nodes(store, run_id, enqueue_claim)
     marker.unlink(missing_ok=True)
 
 
@@ -355,7 +382,6 @@ def _shutdown_children(
         time.sleep(0.05)
 
     if web.poll() is None or consumer.poll() is None:
-        _force_attempt_processes(store.owned_attempt_processes())
         _terminate_child(web, graceful_signal=signal.SIGTERM)
         _terminate_child(consumer, graceful_signal=signal.SIGTERM)
         escalation_deadline = time.monotonic() + _ESCALATION_TIMEOUT_SECONDS
@@ -365,10 +391,18 @@ def _shutdown_children(
             time.sleep(0.05)
         _kill_child(web)
         _kill_child(consumer)
-    with suppress(subprocess.TimeoutExpired):
+    try:
         web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
-    with suppress(subprocess.TimeoutExpired):
         consumer.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        message = "Relay's children have not exited; workspace admission is retained."
+        raise PersistenceError(message) from None
+    if any(process_group_members(child.pid) for child in (web, consumer)):
+        message = (
+            "Relay's exited children left a live process tree; workspace admission is retained."
+        )
+        raise PersistenceError(message)
+    _stop_abandoned_attempts(store)
     store.interrupt_active_attempts()
 
 
@@ -423,22 +457,12 @@ def _run_supervisor(
             _write_shutdown_marker(instance_id)
             store.request_orderly_shutdown(instance_id)
             stop_owned_children(abandoned)
-            processes = store.owned_attempt_processes()
-            verified_pids = {identity.pid for _, identity in processes}
-            for _, process_id in store.active_attempt_processes():
-                if process_id not in verified_pids and process_identity(process_id) is not None:
-                    # Older attempts lack a creation token. Even a live PID
-                    # cannot prove ownership, so leave its worktree untouched.
-                    message = "Relay cannot verify an older attempt's process before recovery."
-                    raise PersistenceError(
-                        message,
-                        next_action="Stop the older Relay worker normally before restarting.",
-                    )
-            _force_attempt_processes(processes, require_exit=True)
+            _stop_abandoned_attempts(store)
             abandoned.clear()
             # Reopen launch only after the former children have stopped.
             store.acquire_instance(os.getpid(), socket.gethostname())
         _validate_bind(config.host, config.port)
+        _stop_abandoned_attempts(store)
         _startup_reconcile(store)
         stop_signals = [signal.SIGINT, signal.SIGTERM]
         if hasattr(signal, "SIGBREAK"):
@@ -487,11 +511,16 @@ def _run_supervisor(
                 worker_failed = consumer.poll() is not None and not signal_requested.is_set()
                 if worker_failed:
                     _terminate_child(web, graceful_signal=signal.SIGTERM)
-                    _force_attempt_processes(store.owned_attempt_processes())
-                    store.fail_worker_attempts()
                     _kill_child(web)
-                    with suppress(subprocess.TimeoutExpired):
-                        web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+                    web.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+                    consumer.wait(timeout=_ESCALATION_TIMEOUT_SECONDS)
+                    if process_group_members(consumer.pid):
+                        message = (
+                            "The failed worker still has children; workspace recovery is blocked."
+                        )
+                        raise PersistenceError(message)
+                    _stop_abandoned_attempts(store)
+                    store.fail_worker_attempts()
                 else:
                     try:
                         _write_shutdown_marker(instance_id)
