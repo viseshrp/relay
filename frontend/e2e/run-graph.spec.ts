@@ -68,7 +68,7 @@ test("refreshing unchanged job geometry keeps measured nodes and their connectio
     Reflect.set(window, "relay-test-hold-resize", true),
   );
   const refreshed = page.waitForResponse((response) =>
-    response.url().includes(`/api/runs/${runId}?collection=nodes`),
+    response.url().includes(`/api/runs/${runId}/monitor?`),
   );
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await refresh.click();
@@ -141,7 +141,7 @@ test("a long run starts at its entry job and Refresh preserves the chosen viewpo
   await graph.getByRole("button", { name: "Zoom Out", exact: true }).click();
   const before = await viewport.getAttribute("style");
   const read = page.waitForResponse((response) =>
-    response.url().includes(`/api/runs/${runId}?collection=nodes`),
+    response.url().includes(`/api/runs/${runId}/monitor?`),
   );
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await refresh.click();

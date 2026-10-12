@@ -37,9 +37,9 @@ export function ServerAccountSettings({ state }: { state: SettingsPageState }) {
         />
       </HelpControl>
       <Alert severity="info">
-        Restart Relay after changing login, address, or port.
-        Command-line flags override saved values for that process. Your existing
-        account and data remain saved.
+        Restart Relay after changing login, address, or port. Command-line flags
+        override saved values for that process. Your existing account and data
+        remain saved.
       </Alert>
       <HelpSelectField
         compact

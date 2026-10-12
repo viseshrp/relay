@@ -31,7 +31,7 @@ The command accepts these options:
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Loopback address: `127.0.0.1`, `localhost`, or `::1` |
 | `--port` | `7845` | TCP port from 1 through 65535 |
-| `--workers` | `1` | Number of Huey thread workers |
+| `--workers` | `1` | Hidden legacy flag; warns and uses one execution thread |
 | `--no-browser` | off | Start without opening the system browser |
 | `--login / --no-login` | login required | Require owner credentials, or open the local app directly |
 
@@ -753,6 +753,32 @@ closes the request's database connections in their owning executor thread.
 Paginated history remains available at
 `GET /api/runs/{id}/events`.
 
+### Coherent monitor reads
+
+Run state comes from `GET /api/runs/{id}/monitor`. State events request a new
+snapshot; they do not edit displayed run, node, or owner-request state. Output
+continues to append to logs. A selected run shares one serial read queue with
+its open job views, and repeated refresh requests coalesce. These reads bypass
+the shared HTTP read cache.
+
+A snapshot older than an observed state event or accepted snapshot is
+rejected. Successful owner actions cancel pending state reads and request a
+fresh snapshot. Selecting another run cancels its old queue. Loaded node,
+request, and attempt pages rebuild serially, and publish together only when
+all their state cursors agree. A state change between pages restarts the
+rebuild while retaining the last accepted view. Pages remain bounded to 200
+records and 1 MiB; load-more controls continue beyond 1,000 records.
+
+Output-only events advance `event_cursor` without advancing `state_cursor`,
+so a busy output stream cannot continually invalidate state reads. Failed
+reads retry four times after 0.5, 1, 2, and 5 seconds. The last accepted view
+stays visible with an error and a manual retry. Before accepting completion,
+Relay drains saved log events through the terminal snapshot's event cursor
+and checks for pending recovery. Reconnects refresh state; a manual refresh
+also detects retries started from another browser. Artifact events retain
+the append-only artifact merge, and selected historical requests still show
+through their linked interaction.
+
 ## Automatic step recovery
 
 **Automatic recovery** in Start work is off unless a workflow or saved owner
@@ -802,7 +828,7 @@ The parent process owns one heartbeat-backed database lease and supervises two
 children:
 
 1. Uvicorn serves Django's HTTP, SSE, and packaged static files.
-2. Huey runs with thread workers and a 15-second shutdown timeout.
+2. Huey runs with one execution thread and a 15-second shutdown timeout.
 
 Press Ctrl+C once to stop. Windows console-break requests follow the same
 orderly shutdown path. Relay first writes a durable shutdown marker, closes
@@ -994,7 +1020,7 @@ project navigation and warn before closing the browser. **Discard changes**
 restores the loaded values. **Reload settings** resolves stale edits.
 
 Server and account displays the current account and active login policy.
-Changes to login, loopback address, port, and workers show a restart notice;
+Changes to login, loopback address, and port show a restart notice;
 startup flags still override saved choices. Notifications retain the existing
 browser-specific permission and preference. Storage shows installation paths
 and the selected project's sizes, counts, and confirmed cleanup controls.
@@ -1057,8 +1083,9 @@ starting a tour is an explicit choice. A successful project run hides the
 first-run banner. Navigation links support opening another tab. Skip links
 move keyboard focus into the current page or run summary.
 
-Settings validate durations, retry limits, ports, and worker counts next to
-the field. Invalid values disable Save. Switching sections with unsaved
+Settings validate durations, retry limits, and ports next to the field.
+Relay uses one execution worker; there is no worker-count field. Invalid
+values disable Save. Switching sections with unsaved
 changes offers Keep editing or Discard changes. Restart-only settings retain
 their restart notices.
 

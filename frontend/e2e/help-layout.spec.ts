@@ -85,8 +85,9 @@ for (const width of [320, 390, 760, 1440])
       .getByRole("spinbutton", { name: "Port", exact: true })
       .boundingBox();
     if (!port) throw new Error("Expected the server port field.");
-    await expect(page.getByRole("spinbutton", { name: "Workers", exact: true }))
-      .toHaveCount(0);
+    await expect(
+      page.getByRole("spinbutton", { name: "Workers", exact: true }),
+    ).toHaveCount(0);
     const login = page.getByRole("switch", {
       name: "Require login",
       exact: true,

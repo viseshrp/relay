@@ -197,7 +197,8 @@ work and captured instructions stay saved. See
 
 ## Architecture
 
-Relay owns workflow state in SQLite. Huey dispatches eligible attempts, while
+Relay owns workflow state in SQLite. One Huey execution thread schedules
+committed changes and dispatches eligible attempts, while
 Django and Uvicorn serve HTTP and replayable server-sent events with optional
 owner login.
 React Flow and a synchronized YAML editor provide the browser authoring

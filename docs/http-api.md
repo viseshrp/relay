@@ -397,7 +397,7 @@ Environment approval emits `wait.answered` with `result: {"approved": true}`
 and `environment.approved`. Status changes and their events commit together;
 an event persistence failure rolls back the corresponding interaction change.
 
-### Job history
+### Run monitor
 
 `GET /api/runs/{id}/monitor` returns one read-only database snapshot:
 
@@ -430,10 +430,14 @@ returned records. A client rebuilding several pages must restart when their
 state cursors differ. SQLite's single writer orders committed event IDs;
 a future database adapter must preserve that ordering contract.
 
+### Job history
+
 `GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job
 contains its `scope_path`, `node_type`, `status`, `writes`, captured `command`
 or human-wait `prompt`, `instructions`, current declared `outputs`, and a
-bounded `attempts` page. `activity_type` identifies command, agent, and human
+bounded `attempts` page. Its `event_cursor` and `state_cursor` use the same
+snapshot and output exclusions as the monitor. `activity_type` identifies
+command, agent, and human
 review steps within the Actions execution nodes. `display_name` retains the
 resolved job or step name; historical views use their existing scope labels.
 Agent instructions include the frozen prompt files and captured inline prompt.
