@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 
 from acp import RequestError, schema
+from django.db import transaction
 import pytest
 
 from relay.agents.acp_driver import RelayAcpClient
@@ -239,6 +241,49 @@ def test_an_expired_claim_is_marked_stale_by_reconciliation(
     clock.advance(2)
     recovered = store.recover_control_claims()
     assert (recovered.returned_to_pending, recovered.marked_stale) == (0, 1)
+
+
+@pytest.mark.parametrize("change", ["apply", "renew"])
+def test_mailbox_recovery_rechecks_a_claim_after_waiting_for_the_writer(
+    permission_attempt: AgentExecutionContext,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    submit_permission(permission_attempt)
+    store = DjangoExecutionStore()
+    attempt = permission_attempt.attempt.attempt
+    control = store.claim_next_control(attempt.attempt_id, attempt.worker_id)
+    assert control is not None
+    clock.advance(CONTROL_CLAIM_STALE_AFTER_SECONDS + 1)
+    store.heartbeat_attempt(attempt.attempt_id, attempt.worker_id)
+    atomic = transaction.atomic
+    first = True
+
+    @contextmanager
+    def change_before_lock() -> Iterator[None]:
+        nonlocal first
+        if first:
+            first = False
+            # Interleave the real owner operation after candidate selection,
+            # before reconciliation acquires its transaction's write lock.
+            if change == "apply":
+                assert store.apply_control(control.request_id, attempt.worker_id)
+            else:
+                with atomic():
+                    ControlRequest.objects.filter(pk=control.request_id).update(
+                        claim_heartbeat_at=clock.now()
+                    )
+        with atomic():
+            yield
+
+    monkeypatch.setattr(transaction, "atomic", change_before_lock)
+    recovered = store.recover_control_claims()
+
+    assert (recovered.returned_to_pending, recovered.marked_stale) == (0, 0)
+    assert ControlRequest.objects.get(pk=control.request_id).state == (
+        "applied" if change == "apply" else "claimed"
+    )
 
 
 def test_an_answer_cannot_be_applied_by_another_worker(

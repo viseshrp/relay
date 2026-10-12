@@ -10,7 +10,7 @@ from django.test import Client
 import pytest
 
 from relay.constants import API_MAX_PAGE_BYTES
-from relay.web.models import HumanInteraction, NodeRun, Run, RunEvent
+from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoReadStore
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
 from tests.test_web_api import client as client
@@ -148,6 +148,55 @@ def test_monitor_pages_all_nodes_beyond_a_thousand(owner: Client, finished_run: 
             break
         assert value["nodes_next"] > cursor
         cursor = value["nodes_next"]
+    assert len(set(ids)) == len(ids) == 1006
+
+
+def test_job_pages_include_metadata_in_the_byte_budget_and_continue_beyond_a_thousand(
+    owner: Client, finished_run: str
+) -> None:
+    node = NodeRun.objects.get(run_id=finished_run)
+    head = NodeAttempt.objects.get(node_run=node).starting_head
+    attempts = NodeAttempt.objects.bulk_create(
+        [
+            NodeAttempt(
+                node_run=node,
+                attempt_number=index + 2,
+                status="failed",
+                worker_id="historical-worker",
+                starting_head=head,
+            )
+            for index in range(1005)
+        ]
+    )
+    RunEvent.objects.bulk_create(
+        [
+            RunEvent(
+                run_id=finished_run,
+                node_run=node,
+                attempt=attempt,
+                type="attempt.ended",
+                source="node",
+                payload={"error_message": "\U0001f642" * 5000},
+            )
+            for attempt in attempts
+        ]
+    )
+    ids: list[str] = []
+    cursor = 0
+    while True:
+        response = owner.get(
+            f"/api/runs/{finished_run}/job?job={node.scope_path}&since={cursor}&limit=1000"
+        )
+        assert response.status_code == 200
+        assert len(response.content) <= API_MAX_PAGE_BYTES
+        value = response.json()
+        records = value["job"]["attempts"]
+        assert 0 < len(records) <= 200
+        ids.extend(row["id"] for row in records)
+        if value["next"] is None:
+            break
+        assert value["next"] > cursor
+        cursor = value["next"]
     assert len(set(ids)) == len(ids) == 1006
 
 

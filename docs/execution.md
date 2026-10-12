@@ -278,10 +278,11 @@ reconciliation runs once per second and checks for due work before writing.
 An installation with no active or due work writes only its supervisor lease;
 unchanged trigger observations do not write new cursor values.
 
-A claimed control has a heartbeat lease. Reconciliation returns it to `pending`
-only while the same attempt remains live. If its owner is gone, the request is
-stale and the attempt follows interruption or worker-loss handling. Pending
-interactions are discarded when their attempt is lost.
+A claimed control has a heartbeat lease. Reconciliation rechecks its state,
+expiry, lease age, and owner after acquiring the write lock. It returns the
+control to `pending` only while the same attempt remains live. If its owner is
+gone, the request is stale and the attempt follows interruption or worker-loss
+handling. Pending interactions are discarded when their attempt is lost.
 
 Human-wait nodes have no subprocess. Their attempt stays durable while the run
 is paused. A deadline takes the declared `on_timeout` edge; without that edge,

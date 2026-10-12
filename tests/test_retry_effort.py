@@ -155,6 +155,7 @@ def test_a_retry_applies_only_the_requested_effort_and_preserves_prior_evidence(
     assert retry(client, run_id, {"effort": "low"}) == (202, {"result": "already_applied"})
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     engine.run_token(token.claim_token)
     assert run_status(run_id) == "succeeded"
@@ -206,6 +207,7 @@ def test_native_quota_recovery_preserves_the_owners_retry_effort(
 ) -> None:
     run_id, client = failed_agent
     assert retry(client, run_id, {"effort": "medium"})[0] == 202
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     claimed = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
     assert claimed is not None
@@ -288,6 +290,7 @@ def test_owner_handoff_executes_the_selected_provider_without_rewriting_complete
     )
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     engine.run_token(token.claim_token)
     assert run_status(run_id) == "succeeded"
@@ -420,6 +423,7 @@ def test_custom_handoff_replaces_the_default_and_reaches_the_new_provider(
         )[0]
         == 202
     )
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
@@ -450,6 +454,7 @@ def test_quota_recovery_and_later_effort_changes_keep_the_replacement_provider(
         retry(client, run_id, {"agent_id": "claude", "model": "m1", "permission_mode": "auto"})[0]
         == 202
     )
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     claimed = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
     assert claimed is not None
@@ -486,6 +491,7 @@ def test_quota_recovery_and_later_effort_changes_keep_the_replacement_provider(
         )[0]
         == 202
     )
+    engine.advance(run_id)
     token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     final = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
     assert final is not None

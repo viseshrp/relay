@@ -58,6 +58,13 @@ def unavailable_database(
             {"project_id": None, "status": None, "since": None, "limit": 10},
         ),
         ("reads", "run_detail", (MISSING_UUID,), {"collection": "nodes", "since": 0, "limit": 10}),
+        (
+            "reads",
+            "monitor",
+            (MISSING_UUID,),
+            {"nodes_since": 0, "interactions_since": 0, "limit": 10},
+        ),
+        ("reads", "run_job", (MISSING_UUID, "root.work"), {"since": 0, "limit": 10}),
         ("reads", "page_events", (MISSING_UUID, 0, 10), {}),
         ("reads", "page_artifacts", (MISSING_UUID, 0, 10), {}),
         ("reads", "artifact_file", ("1",), {}),
@@ -118,6 +125,7 @@ def test_public_repository_calls_wrap_database_outages_in_relay_errors(
     }
     with (
         connection.execute_wrapper(unavailable_database),
+        connections["snapshot"].execute_wrapper(unavailable_database),
         pytest.raises(PersistenceError) as raised,
     ):
         getattr(stores[port], method)(*arguments, **keywords)

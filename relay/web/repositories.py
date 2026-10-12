@@ -1941,7 +1941,6 @@ class DjangoReadStore:
                         : bounded + 1
                     ]
                 )
-                records, more = _bounded_page(attempts, bounded, _job_attempt_record)
                 event_cursor = (
                     RunEvent.objects.filter(run=run).aggregate(value=Max("id"))["value"] or 0
                 )
@@ -1977,7 +1976,7 @@ class DjangoReadStore:
                     ),
                     "instructions": instructions,
                     "outputs": _mapping(node, "outputs"),
-                    "attempts": records,
+                    "attempts": [],
                     "latest_attempt": _job_attempt_record(latest)
                     if (
                         latest := NodeAttempt.objects.filter(node_run=node)
@@ -1987,9 +1986,25 @@ class DjangoReadStore:
                     is not None
                     else None,
                 }
+                budget = (
+                    API_MAX_PAGE_BYTES
+                    - len(json.dumps({"job": result, "next": None}).encode("utf-8"))
+                    - 2048
+                )
+                if budget < 0:
+                    message = "Job metadata exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id, "job": scope_path})
+                records, more = _bounded_page(
+                    attempts, bounded, _job_attempt_record, byte_budget=budget
+                )
+                result["attempts"] = records
                 next_value = int(str(records[-1]["id"])) if more and records else None
-        except (ProjectDiscoveryError, PersistenceError):
-            raise
+                if (
+                    len(json.dumps({"job": result, "next": next_value}).encode("utf-8"))
+                    > API_MAX_PAGE_BYTES
+                ):
+                    message = "A job record exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id, "job": scope_path})
         except DatabaseError:
             message = "Relay could not read this job's attempts."
             raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
@@ -5308,15 +5323,35 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             for request_id in request_ids:
                 with transaction.atomic():
+                    now = timezone.now()
+                    cutoff = now - timedelta(seconds=CONTROL_CLAIM_STALE_AFTER_SECONDS)
                     request = (
                         ControlRequest.objects.select_for_update()
                         .select_related("attempt__node_run")
-                        .get(pk=request_id)
+                        .filter(
+                            pk=request_id,
+                            state__in=(ControlState.PENDING.value, ControlState.CLAIMED.value),
+                        )
+                        .filter(
+                            models.Q(expires_at__lte=now)
+                            | models.Q(
+                                state=ControlState.CLAIMED.value,
+                                claim_heartbeat_at__lte=cutoff,
+                            )
+                        )
+                        .first()
                     )
+                    if request is None:
+                        continue
                     attempt = _related(request, "attempt", NodeAttempt)
                     expired = request.expires_at <= now
                     heartbeat_fresh = attempt.heartbeat_at > cutoff
-                    if not expired and heartbeat_fresh and self._attempt_is_current(attempt):
+                    if (
+                        not expired
+                        and heartbeat_fresh
+                        and request.claim_owner == _string(attempt, "worker_id")
+                        and self._attempt_is_current(attempt)
+                    ):
                         # The owning session is alive; its lost mailbox lease is safe to replay.
                         control_transition = transition_control(
                             _string(request, "state"), "lease_recover"

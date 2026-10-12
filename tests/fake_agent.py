@@ -380,7 +380,12 @@ class WireAgent:
             )
             if self.mode == "stream-200":
                 for index in range(200):
-                    self.update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"Message {index}\n"}})
+                    self.update(
+                        {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": f"Message {index}\n"},
+                        }
+                    )
             if self.mode.startswith("configuration"):
                 self.update(
                     {
