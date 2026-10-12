@@ -14,6 +14,7 @@ import django
 from huey import SqliteHuey, signals
 
 from relay.constants import DB_BUSY_TIMEOUT_MS, RECONCILE_INTERVAL_SECONDS
+from relay.errors import log_persistence_failure
 from relay.paths import artifacts_dir, data_dir, huey_database_path, shutdown_marker_path
 
 from .dispatch import set_dispatch_notifier
@@ -80,14 +81,18 @@ def run_node_attempt(claim_token: str) -> None:
 
     store = DjangoExecutionStore()
     set_dispatch_notifier(enqueue_claim)
-    run_claim_token(
-        store,
-        claim_token,
-        _worker_id(),
-        _executors(),
-        artifact_root=artifacts_dir(create=True),
-    )
-    _advance_changed_runs(store)
+    try:
+        run_claim_token(
+            store,
+            claim_token,
+            _worker_id(),
+            _executors(),
+            artifact_root=artifacts_dir(create=True),
+        )
+        _advance_changed_runs(store)
+    except Exception as error:
+        log_persistence_failure(LOGGER, error, claim_token=claim_token)
+        raise
 
 
 def enqueue_claim(claim_token: str) -> object:
@@ -146,8 +151,9 @@ def reconciliation_loop(stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             reconcile_dispatch()
-        except Exception:
+        except Exception as error:
             # Reconciliation is retried at the next bounded interval; attempts are not.
+            log_persistence_failure(LOGGER, error)
             LOGGER.exception("Relay reconciliation pass failed")
         stop.wait(RECONCILE_INTERVAL_SECONDS)
 

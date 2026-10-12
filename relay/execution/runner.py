@@ -15,7 +15,7 @@ from typing import Protocol, TypeAlias
 
 from relay.agents.usage_limits import ProviderUsageLimit
 from relay.constants import ATTEMPT_HEARTBEAT_INTERVAL_SECONDS
-from relay.errors import NodeExecutionError, RelayError
+from relay.errors import NodeExecutionError, RelayError, log_persistence_failure
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import (
     accept_job_result,
@@ -253,6 +253,7 @@ def _assigned_worktree(claim: ClaimedAttempt) -> tuple[Path, bool]:
 
 
 def _failure(error: RelayError) -> ExecutionOutcome:
+    log_persistence_failure(LOGGER, error)
     reason = (
         AttemptStopReason.OUTPUT_INVALID
         if error.error_code == "output_validation_error"

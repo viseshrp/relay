@@ -26,7 +26,13 @@ from relay.constants import (
     PROCESS_EXIT_POLL_SECONDS,
     SHUTDOWN_TIMEOUT_SECONDS,
 )
-from relay.errors import ConfigError, PersistenceError, ProjectDiscoveryError, RelayError
+from relay.errors import (
+    ConfigError,
+    PersistenceError,
+    ProjectDiscoveryError,
+    RelayError,
+    log_persistence_failure,
+)
 from relay.execution.cancellation import signal_process_tree
 from relay.execution.huey_app import enqueue_claim
 from relay.execution.process_identity import ProcessIdentity, process_identity
@@ -517,7 +523,11 @@ def run_supervisor(
         message = "Relay may bind only to a loopback address."
         raise ConfigError(message)
     with MigrationLock(data_dir(create=True) / "supervisor.lock", timeout=0, purpose="supervisor"):
-        _run_supervisor(config, open_browser=open_browser, on_ready=on_ready)
+        try:
+            _run_supervisor(config, open_browser=open_browser, on_ready=on_ready)
+        except RelayError as error:
+            log_persistence_failure(LOGGER, error)
+            raise
 
 
 __all__ = ["run_supervisor"]

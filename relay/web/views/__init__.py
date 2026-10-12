@@ -18,7 +18,7 @@ from django.http import HttpRequest, JsonResponse
 from django.http.response import HttpResponseBase
 
 from relay.constants import API_MAX_PAGE_BYTES, DATABASE_INTEGER_MAX
-from relay.errors import ConfigError, ProjectDiscoveryError, RelayError
+from relay.errors import ConfigError, ProjectDiscoveryError, RelayError, log_persistence_failure
 from relay.projects.discovery import discover_relay_root
 from relay.projects.identity import canonical_path
 from relay.projects.service import ProjectRecord, register_current_project
@@ -48,6 +48,7 @@ def api_errors(
         try:
             response = view(request, *args, **kwargs)
         except RelayError as error:
+            log_persistence_failure(LOGGER, error, path=log_context_value(request.path))
             return JsonResponse(error.to_envelope(), status=error.http_status)
         except RequestDataTooBig:
             error = ConfigError("The request body exceeds Relay's byte limit.")
