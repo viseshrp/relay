@@ -271,14 +271,29 @@ test("action input forms preserve long command arguments and fit narrow screens"
 test("agent defaults and launch inheritance leave saved YAML unchanged", async ({
   page,
 }) => {
+  const models = await post(page, "/api/agents/codex/models");
+  expect(models.ok()).toBeTruthy();
+  expect((await models.json()).models).toContainEqual(
+    expect.objectContaining({ value: "m1", name: "Model One" }),
+  );
+  const agentsLoaded = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/agents" &&
+      response.request().method() === "GET",
+  );
   await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await agentsLoaded;
   await openJobSettings(page);
   const original = (
     await (await page.request.get("/api/workflows/workflow.yaml")).json()
   ).yaml;
+  expect(parse(original).jobs.work.steps[0].with.model).toBe("m1");
   await expect(
     page.getByRole("combobox", { name: "Model", exact: true }),
-  ).toHaveValue("m1");
+  ).toHaveValue("Model One");
+  await expect(
+    page.getByText("Exact provider value: m1", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel("Effort", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Permission mode", { exact: true })).toHaveCount(
     0,
