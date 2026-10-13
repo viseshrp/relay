@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from collections.abc import Callable
 import json
 import math
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from types import TracebackType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -240,7 +243,24 @@ def _remove_scratch_root(root: Path) -> None:
     if _read_json(root / _SCRATCH_MARKER) != _scratch_owner(root):
         message = f"Refusing cleanup of an unverified pytest root: {root}"
         raise OSError(message)
-    shutil.rmtree(root)
+
+    def remove_readonly(
+        function: Callable[..., object],
+        path: str,
+        exc_info: tuple[type[BaseException], BaseException, TracebackType | None],
+    ) -> None:
+        error = exc_info[1]
+        if function is not os.unlink or not isinstance(error, PermissionError):
+            raise error
+        mode = Path(path).lstat().st_mode
+        if not stat.S_ISREG(mode) or mode & stat.S_IWUSR:
+            raise error
+        # Git loose objects are read-only on Windows. Only change regular
+        # files within this verified allocation, never symlink targets.
+        os.chmod(path, mode | stat.S_IWUSR)
+        function(path)
+
+    shutil.rmtree(root, onerror=remove_readonly)
 
 
 def run(

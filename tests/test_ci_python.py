@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import stat
 from typing import Any
 import xml.etree.ElementTree as ET
 
@@ -185,6 +187,45 @@ def test_scratch_creation_failure_still_publishes_diagnostics(
     summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
     assert summary["commands"] == []
     assert "scratch filesystem unavailable" in summary["errors"][0]
+
+
+def test_scratch_cleanup_removes_readonly_git_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = runner._new_scratch_root({"RUNNER_TEMP": str(tmp_path)})
+    git_object = root / "repo" / ".git" / "objects" / "ab" / "object"
+    git_object.parent.mkdir(parents=True)
+    git_object.write_bytes(b"retained Git object")
+    git_object.chmod(stat.S_IRUSR)
+    unlink = os.unlink
+    denied: list[Path] = []
+
+    def windows_unlink(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> None:
+        # POSIX rmtree may unlink relative to a directory descriptor.
+        target = git_object if Path(path).name == git_object.name else Path(path)
+        if target == git_object and not target.stat().st_mode & stat.S_IWUSR:
+            denied.append(target)
+            message = "Windows read-only file"
+            raise PermissionError(message)
+        unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", windows_unlink)
+    runner._remove_scratch_root(root)
+    assert denied == [git_object]
+    assert not root.exists()
+
+
+def test_scratch_cleanup_preserves_unverified_readonly_files(tmp_path: Path) -> None:
+    owner_file = tmp_path / "owner.txt"
+    owner_file.write_bytes(b"owner bytes")
+    owner_file.chmod(stat.S_IRUSR)
+    try:
+        with pytest.raises(OSError, match="unverified pytest root"):
+            runner._remove_scratch_root(tmp_path)
+        assert owner_file.read_bytes() == b"owner bytes"
+        assert not owner_file.stat().st_mode & stat.S_IWUSR
+    finally:
+        owner_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
 @pytest.mark.parametrize("workers", [0, 2])
