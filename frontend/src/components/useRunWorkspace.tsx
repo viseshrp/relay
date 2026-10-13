@@ -9,6 +9,7 @@ import {
   readMonitorPages,
   retryRunRead,
   RunReadQueue,
+  SnapshotChangedError,
   startRead,
   type MonitorPage,
 } from "../run-monitor";
@@ -231,13 +232,13 @@ export function useRunWorkspace({
     async (since: number, _mode: PageMode): Promise<void> => {
       const owner = queueOwner.current;
       if (!selectedRun || owner?.id !== selectedRun) return;
-      return owner.queue.enqueue("artifacts", async (signal) => {
+      return owner.queue.read("artifacts", async (signal) => {
         const query = new URLSearchParams({
           since: String(since),
           limit: "50",
           visible: "true",
         });
-        while (!signal.aborted) {
+        for (let attempt = 0; attempt < 4 && !signal.aborted; attempt += 1) {
           const observed = artifactAfter.current;
           const response = await retryRunRead(
             () =>
@@ -255,6 +256,7 @@ export function useRunWorkspace({
           // an older page was in flight. Append-only records remain visible.
           if (observed === artifactAfter.current) return;
         }
+        if (!signal.aborted) throw new SnapshotChangedError();
       });
     },
     [selectedRun],
@@ -265,7 +267,7 @@ export function useRunWorkspace({
     if (!selectedRun || owner?.id !== selectedRun) return null;
     const queue = owner.queue;
     try {
-      return await queue.enqueue("monitor", async (signal) => {
+      return await queue.read("monitor", async (signal) => {
         queue.clock = startRead(queue.clock);
         const observeHistory = (history: RunEvent[]) => {
           for (const event of history) {
@@ -282,7 +284,7 @@ export function useRunWorkspace({
           }
         };
         try {
-          while (!signal.aborted) {
+          for (let attempt = 0; attempt < 4 && !signal.aborted; attempt += 1) {
             const snapshot = await readMonitorPages(
               queue,
               (nodesSince, interactionsSince, selectedLink) => {
@@ -367,6 +369,7 @@ export function useRunWorkspace({
             setStreamRun(selectedRun);
             return complete;
           }
+          if (!signal.aborted) throw new SnapshotChangedError();
           return null;
         } finally {
           if (queue.clock.inFlight) queue.clock = finishRead(queue.clock, null);

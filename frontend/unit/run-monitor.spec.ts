@@ -6,6 +6,7 @@ import {
   noteEvent,
   requestRead,
   RunReadQueue,
+  SnapshotChangedError,
   startRead,
   wantsRead,
 } from "../src/run-monitor";
@@ -189,6 +190,113 @@ test("job pages never publish attempts from different snapshots", async () => {
   expect(queue.accepts(1, signal)).toBe(false);
   expect(wantsRead(queue.clock)).toBe(true);
 });
+
+for (const kind of ["monitor", "job"] as const)
+  test(`continuously changing ${kind} pages release the serial queue`, async () => {
+    const { readMonitorPages, readJobPages } =
+      await import("../src/run-monitor");
+    const queue = new RunReadQueue();
+    const controller = new AbortController();
+    let calls = 0;
+    let changing = true;
+    const page = async (since: number) => {
+      calls += 1;
+      // Stop a broken implementation deterministically, without a test timeout.
+      if (calls > 12 && changing) controller.abort();
+      const cursor = changing ? calls : 100;
+      return {
+        run: { id: "run", status: "running" },
+        nodes: [{ id: since + 1 }],
+        interactions: [],
+        nodes_next: since === 0 ? 200 : null,
+        interactions_next: null,
+        linked_interaction: null,
+        state_cursor: cursor,
+        event_cursor: cursor,
+        job: { attempts: [{ number: since + 1 }], state_cursor: cursor },
+        next: since === 0 ? 200 : null,
+      };
+    };
+    const read = async (signal: AbortSignal) =>
+      kind === "monitor"
+        ? readMonitorPages(
+            queue,
+            page as unknown as Parameters<typeof readMonitorPages>[1],
+            () => ({ nodes: 400, interactions: 200, linkedId: null }),
+            signal,
+          )
+        : readJobPages(
+            queue,
+            page as unknown as Parameters<typeof readJobPages>[1],
+            () => 400,
+            signal,
+          );
+    const unstable = queue.enqueue("unstable", read, controller.signal);
+    const other = queue.enqueue("other", async () => "queue progressed");
+    await expect(unstable).rejects.toMatchObject({
+      name: "SnapshotChangedError",
+    });
+    expect(await other).toBe("queue progressed");
+    expect(calls).toBeLessThanOrEqual(12);
+    changing = false;
+    expect(await queue.enqueue("stable", read)).toBeTruthy();
+  });
+
+test("rebuild backoff lets an open job read progress before the next monitor attempt", async () => {
+  const queue = new RunReadQueue();
+  const trace: string[] = [];
+  const monitor = queue.read("monitor", async () => {
+    trace.push("monitor");
+    if (trace.length === 1) throw new SnapshotChangedError();
+    return "coherent monitor";
+  });
+  const job = queue.read("job", async () => {
+    trace.push("job");
+    return "coherent job";
+  });
+  expect(await job).toBe("coherent job");
+  expect(trace).toEqual(["monitor", "job"]);
+  const duplicate = queue.read("monitor", async () => {
+    throw new Error("A refresh during backoff must reuse the pending rebuild.");
+  });
+  expect(duplicate).toBe(monitor);
+  expect(await monitor).toBe("coherent monitor");
+  expect(trace).toEqual(["monitor", "job", "monitor"]);
+});
+
+test("rebuild retries stop after their bounded backoff", async () => {
+  const queue = new RunReadQueue();
+  let calls = 0;
+  await expect(
+    queue.read("monitor", async () => {
+      calls += 1;
+      throw new SnapshotChangedError();
+    }),
+  ).rejects.toBeInstanceOf(SnapshotChangedError);
+  expect(calls).toBe(4);
+});
+
+for (const action of ["owner", "selection", "job closed"])
+  test(`${action} cancels a rebuild during backoff`, async () => {
+    const queue = new RunReadQueue();
+    const caller = new AbortController();
+    let calls = 0;
+    const monitor = queue.read(
+      "monitor",
+      async () => {
+        calls += 1;
+        throw new SnapshotChangedError();
+      },
+      caller.signal,
+    );
+    // A following queue task only starts once the failed read yields for backoff.
+    await queue.enqueue("other", async () => undefined);
+    if (action === "owner") queue.invalidate();
+    else if (action === "selection") queue.close();
+    else caller.abort();
+    await expect(monitor).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toBe(1);
+  });
 
 test("invalidating owner reads cancels queued job work too", async () => {
   const queue = new RunReadQueue();

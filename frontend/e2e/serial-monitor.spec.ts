@@ -266,6 +266,103 @@ test("a monitor rebuild pages beyond 1,000 records without mixing changed pages"
   expect(cursors.filter((cursor) => cursor === 0).length).toBeGreaterThan(1);
 });
 
+test("constant page changes retain the accepted collection and let an open job load", async ({
+  page,
+}) => {
+  const id = await waitingRun(page, "changing-pages");
+  const snapshot: MonitorPage = await (
+    await page.request.get(`/api/runs/${id}/monitor`)
+  ).json();
+  const stream = gate();
+  let phase: "initial" | "changing" | "stable" = "initial";
+  let changingReads = 0;
+  let jobReads = 0;
+  await page.route(
+    (url) => url.pathname === `/api/runs/${id}/stream`,
+    async (route) => {
+      await stream.pending;
+      await route.fulfill({ contentType: "text/event-stream", body: "" });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `/api/runs/${id}/monitor`,
+    async (route) => {
+      const since = Number(
+        new URL(route.request().url()).searchParams.get("nodes_since") ?? 0,
+      );
+      if (phase === "changing") changingReads += 1;
+      const version =
+        phase === "initial" ? 0 : phase === "stable" ? 1000 : changingReads;
+      const nodes = Array.from(
+        { length: Math.min(200, 201 - since) },
+        (_, offset) => {
+          const number = since + offset;
+          return number === 0
+            ? snapshot.nodes[0]
+            : {
+                ...snapshot.nodes[0],
+                id: String(number),
+                node_id: `extra_${number}`,
+                scope_path: `root.extra_${number}`,
+              };
+        },
+      );
+      await route.fulfill({
+        json: {
+          ...snapshot,
+          run: {
+            ...snapshot.run,
+            dispatch_paused: phase !== "initial",
+          },
+          nodes,
+          nodes_next: since === 0 ? 200 : null,
+          state_cursor: snapshot.state_cursor + version,
+        },
+      });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `/api/runs/${id}/job`,
+    async (route) => {
+      jobReads += 1;
+      await route.continue();
+    },
+  );
+  try {
+    await page.goto(`/?view=runs&run=${id}`);
+    await page.getByRole("button", { name: /Load more jobs/i }).click();
+    await expect(
+      page.getByRole("navigation", { name: "Jobs" }).getByRole("link"),
+    ).toHaveCount(202);
+    phase = "changing";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect.poll(() => changingReads).toBeGreaterThanOrEqual(8);
+    // A partially rebuilt paused snapshot must not replace the accepted view.
+    await expect(
+      page.getByRole("button", { name: "Pause", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "Jobs" })
+      .getByRole("link", { name: /^Review/ })
+      .click();
+    await expect.poll(() => jobReads).toBeGreaterThan(0);
+    expect(phase).toBe("changing");
+    phase = "stable";
+    await expect(
+      page.getByRole("button", { name: "Resume", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Jobs" }).getByRole("link"),
+    ).toHaveCount(202);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "changing quickly" }),
+    ).toHaveCount(0);
+  } finally {
+    stream.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
 test("changing runs cancels old monitor and job reads", async ({ page }) => {
   const oldRun = await waitingRun(page, "old-selection");
   const newRun = await waitingRun(page, "new-selection");

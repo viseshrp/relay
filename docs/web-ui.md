@@ -766,13 +766,17 @@ rejected. Successful owner actions cancel pending state reads and request a
 fresh snapshot. Selecting another run cancels its old queue. Loaded node,
 request, and attempt pages rebuild serially, and publish together only when
 all their state cursors agree. A state change between pages restarts the
-rebuild while retaining the last accepted view. Pages remain bounded to 200
+rebuild while retaining the last accepted view. Each page builder tries at
+most four rebuilds before yielding the queue to open jobs and other reads.
+It retries after 0.5, 1, and 2 seconds, then keeps the accepted view with an
+error and a manual retry. Owner actions, run selection, and closing a job
+cancel this backoff as well as pending requests. Pages remain bounded to 200
 records and 1 MiB; load-more controls continue beyond 1,000 records.
 
 Output-only events advance `event_cursor` without advancing `state_cursor`,
 so a busy output stream cannot continually invalidate state reads. Failed
-reads retry four times after 0.5, 1, 2, and 5 seconds. The last accepted view
-stays visible with an error and a manual retry. Before accepting live
+HTTP reads retry four times after 0.5, 1, 2, and 5 seconds. The last accepted
+view stays visible with an error and a manual retry. Before accepting live
 completion, Relay drains saved log events through the terminal snapshot's
 event cursor and checks for pending recovery. An already-finished run opens
 with a small summary; historical logs load when requested. Reconnects refresh

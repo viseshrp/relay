@@ -14,9 +14,9 @@ plan to commits, reproduced failures, retained coverage, and delivery checks.
 This implementation follows the serial-first execution plan with the owner's
 agreed changes. Heartbeats remain, with one coordinator and one renewal
 transaction per five-second cycle. Renewal retries SQLite busy failures for
-up to 30 seconds, then stops the worker. Database-only launch and control
-transactions have a 15-second total retry budget. Git and provider execution
-are never replayed by those retries.
+up to 30 seconds, then stops the worker and Relay without an automatic restart.
+Database-only launch and control transactions have a 15-second total retry
+budget. Git and provider execution are never replayed by those retries.
 
 Monitoring uses a deferred, query-only database alias. Empty polls and idle
 reconciliation read before reserving the writer. Reconciliation runs every
@@ -37,8 +37,12 @@ with open jobs. State events request refreshes; output events append to logs.
 Separate state and output cursors prevent output from invalidating state
 reads. Older responses are discarded, successful actions invalidate pending
 reads, and loaded pages rebuild at one state version. Pages retain the
-200-record and 1 MiB limits and can continue beyond 1,000 records. Live
-completion waits for persisted log tails and pending recovery checks;
+200-record and 1 MiB limits and can continue beyond 1,000 records. Page
+builders yield after four unsuccessful rebuilds and retry after 0.5,
+1, and 2 seconds outside the queue, so open jobs can progress. Exhaustion
+preserves the accepted view and offers manual retry. Owner actions and run
+selection cancel backoff. Live completion waits for persisted log tails and
+pending recovery checks;
 already-finished runs keep historical logs lazy. Existing API
 endpoints, linked requests, reconnects, external retries, and artifact merges
 remain supported.

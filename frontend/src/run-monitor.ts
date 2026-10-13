@@ -90,6 +90,17 @@ function aborted(): DOMException {
 export function isAborted(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
+
+export class SnapshotChangedError extends Error {
+  constructor() {
+    super(
+      "This run is changing quickly. Showing the previous view; Refresh to try again.",
+    );
+    this.name = "SnapshotChangedError";
+  }
+}
+
+const SNAPSHOT_ATTEMPTS = 4;
 export function waitForReadRetry(
   ms: number,
   signal: AbortSignal,
@@ -147,7 +158,11 @@ export async function readMonitorPages(
   },
   signal: AbortSignal,
 ): Promise<MonitorPage> {
-  while (!signal.aborted) {
+  for (
+    let attempt = 0;
+    attempt < SNAPSHOT_ATTEMPTS && !signal.aborted;
+    attempt += 1
+  ) {
     let nodesSince = 0,
       interactionsSince = 0;
     let nodes: RunNode[] = [],
@@ -201,7 +216,8 @@ export async function readMonitorPages(
     // A run changing between pages restarts from page one, retaining the old view.
     await waitForReadRetry(25, signal);
   }
-  throw aborted();
+  if (signal.aborted) throw aborted();
+  throw new SnapshotChangedError();
 }
 
 /** One queue belongs to a selected run, including every open job's state reads. */
@@ -218,6 +234,11 @@ export class RunReadQueue {
   >();
   private active: AbortController | null = null;
   private closed = false;
+  private cycle = new AbortController();
+  private rebuilding = new Map<
+    string,
+    { promise: Promise<unknown>; signal: AbortSignal }
+  >();
 
   constructor(private readonly refreshMonitor: () => void = () => undefined) {}
 
@@ -245,6 +266,8 @@ export class RunReadQueue {
   }
   invalidate(): void {
     this.clock = requestRead(this.clock);
+    this.cycle.abort();
+    this.cycle = new AbortController();
     this.active?.abort();
     for (const entry of this.pending.values()) entry.controller.abort();
     this.pending.clear();
@@ -252,6 +275,51 @@ export class RunReadQueue {
   close(): void {
     this.closed = true;
     this.invalidate();
+  }
+  /** Coherent rebuild retries release the queue before waiting their turn again. */
+  read<T>(
+    key: string,
+    read: (signal: AbortSignal) => Promise<T>,
+    caller?: AbortSignal,
+  ): Promise<T> {
+    if (this.closed || caller?.aborted) return Promise.reject(aborted());
+    const existing = this.rebuilding.get(key);
+    if (existing && !existing.signal.aborted)
+      return existing.promise as Promise<T>;
+    const controller = new AbortController();
+    const owners = caller ? [this.cycle.signal, caller] : [this.cycle.signal];
+    const stop = () => controller.abort();
+    for (const owner of owners) {
+      if (owner.aborted) stop();
+      else owner.addEventListener("abort", stop, { once: true });
+    }
+    const backoff = [500, 1000, 2000];
+    const promise = (async () => {
+      try {
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            return await this.enqueue(key, read, controller.signal);
+          } catch (error) {
+            if (
+              !(error instanceof SnapshotChangedError) ||
+              attempt >= backoff.length
+            )
+              throw error;
+            await waitForReadRetry(backoff[attempt], controller.signal);
+          }
+        }
+      } finally {
+        for (const owner of owners) owner.removeEventListener("abort", stop);
+      }
+    })();
+    this.rebuilding.set(key, { promise, signal: controller.signal });
+    void promise
+      .finally(() => {
+        if (this.rebuilding.get(key)?.promise === promise)
+          this.rebuilding.delete(key);
+      })
+      .catch(() => undefined);
+    return promise;
   }
   enqueue<T>(
     key: string,
@@ -300,7 +368,11 @@ export async function readJobPages(
   target: () => number,
   signal: AbortSignal,
 ): Promise<JobStatePage> {
-  while (!signal.aborted) {
+  for (
+    let attempt = 0;
+    attempt < SNAPSHOT_ATTEMPTS && !signal.aborted;
+    attempt += 1
+  ) {
     let since = 0;
     let attempts: RunJob["attempts"] = [];
     let version: number | null = null;
@@ -321,5 +393,6 @@ export async function readJobPages(
     }
     await waitForReadRetry(25, signal);
   }
-  throw aborted();
+  if (signal.aborted) throw aborted();
+  throw new SnapshotChangedError();
 }

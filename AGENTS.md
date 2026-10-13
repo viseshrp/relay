@@ -92,8 +92,10 @@ applicable; do not silently change adjacent behavior.
 - Read run state through coherent monitor snapshots. Events request refreshes;
   they do not reduce run state in the browser. Share one serial state-read
   queue across the selected run and open jobs, reject older state cursors, and
-  rebuild loaded pages at one version before publishing them. Preserve the
-  200-record and 1 MiB page limits and drain terminal log tails.
+  rebuild loaded pages at one version before publishing them. Bound rebuilds
+  and release the queue during backoff; invalidate both requests and backoff
+  after owner actions or run selection. Preserve the 200-record and 1 MiB
+  page limits and drain terminal log tails.
 - Keep the CLI focused on setup and administration. Workflow authoring, launch,
   run controls, and history belong in the browser and HTTP services.
 - Keep macOS, Linux, and Windows behavior equivalent. Use the existing path and

@@ -92,7 +92,7 @@ export function useJobWorkspace({
     if (!controller || controller.signal.aborted) return null;
     setLoadingJob(true);
     try {
-      const value = await queue.enqueue(
+      const value = await queue.read(
         `job:${scope}`,
         async (signal) => {
           const page = await readJobPages(
