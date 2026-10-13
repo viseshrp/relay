@@ -130,6 +130,7 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
     probe = SqliteWriteProbe()
     append = DjangoExecutionStore.append_attempt_event
     renew = DjangoExecutionStore.renew_attempts
+    renew_once = DjangoExecutionStore._renew_attempts
 
     def observe(
         self: DjangoExecutionStore,
@@ -144,18 +145,26 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
         if event_type == "agent.message":
             ready.set()
 
-    def renewing_attempts(self: DjangoExecutionStore, owners: tuple[tuple[str, str], ...]) -> None:
+    def renew_with_short_wait(
+        self: DjangoExecutionStore, owners: tuple[tuple[str, str], ...]
+    ) -> None:
         # Force retries on the coordinator's connection. Provider execution
         # and shutdown retain their normal configured SQLite busy timeout.
         with connection.cursor() as cursor:
             cursor.execute("PRAGMA busy_timeout=50")
-        renewing.set()
         renew(self, owners)
+
+    def renewing_attempts(self: DjangoExecutionStore, owners: tuple[tuple[str, str], ...]) -> None:
+        # Observe every real retry, including a renewal already in progress
+        # when the test clears its readiness signal and acquires the writer.
+        renewing.set()
+        renew_once(self, owners)
         if probe.first_busy.is_set():
             recovered.set()
 
     monkeypatch.setattr(DjangoExecutionStore, "append_attempt_event", observe)
-    monkeypatch.setattr(DjangoExecutionStore, "renew_attempts", renewing_attempts)
+    monkeypatch.setattr(DjangoExecutionStore, "renew_attempts", renew_with_short_wait)
+    monkeypatch.setattr(DjangoExecutionStore, "_renew_attempts", renewing_attempts)
     monkeypatch.setattr("relay.execution.heartbeat.ATTEMPT_HEARTBEAT_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr("relay.agents.acp_driver.ATTEMPT_HEARTBEAT_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr("relay.agents.acp_driver.CONTROL_POLL_INTERVAL_SECONDS", 0.05)
