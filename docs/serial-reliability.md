@@ -3,7 +3,11 @@
 Relay keeps Django, SQLite with WAL and FULL durability, Huey, and SSE. One
 Huey execution thread runs jobs. The web process commits launches and owner
 decisions; the worker schedules their committed changes. No external service,
-AI subscription, database replacement, or TanStack dependency is required.
+database replacement, or TanStack dependency is required. Automated checks use
+deterministic providers and need no AI subscription.
+
+The [validation record](serial-reliability-validation.md) maps the original
+plan to commits, reproduced failures, retained coverage, and delivery checks.
 
 ## Implementation and plan decisions
 
@@ -33,8 +37,9 @@ with open jobs. State events request refreshes; output events append to logs.
 Separate state and output cursors prevent output from invalidating state
 reads. Older responses are discarded, successful actions invalidate pending
 reads, and loaded pages rebuild at one state version. Pages retain the
-200-record and 1 MiB limits and can continue beyond 1,000 records. Completion
-waits for persisted log tails and pending recovery checks. Existing API
+200-record and 1 MiB limits and can continue beyond 1,000 records. Live
+completion waits for persisted log tails and pending recovery checks;
+already-finished runs keep historical logs lazy. Existing API
 endpoints, linked requests, reconnects, external retries, and artifact merges
 remain supported.
 
@@ -49,7 +54,7 @@ and isolated browser servers.
 | I1, I3, I4 | Five-level quiet execution survives a forced write lock beyond five seconds. Nested registrations renew each attempt once in one transaction. Busy exhaustion stops the worker. |
 | I2, I12 | Forty launches across eight threads retain complete snapshots and unique project numbering. HTTP, runner, Huey, and supervisor log underlying database causes; failed pytest reports expose suppressed causes. |
 | I5, I7, I15 | Control, ownership, settlement, dashboard, attention, job, and monitor reads answer while the writer is held. Snapshot contexts reject writes. Idle reconciliation, including activated triggers, writes nothing. |
-| I6, I16 | Both database aliases explicitly use FULL durability, WAL, and a 15-second busy timeout. NORMAL durability was rejected. |
+| I6, I16 | Both database aliases use FULL durability, WAL, and a 15-second busy timeout. NORMAL durability was rejected. |
 | I8, I9, I17 | Web launch commits no scheduling work. Worker event delivery resumes environment-approved attempts without a web notifier. Huey remains. Startup includes active runs beyond 200. Worker counts above one are rejected or clamped according to interface. |
 | I10, I11 | Forward and backward clock jumps cannot release a paused live writer before Git finalization. Killed processes, surviving children, PID reuse, and incomplete Windows tree enumeration retain safe ownership behavior. Automatic restart was excluded. |
 | I13 | Expiry, discard, and environment approval commit their interaction events with their status changes. Event-write failure rolls back both. |

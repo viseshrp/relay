@@ -1,0 +1,188 @@
+# Serial reliability validation
+
+This records the serial-first implementation against the owner's approved
+plan. The behavioral contracts and write measurements are in
+[serial-reliability.md](serial-reliability.md). Validation uses macOS and
+Python 3.13.11, disposable repositories and storage, and deterministic
+providers. No AI subscription or owner provider account is used.
+
+## Agreed changes to the original Opus plan
+
+The original `SERIAL_EXECUTION_PLAN.md` remains an owner planning file.
+These explicit decisions replace its conflicting instructions:
+
+| Original proposal | Implemented decision |
+| --- | --- |
+| Remove Huey and `huey.db` | Keep Huey, opaque claim delivery, atomic admission, duplicate protection, deferred admission, orphan repair, and `retries=0`. |
+| Set SQLite to NORMAL durability | Keep FULL durability on both aliases, with WAL and a 15-second busy timeout. |
+| Remove attempt heartbeats | Keep one coordinator per worker; renew unique active attempts and admission locks in one transaction every five seconds. Retry busy renewal for 30 seconds, then stop the worker. |
+| Restart an unresponsive worker | No automatic restart. Preserve orderly interruption and unexpected-crash behavior. Process exit must be proved before workspace recovery. |
+| Add output buffering if measurements suggest it | Record measurements only. Output buffering remains separate because it changes crash-time output retention. |
+| Work in an isolated Git worktree | Use the primary checkout on `main`, as subsequently instructed. Archive the task's extra worktree recoverably. Build into scratch assets and package from a plain temporary source copy. |
+
+Django, SQLite, SSE, one execution thread, transactional web controls, and
+the browser redesign remain. No TanStack, Postgres, external service,
+run-control intent table, database reset, or migration-history rewrite is
+included. Legacy worker counts warn and use one; new API values above one
+are rejected and the UI field is removed.
+
+## Phase and commit map
+
+Commit IDs identify the implementation, including follow-up defects found
+during full validation. Documentation changed with its owning contract.
+
+| Phase | Result | Commit |
+| --- | --- | --- |
+| Carry-forward coverage | Retain the timing-regression branch's server tail fixes and browser races. | `3b0473f` |
+| 0 and diagnostics | Controlled write-lock gates, barriers, transaction/wait/hold profiles, suppressed database causes at HTTP, runner, Huey, supervisor, and failed pytest reports. | `204a668`, `81db74b`, `426587a` |
+| 1 and 2 | FULL/WAL settings, query-only deferred snapshots, read-first controls, expiry, settlement, and reconciliation. Idle activated triggers do not write unchanged cursors. | `81db74b`, `426587a` |
+| 3, heartbeat portion | Shared renewal coordinator, read-only ownership checks, bounded rolled-back database retries, and fatal renewal exhaustion. | `cdd9cac` |
+| 4, scheduling portion | Web launch/resume/rerun stop scheduling. One Huey execution thread follows committed scheduling and delivery events, including environment approval. | `4815333` |
+| 3, ownership portion | Stale heartbeats cannot release admission. Supervisor checks process creation identities, stops owned trees, proves exit, and blocks uncertain recovery. | `2f3176f`, `426587a` |
+| 5 | Expiry, discard, and environment approval append their events in the same transaction as the transition. | `cbf6847` |
+| 6 | Coherent bounded monitor API, separate event/state cursors, serial monitor/job reads, stale-response rejection, coherent page rebuilds, bounded backoff, and terminal-tail draining. | `40d508a`, `7fbd5ef` |
+| Full-suite follow-up | Recheck control state and lease after lock acquisition; include job metadata in the 1 MiB budget; adapt fixtures to snapshots and worker scheduling. | `de90cd7` |
+| Browser follow-up | Keep historical logs lazy, avoid duplicate first-connect reads, recover artifact refreshes coalesced behind old responses, and carry the old timing tests onto monitor snapshots. | `3e6807a` |
+| Graph fixture follow-up | Hold a real 14-node graph at a declared owner wait. Preserve the entry/zoom/refresh assertions, assert all 13 edges, and cancel the fixture during cleanup. | `4d029a5` |
+| 7 and 8 | Record profiles, run delivery gates, preserve owner state, push a feature ref, and open a draft PR. Windows measurements remain pending CI. | See validation below and PR history. |
+
+## Failure proof
+
+The following are observed failures before the fix, or failures after
+restoring the faulty behavior for a focused mutation check. Commands use
+the final test locations; the diagnostic HTTP test initially lived in
+`test_sqlite_reliability.py` before moving to its dedicated module.
+
+| Reproducer | Observed red result | Green coverage |
+| --- | --- | --- |
+| `uv run pytest tests/test_sqlite_reliability.py -k monitoring_reads -q` | Dashboard and attention reserve the writer and fail under a held SQLite write lock. | Both read through the held writer; zero writer transactions. |
+| `uv run pytest tests/test_persistence_diagnostics.py -q` | HTTP cause assertion fails: the suppressed database exception is absent from diagnostic records. | Three diagnostic cases preserve causes, handle nested/cyclic chains, and keep private diagnostic text out of public responses. |
+| `uv run pytest tests/test_sqlite_reliability.py -k 'both_connections or empty_control or idle_reconciliation' -q` | Three failures: timeout is 5,000 rather than 15,000 ms; an empty control poll and idle reconciliation reserve the writer. | Both aliases share isolated storage with FULL/WAL settings; empty polling and idle reconciliation reserve no writer. |
+| `uv run pytest tests/test_sqlite_reliability.py -k ownership_checks -q` | In-loop ownership checking attempts a write and fails under the held writer. | The ownership check succeeds with zero transactions and autocommit writes. |
+| `uv run pytest tests/test_worker_heartbeats.py -k quiet_five_level -q` | Restoring per-loop heartbeat writes makes the real five-level ACP execution fail under a write lock held beyond five seconds. | All five attempts complete after the lock opens. |
+| `uv run pytest tests/test_launch_contention.py -k forty -q` | Disabling the selected launch-persistence retry causes the forced-lock, eight-thread burst to fail. | Both ordinary and forced-lock 40-launch bursts retain complete records and unique project numbering. |
+| `uv run pytest tests/test_worker_scheduling.py -q` | Four failures: web scheduling runs during launch; environment delivery is absent; legacy workers stay at eight; API accepts multiple workers. | All scheduling and worker-count contracts pass. The idle worker scheduling case already passed. |
+| `uv run pytest tests/test_worker_scheduling.py -k startup_enumerates -q` | Only 200 of 205 active runs are returned at startup. | All 205 are included. |
+| `uv run pytest tests/test_worker_handoff.py tests/test_supervisor_lifecycle.py -k 'clock_jump or unverified_surviving or until_worker_exit' -q` | Restoring the stale reaper and bypassing exit proof produces four failures: forward hour/week jumps, a surviving unverified child, and admission release before exit confirmation. | Ownership remains held while the old worker can finalize Git. A negative clock jump already passed and is retained coverage. |
+| `uv run pytest tests/test_interaction_events.py -q` | Eight failures cover missing expiry/discard/environment events and failure to roll back their status changes when event append fails. | All eight status/event atomicity cases pass. |
+| `uv run pytest tests/test_agent_controls.py -k mailbox_recovery_rechecks -q` | Two failures: an applied control is reconsidered, or a freshly renewed claim is returned to pending. | Both interleavings recheck state, expiry, age, and owner after acquiring the writer. |
+| `uv run pytest tests/test_worker_heartbeats.py -k streaming_step_lock_profile -q` | The profile reports one empty transaction and five autocommit writes. | The real 200-message nested ACP run has neither. Per-output-event durability remains. |
+| `uv run pytest tests/test_run_monitor.py -k job_pages_include_metadata -q` | A response is 1,049,691 bytes, exceeding 1,048,576. | Every page stays within 1 MiB and 200 attempts while traversing all 1,006 attempts uniquely. |
+| `npm --prefix frontend run test:unit -- --grep 'all read and event'` | Removing the `seen > version` rule makes the interleaving test fail. | All 240 ordered read/event interleavings pass with the rule restored. |
+| Browser stale-snapshot mutation | Replacing `acceptsSnapshot` with unconditional acceptance publishes the injected stale-title marker after a newer event. | The late-response browser cases reject even a briefly visible stale snapshot. |
+| Browser artifact-tail regression | An older empty artifact response consumes the queued refresh; the retained `verdict` artifact never appears. | Both present and missing SSE-tail cases recover the artifact from persisted events. |
+
+The new monitor endpoint was initially absent: its first five API tests
+returned 404. That is evidence of a new feature gap, not an old production
+defect. Snapshot coherence, bounded Unicode payloads, linked answered
+requests, and pagination beyond 1,000 records test the new contract.
+
+New coordinator registration, retry-budget, non-busy-error, exhaustion,
+query-only-write rejection, and raw OS-tree tests validate the replacement
+design. They are not reported as pre-existing failures. Existing stale and
+duplicate answers, duplicate delivery, recovery policy, artifact retention,
+PID reuse, and orderly-versus-crash tests remain regression coverage.
+
+All mutation sources were restored before the normal checks. Mutation
+browser builds used separate scratch assets. Test gates use events,
+barriers, real SQLite busy failures, and process output; the intentional
+five-second lock duration is not used to guess when a participant is ready.
+
+## Focused green checks
+
+These commands passed on the final behavior, in addition to the complete
+suite below:
+
+```bash
+uv run pytest tests/test_launch_contention.py \
+  tests/test_worker_heartbeats.py tests/test_sqlite_reliability.py \
+  tests/test_worker_scheduling.py -q --junitxml=sqlite-profile.xml
+# 29 passed; zero-empty and zero-autocommit profile assertions passed.
+
+uv run pytest tests/test_agent_controls.py \
+  tests/test_sqlite_reliability.py tests/test_worker_heartbeats.py -q
+# 50 passed, including the two control-lease interleavings.
+
+uv run pytest tests/test_run_monitor.py tests/test_web_api.py -q
+# 178 passed, including complete job-response byte accounting.
+
+uv run pytest tests/test_retry_effort.py \
+  tests/test_persistence_failures.py -q
+# 82 passed; fixtures exercise worker scheduling and both DB aliases.
+```
+
+The original failure/green logs remain in the task's local evidence storage.
+The measurements are retained as JUnit `sqlite_profile` properties and
+pytest report sections. The profile table in
+[serial-reliability.md](serial-reliability.md#write-measurements) records the
+observed counts, wait times, and hold times.
+
+Focused browser runs passed the serial monitor, stale-response, artifact,
+large-finished-run, settings, loading/error/empty-view, interaction, paging,
+and initial-resource-read cases. The complete browser gate below is the
+delivery result; focused runs are not a substitute for it.
+
+## Full delivery checks
+
+| Command | Result |
+| --- | --- |
+| `uv run pytest tests -q` | 2,879 passed, 13 skipped in 790.04 seconds. |
+| `make check` | Passed: lockfile, frontend lint/format, all repository hooks, types, security, dependency, license, and generated-help checks. |
+| `uv run python scripts/check_doc_links.py README.md CONTRIBUTING.md AGENTS.md docs/*.md` | Passed. |
+| `uv run python scripts/check_transition_docs.py` | Passed. |
+| `uv run python scripts/check_workflow_examples.py docs/workflows.md` | Passed: 13 guide examples and seven starter workflows. |
+| `RELAY_BUILD_ASSETS_ROOT=<scratch-assets> RELAY_TEST_ASSETS_ROOT=<scratch-assets> make test-frontend` | Passed: 280 authenticated (17.1 min), four no-login (18.6 s), 29 visual (2.0 min), and nine monitor unit tests. Node build tests: 1,022 passed, five skipped. |
+| `make build` in a plain temporary source copy | Passed: source distribution and wheel; owner assets remain untouched. |
+| `make check-dist` in that copy | Passed: Twine metadata and distribution-content checks for both archives. |
+| `uv build --wheel <sdist> --out-dir <scratch-wheels>` | Passed: wheel rebuilt from the source distribution. |
+| Installed wheel, fresh venv, private Git/config/data/log roots, no Node/npm in `PATH` | Passed: `relay init`, real `relay up --no-browser --no-login`, HTTP 200 for auth/index/compiled JavaScript, clean supervisor exit, and OS proof that both children exited. |
+
+The plain archived source copy has no VCS metadata, so its validation-only
+archives use the configured `0.0.0` fallback version. No release version,
+tag, package upload, or owner database was changed. All 1,194 packaged runtime
+files match the wheel used for the no-Node installed-runtime smoke check.
+
+The first full Python run found fixtures that only blocked the default DB
+alias or expected the web request to schedule a retry immediately. Those
+fixtures now exercise both aliases and explicitly advance the simulated
+worker. Browser fixtures that held the removed collection reads now hold
+monitor reads, still observing whether a late response is visibly published.
+Workers-field assertions now assert the field's removal. Existing limits,
+time bounds, and stale-display assertions were preserved.
+
+A later full browser attempt passed 279 cases and failed before opening the
+long-run graph: its fixture expected 14 command subprocesses to finish within
+the default five-second assertion window. The trace showed steady progress
+through job 10, with no execution error. The fixture now stops at an explicit
+owner wait. Both graph tests pass with the same timeout and unchanged
+viewport checks, plus assertions for all 14 nodes and 13 edges. This is a
+fixture repair, not evidence of a production graph defect. The final full
+gate reported above includes this repair.
+
+## Measurement gate and remaining coverage
+
+The local Phase 7 profile passes its zero-empty, zero-autocommit gates. The
+largest individual acquisition wait recorded locally was 102.3 ms during
+the deliberately held-lock launch burst. This does not include the total
+five-second blockage and does not establish Windows performance.
+
+The original Phase 7 Windows threshold check remains pending CI results.
+Windows and Linux runtime coverage and the full supported Python matrix
+are not claimed from the macOS/Python 3.13 checks. Twelve optional JavaScript
+integration cases require installed Node 20/24 runtimes; a directory-junction
+case requires Windows. Live provider certification was not requested.
+
+CI is not watched or polled, failed jobs are not rerun automatically, and
+the PR is not merged. Output buffering remains a separate change under the
+owner's approved scope regardless of these local measurements.
+
+The old plan's line numbers refer to an earlier tree. The corresponding
+subjects now live in `db_routing.py`, `db_retry.py`, `heartbeat.py`, the Huey
+event follower, the supervisor/process adapters, and `run-monitor.ts` rather
+than the proposed replacement worker-loop modules.
+
+Owner preservation checks cover 1,380 planning and served-asset files by
+their original hashes. The independently changed owner `.gitignore` remains
+unstaged. The owner's app remains on port 17945. The task stays on `main`
+without another worktree; publishing uses a separate feature ref pointing
+at the validated commits.
