@@ -43,7 +43,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Set up Node for frontend quality checks
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.21.0'
           cache: npm
@@ -80,7 +80,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up Node 20 for local action tests
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '20'
 
@@ -97,7 +97,7 @@ jobs:
           PY
 
       - name: Set up Node 24 for local action tests
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.21.0'
 
@@ -142,7 +142,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Set up Node for browser tests
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.21.0'
           cache: npm
@@ -202,7 +202,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Set up Node for frontend build
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.21.0'
           cache: npm
@@ -252,7 +252,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Set up Node for frontend build
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.21.0'
           cache: npm
