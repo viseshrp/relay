@@ -90,9 +90,17 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   await expect(
     launch.getByRole("textbox", { name: "Task", exact: true }),
   ).toHaveValue("Ready");
+  const creatingRun = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/runs" &&
+      response.request().method() === "POST",
+  );
   await launch
     .getByRole("button", { name: "Run workflow", exact: true })
     .click();
+  const createdRun = await creatingRun;
+  expect(createdRun.status(), await createdRun.text()).toBe(201);
+  // Start the unchanged completion deadline after launch persistence finishes.
   await expect(
     page.getByText(
       "Work is complete. Review the saved documents and code changes below.",
