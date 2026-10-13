@@ -31,6 +31,16 @@ jobs:
       - name: Set up Python + Environment
         uses: ./.github/actions/setup-python-env
 
+      - name: Set up Node for frontend quality checks
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
       - name: Run code quality checks
         run: make check
 
@@ -38,13 +48,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 15
       matrix:
         python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
         os: [ ubuntu-latest, macos-latest, windows-latest ]
     defaults:
       run:
         shell: bash
+    env:
+      RELAY_TEST_WORKERS: ${{ matrix.os == 'macos-latest' && '2' || '3' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
@@ -53,13 +65,23 @@ jobs:
           fetch-depth: 0  # Required for hatch-vcs to generate full version
           fetch-tags: true
 
-      - name: Set up Python + Environment
-        uses: ./.github/actions/setup-python-env
+      - name: Set up Python and both JavaScript action runtimes
+        uses: ./.github/actions/setup-test-env
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Run tests
         run: make test
+
+      - name: Retain Python outcomes, coverage, and timings
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-python-results-${{ matrix.os }}-${{ matrix.python-version }}
+          include-hidden-files: true
+          path: ${{ runner.temp }}/python-results/
+          if-no-files-found: error
+          retention-days: 1
 
   publish:
     needs: [ quality, tests ]

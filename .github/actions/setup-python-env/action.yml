@@ -10,6 +10,10 @@ inputs:
     description: "uv version to use"
     required: false
     default: "latest"
+  cache-enabled:
+    description: "Restore and save dependency caches"
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -23,7 +27,7 @@ runs:
       uses: astral-sh/setup-uv@v10.0.1
       with:
         version: ${{ inputs.uv-version }}
-        enable-cache: true
+        enable-cache: ${{ inputs.cache-enabled }}
         cache-suffix: ${{ github.job }}-${{ inputs.python-version }}
         prune-cache: true
 
@@ -35,6 +39,7 @@ runs:
         echo "version=$PYTHON_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache .venv directory
+      if: inputs.cache-enabled == 'true'
       uses: actions/cache@v6.1.0
       with:
         path: .venv
