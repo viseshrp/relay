@@ -4,6 +4,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   symlink,
   writeFile,
@@ -308,6 +309,61 @@ test("complete aggregate validates every suite and copies uniquely named blobs",
         await readFile(join(directory, "browser-summary.json"), "utf8"),
       ).timings,
     );
+  });
+});
+
+for (const failure of ["failed process", "failed case", "unstarted case"]) {
+  test(`aggregate retains trusted reports after a ${failure}`, async () => {
+    await temporary(async (directory) => {
+      const { inventoryPath, runs } = await fixture(directory);
+      const { root, run } = runs[1];
+      run.groups[0].exitCode = 1;
+      await save(join(root, "browser-run.json"), run);
+      if (failure !== "failed process") {
+        const result = report("functional", 1);
+        const test = result.suites[0].specs[0].tests[0];
+        test.status = "unexpected";
+        if (failure === "failed case") test.results[0].status = "failed";
+        else test.results = [];
+        await save(join(root, "functional", "report.json"), result);
+      }
+      const blobs = join(directory, "merged");
+      await assert.rejects(
+        verifyRuns(directory, inventoryPath, sha, blobs),
+        /Browser verification failed/,
+      );
+      assert.equal((await readdir(blobs)).length, 6);
+      assert.equal(
+        await readFile(join(blobs, "shard-1-functional.zip"), "utf8"),
+        "blob",
+      );
+      assert.equal(
+        await readFile(join(blobs, "shard-4-visual.zip"), "utf8"),
+        "blob",
+      );
+      const summary = JSON.parse(
+        await readFile(join(directory, "browser-summary.json"), "utf8"),
+      );
+      assert.equal(summary.timings.length, 7);
+      assert.ok(summary.errors.length);
+    });
+  });
+}
+
+test("aggregate never copies a report from a different checkout", async () => {
+  await temporary(async (directory) => {
+    const { inventoryPath, runs } = await fixture(directory);
+    const { root, run } = runs[1];
+    run.sha = "wrong";
+    await save(join(root, "browser-run.json"), run);
+    const blobs = join(directory, "merged");
+    await assert.rejects(
+      verifyRuns(directory, inventoryPath, sha, blobs),
+      /SHA mismatch/,
+    );
+    await assert.rejects(readFile(join(blobs, "shard-1-functional.zip")), {
+      code: "ENOENT",
+    });
   });
 });
 

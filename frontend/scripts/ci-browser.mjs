@@ -346,6 +346,7 @@ export async function verifyRuns(directory, inventoryPath, sha, blobDirectory) {
   const files = await findRuns(directory);
   const seen = new Set();
   const timings = [];
+  const errors = [];
   for (const path of files) {
     const run = await json(path);
     assertSha(run, sha);
@@ -378,20 +379,28 @@ export async function verifyRuns(directory, inventoryPath, sha, blobDirectory) {
       throw new Error(`Missing or unexpected browser groups in ${key}.`);
     for (const group of run.groups) {
       if (group.exitCode !== 0 || group.signal || group.error)
-        throw new Error(`Browser process failed: ${key}/${group.group}.`);
+        errors.push(`Browser process failed: ${key}/${group.group}.`);
       const root = join(dirname(path), group.group);
       const report = await json(join(root, "report.json"));
       const expected =
         group.group === "functional"
           ? value.shards[run.shard - 1]
           : value.groups[group.group];
-      const tests = verifyTestResults(expected, report, group.group);
       if (
         group.group === "functional" &&
-        (report.config.shard?.current !== run.shard ||
-          report.config.shard?.total !== value.total)
+        (report.config?.shard?.current !== run.shard ||
+          report.config?.shard?.total !== value.total)
       )
         throw new Error(`Incorrect Playwright shard in ${key}.`);
+      // Failed outcomes remain gate errors, but their trusted reports are needed
+      // to diagnose the failure in the merged HTML report.
+      let tests;
+      try {
+        tests = verifyTestResults(expected, report, group.group);
+      } catch (error) {
+        errors.push(`${key}/${group.group}: ${error.message}`);
+        tests = reportTests(report, group.group);
+      }
       const blobs = (await readdir(join(root, "blob"))).filter((name) =>
         name.endsWith(".zip"),
       );
@@ -413,6 +422,7 @@ export async function verifyRuns(directory, inventoryPath, sha, blobDirectory) {
         tests: tests.length,
         durationMs: group.durationMs,
         slowest: [...tests]
+          .filter((test) => test.results?.[0])
           .sort((a, b) => b.results[0].duration - a.results[0].duration)
           .slice(0, 10)
           .map((test) => ({
@@ -430,7 +440,7 @@ export async function verifyRuns(directory, inventoryPath, sha, blobDirectory) {
     ).some((key) => !seen.has(key))
   )
     throw new Error("Missing browser shard or frontend unit run.");
-  await save(join(directory, "browser-summary.json"), { sha, timings });
+  await save(join(directory, "browser-summary.json"), { sha, timings, errors });
   if (process.env.GITHUB_STEP_SUMMARY) {
     const lines = [
       "## Browser test timings",
@@ -442,10 +452,13 @@ export async function verifyRuns(directory, inventoryPath, sha, blobDirectory) {
       lines.push(
         `| ${timing.run} | ${timing.group} | ${timing.tests} | ${(timing.durationMs / 1000).toFixed(1)} |`,
       );
+    if (errors.length) lines.push("", "Verification errors:", "", ...errors);
     await writeFile(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`, {
       flag: "a",
     });
   }
+  if (errors.length)
+    throw new Error(`Browser verification failed:\n${errors.join("\n")}`);
   return timings;
 }
 
