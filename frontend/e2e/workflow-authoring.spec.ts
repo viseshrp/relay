@@ -13,7 +13,9 @@ test.beforeEach(async ({ page }) => {
 
 test("inputs, ordered prompts, and YAML are saved together and launch end to end", async ({
   page,
-}) => {
+}, testInfo) => {
+  const promptFile = `smoke-${testInfo.repeatEachIndex}.md`;
+  const promptReference = `prompts/${promptFile}`;
   await page.goto("/?view=workflows&workflow=workflow.yaml");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   await page
@@ -41,7 +43,7 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   await page.getByRole("tab", { name: "Steps", exact: true }).click();
   await page
     .getByRole("textbox", { name: "New prompt file", exact: true })
-    .fill("smoke.md");
+    .fill(promptFile);
   await page
     .getByRole("button", { name: "Create prompt", exact: true })
     .click();
@@ -60,12 +62,12 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
     .poll(
       async () =>
         (await (await page.request.get("/api/workflows/workflow.yaml")).json())
-          .draft?.prompts?.["prompts/smoke.md"]?.text,
+          .draft?.prompts?.[promptReference]?.text,
     )
     .toContain("First instructions");
   await page.reload();
   await expect(page.getByText(/Unsaved changes:/)).toContainText(
-    "prompts/smoke.md",
+    promptReference,
   );
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
@@ -74,11 +76,11 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   const source = await (
     await page.request.get("/api/workflows/workflow.yaml")
   ).json();
-  expect(source.yaml).toContain("prompt-files: prompts/smoke.md");
+  expect(source.yaml).toContain(`prompt-files: ${promptReference}`);
   expect(source.yaml).toContain("task:");
   const prompt = await (
     await page.request.get(
-      "/api/workflows/workflow.yaml/prompt?reference=prompts/smoke.md",
+      `/api/workflows/workflow.yaml/prompt?reference=${promptReference}`,
     )
   ).json();
   expect(prompt.text).toContain("First instructions");

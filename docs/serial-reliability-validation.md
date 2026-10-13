@@ -247,7 +247,10 @@ jobs and both Codecov checks. Patch coverage was 87.99%. Two jobs failed:
   before the launch response. Launch persistence consumed 2.76 seconds,
   and the last accepted snapshot still showed the parent running. The test
   now waits for the successful launch response first. Its completion
-  assertion retains the same five-second deadline.
+  assertion retains the same five-second deadline. Repeating the case
+  exposed a separate filename collision before launch: later repetitions
+  tried to create the previous repetition's prompt. Each repeat now uses
+  its own filename; all five repetitions pass without changing deadlines.
 
 [review-followup-ci]: https://github.com/viseshrp/relay/actions/runs/38335763189
 
