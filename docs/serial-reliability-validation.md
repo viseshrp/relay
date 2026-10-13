@@ -45,6 +45,7 @@ during full validation. Documentation changed with its owning contract.
 | Browser follow-up | Keep historical logs lazy, avoid duplicate first-connect reads, recover artifact refreshes coalesced behind old responses, and carry the old timing tests onto monitor snapshots. | `3e6807a` |
 | Graph fixture follow-up | Hold a real 14-node graph at a declared owner wait. Preserve the entry/zoom/refresh assertions, assert all 13 edges, and cancel the fixture during cleanup. | `4d029a5` |
 | 7 and 8 | Record profiles, run delivery gates, preserve owner state, push a feature ref, and open a draft PR. Windows measurements remain pending CI. | See validation below and PR history. |
+| Review follow-up | Wait for fixture lock acquisition, remove obsolete heartbeat writes, cover consumer/process cleanup, and bound page rebuilds with fair, coalesced, cancellable backoff. | `e351333`, `9ee848a`, `947c3ea` |
 
 ## Failure proof
 
@@ -124,6 +125,9 @@ delivery result; focused runs are not a substitute for it.
 
 ## Full delivery checks
 
+This table records the initial delivery at `241065a`. Review follow-up
+validation is recorded separately below.
+
 | Command | Result |
 | --- | --- |
 | `uv run pytest tests -q` | 2,879 passed, 13 skipped in 790.04 seconds. |
@@ -159,6 +163,73 @@ viewport checks, plus assertions for all 14 nodes and 13 edges. This is a
 fixture repair, not evidence of a production graph defect. The final full
 gate reported above includes this repair.
 
+## Review follow-up
+
+A single read of [CI run 38326398984][review-ci], at `241065a`, confirmed all
+five Windows and all five macOS Python jobs passed. Ubuntu 3.12 failed in
+the nested-agent test's own `hold_write_lock`, before the held-lock portion
+of the experiment began. Its raw SQLite connection used `timeout=0` and
+could lose to the accelerated 50 ms renewal thread. The other four Ubuntu
+jobs, browser gate, quality gate, and CodeQL passed. Codecov's patch check
+also failed: 83.48% against its inherited 86.6% target. The coverage
+configuration and thresholds remain unchanged.
+
+[review-ci]: https://github.com/viseshrp/relay/actions/runs/38326398984
+
+The follow-up addresses the review as follows:
+
+1. The lock helper waits up to five seconds for an existing writer before
+   holding the lock. A deterministic test first holds that writer elsewhere,
+   observes the helper's `BEGIN IMMEDIATE`, and releases the first writer
+   only after verifying the helper waits. The old zero-timeout helper fails
+   this test with `database is locked`. The nested execution test also waits
+   for an actual failed renewal lock acquisition before timing its hold.
+2. The unused per-attempt `heartbeat_attempt` adapter is removed. Control
+   lease and outage tests now exercise `renew_attempts` and `attempt_owned`.
+   Diagnostic coverage exercises the real coordinator under a held writer,
+   verifying the native cause is logged while its public error stays generic.
+3. Monitor and job page builders stop after four incoherent rebuilds. They
+   release the shared queue and retry after 0.5, 1, and 2 seconds. Refreshes
+   coalesce during backoff, and owner actions, run selection, and closing a
+   job cancel backoff. Exhaustion preserves the accepted view with manual
+   retry. The old builders fail both continuously-changing-page unit tests;
+   the browser regression also fails against the previous client at
+   `241065a`: the open job makes no HTTP read within the five-second
+   assertion deadline because the monitor holds the queue. With the fix,
+   that browser loads the job during churn and publishes the complete
+   refreshed collection after versions settle.
+4. The 30-second renewal exhaustion policy is retained and clarified: the
+   worker exits, Relay stops, and no automatic restart occurs. Consumer
+   lifecycle tests verify normal exit and crashes stop renewal and
+   reconciliation. Additional process-tree tests check failed observations,
+   exited descendants, PID reuse, and unrelated processes. These are added
+   safety coverage, not claims of newly reproduced production defects.
+5. The primary checkout stays on `main`; publication advances
+   `feat/serial-execution` for the existing draft PR. `origin/main` remains
+   unchanged until an authorized merge. No worktree is created.
+6. The local, uncommitted `*.md` ignore rule is removed so owner planning
+   files are visible again. The unrelated `/test-results` and `/.archify`
+   rules remain unstaged. Planning files are neither modified nor committed.
+
+Focused checks passed: 116 Python tests, 16 monitor unit tests, and all nine
+serial-monitor browser cases. The full Python suite passed with 2,890 tests
+and 13 skips in 850.76 seconds. Local coverage of changed executable lines
+is 93.30%; counting every partially covered branch line as uncovered gives
+87.83% (498 of 567 lines), above the previous 86.6% patch target. This is a
+local measurement, not a replacement for the pending Codecov aggregate on
+the follow-up head.
+
+Repository quality checks, new-test file hooks, documentation checks,
+distribution builds and content checks, rebuilding the wheel from its
+source distribution, and the installed-wheel runtime without Node/npm
+also pass. All 152 packaged, non-generated Python source files match the
+current checkout, and the build copy matches all 194 frontend source files.
+The full frontend gate passes: 281 authenticated browser cases in 17.3 minutes,
+four no-login cases in 19.1 seconds, 29 visual cases in 2.0 minutes, and all
+16 monitor unit tests. Node build checks pass 1,022 cases, with five skips.
+The pre-fix browser mutation and restored green run use a separate port and
+asset root; neither changes the owner app or the full gate's assets.
+
 ## Measurement gate and remaining coverage
 
 The local Phase 7 profile passes its zero-empty, zero-autocommit gates. The
@@ -166,10 +237,11 @@ largest individual acquisition wait recorded locally was 102.3 ms during
 the deliberately held-lock launch burst. This does not include the total
 five-second blockage and does not establish Windows performance.
 
-The original Phase 7 Windows threshold check remains pending CI results.
-Windows and Linux runtime coverage and the full supported Python matrix
-are not claimed from the macOS/Python 3.13 checks. Twelve optional JavaScript
-integration cases require installed Node 20/24 runtimes; a directory-junction
+The review CI result above establishes Windows coverage at `241065a`; it
+does not establish Windows performance from local timings. The follow-up
+head's Windows/Linux runtime coverage and supported Python matrix remain
+pending CI. Twelve optional JavaScript integration cases require installed
+Node 20/24 runtimes; a directory-junction
 case requires Windows. Live provider certification was not requested.
 
 CI is not watched or polled, failed jobs are not rerun automatically, and
