@@ -89,6 +89,13 @@ applicable; do not silently change adjacent behavior.
 - Keep portable workflow sources under `.relay/`; mutable databases, logs,
   artifacts, resources, and worktrees belong in platform-specific user storage.
   Resolve paths through the existing configuration and path helpers.
+- Read run state through coherent monitor snapshots. Events request refreshes;
+  they do not reduce run state in the browser. Share one serial state-read
+  queue across the selected run and open jobs, reject older state cursors, and
+  rebuild loaded pages at one version before publishing them. Bound rebuilds
+  and release the queue during backoff; invalidate both requests and backoff
+  after owner actions or run selection. Preserve the 200-record and 1 MiB
+  page limits and drain terminal log tails.
 - Keep the CLI focused on setup and administration. Workflow authoring, launch,
   run controls, and history belong in the browser and HTTP services.
 - Keep macOS, Linux, and Windows behavior equivalent. Use the existing path and
@@ -99,6 +106,12 @@ applicable; do not silently change adjacent behavior.
 - `relay.db` is authoritative. Huey's separate `huey.db` carries opaque claim
   tokens. Commit dispatch intent before enqueueing; atomically claim admission
   and create one attempt. Duplicate delivery must not create another attempt.
+- Use one Huey execution thread. Web launch, resume, and rerun handlers commit
+  events; scheduling follows those events in the worker. Keep FULL durability,
+  read-only monitoring snapshots, and database-only bounded busy retries.
+- Heartbeat age never authorizes workspace handoff. Only the supervisor may
+  recover lost attempts, after creation-identity checks and confirmed exit of
+  the worker and its owned process trees. Retain admission if proof fails.
 - Keep state transitions and their events in one transaction. Use
   [state.py](relay/execution/state.py) and [machine.py](relay/execution/machine.py)
   rather than ad hoc status assignments. Keep transactions short; run Git,

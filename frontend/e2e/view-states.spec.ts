@@ -28,7 +28,8 @@ function endpoint(f: Fixture, view: Screen) {
       return url.pathname === `/api/workflows/${f.workflow}`;
     if (view === "runs") return url.pathname === "/api/runs";
     if (view === "job") return url.pathname === `/api/runs/${f.run}/job`;
-    if (view === "summary") return url.pathname === `/api/runs/${f.run}`;
+    if (view === "summary")
+      return url.pathname === `/api/runs/${f.run}/monitor`;
     return url.pathname === "/api/settings";
   };
 }
@@ -211,8 +212,8 @@ test("empty collections use copy appropriate to each view", async ({
   await page.route(summary, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
-    body.run.nodes = [];
-    body.next = null;
+    body.nodes = [];
+    body.nodes_next = null;
     await route.fulfill({ response, json: body });
   });
   await page.goto(href(f, "summary"));

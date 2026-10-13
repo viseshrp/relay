@@ -1,0 +1,43 @@
+requires = ["tox>=4.64.8"]
+env_list = ["py310", "py311", "py312", "py313", "py314"]
+
+[gh-actions]
+python = """
+3.10: py310
+3.11: py311
+3.12: py312
+3.13: py313
+3.14: py314
+"""
+
+[env_run_base]
+runner = "uv-venv-lock-runner"
+ignore_errors = true
+pass_env = [
+  "RELAY_TEST_NODE_20", "RELAY_TEST_NODE_24", "RELAY_TEST_WORKERS",
+  "RELAY_TEST_COVERAGE", "CI", "GITHUB_SHA",
+]
+# tox resets this owned directory before every invocation. CI supplies a short
+# RUNNER_TEMP path to keep nested Windows Git paths below the platform limit.
+env_tmp_dir = "{env:RELAY_TEST_TEMP_DIR:{env_dir}/tmp}"
+set_env = { COVERAGE_FILE = "{env_tmp_dir}/reports/.coverage", PYTHONPATH = "{tox_root}" }
+commands = [
+  ["python", "-m", "pytest", "-p", "tests.ci_reporting", "--collect-only", "-q",
+    "--relay-ci-report", "{env_tmp_dir}/reports/inventory.json",
+    { replace = "posargs", default = ["tests"], extend = true }],
+  ["python", "-m", "pytest", "-p", "tests.ci_reporting", "-m", "serial_integration",
+    "--basetemp", "{env_tmp_dir}/s", "--durations=20",
+    "--junitxml={env_tmp_dir}/reports/junit-serial.xml",
+    "-o", "junit_logging=all", "-o", "junit_log_passing_tests=false",
+    { replace = "if", condition = "env.RELAY_TEST_COVERAGE != 'false'", then = ["--cov", "--cov-report="], else = ["-p", "no:pytest_cov"], extend = true },
+    { replace = "posargs", default = ["tests"], extend = true }],
+  ["python", "-m", "pytest", "-p", "tests.ci_reporting", "-m", "not serial_integration",
+    "-n", "{env:RELAY_TEST_WORKERS:0}", "--dist=worksteal", "--max-worker-restart=0",
+    "--basetemp", "{env_tmp_dir}/p", "--durations=20",
+    "--junitxml={env_tmp_dir}/reports/junit-parallel.xml",
+    "-o", "junit_logging=all", "-o", "junit_log_passing_tests=false",
+    { replace = "if", condition = "env.RELAY_TEST_COVERAGE != 'false'", then = ["--cov", "--cov-append", "--cov-report="], else = ["-p", "no:pytest_cov"], extend = true },
+    { replace = "posargs", default = ["tests"], extend = true }],
+  { replace = "if", condition = "env.RELAY_TEST_COVERAGE != 'false'", extend = true, then = [["python", "-m", "coverage", "xml", "-o", "{env_tmp_dir}/reports/coverage.xml"], ["python", "-m", "coverage", "json", "-o", "{env_tmp_dir}/reports/coverage.json"]] },
+  ["python", "scripts/verify_python_tests.py", "{env_tmp_dir}/reports"],
+]

@@ -3,7 +3,16 @@ import { useDisclosureState } from "../view-state";
 import { runJobs } from "../job-list";
 
 import { api, errorMessage } from "../api";
-import { invalidateReads } from "../read-cache";
+import {
+  finishRead,
+  isAborted,
+  readMonitorPages,
+  retryRunRead,
+  RunReadQueue,
+  SnapshotChangedError,
+  startRead,
+  type MonitorPage,
+} from "../run-monitor";
 import type {
   ArtifactRecord,
   AgentsResponse,
@@ -35,13 +44,10 @@ import {
   PENDING_RECOVERY,
   PAUSABLE_RUNS,
   RunWorkspaceProps,
-  DetailCollection,
   PageMode,
-  RunDetailPage,
   ArtifactPage,
   mergeEvents,
   mergeRecords,
-  applyStateEvent,
 } from "./RunWorkspaceShared";
 type ReadResponse1 = { runs: RunSummary[]; next: string | null };
 type ReadResponse2 = { events: RunEvent[]; next: number | null };
@@ -144,21 +150,25 @@ export function useRunWorkspace({
   const [streamRun, setStreamRun] = useState<string | null>(null);
   const [streamEpoch, setStreamEpoch] = useState(0);
   const currentRun = useRef<string | null>(null);
-  const detailGeneration = useRef(0);
-  const stateAfter = useRef(0);
+  const [readQueue, setReadQueue] = useState<RunReadQueue | null>(null);
+  const queueOwner = useRef<{
+    id: string;
+    queue: RunReadQueue;
+    initial: boolean;
+  } | null>(null);
+  const targets = useRef({ nodes: 200, interactions: 200 });
+  const linkedId = useRef(selectedInteraction);
+  const sourceRef = useRef<EventSource | null>(null);
+  const flushRef = useRef<(() => void) | null>(null);
   const eventAfter = useRef(0);
-  const previousRunStatus = useRef<string | null>(null);
+  const persistedAfter = useRef(0);
+  const artifactAfter = useRef(0);
+  const streamComplete = useRef(false);
   const stepProgress = useRef<HTMLDivElement>(null);
   const jobContent = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (selectedJob) jobContent.current?.scrollIntoView({ block: "start" });
   }, [selectedJob]);
-
-  const invalidateRunReads = useCallback(() => {
-    detailGeneration.current += 1;
-    if (selectedRun !== null)
-      invalidateReads(`/api/runs/${encodeURIComponent(selectedRun)}`);
-  }, [selectedRun]);
 
   const historyRequest = useRef<AbortController | null>(null);
   useEffect(() => () => historyRequest.current?.abort(), []);
@@ -192,206 +202,201 @@ export function useRunWorkspace({
     [project.id, filters],
   );
 
-  const loadDetailCollection = useCallback(
-    async (
-      collection: DetailCollection,
-      since: number,
-      mode: PageMode,
-      publish = true,
-    ): Promise<RunDetail> => {
-      if (selectedRun === null)
-        throw new Error("Select a run before loading its detail.");
-      const generation = detailGeneration.current;
-      const query = new URLSearchParams({
-        collection,
-        since: String(since),
-        limit: "200",
-      });
-      if (collection === "interactions") query.set("pending", "true");
-      const response = await api<RunDetailPage>(
-        `/api/runs/${encodeURIComponent(selectedRun)}?${query.toString()}`,
-      );
-      if (
-        currentRun.current !== selectedRun ||
-        generation !== detailGeneration.current
-      )
-        return response.run;
-      if (publish)
-        setDetail((current) => {
-          const sameRun = current?.id === response.run.id;
-          const currentNodes = sameRun ? current.nodes : [];
-          const currentInteractions = sameRun ? current.interactions : [];
-          return {
-            ...response.run,
-            nodes:
-              collection === "nodes"
-                ? mode === "replace"
-                  ? response.run.nodes
-                  : mergeRecords(currentNodes, response.run.nodes)
-                : currentNodes,
-            interactions:
-              collection === "interactions"
-                ? mode !== "append"
-                  ? response.run.interactions
-                  : mergeRecords(currentInteractions, response.run.interactions)
-                : currentInteractions,
-          };
-        });
-      if (collection === "nodes") setNodeCursor(response.next);
-      else setInteractionCursor(response.next);
-      return response.run;
-    },
-    [selectedRun],
-  );
-
-  const loadArtifacts = useCallback(
-    async (since: number, mode: PageMode): Promise<void> => {
-      if (selectedRun === null) return;
-      const query = new URLSearchParams({
-        since: String(since),
-        limit: "50",
-        visible: "true",
-      });
-      const response = await api<ArtifactPage>(
-        `/api/runs/${encodeURIComponent(selectedRun)}/artifacts?${query.toString()}`,
-      );
-      if (currentRun.current !== selectedRun) return;
-      setArtifacts((current) =>
-        mode === "replace"
-          ? response.artifacts
-          : mergeRecords(current, response.artifacts),
-      );
-      setArtifactCursor(response.next);
-    },
-    [selectedRun],
-  );
-
-  const loadLinkedRequest = useCallback(async () => {
-    if (!selectedRun || !selectedInteraction) {
-      setLinkedRequest(null);
-      return;
-    }
-    const generation = detailGeneration.current;
-    const response = await api<RunDetailPage>(
-      `/api/runs/${selectedRun}?collection=interactions&interaction=${encodeURIComponent(selectedInteraction)}&limit=1`,
-    );
-    if (
-      currentRun.current === selectedRun &&
-      generation === detailGeneration.current
-    )
-      setLinkedRequest(response.run.interactions[0] ?? null);
-  }, [selectedRun, selectedInteraction]);
-
-  const refreshDetail = useCallback(
-    async (reset = false, publish = true): Promise<RunDetail | null> => {
-      if (selectedRun === null) return null;
-      const generation = detailGeneration.current;
-      const mode: PageMode = reset ? "replace" : "refresh";
-      const [run, interactions] = await Promise.all([
-        loadDetailCollection("nodes", 0, mode, !reset),
-        loadDetailCollection("interactions", 0, mode, !reset),
-        loadArtifacts(0, mode),
-        loadLinkedRequest(),
-      ]);
-      if (generation !== detailGeneration.current) return null;
-      const complete = { ...run, interactions: interactions.interactions };
-      if (reset && currentRun.current === selectedRun) {
-        if (publish) setDetail(complete);
-        stateAfter.current = Math.min(
-          run.event_cursor ?? 0,
-          interactions.event_cursor ?? 0,
-        );
-      }
-      return complete;
-    },
-    [loadArtifacts, loadDetailCollection, loadLinkedRequest, selectedRun],
-  );
-
-  const applyLiveUpdates = useCallback(
-    (batch: RunEvent[]) => {
-      // Historical output stays visible; progress starts at the loaded state cursor.
-      const live = batch.filter((item) => item.id > stateAfter.current);
-      setDetail((current) => live.reduce(applyStateEvent, current));
-      if (
-        live.some(
-          (item) =>
-            item.type.startsWith("run.") ||
-            item.type.endsWith(".requested") ||
-            item.type.endsWith(".answered"),
-        )
-      )
-        attentionChanged();
-      const interactionChanged = live.some(
-        (item) =>
-          item.type === "attempt.ended" ||
-          item.type === "attempt.started" ||
-          item.type.endsWith(".requested") ||
-          item.type.endsWith(".answered"),
-      );
-      if (interactionChanged) {
-        // A live state event must not share or publish a read from before
-        // its transaction, even if that older response is still in flight.
-        invalidateRunReads();
-      }
-      if (
-        interactionChanged ||
-        live.some(
-          (item) =>
-            item.type === "node.created" ||
-            item.type === "run.dispatch_changed" ||
-            item.type === "run.repairs_changed" ||
-            item.type === "node.settings_changed" ||
-            item.type.startsWith("run.retry_") ||
-            item.type.startsWith("run.recovery_"),
-        )
-      ) {
-        void loadDetailCollection("nodes", 0, "refresh").catch(
-          (caught: unknown) => setError(errorMessage(caught)),
-        );
-      }
-      if (interactionChanged) {
-        void loadDetailCollection("interactions", 0, "refresh").catch(
-          (caught: unknown) => setError(errorMessage(caught)),
-        );
-        void loadLinkedRequest().catch((caught: unknown) =>
-          setError(errorMessage(caught)),
-        );
-      }
-      if (live.some((item) => item.type === "artifact.preserved")) {
-        void loadArtifacts(0, "refresh").catch((caught: unknown) =>
-          setError(errorMessage(caught)),
-        );
-      }
-    },
-    [
-      invalidateRunReads,
-      loadArtifacts,
-      loadDetailCollection,
-      loadLinkedRequest,
-    ],
-  );
-
   const loadEvents = useCallback(
-    async (since = 0, full = false) => {
+    async (since = 0, full = false, signal?: AbortSignal) => {
       if (selectedRun === null) return [];
       const summary = summaryOnly.current && !full;
       const response = await api<ReadResponse2>(
         `/api/runs/${encodeURIComponent(selectedRun)}/events?since=${since}&limit=${summary ? 50 : 100}${summary ? "&summary=true" : ""}`,
+        { signal, share: false },
       );
+      if (currentRun.current !== selectedRun || signal?.aborted) return [];
       if (full) summaryOnly.current = false;
-      if (currentRun.current !== selectedRun) return [];
       eventAfter.current = Math.max(
         eventAfter.current,
         response.events.at(-1)?.id ?? 0,
       );
-      setEvents((current) =>
-        since === 0 ? response.events : mergeEvents(current, response.events),
-      );
+      if (!summary)
+        persistedAfter.current = Math.max(
+          persistedAfter.current,
+          response.events.at(-1)?.id ?? 0,
+        );
+      setEvents((current) => mergeEvents(current, response.events));
       setEventCursor(summary && since === 0 ? 0 : response.next);
       return response.events;
     },
     [selectedRun],
   );
+
+  const loadArtifacts = useCallback(
+    async (since: number, _mode: PageMode): Promise<void> => {
+      const owner = queueOwner.current;
+      if (!selectedRun || owner?.id !== selectedRun) return;
+      return owner.queue.read("artifacts", async (signal) => {
+        const query = new URLSearchParams({
+          since: String(since),
+          limit: "50",
+          visible: "true",
+        });
+        for (let attempt = 0; attempt < 4 && !signal.aborted; attempt += 1) {
+          const observed = artifactAfter.current;
+          const response = await retryRunRead(
+            () =>
+              api<ArtifactPage>(`/api/runs/${selectedRun}/artifacts?${query}`, {
+                signal,
+                share: false,
+              }),
+            signal,
+            (caught) => setError(errorMessage(caught)),
+          );
+          if (signal.aborted || currentRun.current !== selectedRun) return;
+          setArtifacts((current) => mergeRecords(current, response.artifacts));
+          setArtifactCursor(response.next);
+          // Coalescing must not consume an artifact event that arrived while
+          // an older page was in flight. Append-only records remain visible.
+          if (observed === artifactAfter.current) return;
+        }
+        if (!signal.aborted) throw new SnapshotChangedError();
+      });
+    },
+    [selectedRun],
+  );
+
+  const requestMonitor = useCallback(async (): Promise<RunDetail | null> => {
+    const owner = queueOwner.current;
+    if (!selectedRun || owner?.id !== selectedRun) return null;
+    const queue = owner.queue;
+    try {
+      return await queue.read("monitor", async (signal) => {
+        queue.clock = startRead(queue.clock);
+        const observeHistory = (history: RunEvent[]) => {
+          for (const event of history) {
+            queue.observe(event);
+            if (
+              event.type === "artifact.preserved" &&
+              event.id > artifactAfter.current
+            ) {
+              artifactAfter.current = event.id;
+              void loadArtifacts(0, "refresh").catch((caught: unknown) => {
+                if (!isAborted(caught)) setError(errorMessage(caught));
+              });
+            }
+          }
+        };
+        try {
+          for (let attempt = 0; attempt < 4 && !signal.aborted; attempt += 1) {
+            const snapshot = await readMonitorPages(
+              queue,
+              (nodesSince, interactionsSince, selectedLink) => {
+                const query = new URLSearchParams({
+                  nodes_since: String(nodesSince),
+                  interactions_since: String(interactionsSince),
+                  limit: "200",
+                });
+                if (selectedLink) query.set("interaction", selectedLink);
+                return retryRunRead(
+                  () =>
+                    api<MonitorPage>(
+                      `/api/runs/${selectedRun}/monitor?${query}`,
+                      { signal, share: false },
+                    ),
+                  signal,
+                  (caught) => setError(errorMessage(caught)),
+                );
+              },
+              () => ({ ...targets.current, linkedId: linkedId.current }),
+              signal,
+            );
+            const terminal =
+              TERMINAL_RUNS.has(snapshot.run.status) &&
+              snapshot.run.problem?.retry?.state !== "scheduled" &&
+              !PENDING_RECOVERY.has(
+                snapshot.run.recovery?.current?.state ?? "",
+              );
+            if (owner.initial) {
+              summaryOnly.current = terminal;
+              if (terminal) {
+                // An already-finished run opens with lazy historical logs.
+                // Drain new output from this boundary if it is retried later.
+                persistedAfter.current = snapshot.event_cursor;
+                eventAfter.current = snapshot.event_cursor;
+              }
+              const history = await loadEvents(0, false, signal);
+              observeHistory(history);
+              owner.initial = false;
+            }
+            if (terminal) {
+              flushRef.current?.();
+              while (
+                !signal.aborted &&
+                persistedAfter.current < snapshot.event_cursor
+              ) {
+                const before = persistedAfter.current;
+                const tail = await retryRunRead(
+                  () => loadEvents(before, true, signal),
+                  signal,
+                  (caught) => setError(errorMessage(caught)),
+                );
+                observeHistory(tail);
+                if (persistedAfter.current <= before)
+                  throw new Error(
+                    "Relay could not finish loading the run's saved output.",
+                  );
+              }
+            }
+            if (!queue.accept(snapshot.state_cursor, signal)) continue;
+            const complete: RunDetail = {
+              ...snapshot.run,
+              nodes: snapshot.nodes,
+              interactions: snapshot.interactions,
+              event_cursor: snapshot.event_cursor,
+              state_cursor: snapshot.state_cursor,
+            };
+            setDetail(complete);
+            setNodeCursor(snapshot.nodes_next);
+            setInteractionCursor(snapshot.interactions_next);
+            setLinkedRequest(snapshot.linked_interaction);
+            setError(null);
+            if (streamComplete.current && !terminal)
+              setStreamEpoch((value) => value + 1);
+            streamComplete.current = terminal;
+            if (terminal) {
+              flushRef.current?.();
+              sourceRef.current?.close();
+              sourceRef.current = null;
+              setStreamState("complete");
+            }
+            setStreamRun(selectedRun);
+            return complete;
+          }
+          if (!signal.aborted) throw new SnapshotChangedError();
+          return null;
+        } finally {
+          if (queue.clock.inFlight) queue.clock = finishRead(queue.clock, null);
+        }
+      });
+    } catch (caught) {
+      if (!isAborted(caught) && currentRun.current === selectedRun)
+        setError(errorMessage(caught));
+      return null;
+    }
+  }, [loadArtifacts, loadEvents, selectedRun]);
+
+  const refresh = useCallback(async () => {
+    const owner = queueOwner.current;
+    if (owner?.id !== selectedRun) return null;
+    owner.queue.invalidate();
+    const run = await requestMonitor();
+    void loadArtifacts(0, "refresh").catch((caught: unknown) => {
+      if (!isAborted(caught)) setError(errorMessage(caught));
+    });
+    return run;
+  }, [loadArtifacts, requestMonitor, selectedRun]);
+
+  useEffect(() => {
+    linkedId.current = selectedInteraction;
+    void requestMonitor();
+  }, [selectedInteraction, requestMonitor]);
 
   useEffect(() => {
     if (selectedRun) return;
@@ -401,13 +406,14 @@ export function useRunWorkspace({
   }, [loadHistory, selectedRun]);
 
   useEffect(() => {
-    let disposed = false;
     currentRun.current = selectedRun;
-    detailGeneration.current += 1;
     eventAfter.current = 0;
-    stateAfter.current = 0;
-    previousRunStatus.current = null;
+    persistedAfter.current = 0;
+    artifactAfter.current = 0;
+    streamComplete.current = false;
+    targets.current = { nodes: 200, interactions: 200 };
     setStreamRun(null);
+    setStreamState("connecting");
     setDetail(null);
     setSelectedStage(null);
     setRetrySettings(null);
@@ -420,168 +426,81 @@ export function useRunWorkspace({
     setArtifacts([]);
     setArtifactCursor(null);
     setEventCursor(null);
-    if (selectedRun === null) return;
-    let initialRun: RunDetail | null = null;
-    void refreshDetail(true, false)
-      .then((run) => {
-        initialRun = run;
-        summaryOnly.current = Boolean(run && TERMINAL_RUNS.has(run.status));
-        return loadEvents();
-      })
-      .then((history) => {
-        if (disposed) return;
-        // A step may finish between the state read and the history response.
-        // Publish history and state together so job reads start at one revision.
-        // Apply new events before the stream starts after their final ID.
-        setDetail(initialRun);
-        applyLiveUpdates(history);
-        setStreamRun(selectedRun);
-      })
-      .catch((caught: unknown) => {
-        if (!disposed) setError(errorMessage(caught));
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [applyLiveUpdates, loadEvents, refreshDetail, selectedRun]);
-
-  useEffect(() => {
-    if (detail === null || detail.id !== selectedRun) return;
-    const previous = previousRunStatus.current;
-    previousRunStatus.current = detail.status;
-    if (
-      previous !== null &&
-      TERMINAL_RUNS.has(previous) &&
-      (!TERMINAL_RUNS.has(detail.status) ||
-        (detail.status === "failed" &&
-          (detail.problem?.retry?.state === "scheduled" ||
-            PENDING_RECOVERY.has(detail.recovery?.current?.state ?? "")))) &&
-      streamState === "complete"
-    )
-      setStreamEpoch((value) => value + 1);
-  }, [detail, selectedRun, streamState]);
-
-  const streamActive =
-    detail?.id === selectedRun &&
-    (!TERMINAL_RUNS.has(detail.status) ||
-      detail.problem?.retry?.state === "scheduled" ||
-      PENDING_RECOVERY.has(detail.recovery?.current?.state ?? ""));
-  useEffect(() => {
-    if (selectedRun === null || streamRun !== selectedRun) return;
-    if (!streamActive) {
-      setStreamState("complete");
+    if (!selectedRun) {
+      queueOwner.current = null;
+      setReadQueue(null);
       return;
     }
+    const queue = new RunReadQueue(() => {
+      void requestMonitor();
+    });
+    queueOwner.current = { id: selectedRun, queue, initial: true };
+    setReadQueue(queue);
+    void requestMonitor();
+    void loadArtifacts(0, "replace").catch((caught: unknown) => {
+      if (!isAborted(caught) && currentRun.current === selectedRun)
+        setError(errorMessage(caught));
+    });
+    return () => queue.close();
+  }, [loadArtifacts, requestMonitor, selectedRun]);
+
+  useEffect(() => {
+    if (
+      !selectedRun ||
+      streamRun !== selectedRun ||
+      queueOwner.current?.id !== selectedRun ||
+      streamComplete.current
+    )
+      return;
+    const queue = queueOwner.current.queue;
     const source = new EventSource(
       `/api/runs/${encodeURIComponent(selectedRun)}/stream?since=${eventAfter.current}`,
     );
+    sourceRef.current = source;
     let incoming: RunEvent[] = [];
     let frame: number | null = null;
     let disposed = false;
-    let completionCheck: Promise<void> | null = null;
-    const checkCompletion = () => {
-      if (completionCheck !== null) return;
-      // A replayed terminal event may precede a retry. Confirm current state
-      // before closing, including when the server ends a terminal stream.
-      invalidateRunReads();
-      const generation = detailGeneration.current;
-      completionCheck = Promise.all([
-        refreshDetail(true, false),
-        loadEvents(eventAfter.current),
-      ])
-        .then(([run, history]) => {
-          if (
-            currentRun.current !== selectedRun ||
-            generation !== detailGeneration.current ||
-            run === null
-          )
-            return;
-          // A terminal event may already have disposed this stream effect.
-          // Finish reconciling the same run and keep previously loaded pages.
-          const latest = history
-            .filter((event) => event.id > run.event_cursor)
-            .reduce<RunDetail | null>(applyStateEvent, run);
-          if (latest === null) return;
-          const loadedScopes = new Set(
-            run.nodes.map((node) => node.scope_path),
-          );
-          setDetail((current) =>
-            history
-              .filter(
-                (event) =>
-                  event.type.startsWith("node.") &&
-                  typeof event.payload.scope_path === "string" &&
-                  !loadedScopes.has(event.payload.scope_path),
-              )
-              .reduce<RunDetail | null>(applyStateEvent, {
-                ...latest,
-                nodes: mergeRecords(current?.nodes ?? [], latest.nodes),
-              }),
-          );
-          if (
-            TERMINAL_RUNS.has(latest.status) &&
-            latest.problem?.retry?.state !== "scheduled" &&
-            !PENDING_RECOVERY.has(latest.recovery?.current?.state ?? "")
-          ) {
-            source.close();
-            setStreamState("complete");
-          }
-        })
-        .catch((caught: unknown) => {
-          if (!disposed) setError(errorMessage(caught));
-        })
-        .finally(() => {
-          completionCheck = null;
-        });
-    };
+    let connected = false;
     const flush = () => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
       const batch = incoming;
       incoming = [];
-      if (batch.length === 0) return;
-      setEvents((current) => mergeEvents(current, batch));
-      applyLiveUpdates(batch);
-      if (
-        batch.some(
-          (item) =>
-            item.id > stateAfter.current &&
-            (item.type.startsWith("run.retry_") ||
-              item.type.startsWith("run.recovery_") ||
-              (item.type.startsWith("run.") &&
-                typeof item.payload.status === "string" &&
-                TERMINAL_RUNS.has(item.payload.status))),
-        )
-      )
-        checkCompletion();
+      if (batch.length && currentRun.current === selectedRun)
+        setEvents((current) => mergeEvents(current, batch));
     };
+    flushRef.current = flush;
     setStreamState("connecting");
-    source.onopen = () => setStreamState("live");
+    source.onopen = () => {
+      setStreamState("live");
+      // The first connection replays from the accepted history cursor.
+      // Reconnects must also recover state when their event tail is missing.
+      if (connected) void requestMonitor();
+      connected = true;
+    };
     const receive = (event: Event) => {
+      if (disposed) return;
       if (!(event instanceof MessageEvent)) {
         flush();
         setStreamState("reconnecting");
-        checkCompletion();
+        void requestMonitor();
         return;
       }
       try {
         const item = JSON.parse(event.data) as RunEvent;
         if (item.version !== 1) return;
         eventAfter.current = Math.max(eventAfter.current, item.id);
-        if (incoming.at(-1)?.id === item.id)
-          incoming[incoming.length - 1] = item;
-        else incoming.push(item);
-        // Publish one ordered batch per paint instead of copying/sorting the
-        // growing history for each replayed event.
+        incoming.push(item);
         if (frame === null) frame = requestAnimationFrame(flush);
-        const status = item.payload.status;
-        if (
-          item.id > stateAfter.current &&
-          item.type.startsWith("run.") &&
-          typeof status === "string" &&
-          TERMINAL_RUNS.has(status)
-        ) {
-          flush();
+        if (queue.observe(item)) {
+          attentionChanged();
+          void requestMonitor();
+        }
+        if (item.type === "artifact.preserved") {
+          artifactAfter.current = Math.max(artifactAfter.current, item.id);
+          void loadArtifacts(0, "refresh").catch((caught: unknown) => {
+            if (!isAborted(caught)) setError(errorMessage(caught));
+          });
         }
       } catch {
         setError("Relay received an invalid event frame.");
@@ -591,19 +510,12 @@ export function useRunWorkspace({
     source.addEventListener("error", receive);
     return () => {
       disposed = true;
-      if (frame !== null) cancelAnimationFrame(frame);
+      flush();
       source.close();
+      if (sourceRef.current === source) sourceRef.current = null;
+      if (flushRef.current === flush) flushRef.current = null;
     };
-  }, [
-    applyLiveUpdates,
-    invalidateRunReads,
-    loadEvents,
-    refreshDetail,
-    selectedRun,
-    streamEpoch,
-    streamRun,
-    streamActive,
-  ]);
+  }, [loadArtifacts, requestMonitor, selectedRun, streamEpoch, streamRun]);
 
   async function configureRecovery(enabled: boolean) {
     if (selectedRun === null) return;
@@ -613,7 +525,7 @@ export function useRunWorkspace({
         method: "POST",
         body: JSON.stringify({ enabled, idempotency_key: crypto.randomUUID() }),
       });
-      await refreshDetail();
+      await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -629,7 +541,7 @@ export function useRunWorkspace({
         method: "POST",
         body: JSON.stringify({ paused, idempotency_key: crypto.randomUUID() }),
       });
-      await Promise.all([refreshDetail(), loadHistory()]);
+      await Promise.all([refresh(), loadHistory()]);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -650,7 +562,7 @@ export function useRunWorkspace({
         ...options,
       }),
     });
-    await refreshDetail();
+    await refresh();
   }
 
   async function cancelRun() {
@@ -663,7 +575,7 @@ export function useRunWorkspace({
           body: JSON.stringify({ idempotency_key: crypto.randomUUID() }),
         },
       );
-      await refreshDetail();
+      await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -747,9 +659,8 @@ export function useRunWorkspace({
           }),
         },
       );
-      previousRunStatus.current = null;
       setStreamEpoch((value) => value + 1);
-      await refreshDetail();
+      await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
       throw caught;
@@ -761,13 +672,13 @@ export function useRunWorkspace({
     // latest attempt and configuration finish loading.
     setRefreshing(true);
     try {
-      await Promise.all([loadHistory(), refreshDetail(true)]);
+      await Promise.all([loadHistory(), refresh()]);
       const history = await loadEvents(eventAfter.current);
-      applyLiveUpdates(history);
+      for (const event of history) queueOwner.current?.queue.observe(event);
+      await requestMonitor();
       // Another owner client may have retried after this terminal stream closed.
       // Reopen from the retained cursor so its new attempt updates remain visible.
       if (selectedRun !== null) {
-        previousRunStatus.current = null;
         setStreamEpoch((value) => value + 1);
       }
     } catch (caught) {
@@ -787,7 +698,8 @@ export function useRunWorkspace({
   async function loadMoreNodes() {
     if (nodeCursor === null) return;
     try {
-      await loadDetailCollection("nodes", nodeCursor, "append");
+      targets.current.nodes += 200;
+      await requestMonitor();
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -796,7 +708,8 @@ export function useRunWorkspace({
   async function loadMoreInteractions() {
     if (interactionCursor === null) return;
     try {
-      await loadDetailCollection("interactions", interactionCursor, "append");
+      targets.current.interactions += 200;
+      await requestMonitor();
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -959,7 +872,8 @@ export function useRunWorkspace({
     selectedInteraction,
     interactionCursor,
     loadMoreInteractions,
-    refreshDetail,
+    refreshDetail: refresh,
+    readQueue,
     now,
     summaryMessage,
     linkedRequest,

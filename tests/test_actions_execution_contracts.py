@@ -56,7 +56,12 @@ jobs:
     NodeAttempt.objects.filter(node_run__run_id=run_id).update(
         heartbeat_at=timezone.now() - timedelta(days=1)
     )
-    assert engine.store.reap_stale_attempts(orderly_shutdown=False).worker_lost == 0
+    from relay.execution.reconcile import reconcile_once
+
+    assert (
+        reconcile_once(engine.store, lambda _: None, orderly_shutdown=False).attempts.worker_lost
+        == 0
+    )
     assert answer_wait(engine, run_id) == "accepted"
     assert Run.objects.get(pk=run_id).status == "succeeded"
     assert (

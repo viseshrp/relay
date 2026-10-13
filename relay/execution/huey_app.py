@@ -14,6 +14,7 @@ import django
 from huey import SqliteHuey, signals
 
 from relay.constants import DB_BUSY_TIMEOUT_MS, RECONCILE_INTERVAL_SECONDS
+from relay.errors import log_persistence_failure
 from relay.paths import artifacts_dir, data_dir, huey_database_path, shutdown_marker_path
 
 from .dispatch import set_dispatch_notifier
@@ -24,16 +25,21 @@ from .scheduler import SchedulingChange, SchedulingStore, dispatch_ready_nodes
 LOGGER = logging.getLogger(__name__)
 _SCHEDULE_GUARD: LockType = threading.Lock()
 _SCHEDULE_CURSOR: int | None = None
+_DELIVERY_CURSOR: int | None = None
 
 
 class ActiveSchedulingStore(SchedulingStore, Protocol):
-    """Scheduler adapter that can enumerate the bounded active-run set."""
+    """Scheduler adapter that enumerates every durable active run at startup."""
 
     def active_run_ids(self) -> tuple[str, ...]: ...
 
     def latest_event_id(self) -> int: ...
 
     def scheduling_changes(self, after: int) -> tuple[int, tuple[SchedulingChange, ...]]: ...
+
+    def delivery_changes(self, after: int) -> tuple[int, tuple[str, ...]]: ...
+
+    def pending_dispatch_tokens(self, run_id: str) -> tuple[str, ...]: ...
 
 
 def _database_path() -> Path:
@@ -80,14 +86,18 @@ def run_node_attempt(claim_token: str) -> None:
 
     store = DjangoExecutionStore()
     set_dispatch_notifier(enqueue_claim)
-    run_claim_token(
-        store,
-        claim_token,
-        _worker_id(),
-        _executors(),
-        artifact_root=artifacts_dir(create=True),
-    )
-    _advance_changed_runs(store)
+    try:
+        run_claim_token(
+            store,
+            claim_token,
+            _worker_id(),
+            _executors(),
+            artifact_root=artifacts_dir(create=True),
+        )
+        _advance_changed_runs(store)
+    except Exception as error:
+        log_persistence_failure(LOGGER, error, claim_token=claim_token)
+        raise
 
 
 def enqueue_claim(claim_token: str) -> object:
@@ -97,12 +107,27 @@ def enqueue_claim(claim_token: str) -> object:
 
 def _advance_changed_runs(store: ActiveSchedulingStore) -> None:
     """Initialize at consumer startup, then follow committed node changes."""
-    global _SCHEDULE_CURSOR
+    global _SCHEDULE_CURSOR, _DELIVERY_CURSOR
     with _SCHEDULE_GUARD:
+        delivered: set[str] = set()
+
+        def deliver(token: str) -> object:
+            if token in delivered:
+                return None
+            result = enqueue_claim(token)
+            delivered.add(token)
+            return result
+
+        if _DELIVERY_CURSOR is None:
+            _DELIVERY_CURSOR = store.latest_event_id()
+            for run_id in store.active_run_ids():
+                for token in store.pending_dispatch_tokens(run_id):
+                    deliver(token)
+                    store.mark_dispatch_enqueued(token)
         if _SCHEDULE_CURSOR is None:
             cursor = store.latest_event_id()
             for run_id in store.active_run_ids():
-                dispatch_ready_nodes(store, run_id, enqueue_claim)
+                dispatch_ready_nodes(store, run_id, deliver)
             _SCHEDULE_CURSOR = cursor
         cursor, changes = store.scheduling_changes(_SCHEDULE_CURSOR)
         affected = {}
@@ -117,9 +142,17 @@ def _advance_changed_runs(store: ActiveSchedulingStore) -> None:
                     existing.append(change.node_id)
         for run_id, nodes in affected.items():
             dispatch_ready_nodes(
-                store, run_id, enqueue_claim, tuple(nodes) if nodes is not None else None
+                store, run_id, deliver, tuple(nodes) if nodes is not None else None
             )
         _SCHEDULE_CURSOR = cursor
+        # A suspended scope may already own an attempt. Its committed delivery
+        # event must reach Huey even when the web process has no queue notifier.
+        cursor, tokens = store.delivery_changes(_DELIVERY_CURSOR)
+        for token in tokens:
+            if token not in delivered:
+                deliver(token)
+                store.mark_dispatch_enqueued(token)
+        _DELIVERY_CURSOR = cursor
 
 
 def reconcile_dispatch() -> ReconcileResult:
@@ -146,8 +179,9 @@ def reconciliation_loop(stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             reconcile_dispatch()
-        except Exception:
+        except Exception as error:
             # Reconciliation is retried at the next bounded interval; attempts are not.
+            log_persistence_failure(LOGGER, error)
             LOGGER.exception("Relay reconciliation pass failed")
         stop.wait(RECONCILE_INTERVAL_SECONDS)
 

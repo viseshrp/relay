@@ -47,7 +47,6 @@ const steps: {
   { topic: "login", section: "Server and account" },
   { topic: "host", section: "Server and account" },
   { topic: "port", section: "Server and account" },
-  { topic: "workers", section: "Server and account" },
   { topic: "notifications", section: "Notifications" },
   { topic: "storage", section: "Storage" },
   { topic: "onboarding", section: "Welcome and guided tour" },

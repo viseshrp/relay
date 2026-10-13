@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from typing import ClassVar
 
 from . import constants
@@ -215,6 +216,30 @@ class PersistenceError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_SERVICE_UNAVAILABLE
 
 
+def persistence_cause(error: BaseException) -> BaseException | None:
+    """Find a persistence wrapper's retained cause, including suppressed chaining."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        cause = current.__cause__ or current.__context__
+        if isinstance(current, PersistenceError) and cause is not None:
+            return cause
+        current = cause
+    return None
+
+
+def log_persistence_failure(logger: logging.Logger, error: BaseException, **context: str) -> None:
+    """Keep native diagnostics in the process log, outside public error envelopes."""
+    cause = persistence_cause(error)
+    if cause is not None:
+        logger.warning(
+            "Relay persistence failure",
+            exc_info=(type(cause), cause, cause.__traceback__),
+            extra=context,
+        )
+
+
 __all__ = [
     "AgentAuthError",
     "AgentDiscoveryError",
@@ -243,6 +268,8 @@ __all__ = [
     "SchemaVersionError",
     "WorkflowValidationError",
     "WorktreeError",
+    "log_persistence_failure",
+    "persistence_cause",
 ]
 
 

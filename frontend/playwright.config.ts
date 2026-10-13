@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 const port = process.env.PLAYWRIGHT_PORT ?? "4174";
 
 export default defineConfig({
+  metadata: { relayCheckout: process.env.RELAY_TEST_CHECKOUT_SHA },
   testDir: "./e2e",
   testIgnore: ["optional-login.spec.ts", "visual-regression.spec.ts"],
   snapshotPathTemplate: "{testDir}/baselines/{platform}/{arg}{ext}",

@@ -197,9 +197,9 @@ work and captured instructions stay saved. See
 
 ## Architecture
 
-Relay owns workflow state in SQLite. Huey dispatches eligible attempts, while
-Django and Uvicorn serve HTTP and replayable server-sent events with optional
-owner login.
+Relay owns workflow state in SQLite. One worker schedules committed changes
+and runs eligible attempts through a single Huey execution thread. Django and
+Uvicorn serve HTTP and replayable server-sent events with optional owner login.
 React Flow and a synchronized YAML editor provide the browser authoring
 surface. Coding agents run through Agent Client Protocol adapters, except for
 Antigravity's documented native headless interface.

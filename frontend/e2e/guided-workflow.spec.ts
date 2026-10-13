@@ -425,15 +425,15 @@ test("a review completed during initial loading updates progress before the stre
     capturedDetails = resolve;
   });
   let snapshots = 0;
-  await page.route(`**/api/runs/${runId}?collection=*`, async (route) => {
-    if (snapshots >= 2) {
+  await page.route(`**/api/runs/${runId}/monitor?*`, async (route) => {
+    if (snapshots >= 1) {
       await route.continue();
       return;
     }
     const response = await route.fetch();
     const body = await response.json();
     snapshots += 1;
-    if (snapshots === 2) capturedDetails();
+    if (snapshots === 1) capturedDetails();
     await released;
     await route.fulfill({ response, json: body });
   });

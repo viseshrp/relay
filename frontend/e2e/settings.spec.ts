@@ -255,9 +255,9 @@ test("server settings state their restart requirement and preserve current acces
   await panel
     .getByRole("spinbutton", { name: "Port", exact: true })
     .fill("8123");
-  await panel
-    .getByRole("spinbutton", { name: "Workers", exact: true })
-    .fill("3");
+  await expect(
+    panel.getByRole("spinbutton", { name: "Workers", exact: true }),
+  ).toHaveCount(0);
   await panel
     .getByRole("switch", { name: "Require login", exact: true })
     .uncheck();

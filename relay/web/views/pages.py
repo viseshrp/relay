@@ -396,6 +396,32 @@ def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def run_monitor(request: HttpRequest, run_id: str) -> HttpResponse:
+    target = request.GET.get("interaction")
+    return JsonResponse(
+        DjangoReadStore().monitor(
+            canonical_uuid(run_id, resource="run"),
+            nodes_since=_nonnegative_int(
+                request.GET.get("nodes_since"),
+                field="nodes_since",
+                default=0,
+                maximum=DATABASE_INTEGER_MAX,
+            ),
+            interactions_since=_nonnegative_int(
+                request.GET.get("interactions_since"),
+                field="interactions_since",
+                default=0,
+                maximum=DATABASE_INTEGER_MAX,
+            ),
+            limit=_page_limit(request),
+            interaction_id=canonical_record_id(target, resource="interaction") if target else None,
+        )
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def run_events(request: HttpRequest, run_id: str) -> HttpResponse:
     run_id = canonical_uuid(run_id, resource="run")
     since, limit = _page_parameters(request)

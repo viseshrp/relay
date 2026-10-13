@@ -1,4 +1,4 @@
-"""Bounded recovery of unstarted delivery, leased controls, and lost workers."""
+"""Bounded delivery and control repair; worker loss belongs to the supervisor."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class AttemptRecovery:
-    """Attempt rows reconciled from heartbeat and shutdown evidence."""
+    """Compatibility counters; periodic repair cannot recover worker attempts."""
 
     interrupted: int
     worker_lost: int
@@ -47,8 +47,6 @@ class ReconcileStore(Protocol):
 
     def expire_scope_waits(self) -> int: ...
 
-    def reap_stale_attempts(self, *, orderly_shutdown: bool) -> AttemptRecovery: ...
-
     def resume_usage_retries(self) -> int: ...
 
     def resume_automatic_retries(self) -> int: ...
@@ -77,7 +75,9 @@ def reconcile_once(
     expired_waits = store.expire_human_waits()
     store.expire_scope_waits()
     controls = store.recover_control_claims()
-    attempts = store.reap_stale_attempts(orderly_shutdown=orderly_shutdown)
+    # Sleep, a clock jump, or lock contention can age a live worker's heartbeat.
+    # Only the supervisor may release admission after proving process exit.
+    attempts = AttemptRecovery(0, 0)
     usage_retries = 0 if orderly_shutdown else store.resume_usage_retries()
     automatic_retries = 0 if orderly_shutdown else store.resume_automatic_retries()
     if not orderly_shutdown:

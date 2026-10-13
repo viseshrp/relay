@@ -33,7 +33,11 @@ function isErrorBody(value: unknown): value is ApiErrorBody {
   return typeof record.code === "string" && typeof record.message === "string";
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function api<T>(
+  path: string,
+  options: RequestInit & { share?: boolean } = {},
+): Promise<T> {
+  const { share = true, ...init } = options;
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
   if (method !== "GET" && method !== "HEAD") {
@@ -60,12 +64,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     return (await response.json()) as T;
   }
-  if (method === "GET")
+  if (method === "GET") {
+    if (!share) return read(init.signal);
     return sharedRead(
       `${path}:${JSON.stringify([...headers])}:${init.cache ?? "default"}`,
       init.signal,
       read,
     );
+  }
   invalidateReads();
   return read(init.signal);
 }

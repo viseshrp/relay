@@ -70,6 +70,7 @@ from relay.execution.dispatch import (
     notify_dispatch,
     release_admission,
 )
+from relay.execution.events import OUTPUT_EVENT_TYPES
 from relay.execution.launch_request import FrozenLaunchBindings, LaunchRequest
 from relay.execution.locks import decide_admission
 from relay.execution.machine import (
@@ -79,7 +80,6 @@ from relay.execution.machine import (
     transition_run,
 )
 from relay.execution.process_identity import ProcessIdentity, process_identity
-from relay.execution.reconcile import AttemptRecovery
 from relay.execution.relaunch import PreviousRunInputs
 from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import (
@@ -141,6 +141,8 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.web.db_retry import retry_database_busy
+from relay.web.db_routing import read_snapshot
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
@@ -1224,7 +1226,7 @@ def _bounded_page(
     byte_count = 0
     for row in rows[:limit]:
         record = serialize(row)
-        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(record).encode("utf-8")
         if records and byte_count + len(encoded) > byte_budget:
             more = True
             break
@@ -1284,7 +1286,7 @@ class DjangoReadStore:
             raise ConfigError(message)
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 runs = Run.objects.select_related("project").annotate(
                     read_waiting_count=models.Count(
                         "interactions", filter=_waiting_filter("interactions__")
@@ -1462,7 +1464,7 @@ class DjangoReadStore:
     def attention(self, since: int | None) -> dict[str, object]:
         """Read owner requests and new completion facts without event payloads."""
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 pending = HumanInteraction.objects.filter(_waiting_filter())
                 waiting_runs = pending.values_list("run_id", flat=True).distinct()
                 latest = RunEvent.objects.order_by("-id").first()
@@ -1645,6 +1647,128 @@ class DjangoReadStore:
         else:
             return records, next_value
 
+    @staticmethod
+    def _monitor_run(run_id: str) -> Run:
+        events = RunEvent.objects.filter(run_id=run_id).order_by("-id")
+        return _require_run(
+            Run.objects.select_related("snapshot", "project")
+            .annotate(
+                read_waiting_count=models.Count(
+                    "interactions",
+                    filter=Q(
+                        interactions__status="pending", interactions__attempt__status="waiting"
+                    ),
+                ),
+                read_event_cursor=Coalesce(
+                    models.Subquery(events.values("id")[:1]),
+                    0,
+                    output_field=models.BigIntegerField(),
+                ),
+                read_state_cursor=Coalesce(
+                    models.Subquery(events.exclude(type__in=OUTPUT_EVENT_TYPES).values("id")[:1]),
+                    0,
+                    output_field=models.BigIntegerField(),
+                ),
+            )
+            .filter(pk=run_id)
+            .first(),
+            run_id,
+        )
+
+    @staticmethod
+    def _run_metadata(run: Run) -> dict[str, object]:
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        result = _run_record(run)
+        name = _mapping(snapshot, "resolved_definition").get("name")
+        result["workflow_name"] = (
+            name
+            if isinstance(name, str) and name
+            else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
+        ) or _string(run, "workflow_key")
+        result["working_folder"] = _string(run, "worktree_path")
+        result["problem"] = _run_problem(run)
+        result["recovery"] = _run_recovery(run)
+        result["event_cursor"] = _integer(run, "read_event_cursor")
+        result["project"] = asdict(_record(_related(run, "project", Project)))
+        result["snapshot"] = {
+            "relay_version": _string(snapshot, "relay_version"),
+            "runtime_versions": _mapping(snapshot, "runtime_versions"),
+            "hashes": _mapping(snapshot, "hashes"),
+            "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
+        }
+        result["state_cursor"] = _integer(run, "read_state_cursor")
+        return result
+
+    @staticmethod
+    def _node_records(
+        run: Run, since: int, limit: int, byte_budget: int
+    ) -> tuple[list[dict[str, object]], int | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        repair_groups = _repair_groups(run)
+        # Legacy exhaustion sentinels belong to the explicitly grouped
+        # repair loop. Their execution and frozen definitions stay intact.
+        for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
+            target = _mapping(coordinator, "frozen_def").get("exhausted")
+            if isinstance(target, str) and target:
+                repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
+                    repair_groups[_string(coordinator, "scope_path")]
+                )
+        nodes = list(
+            NodeRun.objects.filter(run=run, pk__gt=since)
+            .annotate(
+                has_attempt=models.Exists(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                ),
+                latest_started_at=models.Subquery(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                    .order_by("-attempt_number")
+                    .values("started_at")[:1]
+                ),
+                latest_ended_at=models.Subquery(
+                    NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
+                    .order_by("-attempt_number")
+                    .values("ended_at")[:1]
+                ),
+            )
+            .order_by("pk")[: bounded + 1]
+        )
+        records, more = _bounded_page(
+            nodes,
+            bounded,
+            lambda node: _node_record(
+                node,
+                snapshot,
+                dispatch_paused=_boolean(run, "dispatch_paused"),
+                repair_groups=repair_groups,
+            ),
+            byte_budget=byte_budget,
+        )
+        return records, int(str(records[-1]["id"])) if more and records else None
+
+    @staticmethod
+    def _interaction_records(
+        run: Run,
+        since: int,
+        limit: int,
+        pending_only: bool,
+        interaction_id: str | None,
+        byte_budget: int,
+    ) -> tuple[list[dict[str, object]], int | None]:
+        bounded = min(max(limit, 1), API_MAX_PAGE)
+        query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
+            run=run, pk__gt=since
+        )
+        if pending_only:
+            query = query.filter(status=InteractionStatus.PENDING.value)
+        if interaction_id is not None:
+            query = query.filter(pk=interaction_id)
+        interactions = list(query.order_by("pk")[: bounded + 1])
+        records, more = _bounded_page(
+            interactions, bounded, _interaction_record, byte_budget=byte_budget
+        )
+        return records, int(str(records[-1]["id"])) if more and records else None
+
     def run_detail(
         self,
         run_id: str,
@@ -1655,114 +1779,70 @@ class DjangoReadStore:
         pending_only: bool = False,
         interaction_id: str | None = None,
     ) -> tuple[dict[str, object], int | None]:
-        """Read one bounded node or interaction page plus stable run metadata."""
-        bounded = min(max(limit, 1), API_MAX_PAGE)
+        """Preserve the original collection endpoint using read-only snapshots."""
         try:
-            # Read the run and its cursor in one statement. A retry committed
-            # before this read cannot leave its old terminal event above the cursor.
-            latest_event = RunEvent.objects.filter(run_id=run_id).order_by("-id").values("id")[:1]
-            run = _require_run(
-                Run.objects.select_related("snapshot", "project")
-                .annotate(
-                    read_waiting_count=models.Count(
-                        "interactions",
-                        filter=models.Q(
-                            interactions__status=InteractionStatus.PENDING.value,
-                            interactions__attempt__status=AttemptStatus.WAITING.value,
-                        ),
-                    ),
-                    read_event_cursor=Coalesce(
-                        models.Subquery(latest_event), 0, output_field=models.BigIntegerField()
-                    ),
-                )
-                .filter(pk=run_id)
-                .first(),
-                run_id,
-            )
-            snapshot = _related(run, "snapshot", RunSnapshot)
-            result = _run_record(run)
-            name = _mapping(snapshot, "resolved_definition").get("name")
-            result["workflow_name"] = (
-                name
-                if isinstance(name, str) and name
-                else _captured_workflow_name(_string(snapshot, "workflow_yaml"))
-            ) or _string(run, "workflow_key")
-            result["working_folder"] = _string(run, "worktree_path")
-            result["problem"] = _run_problem(run)
-            result["recovery"] = _run_recovery(run)
-            result["event_cursor"] = _integer(run, "read_event_cursor")
-            result["project"] = asdict(_record(_related(run, "project", Project)))
-            result["snapshot"] = {
-                "relay_version": _string(snapshot, "relay_version"),
-                "runtime_versions": _mapping(snapshot, "runtime_versions"),
-                "hashes": _mapping(snapshot, "hashes"),
-                "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
-            }
-            result["nodes"] = []
-            result["interactions"] = []
-            # Reserve half the response ceiling for run and snapshot metadata.
-            byte_budget = API_MAX_PAGE_BYTES // 2
-            if collection == "nodes":
-                repair_groups = _repair_groups(run)
-                # Legacy exhaustion sentinels belong to the explicitly grouped
-                # repair loop. Their execution and frozen definitions stay intact.
-                for coordinator in NodeRun.objects.filter(run=run, scope_path__in=repair_groups):
-                    target = _mapping(coordinator, "frozen_def").get("exhausted")
-                    if isinstance(target, str) and target:
-                        repair_groups[sibling_scope(_string(coordinator, "scope_path"), target)] = (
-                            repair_groups[_string(coordinator, "scope_path")]
-                        )
-                nodes = list(
-                    NodeRun.objects.filter(run=run, pk__gt=since)
-                    .annotate(
-                        has_attempt=models.Exists(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                        ),
-                        latest_started_at=models.Subquery(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                            .order_by("-attempt_number")
-                            .values("started_at")[:1]
-                        ),
-                        latest_ended_at=models.Subquery(
-                            NodeAttempt.objects.filter(node_run_id=models.OuterRef("pk"))
-                            .order_by("-attempt_number")
-                            .values("ended_at")[:1]
-                        ),
+            with read_snapshot():
+                run = self._monitor_run(run_id)
+                result = {**self._run_metadata(run), "nodes": [], "interactions": []}
+                if collection == "nodes":
+                    rows, cursor = self._node_records(run, since, limit, API_MAX_PAGE_BYTES // 2)
+                else:
+                    rows, cursor = self._interaction_records(
+                        run, since, limit, pending_only, interaction_id, API_MAX_PAGE_BYTES // 2
                     )
-                    .order_by("pk")[: bounded + 1]
-                )
-                records, more = _bounded_page(
-                    nodes,
-                    bounded,
-                    lambda node: _node_record(
-                        node,
-                        snapshot,
-                        dispatch_paused=_boolean(run, "dispatch_paused"),
-                        repair_groups=repair_groups,
-                    ),
-                    byte_budget=byte_budget,
-                )
-            else:
-                query = HumanInteraction.objects.select_related("node_run", "attempt").filter(
-                    run=run, pk__gt=since
-                )
-                if pending_only:
-                    query = query.filter(status=InteractionStatus.PENDING.value)
-                if interaction_id is not None:
-                    query = query.filter(pk=interaction_id)
-                interactions = list(query.order_by("pk")[: bounded + 1])
-                records, more = _bounded_page(
-                    interactions, bounded, _interaction_record, byte_budget=byte_budget
-                )
-            result[collection] = records
-            next_value = int(str(records[-1]["id"])) if more and records else None
-        except (ProjectDiscoveryError, PersistenceError):
-            raise
+                result[collection] = rows
+                return result, cursor
         except DatabaseError:
             message = "Relay could not read run detail."
             raise PersistenceError(message, context={"run": run_id}) from None
-        else:
-            return result, next_value
+
+    def monitor(
+        self,
+        run_id: str,
+        *,
+        nodes_since: int = 0,
+        interactions_since: int = 0,
+        limit: int = API_MAX_PAGE,
+        interaction_id: str | None = None,
+    ) -> dict[str, object]:
+        """Read metadata, pages, and a linked request from one database version."""
+        try:
+            with read_snapshot():
+                run = self._monitor_run(run_id)
+                linked = (
+                    HumanInteraction.objects.select_related("node_run", "attempt")
+                    .filter(run=run, pk=interaction_id)
+                    .first()
+                    if interaction_id is not None
+                    else None
+                )
+                result: dict[str, object] = {
+                    "run": self._run_metadata(run),
+                    "nodes": [],
+                    "interactions": [],
+                    "nodes_next": None,
+                    "interactions_next": None,
+                    "linked_interaction": _interaction_record(linked) if linked else None,
+                    "event_cursor": _integer(run, "read_event_cursor"),
+                    "state_cursor": _integer(run, "read_state_cursor"),
+                }
+                budget = API_MAX_PAGE_BYTES - len(json.dumps(result).encode("utf-8")) - 2048
+                if budget < 0:
+                    message = "Run metadata exceeds the monitor response limit."
+                    raise PersistenceError(message, context={"run": run_id})
+                result["nodes"], result["nodes_next"] = self._node_records(
+                    run, nodes_since, limit, budget // 2
+                )
+                result["interactions"], result["interactions_next"] = self._interaction_records(
+                    run, interactions_since, limit, True, None, budget // 2
+                )
+                if len(json.dumps(result).encode("utf-8")) > API_MAX_PAGE_BYTES:
+                    message = "A monitor record exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id})
+                return result
+        except DatabaseError:
+            message = "Relay could not read the run monitor."
+            raise PersistenceError(message, context={"run": run_id}) from None
 
     def page_events(
         self,
@@ -1820,7 +1900,7 @@ class DjangoReadStore:
         parse_scope_path(scope_path)
         bounded = min(max(limit, 1), API_MAX_PAGE)
         try:
-            with transaction.atomic():
+            with read_snapshot():
                 run = _require_run(
                     Run.objects.select_related("snapshot").filter(pk=run_id).first(), run_id
                 )
@@ -1861,8 +1941,18 @@ class DjangoReadStore:
                         : bounded + 1
                     ]
                 )
-                records, more = _bounded_page(attempts, bounded, _job_attempt_record)
+                event_cursor = (
+                    RunEvent.objects.filter(run=run).aggregate(value=Max("id"))["value"] or 0
+                )
+                state_cursor = (
+                    RunEvent.objects.filter(run=run)
+                    .exclude(type__in=OUTPUT_EVENT_TYPES)
+                    .aggregate(value=Max("id"))["value"]
+                    or 0
+                )
                 result = {
+                    "event_cursor": event_cursor,
+                    "state_cursor": state_cursor,
                     "scope_path": scope_path,
                     "working_folder": _string(run, "worktree_path"),
                     "node_type": _string(node, "node_type"),
@@ -1886,7 +1976,7 @@ class DjangoReadStore:
                     ),
                     "instructions": instructions,
                     "outputs": _mapping(node, "outputs"),
-                    "attempts": records,
+                    "attempts": [],
                     "latest_attempt": _job_attempt_record(latest)
                     if (
                         latest := NodeAttempt.objects.filter(node_run=node)
@@ -1896,9 +1986,25 @@ class DjangoReadStore:
                     is not None
                     else None,
                 }
+                budget = (
+                    API_MAX_PAGE_BYTES
+                    - len(json.dumps({"job": result, "next": None}).encode("utf-8"))
+                    - 2048
+                )
+                if budget < 0:
+                    message = "Job metadata exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id, "job": scope_path})
+                records, more = _bounded_page(
+                    attempts, bounded, _job_attempt_record, byte_budget=budget
+                )
+                result["attempts"] = records
                 next_value = int(str(records[-1]["id"])) if more and records else None
-        except (ProjectDiscoveryError, PersistenceError):
-            raise
+                if (
+                    len(json.dumps({"job": result, "next": next_value}).encode("utf-8"))
+                    > API_MAX_PAGE_BYTES
+                ):
+                    message = "A job record exceeds the response limit."
+                    raise PersistenceError(message, context={"run": run_id, "job": scope_path})
         except DatabaseError:
             message = "Relay could not read this job's attempts."
             raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
@@ -2053,7 +2159,7 @@ def _bounded_interaction_request(
     byte_count = len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     for option in options:
         record = dict(option)
-        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(record).encode("utf-8")
         # Each option is encoded once; later options add one JSON comma byte.
         added_bytes = len(encoded) + (1 if retained else 0)
         if byte_count + added_bytes > budget:
@@ -2383,6 +2489,7 @@ class DjangoExecutionStore(DjangoAgentStore):
 
         return freeze_bindings(project_id)
 
+    @retry_database_busy
     def create_pending_run(
         self,
         project_id: str,
@@ -2481,6 +2588,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not persist the pending run and immutable snapshot."
             raise PersistenceError(message, context={"run": run_id}) from None
 
+    @retry_database_busy
     def mark_run_started(
         self,
         run_id: str,
@@ -2643,6 +2751,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "run.started",
                         "run.rerun",
                         "run.resumed",
+                        "run.dispatch_changed",
                         "node.ready",
                         "node.succeeded",
                         "node.failed",
@@ -2671,8 +2780,59 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not read the scheduling cursor."
             raise PersistenceError(message) from None
 
+    def delivery_changes(self, after: int) -> tuple[int, tuple[str, ...]]:
+        """Read durable delivery intent, including resumed scopes with an attempt."""
+        try:
+            upper = self.latest_event_id()
+            events = list(
+                RunEvent.objects.filter(
+                    id__gt=after,
+                    id__lte=upper,
+                    type__in=("node.dispatched", "run.dispatch_changed"),
+                )
+                .order_by("id")
+                .values("id", "run_id", "node_run_id", "type")[:RECONCILE_MAX_ITEMS]
+            )
+            cursor = events[-1]["id"] if len(events) == RECONCILE_MAX_ITEMS else upper
+            if not events:
+                return cursor, ()
+            nodes = [row["node_run_id"] for row in events if row["type"] == "node.dispatched"]
+            runs = [row["run_id"] for row in events if row["type"] == "run.dispatch_changed"]
+            tokens = (
+                DispatchClaim.objects.filter(
+                    Q(node_run_id__in=nodes) | Q(node_run__run_id__in=runs),
+                    state=DispatchState.DISPATCHED.value,
+                    node_run__status=NodeStatus.DISPATCHED.value,
+                    node_run__run__dispatch_paused=False,
+                    node_run__run__status__in=(
+                        RunStatus.RUNNING.value,
+                        RunStatus.PAUSED_WAIT.value,
+                    ),
+                )
+                .order_by("created_at", "pk")
+                .values_list("claim_token", flat=True)
+            )
+            return int(cursor), tuple(tokens)
+        except DatabaseError:
+            message = "Relay could not read committed delivery intent."
+            raise PersistenceError(message) from None
+
     def settle_run(self, run_id: str) -> None:
         try:
+            status = Run.objects.values_list("status", flat=True).get(pk=run_id)
+            if status not in (
+                RunStatus.RUNNING.value,
+                RunStatus.PAUSED_WAIT.value,
+                RunStatus.CANCELING.value,
+            ):
+                return
+            if (
+                status != RunStatus.CANCELING.value
+                and NodeRun.objects.filter(run_id=run_id)
+                .exclude(status__in=tuple(item.value for item in TERMINAL_NODE_STATUSES))
+                .exists()
+            ):
+                return
             with transaction.atomic():
                 run = Run.objects.select_for_update().get(pk=run_id)
                 self._finish_run_if_terminal(run)
@@ -2689,7 +2849,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     status__in=(RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value)
                 )
                 .order_by("started_at", "pk")
-                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
+                .values_list("pk", flat=True)
             )
             return tuple(str(value) for value in values)
         except DatabaseError:
@@ -3303,10 +3463,11 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def mark_dispatch_enqueued(self, claim_token: str) -> None:
         try:
-            DispatchClaim.objects.filter(
-                claim_token=claim_token,
-                state=DispatchState.DISPATCHED.value,
-            ).update(enqueued_at=timezone.now())
+            with transaction.atomic():
+                DispatchClaim.objects.filter(
+                    claim_token=claim_token,
+                    state=DispatchState.DISPATCHED.value,
+                ).update(enqueued_at=timezone.now())
         except DatabaseError:
             message = "Relay could not record the Huey enqueue time."
             raise PersistenceError(message) from None
@@ -3583,32 +3744,49 @@ class DjangoExecutionStore(DjangoAgentStore):
 
     def mark_dispatch_consumed(self, claim_token: str) -> None:
         try:
-            DispatchClaim.objects.filter(
-                claim_token=claim_token,
-                state=DispatchState.CLAIMED.value,
-            ).update(state=DispatchState.CONSUMED.value, consumed_at=timezone.now())
+            with transaction.atomic():
+                DispatchClaim.objects.filter(
+                    claim_token=claim_token,
+                    state=DispatchState.CLAIMED.value,
+                ).update(state=DispatchState.CONSUMED.value, consumed_at=timezone.now())
         except DatabaseError:
             message = "Relay could not mark the dispatch claim consumed."
             raise PersistenceError(message) from None
 
-    def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool:
-        now = timezone.now()
+    def attempt_owned(self, attempt_id: str, worker_id: str) -> bool:
+        """Provider/command checks never reserve or renew SQLite's writer."""
         try:
-            updated = NodeAttempt.objects.filter(
+            return NodeAttempt.objects.filter(
                 pk=attempt_id,
                 worker_id=worker_id,
                 status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(heartbeat_at=now)
+            ).exists()
         except DatabaseError:
-            LOGGER.exception(
-                "Attempt heartbeat database update failed", extra={"attempt_id": attempt_id}
+            message = "Relay could not read the attempt's worker ownership."
+            raise PersistenceError(message, context={"node": attempt_id}) from None
+
+    def renew_attempts(self, owners: tuple[tuple[str, str], ...]) -> None:
+        """Renew each registered attempt and admission once per worker cycle."""
+        retry_database_busy(self._renew_attempts, budget=ATTEMPT_STALE_AFTER_SECONDS)(owners)
+
+    def _renew_attempts(self, owners: tuple[tuple[str, str], ...]) -> None:
+        try:
+            identity = models.Q(pk__in=[])
+            for attempt_id, worker_id in set(owners):
+                identity |= models.Q(pk=attempt_id, worker_id=worker_id)
+            active = NodeAttempt.objects.filter(
+                identity, status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value)
             )
-            message = "Relay could not update the attempt heartbeat."
+            if not owners or not active.exists():
+                return
+            with transaction.atomic():
+                ids = list(active.values_list("pk", flat=True))
+                now = timezone.now()
+                NodeAttempt.objects.filter(pk__in=ids).update(heartbeat_at=now)
+                RunLock.objects.filter(attempt_id__in=ids).update(heartbeat_at=now)
+        except DatabaseError:
+            message = "Relay could not renew the worker's active attempts."
             raise PersistenceError(message) from None
-        else:
-            if updated:
-                RunLock.objects.filter(attempt_id=attempt_id).update(heartbeat_at=now)
-            return updated == 1
 
     def owned_attempt_processes(self) -> tuple[tuple[str, ProcessIdentity], ...]:
         """Only identities recorded at spawn may authorize later escalation."""
@@ -3630,10 +3808,13 @@ class DjangoExecutionStore(DjangoAgentStore):
     def record_attempt_process(self, attempt_id: str, process_id: int | None) -> None:
         identity = process_identity(process_id) if process_id is not None else None
         try:
-            NodeAttempt.objects.filter(
-                pk=attempt_id,
-                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(process_pid=process_id, process_started=identity.started if identity else None)
+            with transaction.atomic():
+                NodeAttempt.objects.filter(
+                    pk=attempt_id,
+                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                ).update(
+                    process_pid=process_id, process_started=identity.started if identity else None
+                )
         except DatabaseError:
             message = "Relay could not record the attempt process."
             raise PersistenceError(message, context={"node": attempt_id}) from None
@@ -3650,16 +3831,17 @@ class DjangoExecutionStore(DjangoAgentStore):
         """Persist process/session correlation without changing attempt ownership."""
         identity = process_identity(process_id) if process_id is not None else None
         try:
-            NodeAttempt.objects.filter(
-                pk=attempt_id,
-                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(
-                process_pid=process_id,
-                process_started=identity.started if identity else None,
-                acp_session_id=session_id,
-                agent_version=agent_version,
-                config_ids=dict(config_ids),
-            )
+            with transaction.atomic():
+                NodeAttempt.objects.filter(
+                    pk=attempt_id,
+                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
+                ).update(
+                    process_pid=process_id,
+                    process_started=identity.started if identity else None,
+                    acp_session_id=session_id,
+                    agent_version=agent_version,
+                    config_ids=dict(config_ids),
+                )
         except DatabaseError:
             message = "Relay could not record the agent session."
             raise PersistenceError(message, context={"node": attempt_id}) from None
@@ -4887,6 +5069,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             AttemptStatus.WAITING.value,
         }
 
+    @retry_database_busy
     def submit_control(
         self,
         attempt_id: str,
@@ -4951,6 +5134,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not persist the control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
+    @retry_database_busy
     def claim_next_control(
         self,
         attempt_id: str,
@@ -4958,6 +5142,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         kinds: tuple[str, ...] | None = None,
     ) -> ClaimedControl | None:
         try:
+            candidates = ControlRequest.objects.filter(
+                attempt_id=attempt_id, state=ControlState.PENDING.value
+            )
+            if kinds is not None:
+                candidates = candidates.filter(kind__in=kinds)
+            # Include expired candidates so cleanup still runs; recheck all
+            # ownership, expiry and session predicates after acquiring the lock.
+            if not candidates.exists():
+                return None
             with transaction.atomic():
                 attempt = (
                     NodeAttempt.objects.select_for_update()
@@ -5008,6 +5201,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not claim the next control request."
             raise PersistenceError(message, context={"node": attempt_id}) from None
 
+    @retry_database_busy
     def apply_control(self, request_id: str, worker_id: str) -> bool:
         try:
             with transaction.atomic():
@@ -5110,15 +5304,35 @@ class DjangoExecutionStore(DjangoAgentStore):
             )
             for request_id in request_ids:
                 with transaction.atomic():
+                    now = timezone.now()
+                    cutoff = now - timedelta(seconds=CONTROL_CLAIM_STALE_AFTER_SECONDS)
                     request = (
                         ControlRequest.objects.select_for_update()
                         .select_related("attempt__node_run")
-                        .get(pk=request_id)
+                        .filter(
+                            pk=request_id,
+                            state__in=(ControlState.PENDING.value, ControlState.CLAIMED.value),
+                        )
+                        .filter(
+                            models.Q(expires_at__lte=now)
+                            | models.Q(
+                                state=ControlState.CLAIMED.value,
+                                claim_heartbeat_at__lte=cutoff,
+                            )
+                        )
+                        .first()
                     )
+                    if request is None:
+                        continue
                     attempt = _related(request, "attempt", NodeAttempt)
                     expired = request.expires_at <= now
                     heartbeat_fresh = attempt.heartbeat_at > cutoff
-                    if not expired and heartbeat_fresh and self._attempt_is_current(attempt):
+                    if (
+                        not expired
+                        and heartbeat_fresh
+                        and request.claim_owner == _string(attempt, "worker_id")
+                        and self._attempt_is_current(attempt)
+                    ):
                         # The owning session is alive; its lost mailbox lease is safe to replay.
                         control_transition = transition_control(
                             _string(request, "state"), "lease_recover"
@@ -5256,6 +5470,19 @@ class DjangoExecutionStore(DjangoAgentStore):
                     attempt = _related(interaction, "attempt", NodeAttempt)
                     node = _related(attempt, "node_run", NodeRun)
                     run = _related(node, "run", Run)
+                    _append_event(
+                        run,
+                        f"{_string(interaction, 'kind')}.expired",
+                        EventSource.SYSTEM,
+                        {
+                            "scope_path": _string(node, "scope_path"),
+                            "attempt_number": _integer(attempt, "attempt_number"),
+                            "interaction_id": _identifier(interaction),
+                            "deadline": _datetime_text(_datetime_field(interaction, "deadline")),
+                        },
+                        node=node,
+                        attempt=attempt,
+                    )
                     on_timeout = _mapping(node, "frozen_def").get("on_timeout")
                     if isinstance(on_timeout, str):
                         outcome = ExecutionOutcome(
@@ -5305,6 +5532,18 @@ class DjangoExecutionStore(DjangoAgentStore):
     def expire_scope_waits(self) -> int:
         """Enforce enclosing deadlines even while a scope owns no worker."""
         try:
+            due = NodeAttempt.objects.filter(
+                status=AttemptStatus.WAITING.value,
+                node_run__node_type__in=(
+                    NodeType.LOOP.value,
+                    NodeType.SUBWORKFLOW.value,
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                ),
+                deadline_at__lte=timezone.now(),
+            )
+            if not due.exists():
+                return 0
             with transaction.atomic():
                 attempts = list(
                     NodeAttempt.objects.select_for_update()
@@ -5354,20 +5593,39 @@ class DjangoExecutionStore(DjangoAgentStore):
                     | models.Q(enqueued_at__isnull=True, created_at__lte=cutoff)
                 )
                 .order_by("created_at")
-                .values_list("claim_token", flat=True)[:RECONCILE_MAX_ITEMS]
+                .values_list("claim_token", flat=True)
             )
             return tuple(str(token) for token in tokens)
         except DatabaseError:
             message = "Relay could not scan durable dispatch claims."
             raise PersistenceError(message) from None
 
+    @transaction.atomic
     def _discard_attempt_mailbox(self, attempt: NodeAttempt) -> None:
         interaction_transition = transition_interaction(
             InteractionStatus.PENDING.value, "attempt_lost"
         )
-        HumanInteraction.objects.filter(
-            attempt=attempt, status=InteractionStatus.PENDING.value
-        ).update(status=interaction_transition.status)
+        interactions = (
+            HumanInteraction.objects.select_for_update()
+            .select_related("node_run__run")
+            .filter(attempt=attempt, status=InteractionStatus.PENDING.value)
+        )
+        for interaction in interactions:
+            _set_model_field(interaction, "status", interaction_transition.status)
+            interaction.save(update_fields=("status",))
+            node = _related(interaction, "node_run", NodeRun)
+            _append_event(
+                _related(node, "run", Run),
+                f"{_string(interaction, 'kind')}.discarded",
+                EventSource.SYSTEM,
+                {
+                    "scope_path": _string(node, "scope_path"),
+                    "attempt_number": _integer(attempt, "attempt_number"),
+                    "interaction_id": _identifier(interaction),
+                },
+                node=node,
+                attempt=attempt,
+            )
         requests = ControlRequest.objects.select_for_update().filter(
             attempt=attempt,
             state__in=(ControlState.PENDING.value, ControlState.CLAIMED.value),
@@ -5376,82 +5634,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             control_transition = transition_control(_string(request, "state"), "supersede")
             _set_model_field(request, "state", control_transition.status)
             request.save(update_fields=("state",))
-
-    def _reap_stale_attempt(
-        self,
-        attempt_id: int,
-        cutoff: datetime,
-        *,
-        orderly_shutdown: bool,
-    ) -> AttemptStopReason | None:
-        with transaction.atomic():
-            attempt = (
-                NodeAttempt.objects.select_for_update()
-                .select_related("node_run")
-                .filter(pk=attempt_id)
-                .first()
-            )
-            if attempt is None or _string(attempt, "status") not in {
-                AttemptStatus.RUNNING.value,
-                AttemptStatus.WAITING.value,
-            }:
-                return None
-            if attempt.heartbeat_at > cutoff:
-                return None
-            node = _related(attempt, "node_run", NodeRun)
-            if (
-                not orderly_shutdown
-                and _string(node, "node_type")
-                in {
-                    NodeType.HUMAN_WAIT.value,
-                    NodeType.LOOP.value,
-                    NodeType.SUBWORKFLOW.value,
-                    NodeType.ACTIONS_JOB.value,
-                    NodeType.ACTIONS_STEP.value,
-                }
-                and _string(attempt, "status") == AttemptStatus.WAITING.value
-            ):
-                return None
-            self._discard_attempt_mailbox(attempt)
-            reason = (
-                AttemptStopReason.INTERRUPTED if orderly_shutdown else AttemptStopReason.WORKER_LOST
-            )
-            outcome = ExecutionOutcome(
-                OutcomeKind.FAILED,
-                stop_reason=reason,
-                error_code=reason.value,
-            )
-            self.finish_attempt(_identifier(attempt), outcome, _string(attempt, "starting_head"))
-            self.release_attempt_lock(_identifier(attempt))
-            return reason
-
-    def reap_stale_attempts(self, *, orderly_shutdown: bool) -> AttemptRecovery:
-        cutoff = timezone.now() - timedelta(seconds=ATTEMPT_STALE_AFTER_SECONDS)
-        try:
-            attempt_ids = list(
-                NodeAttempt.objects.filter(
-                    status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-                    heartbeat_at__lte=cutoff,
-                )
-                .order_by("heartbeat_at")
-                .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
-            )
-            interrupted = 0
-            lost = 0
-            for attempt_id in attempt_ids:
-                reason = self._reap_stale_attempt(
-                    attempt_id, cutoff, orderly_shutdown=orderly_shutdown
-                )
-                if reason is AttemptStopReason.INTERRUPTED:
-                    interrupted += 1
-                elif reason is AttemptStopReason.WORKER_LOST:
-                    lost += 1
-            return AttemptRecovery(interrupted, lost)
-        except PersistenceError:
-            raise
-        except DatabaseError:
-            message = "Relay could not reconcile stale attempts."
-            raise PersistenceError(message) from None
 
     def _attempt_for_claim(self, claim_token: str) -> NodeAttempt | None:
         claim = (

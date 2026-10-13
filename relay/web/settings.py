@@ -120,12 +120,23 @@ DATABASES: dict[str, dict[str, object]] = {
             # Reserve the write lock before reads so writers honor the timeout.
             "transaction_mode": "IMMEDIATE",
             "init_command": (
-                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; "
+                "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; "
                 f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS};"
             ),
         },
-    }
+    },
+    "snapshot": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": database_override or str(database_path()),
+        "OPTIONS": {
+            "timeout": DB_BUSY_TIMEOUT_MS / 1_000,
+            "transaction_mode": "DEFERRED",
+            "init_command": "PRAGMA foreign_keys=ON; PRAGMA query_only=ON;",
+        },
+        "TEST": {"MIRROR": "default"},
+    },
 }
+DATABASE_ROUTERS = ["relay.web.db_routing.SnapshotRouter"]
 
 AUTH_PASSWORD_VALIDATORS: list[dict[str, str]] = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

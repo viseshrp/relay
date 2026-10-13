@@ -296,6 +296,8 @@ export interface JobAttempt {
 }
 
 export interface RunJob {
+  event_cursor: number;
+  state_cursor: number;
   activity_type?: string;
   display_name?: string;
   working_folder: string;
@@ -339,6 +341,7 @@ export interface RunInteraction {
 }
 
 export interface RunDetail extends RunSummary {
+  state_cursor: number;
   workflow_name: string;
   working_folder: string;
   problem: RunProblem | null;

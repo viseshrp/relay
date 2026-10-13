@@ -66,6 +66,21 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
+CI uses native tox commands, isolated pytest-xdist workers, and four
+separate Playwright browser shards. Inventories verify that every test
+finishes exactly once.
+Linux/Python 3.14 collects branch coverage; the other 14 environments run
+every test without suite-wide coverage instrumentation. Local tox runs keep
+coverage enabled by default. Set `RELAY_TEST_COVERAGE=false` to run without
+coverage while preserving complete execution and outcome verification.
+See [CI execution and test completeness](docs/ci-testing.md) for serial
+references, worker overrides, retained reports, and rollback controls.
+
+Windows 3.10 CI uses uv's managed CPython 3.10.19 build. The setup action's
+`managed-python` input selects that runtime, and tox uses the same managed
+interpreter. Other jobs keep the default setup-python path. Each compatibility
+job reports its Python and SQLite versions before running tests.
+
 The Markdown hook checks every supplied file. Its `--` delimiter ends the
 list of disabled rules before file names. [Markdown configuration](.markdownlint.jsonc)
 keeps the 80-column limit for prose and code, permits wider table rows, and

@@ -67,6 +67,7 @@ def process_boundary(monkeypatch: pytest.MonkeyPatch) -> ProcessBoundary:
     data_dir(create=True)
     monkeypatch.setattr(process_ownership, "process_identity", boundary.identity)
     monkeypatch.setattr(process_ownership, "signal_process_tree", boundary.stop)
+    monkeypatch.setattr(process_ownership, "process_group_members", lambda _: ())
     return boundary
 
 
@@ -336,3 +337,21 @@ def test_restart_recovers_real_orphan_children_and_preserves_completed_runs(
             for identity in children:
                 if process_identity(identity.pid) == identity:
                     signal_process_tree(identity.pid, force=True)
+
+
+def test_incomplete_windows_tree_enumeration_blocks_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+    from unittest.mock import Mock
+
+    from relay.execution.process_identity import _windows_descendants
+
+    kernel = Mock()
+    kernel.CreateToolhelp32Snapshot.return_value = 1
+    kernel.Process32FirstW.return_value = False
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    with pytest.raises(PersistenceError, match="finish observing"):
+        _windows_descendants(ProcessIdentity(101, "windows:1000"))
+    kernel.CloseHandle.assert_called_once_with(1)

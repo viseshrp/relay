@@ -111,7 +111,7 @@ def test_up_overrides_only_explicit_command_options(
     assert (effective.host, effective.port, effective.workers) == (
         expected["host"],
         expected["port"],
-        expected["workers"],
+        1,
     )
     assert supervisor_boundary.browser_requests == [False]
 
@@ -531,7 +531,8 @@ def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> 
     }
     path = tmp_path / "settings.json"
     path.write_text(json.dumps(expected), encoding="utf-8")
-    assert load_config(path).to_dict() == expected
+    assert load_config(path).to_dict() == {**expected, "workers": 1}
+    assert json.loads(path.read_text(encoding="utf-8")) == expected
 
 
 @pytest.mark.parametrize(

@@ -90,10 +90,14 @@ const EVENT_TYPES = [
   "command.exit",
   "permission.requested",
   "permission.answered",
+  "permission.discarded",
   "elicitation.requested",
   "elicitation.answered",
+  "elicitation.discarded",
   "wait.requested",
   "wait.answered",
+  "wait.expired",
+  "wait.discarded",
   "artifact.preserved",
 ] as const;
 const TERMINAL_RUNS = new Set(["succeeded", "failed", "canceled"]);
@@ -166,75 +170,6 @@ function runStatusLabel(run: RunSummary): string {
     : run.dispatch_paused && PAUSABLE_RUNS.has(run.status)
       ? "New jobs paused"
       : statusLabel(run.status);
-}
-function applyStateEvent(
-  current: RunDetail | null,
-  event: RunEvent,
-): RunDetail | null {
-  if (current === null) return null;
-  const status = event.payload.status;
-  if (
-    event.type === "run.dispatch_changed" &&
-    typeof event.payload.paused === "boolean"
-  ) {
-    return {
-      ...current,
-      dispatch_paused: event.payload.paused,
-      dispatch_paused_at:
-        typeof event.payload.dispatch_paused_at === "string"
-          ? event.payload.dispatch_paused_at
-          : null,
-      dispatch_paused_seconds:
-        typeof event.payload.dispatch_paused_seconds === "number"
-          ? event.payload.dispatch_paused_seconds
-          : current.dispatch_paused_seconds,
-    };
-  }
-  if (event.type.startsWith("run.") && typeof status === "string") {
-    const failed = ["failed", "canceling"].includes(status);
-    return {
-      ...current,
-      status,
-      problem: failed ? current.problem : null,
-      failure_summary: failed
-        ? typeof event.payload.failure_summary === "string"
-          ? event.payload.failure_summary
-          : current.failure_summary
-        : null,
-      failure_code: failed
-        ? typeof event.payload.failure_code === "string"
-          ? event.payload.failure_code
-          : current.failure_code
-        : null,
-    };
-  }
-  if (event.type.startsWith("node.")) {
-    const scopePath = event.payload.scope_path;
-    if (typeof scopePath === "string" && typeof status === "string") {
-      return {
-        ...current,
-        nodes: current.nodes.map((node) =>
-          node.scope_path === scopePath ? { ...node, status } : node,
-        ),
-      };
-    }
-  }
-  if (
-    event.type === "run.merged" &&
-    typeof event.payload.merged_commit === "string"
-  ) {
-    return { ...current, merged_commit: event.payload.merged_commit };
-  }
-  if (
-    event.type === "run.cleanup_succeeded" ||
-    event.type === "run.cleanup_failed"
-  ) {
-    const worktreeState = event.payload.worktree_state;
-    return typeof worktreeState === "string"
-      ? { ...current, worktree_state: worktreeState }
-      : current;
-  }
-  return current;
 }
 function outputText(event: RunEvent): string | null {
   // {text: "Done."} -> "Done."; {plan: ["build"]} -> indented JSON.
@@ -381,7 +316,6 @@ export {
   mergeEvents,
   mergeRecords,
   runStatusLabel,
-  applyStateEvent,
   outputText,
   VirtualEvents,
 };

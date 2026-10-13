@@ -365,12 +365,12 @@ class WireAgent:
                 self.update(
                     {"sessionUpdate": "config_option_update", "configOptions": [selector("m2")]}
                 )
-            elif self.mode == "configuration-late-effort-drift":
+            elif self.mode.removesuffix("-end-turn") == "configuration-late-effort-drift":
                 self.effort = "high"
                 self.update(
                     {"sessionUpdate": "config_option_update", "configOptions": self.configuration()}
                 )
-            elif self.mode == "configuration-late-mode-drift":
+            elif self.mode.removesuffix("-end-turn") == "configuration-late-mode-drift":
                 self.update({"sessionUpdate": "current_mode_update", "currentModeId": "ask"})
             self.update(
                 {
@@ -378,6 +378,14 @@ class WireAgent:
                     "content": {"type": "text", "text": "ready"},
                 }
             )
+            if self.mode == "stream-200":
+                for index in range(200):
+                    self.update(
+                        {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": f"Message {index}\n"},
+                        }
+                    )
             if self.mode.startswith("configuration"):
                 self.update(
                     {
@@ -391,9 +399,20 @@ class WireAgent:
                         },
                     }
                 )
-            if self.mode == "hold":
+            if self.mode in {
+                "hold",
+                "configuration-late-effort-drift",
+                "configuration-late-mode-drift",
+            }:
+                # Drift cancellation tests must keep work active until the
+                # real session/cancel arrives. Separate end-turn modes cover
+                # rejection when the provider has already finished its turn.
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
             else:
+                if self.mode.startswith("quiet-until:"):
+                    gate = Path(self.mode.removeprefix("quiet-until:"))
+                    while not gate.exists():
+                        time.sleep(0.01)
                 reason = "refusal" if self.mode == "refusal" else "end_turn"
                 self.reply(request_id, {"stopReason": reason})
         elif method == "session/cancel":

@@ -10,12 +10,14 @@ worktrees, or artifacts.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from datetime import datetime, tzinfo
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import time
+import traceback
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, TypeVar
 
@@ -33,6 +35,30 @@ if TYPE_CHECKING:
     )
 
 ThreadResult = TypeVar("ThreadResult")
+pytest_plugins = ["tests.ci_reporting"]
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Show causes suppressed by public Relay envelopes in failed CI reports."""
+    from relay.errors import PersistenceError, persistence_cause
+
+    del item
+    report = yield
+    if call.excinfo is not None:
+        error: BaseException | None = call.excinfo.value
+        seen: set[int] = set()
+        while error is not None and id(error) not in seen:
+            seen.add(id(error))
+            if isinstance(error, PersistenceError) and (cause := persistence_cause(error)):
+                report.sections.append(
+                    ("Persistence cause", "".join(traceback.format_exception(cause)))
+                )
+            error = error.__cause__ or error.__context__
+    return report
+
 
 _SESSION_ROOT = Path(tempfile.mkdtemp(prefix="relay-tests-"))
 _TEMPLATE_DATABASE = _SESSION_ROOT / "template" / "relay.db"
@@ -68,6 +94,15 @@ def _prepare_django() -> None:
 
 
 _prepare_django()
+
+
+def pytest_unconfigure() -> None:
+    """Also release controller and collection-only scratch roots without fixtures."""
+    from django.db import connections
+
+    connections.close_all()
+    shutil.rmtree(_SESSION_ROOT, ignore_errors=True)
+    _SESSION_ENVIRONMENT.undo()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -110,17 +145,37 @@ def isolated_relay(
     database = tmp_path / "database" / "relay.db"
     database.parent.mkdir()
     shutil.copyfile(migrated_template, database)
-    monkeypatch.setitem(settings.DATABASES["default"], "NAME", str(database))
+    for alias in ("default", "snapshot"):
+        monkeypatch.setitem(settings.DATABASES[alias], "NAME", str(database))
     # A web process caches its served project and a consumer caches its event cursor for
     # their whole lifetime; each test starts both from its own fresh database.
     monkeypatch.setattr(views, "_PROJECT", None)
     monkeypatch.setattr(huey_app, "_SCHEDULE_CURSOR", None)
+    monkeypatch.setattr(huey_app, "_DELIVERY_CURSOR", None)
     yield
     set_dispatch_notifier(None)
     connections.close_all()
     # API launches enqueue claim tokens in the shared session queue; no consumer runs them.
     huey_app.huey.flush()
     huey_app.huey.storage.close()
+
+
+@pytest.fixture
+def short_busy_timeout(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    from django.conf import settings
+    from django.db import connections
+
+    connections.close_all()
+    for database in settings.DATABASES.values():
+        options = dict(database.get("OPTIONS", {}))
+        options["timeout"] = 0.05
+        options["init_command"] = re.sub(
+            r"PRAGMA busy_timeout=\d+;?", "", str(options.get("init_command", ""))
+        )
+        monkeypatch.setitem(database, "OPTIONS", options)
+
+    yield
+    connections.close_all()
 
 
 @pytest.fixture

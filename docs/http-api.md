@@ -297,8 +297,8 @@ mismatch returns `400 config_error` before creating a run. Launch validates the
 workflow tree, inputs, clean Git state, declared entry-point artifacts, and all
 exact-model routes before creating a run. Independent route failures are
 returned together. A successful preflight atomically records the run and
-snapshot, creates `relay/run/{run-id}` in an isolated worktree, and durably
-dispatches eligible nodes.
+snapshot and creates `relay/run/{run-id}` in an isolated worktree. Its committed
+`run.started` event triggers scheduling in the Huey worker.
 
 `cleanup_policy` additionally accepts `merge_on_success`, inherited from
 project/global settings when omitted. It requires a strictly clean checkout
@@ -390,12 +390,54 @@ provider and command output remains available through the event history.
 Node summaries also include the latest attempt's `started_at` and `ended_at`
 as UTC timestamps, or null before that attempt starts or finishes.
 
+Owner interaction transitions also emit `wait.expired`, `wait.discarded`,
+`permission.discarded`, and `elicitation.discarded`. Each event identifies the
+interaction, scope, and attempt number. Expiry includes its deadline.
+Environment approval emits `wait.answered` with `result: {"approved": true}`
+and `environment.approved`. Status changes and their events commit together;
+an event persistence failure rolls back the corresponding interaction change.
+
+### Run monitor
+
+`GET /api/runs/{id}/monitor` returns one read-only database snapshot:
+
+```json
+{
+  "run": {},
+  "nodes": [],
+  "nodes_next": null,
+  "interactions": [],
+  "interactions_next": null,
+  "linked_interaction": null,
+  "event_cursor": 5828,
+  "state_cursor": 5820
+}
+```
+
+`run` has the existing run metadata. Interactions include pending requests;
+optional `interaction={id}` also returns that run's selected historical request
+as `linked_interaction`. Use `nodes_since` and `interactions_since` with the
+returned numeric cursors. `limit` defaults to 200 and cannot raise the existing
+200-record page cap. Further pages have no 1,000-record cutoff. The complete
+JSON response, including metadata and escaped Unicode, stays within 1 MiB.
+
+`event_cursor` includes output. `state_cursor` excludes output-only events:
+agent messages, thoughts, tool calls and results, plans, provider events,
+stderr, results, and turn boundaries; command stdout and stderr; Actions log
+messages and groups. Usage limits, command exit, artifacts, and every other
+state event still advance it. Both cursors describe the same snapshot as the
+returned records. A client rebuilding several pages must restart when their
+state cursors differ. SQLite's single writer orders committed event IDs;
+a future database adapter must preserve that ordering contract.
+
 ### Job history
 
 `GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job
 contains its `scope_path`, `node_type`, `status`, `writes`, captured `command`
 or human-wait `prompt`, `instructions`, current declared `outputs`, and a
-bounded `attempts` page. `activity_type` identifies command, agent, and human
+bounded `attempts` page. Its `event_cursor` and `state_cursor` use the same
+snapshot and output exclusions as the monitor. `activity_type` identifies
+command, agent, and human
 review steps within the Actions execution nodes. `display_name` retains the
 resolved job or step name; historical views use their existing scope labels.
 Agent instructions include the frozen prompt files and captured inline prompt.
@@ -811,6 +853,9 @@ services. They never mutate an existing run's snapshot or provider session.
 
 `settings` contains the existing `agent_preferences`, `cleanup_policy`, `host`,
 `port`, `workers`, and `login_required`, plus `workflow_defaults`:
+
+`workers` is always one in responses. Legacy saved counts warn and use one
+without rewriting the file. New saves above one return `422 config_error`.
 
 ```json
 {

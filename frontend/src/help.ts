@@ -127,10 +127,6 @@ export const help = {
     "Port",
     "The local TCP port used after restart, from 1 to 65535. Open the new address after changing it. Startup flags can override this saved value.",
   ],
-  workers: [
-    "Workers",
-    "The number of local job workers after restart. Dependencies and Git write locks still limit concurrency, so increasing this value does not make every job run at once.",
-  ],
   notifications: [
     "Desktop notifications",
     "Optional browser notifications for waiting and completed runs across projects. The browser asks for permission. This browser keeps its own preference; notifications omit questions and agent output.",

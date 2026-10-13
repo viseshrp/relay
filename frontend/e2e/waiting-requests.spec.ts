@@ -335,7 +335,11 @@ test("a job log keeps its pending response available above the output", async ({
   ).toBeVisible();
 });
 
-for (const delivery of ["missing stream tail", "late pending read"] as const)
+for (const delivery of [
+  "missing stream tail",
+  "late pending read",
+  "late node read",
+] as const)
   test(`a human-wait job reconciles its answer after a ${delivery}`, async ({
     page,
   }) => {
@@ -371,11 +375,12 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
     const streamReady = gate();
     const staleReady = gate();
     const staleRelease = gate();
-    const historyStarted = gate();
-    const historyRelease = gate();
+    const freshReady = gate();
+    const freshRelease = gate();
     let streamSince = 0;
     let streamBody = "";
-    let staleReleased = false;
+    let holding = false;
+    let readsAfterAnswer = 0;
     await page.route(
       (url) => url.pathname === `/api/runs/${id}/stream`,
       async (route) => {
@@ -384,7 +389,6 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
         );
         streamStarted.release();
         await streamReady.pending;
-        if (staleReleased) await historyRelease.pending;
         await route.fulfill({
           contentType: "text/event-stream",
           body: streamBody,
@@ -407,55 +411,63 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
       ).toContainText("Waiting");
       await job.getByRole("button", { name: "Outputs", exact: true }).click();
       await expect(job.getByText("No declared outputs.")).toBeVisible();
-
-      if (delivery === "late pending read") {
+      if (delivery !== "missing stream tail") {
         let held = false;
         await page.route(
-          (url) =>
-            url.pathname === `/api/runs/${id}` &&
-            url.searchParams.has("collection"),
+          (url) => url.pathname === `/api/runs/${id}/monitor`,
           async (route) => {
-            if (staleReleased) await historyRelease.pending;
-            if (
-              held ||
-              new URL(route.request().url()).searchParams.get("collection") !==
-                "interactions"
-            ) {
-              await route.continue();
+            const response = await route.fetch();
+            if (held) {
+              readsAfterAnswer += 1;
+              freshReady.release();
+              await freshRelease.pending;
+              await route.fulfill({ response });
               return;
             }
             held = true;
-            const response = await route.fetch();
-            const saved: { run: RunDetail } = await response.json();
-            expect(saved.run.interactions.map((item) => item.id)).toContain(
-              interaction.id,
-            );
+            holding = true;
+            const saved = await response.json();
+            expect(saved.run.status).toBe("paused_wait");
+            expect(
+              saved.interactions.map((item: { id: string }) => item.id),
+            ).toContain(interaction.id);
+            expect(
+              saved.nodes.find(
+                (node: { scope_path: string }) =>
+                  node.scope_path === interaction.scope_path,
+              )?.status,
+            ).toBe("waiting");
+            // A stale publication leaves visible evidence even if the next read repairs it.
+            saved.interactions[0].request.prompt =
+              "STALE MONITOR WAS PUBLISHED";
             staleReady.release();
             await staleRelease.pending;
-            await route.fulfill({ response });
+            holding = false;
+            await route.fulfill({ response, json: saved });
           },
         );
-        // Automatic repair and history catch-up must not conceal a stale write.
-        await page.route(
-          (url) =>
-            url.pathname === `/api/runs/${id}/events` &&
-            !url.searchParams.has("job"),
-          async (route) => {
-            if (!staleReleased) {
-              await route.continue();
-              return;
-            }
-            historyStarted.release();
-            await historyRelease.pending;
-            await route.continue();
-          },
-        );
+        await page.evaluate(() => {
+          (
+            window as unknown as { staleMonitorPublished: boolean }
+          ).staleMonitorPublished = false;
+          new MutationObserver(() => {
+            if (
+              document.body.textContent?.includes("STALE MONITOR WAS PUBLISHED")
+            )
+              (
+                window as unknown as { staleMonitorPublished: boolean }
+              ).staleMonitorPublished = true;
+          }).observe(document.body, {
+            subtree: true,
+            childList: true,
+            characterData: true,
+          });
+        });
         await page
           .getByRole("button", { name: "Refresh", exact: true })
           .click();
         await staleReady.pending;
       }
-
       const answer = "Approved without losing the final state.";
       const answered = await post(
         page,
@@ -470,7 +482,7 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
       await expect
         .poll(async () => (await detail(page, id)).status)
         .toBe("succeeded");
-      if (delivery === "late pending read") {
+      if (delivery !== "missing stream tail") {
         const replay: { events: RunEvent[] } = await (
           await page.request.get(
             `/api/runs/${id}/events?since=${streamSince}&limit=100`,
@@ -487,18 +499,14 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
           .join("");
       }
       streamReady.release();
-      await expect(banner).toHaveCount(0);
-      await expect(
-        job.getByRole("combobox", { name: "Attempt", exact: true }),
-      ).toHaveText("Attempt 1 · Completed");
-      await expect(
-        job.getByRole("table", { name: "Declared outputs", exact: true }),
-      ).toContainText(answer);
-
-      if (delivery === "late pending read") {
-        staleReleased = true;
-        staleRelease.release();
-        await historyStarted.pending;
+      if (holding) {
+        // Let EventSource deliver the observed state version before the old read returns.
+        await page
+          .waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === `/api/runs/${id}/stream`,
+          )
+          .catch(() => undefined);
         await page.evaluate(
           () =>
             new Promise<void>((resolve) =>
@@ -507,15 +515,40 @@ for (const delivery of ["missing stream tail", "late pending read"] as const)
               ),
             ),
         );
-        await expect(banner).toHaveCount(0);
-        await expect(
-          job.getByRole("table", { name: "Declared outputs", exact: true }),
-        ).toContainText(answer);
+        staleRelease.release();
+        await freshReady.pending;
+        expect(readsAfterAnswer).toBeGreaterThan(0);
+        expect(
+          await page.evaluate(
+            () =>
+              (window as unknown as { staleMonitorPublished: boolean })
+                .staleMonitorPublished,
+          ),
+        ).toBe(false);
+        freshRelease.release();
       }
+      await expect(banner).toHaveCount(0);
+      await expect(
+        job.getByRole("combobox", { name: "Attempt", exact: true }),
+      ).toHaveText("Attempt 1 · Completed");
+      await expect(
+        job.getByRole("table", { name: "Declared outputs", exact: true }),
+      ).toContainText(answer);
+      await expect(
+        page.getByRole("button", { name: "Pause", exact: true }),
+      ).toHaveCount(0);
+      if (delivery !== "missing stream tail")
+        expect(
+          await page.evaluate(
+            () =>
+              (window as unknown as { staleMonitorPublished: boolean })
+                .staleMonitorPublished,
+          ),
+        ).toBe(false);
     } finally {
       streamReady.release();
       staleRelease.release();
-      historyRelease.release();
+      freshRelease.release();
       await page.unrouteAll({ behavior: "wait" });
     }
   });

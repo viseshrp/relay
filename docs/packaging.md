@@ -131,3 +131,10 @@ Optional compressed companions do not trigger an asset-catalog rescan when
 absent. New original asset requests still discover newly published files and
 their companions. This keeps uncompressed font requests from delaying lazy
 modules while preserving path containment and encoding negotiation.
+
+For isolated development checks, set `RELAY_BUILD_ASSETS_ROOT` to a disposable
+absolute directory before `npm run build` or `make test-frontend`. Set
+`RELAY_TEST_ASSETS_ROOT` to the same directory so browser-test servers serve
+that build. This keeps a running editable app's assets in place. Distribution
+builds use their normal clean output and should run from a disposable source
+copy when the owner's checkout is serving an app.

@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 import json
 from pathlib import Path
+import time
 
 from django.test import Client
 from pydantic import ValidationError
@@ -231,10 +232,30 @@ def test_attempts_cancel_if_a_provider_changes_an_explicit_override(
     mode: str,
 ) -> None:
     monkeypatch.setenv("FAKE_ACP_MODE", mode)
-    context = replace(agent_context, effort="low", permission_mode="auto")
+    context = replace(
+        agent_context,
+        attempt=replace(agent_context.attempt, deadline_at=time.monotonic() + 30),
+        effort="low",
+        permission_mode="auto",
+    )
     with pytest.raises(AgentConfigurationError):
         execute(AcpDriver(PROFILES["codex"], context.command), context)
     assert any(item.get("method") == "session/cancel" for item in fake_agents.messages())
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["configuration-late-effort-drift-end-turn", "configuration-late-mode-drift-end-turn"],
+)
+def test_attempts_reject_override_drift_even_if_the_provider_finishes_its_turn(
+    agent_context: AgentExecutionContext,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    monkeypatch.setenv("FAKE_ACP_MODE", mode)
+    context = replace(agent_context, effort="low", permission_mode="auto")
+    with pytest.raises(AgentConfigurationError):
+        execute(AcpDriver(PROFILES["codex"], context.command), context)
 
 
 def test_preflight_routes_same_model_with_different_overrides_independently(

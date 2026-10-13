@@ -19,7 +19,7 @@ _DEFERRED: dict[str, set[str]] = {}
 _NOTIFY: Callable[[str], object] | None = None
 
 
-def set_dispatch_notifier(notify: Callable[[str], object]) -> None:
+def set_dispatch_notifier(notify: Callable[[str], object] | None) -> None:
     """Install the single consumer's enqueue callback."""
     global _NOTIFY
     _NOTIFY = notify

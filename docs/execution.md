@@ -144,6 +144,12 @@ Dispatch has two database files and no cross-database transaction. Relay first
 commits `ready` to `dispatched` with a new `DispatchClaim` in `relay.db`. It then
 enqueues only the claim token in `huey.db` and records `enqueued_at`.
 
+Launch, resume, and rerun HTTP handlers commit their state and events without
+scheduling. The worker follows those events and schedules eligible nodes. At
+startup it also delivers existing dispatched claims, including suspended scopes
+that reuse an attempt. Committed delivery events repair a missing web-process
+notifier; duplicate Huey delivery still cannot create a second attempt.
+
 The consumer atomically claims a still-dispatched token, acquires admission, and
 creates one `NodeAttempt` in the same Relay transaction. Duplicate tokens exit
 without another attempt. A bounded reconciliation pass re-enqueues old,
@@ -266,18 +272,38 @@ attempt's request. It applies the request before recording the corresponding
 answer event. An expired request or one for an older attempt becomes `stale`.
 Posting the same idempotency key again does not apply the answer twice.
 
-A claimed control has a heartbeat lease. Reconciliation returns it to `pending`
-only while the same attempt remains live. If its owner is gone, the request is
-stale and the attempt follows interruption or worker-loss handling. Pending
-interactions are discarded when their attempt is lost.
+Empty control polls check with a read before reserving SQLite's writer. The
+claim transaction rechecks ownership, expiry, and request state. Periodic
+reconciliation runs once per second and checks for due work before writing.
+An installation with no active or due work writes only its supervisor lease;
+unchanged trigger observations do not write new cursor values.
+
+A claimed control has a heartbeat lease. Reconciliation rechecks its state,
+expiry, lease age, and owner after acquiring the write lock. It returns the
+control to `pending` only while the same attempt remains live. If its owner is
+gone, the request is stale and the attempt follows interruption or worker-loss
+handling. Pending interactions are discarded when their attempt is lost.
 
 Human-wait nodes have no subprocess. Their attempt stays durable while the run
 is paused. A deadline takes the declared `on_timeout` edge; without that edge,
 the node fails with `timeout`.
 
-Worker ownership is renewed throughout command-output retention, commit
-validation, evidence preservation, and reader-worktree removal. These phases
-can outlast the stale-attempt threshold without being mistaken for worker loss.
+One coordinator in the worker process renews all registered attempts and their
+admission locks once every five seconds, in one short transaction. Nested
+scopes share registrations; each attempt renews once per cycle. Registrations
+cover execution, command-output retention, Git validation, evidence
+preservation, and reader-worktree removal. Provider and command loops check
+ownership through reads.
+
+Heartbeat renewal retries transient SQLite busy errors within a 30-second
+total budget. Exhaustion stops the worker so the supervisor can prove it has
+exited before recovery. This is an unexpected child exit: Relay stops rather
+than automatically restarting the worker. Attempt heartbeats support control
+claim recovery; their age never authorizes workspace handoff. Launch
+persistence and control transactions retry only rolled-back SQLite busy
+failures within a 15-second total budget, including SQLite's own waiting.
+Git operations, provider calls, and agent execution are never repeated by a
+database retry. Other database errors propagate unchanged.
 
 ## Node execution
 
@@ -317,9 +343,8 @@ Relay copies them to central evidence storage with their SHA-256 hashes. An
 
 Loop and subworkflow child graphs execute inline in the enclosing consumer
 thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
-default single worker. Each child heartbeat also renews its bounded chain of
-enclosing attempts, so a long child cannot make its owning loop or subworkflow
-look abandoned. When a child waits for the owner or for worktree admission,
+single worker. The shared coordinator keeps the child and enclosing attempts
+renewed together. When a child waits for the owner or for worktree admission,
 the parent scope yields its worker. A child settlement redispatches the same
 parent attempt, which reads the saved child rows and continues without repeating
 successful children. Suspended scopes retain their original durable deadline;
@@ -434,13 +459,18 @@ During orderly shutdown, interrupted attempts in canceling runs end as
 the run drains to the owner's canceled result or fail-fast failure.
 Other active attempts end as `interrupted` and their nodes
 return to `pending`. Restart reconciliation validates retained inputs and
-artifacts, then creates new attempts. An unmarked stale heartbeat ends as
-`worker_lost` and triggers fail-fast instead.
+artifacts, then creates new attempts. Unexpected worker exit ends its active
+attempts as `worker_lost` and triggers fail-fast after process exit is proved.
+An old heartbeat alone never releases a live worker's admission or workspace.
+Sleep and wall-clock changes do not authorize a replacement writer.
 
 The supervisor stops its web and worker children even if it loses its lease
 or cannot persist shutdown intent. A marker written before a persistence
 failure stays available for restart reconciliation. The supervisor releases
 its own lease after child cleanup and reports a shutdown failure.
+If a child refuses to exit, attempts and their admission remain held and the
+ownership record stays available for the next startup. No worker restarts
+automatically.
 
 ### Restart after a lost supervisor
 
@@ -461,6 +491,10 @@ and process start ticks; Windows uses `GetProcessTimes`; macOS uses
 `PROC_PIDTBSDINFO`. Active command and agent attempts also retain their creation
 time. Recovery waits for verified attempts to exit before reconciling their
 worktrees.
+The supervisor checks surviving POSIX group members and Windows job
+descendants as well as the recorded process. If an exited POSIX leader left
+children whose creation identities were never observed, recovery stops and
+retains the workspace. A saved group number alone cannot authorize a kill.
 
 After cleanup, Relay reclaims the requested port, reconciles interrupted work,
 and starts fresh children. Completed runs, successful nodes, recorded commits,
@@ -503,8 +537,9 @@ through the single consumer. Stale-dispatch reconciliation remains the repair
 path after enqueue loss or consumer restart. Nested admission waits yield their
 worker and remain bounded by the enclosing deadline.
 
-One Huey consumer process uses thread workers on Linux, Windows, and macOS. The
-default is one worker; a configured count permits read-only parallelism while
-the durable admission lock still excludes writers. SQLite transactions are
-short, use WAL, and fail after the configured busy timeout rather than retrying
-without a bound.
+One Huey consumer process uses exactly one execution thread on Linux, Windows,
+and macOS. Legacy positive `workers` settings and `--workers` flags warn and use
+one. The settings UI omits this field; new API values above one return `422`.
+The reconciler and heartbeat coordinator remain separate background threads.
+SQLite transactions stay short, use WAL with FULL durability, and have bounded
+busy waiting.

@@ -1,7 +1,14 @@
 import { ViewSkeleton } from "./ViewSkeleton";
 import { Alert, Button, Paper } from "@mui/material";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
+import {
+  isAborted,
+  OUTPUT_EVENT_TYPES,
+  readJobPages,
+  retryRunRead,
+} from "../run-monitor";
+import { useRunReads } from "./RunReadsContext";
 import { ansiSpans, commandLines } from "../job";
 import { stageLabel } from "../navigation";
 import type { RetryConfiguration, RunEvent, RunJob, RunNode } from "../types";
@@ -30,6 +37,9 @@ export function useJobWorkspace({
   onRetry: (scope: string) => Promise<void>;
   onRetrySettings: (settings: RetryConfiguration) => void;
 }) {
+  const queue = useRunReads();
+  const attemptTarget = useRef(200);
+  const caller = useRef<AbortController | null>(null);
   const [panels, setPanel] = useDisclosureState(`${runId}:${scope}`);
   const steps = nodes.filter(
     (node) => node.node_type === "actions_step" && node.parent_scope === scope,
@@ -52,13 +62,8 @@ export function useJobWorkspace({
     () => liveEvents.filter((event) => event.payload.scope_path === scope),
     [liveEvents, scope],
   );
-  const revision = relevant
-    .filter(
-      (event) =>
-        event.type === "attempt.ended" ||
-        event.type === "attempt.started" ||
-        event.type.startsWith("node."),
-    )
+  const revision = liveEvents
+    .filter((event) => !OUTPUT_EVENT_TYPES.has(event.type))
     .at(-1)?.id;
   const attempts = useMemo(
     () =>
@@ -82,48 +87,70 @@ export function useJobWorkspace({
     attempt?.stop_reason === "failed" || Boolean(attempt?.error_code);
   const query = `job=${encodeURIComponent(scope)}&limit=200`;
 
+  const requestJob = useCallback(async (): Promise<RunJob | null> => {
+    const controller = caller.current;
+    if (!controller || controller.signal.aborted) return null;
+    setLoadingJob(true);
+    try {
+      const value = await queue.read(
+        `job:${scope}`,
+        async (signal) => {
+          const page = await readJobPages(
+            queue,
+            (since) =>
+              retryRunRead(
+                () =>
+                  api<JobPage>(
+                    `/api/runs/${runId}/job?${query}&since=${since}`,
+                    { signal, share: false },
+                  ),
+                signal,
+                (caught) => setJobError(errorMessage(caught)),
+              ),
+            () => attemptTarget.current,
+            signal,
+          );
+          if (signal.aborted) return null;
+          setJob(page.job);
+          setAttemptCursor(page.next);
+          setJobError(null);
+          return page.job;
+        },
+        controller.signal,
+      );
+      return value;
+    } catch (caught) {
+      if (controller.signal.aborted) return null;
+      if (isAborted(caught)) setJobRevision((value) => value + 1);
+      else setJobError(errorMessage(caught));
+      return null;
+    } finally {
+      if (!controller.signal.aborted) setLoadingJob(false);
+    }
+  }, [queue, query, runId, scope]);
+
+  useEffect(() => {
+    setJob(null);
+    setAttemptNumber(null);
+    setAttemptCursor(null);
+    attemptTarget.current = 200;
+  }, [runId, scope]);
   useEffect(() => {
     const controller = new AbortController();
-    setLoadingJob(true);
-    void api<JobPage>(`/api/runs/${runId}/job?${query}`, {
-      signal: controller.signal,
-    })
-      .then((value) => {
-        if (controller.signal.aborted) return;
-        setJobError(null);
-        setJob((current) => ({
-          ...value.job,
-          attempts: Array.from(
-            new Map(
-              [...(current?.attempts ?? []), ...value.job.attempts].map(
-                (row) => [row.number, row],
-              ),
-            ).values(),
-          ),
-        }));
-        setAttemptCursor(value.next);
-      })
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setJobError(errorMessage(caught));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoadingJob(false);
-      });
+    caller.current = controller;
+    void requestJob();
     return () => controller.abort();
-  }, [runId, query, revision, refreshing, jobRevision]);
+  }, [requestJob, revision, refreshing, jobRevision]);
 
   async function openRetrySettings(): Promise<void> {
     setBusy(true);
     try {
-      const current = await api<JobPage>(`/api/runs/${runId}/job?${query}`);
-      if (current.job.retry_settings)
-        onRetrySettings(current.job.retry_settings);
-      else
+      const current = await requestJob();
+      if (current?.retry_settings) onRetrySettings(current.retry_settings);
+      else if (current)
         setError(
           "This job no longer has retry settings. Refresh the run to see its current state.",
         );
-    } catch (caught) {
-      setError(errorMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -182,22 +209,8 @@ export function useJobWorkspace({
 
   async function moreAttempts() {
     if (attemptCursor === null) return;
-    try {
-      const value = await api<JobPage>(
-        `/api/runs/${runId}/job?${query}&since=${attemptCursor}`,
-      );
-      setJob((current) =>
-        current
-          ? {
-              ...current,
-              attempts: [...current.attempts, ...value.job.attempts],
-            }
-          : value.job,
-      );
-      setAttemptCursor(value.next);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    }
+    attemptTarget.current += 200;
+    await requestJob();
   }
   const lines = commandLines(events);
   const lastError = lines

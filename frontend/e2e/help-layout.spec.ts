@@ -84,13 +84,10 @@ for (const width of [320, 390, 760, 1440])
     const port = await page
       .getByRole("spinbutton", { name: "Port", exact: true })
       .boundingBox();
-    const workers = await page
-      .getByRole("spinbutton", { name: "Workers", exact: true })
-      .boundingBox();
-    if (!port || !workers)
-      throw new Error("Expected the server port and worker fields.");
-    if (workers.x > port.x + port.width)
-      expect(Math.abs(port.y - workers.y)).toBeLessThanOrEqual(1);
+    if (!port) throw new Error("Expected the server port field.");
+    await expect(
+      page.getByRole("spinbutton", { name: "Workers", exact: true }),
+    ).toHaveCount(0);
     const login = page.getByRole("switch", {
       name: "Require login",
       exact: true,

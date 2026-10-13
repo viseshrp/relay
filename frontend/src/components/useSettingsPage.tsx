@@ -212,7 +212,7 @@ export function useSettingsPage({
             revision: response.revision,
           }),
         });
-        const restart = ["host", "port", "workers", "login_required"] as const;
+        const restart = ["host", "port", "login_required"] as const;
         const changed = restart.some(
           (key) => result.settings[key] !== response.settings[key],
         );

@@ -25,7 +25,5 @@ export function settingsErrors(
     settings.port > 65535
   )
     errors.port = "Choose an integer from 1 through 65535.";
-  if (!Number.isInteger(settings.workers) || settings.workers < 1)
-    errors.workers = "Choose a positive whole number.";
   return errors;
 }
