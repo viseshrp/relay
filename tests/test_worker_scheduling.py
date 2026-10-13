@@ -78,6 +78,9 @@ def test_idle_worker_scheduling_takes_no_write_lock() -> None:
 def test_legacy_worker_count_warns_and_uses_one(caplog: pytest.LogCaptureFixture) -> None:
     assert validate_config({"workers": 8}).workers == 1
     assert "one worker" in caplog.text
+    warning = next(record for record in caplog.records if record.name == "relay.config")
+    assert warning.args == ()
+    assert warning.getMessage() == ("Relay uses one worker; the legacy workers setting is ignored.")
 
 
 def test_settings_api_rejects_new_parallel_worker_values(monkeypatch: pytest.MonkeyPatch) -> None:

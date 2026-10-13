@@ -85,7 +85,7 @@ def validate_config(raw: object) -> RelayConfig:
         message = "workers must be a positive integer."
         raise ConfigError(message)
     if workers != 1:
-        LOGGER.warning("Relay uses one worker; the legacy workers=%s setting is ignored.", workers)
+        LOGGER.warning("Relay uses one worker; the legacy workers setting is ignored.")
         workers = 1
     login_required = raw.get("login_required", True)
     if not isinstance(login_required, bool):
