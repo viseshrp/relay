@@ -66,6 +66,11 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
+CI runs the complete matrix with isolated Python workers and four separate
+browser shards. Inventories verify that every test finishes exactly once.
+See [CI execution and test completeness](docs/ci-testing.md) for serial
+references, worker overrides, retained reports, and rollback controls.
+
 The Markdown hook checks every supplied file. Its `--` delimiter ends the
 list of disabled rules before file names. [Markdown configuration](.markdownlint.jsonc)
 keeps the 80-column limit for prose and code, permits wider table rows, and
