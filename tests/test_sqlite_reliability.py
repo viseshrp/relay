@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
+import sqlite3
+import threading
+from typing import Any
 
 from django.db import DatabaseError, OperationalError, connection, connections, transaction
 from django.utils import timezone
@@ -16,6 +20,42 @@ from relay.web.models import Project, WorkflowTrigger
 from relay.web.repositories import DjangoExecutionStore, DjangoReadStore
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
 from tests.support import RelayProject
+
+
+def test_lock_gate_waits_for_an_existing_writer_before_taking_over(
+    project: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del project
+    database = Path(connection.settings_dict["NAME"])
+    connect = sqlite3.connect
+    blocker = connect(database, isolation_level=None)
+    attempting = threading.Event()
+
+    def observe_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        opened = connect(*args, **kwargs)
+        opened.set_trace_callback(
+            lambda sql: attempting.set() if sql == "BEGIN IMMEDIATE" else None
+        )
+        return opened
+
+    def acquire() -> bool:
+        with hold_write_lock(database):
+            return True
+
+    try:
+        blocker.execute("BEGIN IMMEDIATE")
+        monkeypatch.setattr(sqlite3, "connect", observe_connect)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(acquire)
+            try:
+                assert attempting.wait(2), "lock helper did not try acquiring the writer"
+                with pytest.raises(FutureTimeoutError):
+                    future.result(timeout=0.1)
+            finally:
+                blocker.execute("COMMIT")
+            assert future.result(timeout=2)
+    finally:
+        blocker.close()
 
 
 def test_lock_gate_and_probe_measure_real_sqlite_waiting(

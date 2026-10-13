@@ -165,8 +165,12 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
             assert ready.wait(15), "fake agent did not reach its quiet gate"
             assert NodeAttempt.objects.filter(status="running").count() == 5
             renewing.clear()
-            with hold_write_lock(Path(connection.settings_dict["NAME"])):
+            with (
+                SqliteWriteProbe() as probe,
+                hold_write_lock(Path(connection.settings_dict["NAME"])),
+            ):
                 assert renewing.wait(2), "coordinator did not try renewing"
+                assert probe.first_busy.wait(2), "renewal never encountered the held writer"
                 elapsed = threading.Event()
                 timer = threading.Timer(5.05, elapsed.set)
                 timer.start()

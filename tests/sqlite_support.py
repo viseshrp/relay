@@ -18,8 +18,8 @@ from django.db.backends.sqlite3.base import DatabaseWrapper, SQLiteCursorWrapper
 
 @contextmanager
 def hold_write_lock(database: Path) -> Iterator[None]:
-    """Reserve the actual writer lock until the caller releases its gate."""
-    connection = sqlite3.connect(database, isolation_level=None, timeout=0)
+    """Wait briefly for an existing writer, then hold the lock until gate release."""
+    connection = sqlite3.connect(database, isolation_level=None, timeout=5)
     try:
         connection.execute("BEGIN IMMEDIATE")
         yield
