@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import replace
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 from django.db import connections
@@ -32,6 +34,7 @@ from relay.errors import (
 )
 from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
+from relay.execution.runner import OutcomeKind
 from relay.web.models import NodeAttempt, RunEvent
 from relay.web.repositories import DjangoExecutionStore
 from relay.workflows.routing import RouteRequirement
@@ -335,6 +338,64 @@ def test_acp_owner_cancel_stops_the_live_provider_process(
     )
     assert driver.process is not None and driver.process.returncode is not None
     assert NodeAttempt.objects.get(pk=agent_context.attempt.attempt.attempt_id).process_pid is None
+
+
+def test_provider_finishing_during_a_control_poll_keeps_its_completed_result(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = threading.Event()
+    completed = threading.Event()
+    monkeypatch.setattr("relay.agents.driver.CONTROL_POLL_INTERVAL_SECONDS", 0.01)
+
+    async def supervise() -> None:
+        loop = asyncio.get_running_loop()
+        finish = asyncio.Event()
+
+        class FinishingDriver(AcpDriver):
+            starts: int = 0
+            cancellations: int = 0
+
+            async def start_attempt(
+                self, context: AgentExecutionContext
+            ) -> AsyncIterator[AgentEvent]:
+                del context
+                self.starts += 1
+                yield AgentEvent("agent.message", {"text": "waiting for a control poll"})
+                ready.set()
+                await finish.wait()
+
+            async def cancel(self) -> None:
+                self.cancellations += 1
+
+            async def finalize(self) -> AgentResult:
+                # Run this callback after the execution task returns its result.
+                loop.call_soon(completed.set)
+                return AgentResult(True, "end_turn", 0)
+
+        def poll(attempt_id: str, worker_id: str, kinds: tuple[str, ...] | None = None) -> None:
+            del attempt_id, worker_id, kinds
+            if ready.is_set():
+                loop.call_soon_threadsafe(finish.set)
+                assert completed.wait(5), "provider did not finish during the control poll"
+
+        driver = FinishingDriver(PROFILES["codex"], agent_context.command)
+        monkeypatch.setattr(agent_context.attempt.runtime, "claim_next_control", poll)
+        try:
+            result = await asyncio.wait_for(
+                RoutedAgentNodeDriver()._supervise(driver, agent_context), timeout=5
+            )
+        finally:
+            await asyncio.to_thread(connections.close_all)
+        assert (result.kind, result.stop_reason, result.exit_code) == (
+            OutcomeKind.SUCCEEDED,
+            "completed",
+            0,
+        )
+        assert driver.starts == 1
+        assert driver.cancellations == 0
+        assert completed.is_set()
+
+    asyncio.run(supervise())
 
 
 @pytest.mark.parametrize("agent_id", ["codex", "antigravity"])
