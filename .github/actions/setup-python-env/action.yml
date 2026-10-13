@@ -14,6 +14,10 @@ inputs:
     description: "Install the requested Python through uv instead of setup-python"
     required: false
     default: "false"
+  cache-enabled:
+    description: "Restore and save dependency caches"
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -28,7 +32,7 @@ runs:
       uses: astral-sh/setup-uv@v10.0.1
       with:
         version: ${{ inputs.uv-version }}
-        enable-cache: true
+        enable-cache: ${{ inputs.cache-enabled }}
         cache-suffix: ${{ github.job }}-${{ inputs.python-version }}
         prune-cache: true
         python-version: ${{ inputs.managed-python == 'true' && inputs.python-version || '' }}
@@ -41,6 +45,7 @@ runs:
         echo "version=$PYTHON_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache .venv directory
+      if: inputs.cache-enabled == 'true'
       uses: actions/cache@v6.1.0
       with:
         path: .venv

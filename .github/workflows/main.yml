@@ -7,6 +7,14 @@ on:
         description: Generate Linux visual baselines for review
         type: boolean
         default: false
+      serial_python:
+        description: Run complete serial Python references
+        type: boolean
+        default: false
+      cold_cache:
+        description: Skip dependency cache restoration and saving
+        type: boolean
+        default: false
   pull_request:
   push:
     tags:
@@ -34,6 +42,7 @@ jobs:
           fetch-tags: true
 
       - name: Cache pre-commit hooks
+        if: inputs.cold_cache != true
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/pre-commit
@@ -41,12 +50,14 @@ jobs:
 
       - name: Set up Python + Environment
         uses: ./.github/actions/setup-python-env
+        with:
+          cache-enabled: ${{ inputs.cold_cache != true }}
 
       - name: Set up Node for frontend quality checks
         uses: actions/setup-node@v7.0.0
         with:
           node-version: '24.21.0'
-          cache: npm
+          cache: ${{ inputs.cold_cache != true && 'npm' || '' }}
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
@@ -55,12 +66,15 @@ jobs:
       - name: Run code quality checks
         run: make check
 
+
   tests:
     if: inputs.refresh_visual_baselines != true
     runs-on: ${{ matrix.os }}
     env:
       # Keep tox on the same managed patch release as the Windows 3.10 job.
       UV_PYTHON_PREFERENCE: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' && 'only-managed' || 'system' }}
+      RELAY_TEST_WORKERS: ${{ inputs.serial_python == true && '0' || (matrix.os == 'macos-latest' && '2' || '3') }}
+      RELAY_TEST_COVERAGE: ${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' && 'true' || 'false' }}
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -74,75 +88,242 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0  # Required for hatch-vcs to generate full version
+          fetch-depth: 0
           fetch-tags: true
 
-      - name: Set up Python + Environment
-        uses: ./.github/actions/setup-python-env
+      - name: Set up Python and both JavaScript action runtimes
+        uses: ./.github/actions/setup-test-env
         with:
-          # setup-python's final Windows 3.10 build is 3.10.11. Match the
-          # managed 3.10.19 patch release exercised locally and on other OSes.
-          python-version: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' && '3.10.19' || matrix.python-version }}
-          managed-python: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' }}
+          python-version: ${{ matrix.python-version }}
+          cache-enabled: ${{ inputs.cold_cache != true }}
 
-      - name: Report Python and SQLite runtime
-        run: uv run python -c "import sqlite3, sys; print(sys.version); print('SQLite', sqlite3.sqlite_version)"
-
-      - name: Set up Node 20 for local action tests
-        uses: actions/setup-node@v7.0.0
-        with:
-          node-version: '20'
-
-      - name: Capture Node 20 runtime
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import shutil
-          executable = shutil.which("node")
-          assert executable is not None
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
-              stream.write(f"RELAY_TEST_NODE_20={executable}\n")
-          PY
-
-      - name: Set up Node 24 for local action tests
-        uses: actions/setup-node@v7.0.0
-        with:
-          node-version: '24.21.0'
-
-      - name: Capture Node 24 runtime
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import shutil
-          executable = shutil.which("node")
-          assert executable is not None
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
-              stream.write(f"RELAY_TEST_NODE_24={executable}\n")
-          PY
-
-      - name: Validate Windows command and payload boundaries
-        if: runner.os == 'Windows'
-        run: >-
-          uv run pytest tests/test_windows_process.py
-          tests/test_workflow_starters.py
-          tests/test_actions_language_boundaries.py -q
-
-      - name: Run tests
-        env:
-          # Only this job uploads coverage; compatibility jobs run the same
-          # suite without a tracer, including the older Windows interpreter.
-          RELAY_TEST_COVERAGE_ARGS: ${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os == 'ubuntu-latest' && '--cov --cov-config=pyproject.toml --cov-report=xml:coverage.xml' || '' }}
+      - name: Run complete Python suite and verify execution
         run: make test
+
+      - name: Retain Python outcomes, coverage, and timings
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: python-results-${{ matrix.os }}-${{ matrix.python-version }}
+          include-hidden-files: true
+          path: ${{ runner.temp }}/python-results/
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload coverage to Codecov
         if: ${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os == 'ubuntu-latest' }}
         uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ runner.temp }}/python-results/coverage.xml
+          disable_search: true
+          fail_ci_if_error: true
+
+  frontend-prepare:
+    if: inputs.refresh_visual_baselines != true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python + Environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          cache-enabled: ${{ inputs.cold_cache != true }}
+
+      - name: Set up Node for browser tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: ${{ inputs.cold_cache != true && 'npm' || '' }}
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Install Chromium for real build-publication tests
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run all frontend build-script and expression tests
+        run: npm --prefix frontend run test:build
+
+      - name: Collect complete browser and unit inventories
+        run: >-
+          node frontend/scripts/ci-browser.mjs inventory
+          --output "$RUNNER_TEMP/frontend-preparation/inventory.json"
+          --total 4
+
+      - name: Run and retain all frontend unit tests
+        run: >-
+          node frontend/scripts/ci-browser.mjs unit
+          --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json"
+          --reports-dir "$RUNNER_TEMP/frontend-preparation/results/unit"
+
+      - name: Check types and build browser assets once
+        run: npm --prefix frontend run build
+
+      - name: Archive and identify the exact browser build
+        run: |
+          tar -C relay/static -czf "$RUNNER_TEMP/frontend-preparation/assets.tgz" .
+          node frontend/scripts/ci-browser.mjs prepare-assets \
+            --assets-root relay/static \
+            --output-dir "$RUNNER_TEMP/frontend-preparation" \
+            --archive "$RUNNER_TEMP/frontend-preparation/assets.tgz"
+
+      - name: Retain browser inputs and frontend unit results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: frontend-preparation
+          path: ${{ runner.temp }}/frontend-preparation/
+          if-no-files-found: error
+          retention-days: 1
+
+  browser-shards:
+    if: inputs.refresh_visual_baselines != true
+    needs: frontend-prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python + Environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          cache-enabled: ${{ inputs.cold_cache != true }}
+
+      - name: Set up Node for browser tests
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: ${{ inputs.cold_cache != true && 'npm' || '' }}
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install isolated browser test dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Download the prepared browser build and inventory
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: frontend-preparation
+          path: ${{ runner.temp }}/frontend-preparation
+
+      - name: Configure isolated browser assets
+        run: echo "RELAY_TEST_ASSETS_ROOT=$RUNNER_TEMP/browser-assets" >> "$GITHUB_ENV"
+
+      - name: Verify browser build bytes and checkout identity
+        run: |
+          mkdir -p "$RELAY_TEST_ASSETS_ROOT"
+          tar -xzf "$RUNNER_TEMP/frontend-preparation/assets.tgz" -C "$RELAY_TEST_ASSETS_ROOT"
+          node frontend/scripts/ci-browser.mjs verify-assets \
+            --assets-root "$RELAY_TEST_ASSETS_ROOT" \
+            --manifest "$RUNNER_TEMP/frontend-preparation/assets-manifest.json" \
+            --archive "$RUNNER_TEMP/frontend-preparation/assets.tgz"
+
+      - name: Run isolated browser shard and required auxiliary suites
+        run: >-
+          node frontend/scripts/ci-browser.mjs run
+          --shard ${{ matrix.shard }} --total 4
+          --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json"
+          --reports-dir "$RUNNER_TEMP/browser-results/shard-${{ matrix.shard }}"
+
+      - name: Retain browser outcomes and reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/browser-results/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Retain failed browser traces and screenshot diffs
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-failure-traces-${{ matrix.shard }}
+          path: ${{ runner.temp }}/browser-results/**/test-results/
+          retention-days: 7
 
   browser-tests:
+    if: ${{ always() && inputs.refresh_visual_baselines != true }}
+    needs: [frontend-prepare, browser-shards]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Node for report verification
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: ${{ inputs.cold_cache != true && 'npm' || '' }}
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install report tools
+        run: npm --prefix frontend ci
+
+      - name: Download preparation and frontend unit results
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: frontend-preparation
+          path: ${{ runner.temp }}/frontend-preparation
+
+      - name: Download every browser shard report
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: browser-results-*
+          path: ${{ runner.temp }}/browser-results
+
+      - name: Verify complete execution and collect mergeable reports
+        run: |
+          cp -R "$RUNNER_TEMP/frontend-preparation/results/unit" "$RUNNER_TEMP/browser-results/unit"
+          node frontend/scripts/ci-browser.mjs verify \
+            --reports-dir "$RUNNER_TEMP/browser-results" \
+            --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json" \
+            --sha "$(git rev-parse HEAD)" \
+            --merged-blobs "$RUNNER_TEMP/merged-blobs"
+
+      - name: Merge complete browser reports
+        if: always()
+        working-directory: frontend
+        run: npx playwright merge-reports --reporter=html "$RUNNER_TEMP/merged-blobs"
+
+      - name: Retain merged browser report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-report
+          path: |
+            frontend/playwright-report/
+            ${{ runner.temp }}/browser-results/browser-summary.json
+          retention-days: 1
+
+      - name: Require every upstream browser job to succeed
+        if: always()
+        env:
+          PREPARATION_RESULT: ${{ needs.frontend-prepare.result }}
+          SHARD_RESULT: ${{ needs.browser-shards.result }}
+        run: |
+          test "$PREPARATION_RESULT" = success
+          test "$SHARD_RESULT" = success
+
+  visual-baselines:
+    if: inputs.refresh_visual_baselines == true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -168,14 +349,12 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Generate Linux visual baselines for review
-        if: inputs.refresh_visual_baselines == true
         run: |
           npm --prefix frontend run build
           cd frontend
           npx playwright test --config playwright.visual.config.ts --update-snapshots --grep 'visual .* at'
 
       - name: Retain generated Linux visual baselines
-        if: inputs.refresh_visual_baselines == true
         uses: actions/upload-artifact@v7.0.2
         with:
           name: linux-visual-baselines
@@ -183,7 +362,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Run browser tests against the isolated Relay server
+      - name: Run complete browser verification
         run: make test-frontend
 
       - name: Retain failed browser traces

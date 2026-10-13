@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     )
 
 ThreadResult = TypeVar("ThreadResult")
+pytest_plugins = ["tests.ci_reporting"]
 
 
 @pytest.hookimpl(wrapper=True)
@@ -93,6 +94,15 @@ def _prepare_django() -> None:
 
 
 _prepare_django()
+
+
+def pytest_unconfigure() -> None:
+    """Also release controller and collection-only scratch roots without fixtures."""
+    from django.db import connections
+
+    connections.close_all()
+    shutil.rmtree(_SESSION_ROOT, ignore_errors=True)
+    _SESSION_ENVIRONMENT.undo()
 
 
 @pytest.fixture(scope="session", autouse=True)

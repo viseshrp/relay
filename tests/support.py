@@ -340,7 +340,7 @@ class FakeAgents:
         return fake_executable(
             self.directory,
             profile.executable_names[0],
-            Path(__file__).with_name("fake_agent.py"),
+            Path(__file__).with_name("fake_agent_entry.py"),
             (transport,),
         )
 

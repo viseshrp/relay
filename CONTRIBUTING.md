@@ -66,12 +66,14 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
-All 15 CI compatibility jobs run the full Python suite. Coverage is collected
-only on the main Ubuntu interpreter, which uploads the existing Codecov
-report. Other jobs run without coverage instrumentation or unused reports.
-Local tox runs keep
-coverage enabled by default. `RELAY_TEST_COVERAGE_ARGS` overrides those
-arguments; an empty value runs the same suite without coverage.
+CI runs the complete matrix with isolated Python workers and four separate
+browser shards. Inventories verify that every test finishes exactly once.
+Linux/Python 3.14 collects branch coverage; the other 14 environments run
+every test without suite-wide coverage instrumentation. Local tox runs keep
+coverage enabled by default. Set `RELAY_TEST_COVERAGE=false` to run without
+coverage while preserving complete execution and outcome verification.
+See [CI execution and test completeness](docs/ci-testing.md) for serial
+references, worker overrides, retained reports, and rollback controls.
 
 Windows 3.10 CI uses uv's managed CPython 3.10.19 build. The setup action's
 `managed-python` input selects that runtime, and tox uses the same managed

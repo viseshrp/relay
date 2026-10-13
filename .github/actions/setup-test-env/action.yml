@@ -1,0 +1,76 @@
+name: Set up complete Python test environment
+description: Install the selected Python and both supported JavaScript action runtimes
+
+inputs:
+  python-version:
+    description: Python version under test
+    required: true
+  cache-enabled:
+    description: Restore and save dependency caches
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Select the supported interpreter source
+      shell: bash
+      env:
+        RELAY_REQUESTED_PYTHON: ${{ inputs.python-version }}
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" && "$RELAY_REQUESTED_PYTHON" == "3.10" ]]; then
+          echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+        else
+          echo "UV_PYTHON_PREFERENCE=system" >> "$GITHUB_ENV"
+        fi
+
+    - name: Set up Python + Environment
+      uses: ./.github/actions/setup-python-env
+      with:
+        python-version: ${{ runner.os == 'Windows' && inputs.python-version == '3.10' && '3.10.19' || inputs.python-version }}
+        managed-python: ${{ runner.os == 'Windows' && inputs.python-version == '3.10' }}
+        cache-enabled: ${{ inputs.cache-enabled }}
+
+    - name: Report Python and SQLite runtime
+      shell: bash
+      run: uv run python -c "import sqlite3, sys; print(sys.version); print('SQLite', sqlite3.sqlite_version)"
+
+    - name: Set up Node 20 for local action tests
+      uses: actions/setup-node@v7.0.0
+      with:
+        node-version: '20'
+
+    - name: Capture Node 20 runtime
+      shell: bash
+      run: |
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        import shutil
+        executable = shutil.which("node")
+        assert executable is not None
+        with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+            stream.write(f"RELAY_TEST_NODE_20={executable}\n")
+        PY
+
+    - name: Set up Node 24 for local action tests
+      uses: actions/setup-node@v7.0.0
+      with:
+        node-version: '24.21.0'
+
+    - name: Capture Node 24 runtime
+      shell: bash
+      run: |
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        import shutil
+        executable = shutil.which("node")
+        assert executable is not None
+        with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as stream:
+            stream.write(f"RELAY_TEST_NODE_24={executable}\n")
+        PY
+
+    - name: Configure isolated Python reports
+      shell: bash
+      run: echo "RELAY_TEST_REPORT_DIR=$RUNNER_TEMP/python-results" >> "$GITHUB_ENV"

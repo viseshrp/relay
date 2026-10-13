@@ -55,6 +55,7 @@ dev = [
     "tox-gh-actions",
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "pre-commit",
     "ruff",
     "pip-audit",
@@ -150,6 +151,7 @@ markers = [
     "integration:Run integration tests",
     "smoke:Run the smoke tests",
     "unit:Run the unit tests",
+    "serial_integration:Run timed contention and orphan recovery without competing tests",
 ]
 norecursedirs = [
     ".git",
