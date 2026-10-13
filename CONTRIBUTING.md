@@ -66,6 +66,13 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
+All 15 CI compatibility jobs run the full Python suite. Coverage is collected
+only on the main Ubuntu interpreter, which uploads the existing Codecov
+report. Other jobs run without coverage instrumentation, avoiding unnecessary
+tracing of older interpreters during threaded execution. Local tox runs keep
+coverage enabled by default. `RELAY_TEST_COVERAGE_ARGS` overrides those
+arguments; an empty value runs the same suite without coverage.
+
 The Markdown hook checks every supplied file. Its `--` delimiter ends the
 list of disabled rules before file names. [Markdown configuration](.markdownlint.jsonc)
 keeps the 80-column limit for prose and code, permits wider table rows, and

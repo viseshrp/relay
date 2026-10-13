@@ -121,6 +121,10 @@ jobs:
           tests/test_actions_language_boundaries.py -q
 
       - name: Run tests
+        env:
+          # Only this job uploads coverage; compatibility jobs run the same
+          # suite without a tracer, including the older Windows interpreter.
+          RELAY_TEST_COVERAGE_ARGS: ${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os == 'ubuntu-latest' && '--cov --cov-config=pyproject.toml --cov-report=xml:coverage.xml' || '' }}
         run: make test
 
       - name: Upload coverage to Codecov

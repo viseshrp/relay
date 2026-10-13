@@ -230,6 +230,43 @@ four no-login cases in 19.1 seconds, 29 visual cases in 2.0 minutes, and all
 The pre-fix browser mutation and restored green run use a separate port and
 asset root; neither changes the owner app or the full gate's assets.
 
+## PR comments and CI follow-up
+
+[CI run 38335763189][review-followup-ci], at `9dff6cb`, passed 14 Python/OS
+jobs and both Codecov checks. Patch coverage was 87.99%. Two jobs failed:
+
+- Windows 3.10 exited with native access violation `0xC0000005` during the
+  launch burst. The crashing thread was garbage-collecting while parsing
+  YAML under coverage instrumentation. The stack alone does not establish
+  the native cause. All 15 compatibility jobs continue to run the full
+  suite; only the main Ubuntu interpreter collects the coverage report it
+  already uploaded. Other jobs run without a tracer. Coverage thresholds,
+  the uploaded report, and supported versions remain unchanged. Local tox
+  retains coverage by default and accepts an explicit override.
+- The authoring browser test started its five-second completion assertion
+  before the launch response. Launch persistence consumed 2.76 seconds,
+  and the last accepted snapshot still showed the parent running. The test
+  now waits for the successful launch response first. Its completion
+  assertion retains the same five-second deadline.
+
+[review-followup-ci]: https://github.com/viseshrp/relay/actions/runs/38335763189
+
+The worker-count compatibility warning now contains only a fixed message;
+its regression test checks that no configuration value enters log arguments.
+The other CodeQL comments identify six intentional Protocol signatures,
+three shared-state assignments read by later calls, and two cancellation
+awaits. Those statements remain: lifecycle, scheduling, and disconnect
+coverage exercise their behavior. Review replies explain each use before
+the corresponding conversation is resolved. The final head's CI result is
+recorded on the PR after the checks complete.
+
+Local follow-up checks pass: 86 backend cases covering renewal, scheduling,
+consumer lifecycle, disconnects, and supervisor behavior; both 40-launch
+burst cases through the non-instrumented Python 3.10 tox command; and the
+authoring browser case. `make check`, frontend lint/format, changed-file
+hooks, and documentation links also pass. Tox configuration checks confirm
+both the default coverage arguments and the empty override.
+
 ## Measurement gate and remaining coverage
 
 The local Phase 7 profile passes its zero-empty, zero-autocommit gates. The
@@ -244,9 +281,11 @@ pending CI. Twelve optional JavaScript integration cases require installed
 Node 20/24 runtimes; a directory-junction
 case requires Windows. Live provider certification was not requested.
 
-CI is not watched or polled, failed jobs are not rerun automatically, and
-the PR is not merged. Output buffering remains a separate change under the
-owner's approved scope regardless of these local measurements.
+Initial delivery did not watch or poll CI or automatically rerun failures.
+The owner's subsequent PR follow-up request authorizes checking CI through
+a green result and repairing its failures. No recurring monitor is scheduled
+and the PR is not merged. Output buffering remains a separate change under
+the owner's approved scope regardless of these local measurements.
 
 The old plan's line numbers refer to an earlier tree. The corresponding
 subjects now live in `db_routing.py`, `db_retry.py`, `heartbeat.py`, the Huey
