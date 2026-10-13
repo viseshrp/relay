@@ -2,20 +2,52 @@
 
 from __future__ import annotations
 
+from configparser import ConfigParser
 from copy import deepcopy
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tox.config.loader.str_convert import StrConvert
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 _PYTHONS = {"3.10", "3.11", "3.12", "3.13", "3.14"}
 _OPERATING_SYSTEMS = {"ubuntu-latest", "macos-latest", "windows-latest"}
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("override", [False, True])
+def test_tox_keeps_spaced_checkout_and_report_paths_in_one_argument(
+    monkeypatch: pytest.MonkeyPatch, platform: str, override: bool
+) -> None:
+    configuration = ConfigParser()
+    configuration.read(ROOT / "tox.ini", encoding="utf-8")
+    template = configuration["testenv"]["commands"].strip()
+    directory = (
+        r"D:\checkout with spaces\.tox\py310\tmp\reports"
+        if platform == "win32"
+        else "/workspace/checkout with spaces/.tox/py310/tmp/reports"
+    )
+    if override:
+        directory = (
+            r"D:\custom test reports" if platform == "win32" else "/workspace/custom test reports"
+        )
+    command = template.replace("{env:RELAY_TEST_REPORT_DIR:{env_tmp_dir}/reports}", directory)
+    # Exercise tox's actual platform-specific quote and backslash conversion.
+    monkeypatch.setattr("tox.config.loader.str_convert.sys", SimpleNamespace(platform=platform))
+    assert StrConvert.to_command(command).args == [
+        "python",
+        "scripts/run_python_tests.py",
+        "--reports-dir",
+        directory,
+        "--legacy-coverage",
+    ]
 
 
 def _load(relative: str) -> dict[str, Any]:
