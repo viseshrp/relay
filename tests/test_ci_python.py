@@ -192,6 +192,7 @@ def test_real_runner_collects_exact_identities_and_combines_branch_coverage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int
 ) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setenv("RELAY_TEST_COVERAGE", "false")
     tests = tmp_path / "test_probe.py"
     tests.write_text(
         "import pytest\n"
@@ -204,16 +205,57 @@ def test_real_runner_collects_exact_identities_and_combines_branch_coverage(
         encoding="utf-8",
     )
     reports = tmp_path / "reports"
-    assert runner.run(workers, reports, [str(tests)]) == 0
+    assert runner.run(workers, reports, [str(tests)], coverage_enabled=True) == 0
     summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
     coverage = json.loads((reports / "coverage.json").read_text(encoding="utf-8"))
     assert summary["test_count"] == 2
     assert summary["errors"] == []
+    assert summary["coverage_enabled"] is True
     assert summary["temporary_root_retained"] is False
     assert not Path(summary["temporary_root"]).exists()
     assert coverage["meta"]["branch_coverage"] is True
     assert coverage["totals"]["covered_lines"] > 0
     assert len(list(reports.glob("junit-*.xml"))) == (1 if workers == 0 else 2)
+
+
+@pytest.mark.parametrize("serial_failure", [False, True])
+def test_real_no_coverage_cli_runs_every_lane_and_preserves_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, serial_failure: bool
+) -> None:
+    probe = tmp_path / "test_probe.py"
+    probe.write_text(
+        "import pytest\n"
+        "@pytest.mark.serial_integration\n"
+        "def test_serial():\n"
+        f"    assert {not serial_failure!r}\n"
+        "def test_parallel():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    reports = tmp_path / "reports"
+    monkeypatch.setenv("RELAY_TEST_COVERAGE", "false")
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        ["run_python_tests.py", "--workers", "2", "--reports-dir", str(reports), str(probe)],
+    )
+    assert runner.main() == int(serial_failure)
+    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
+    assert summary["coverage_enabled"] is False
+    assert summary["coverage_reports"] == []
+    assert summary["test_count"] == 2
+    assert [command["name"] for command in summary["commands"]] == [
+        "inventory",
+        "serial",
+        "parallel",
+    ]
+    assert summary["commands"][-1]["exit_code"] == 0
+    assert bool(summary["errors"]) is serial_failure
+    assert not list(reports.glob("*coverage*"))
+    assert not list(reports.glob(".coverage*"))
+    for name in ("serial", "parallel"):
+        lane = json.loads((reports / f"{name}.json").read_text(encoding="utf-8"))
+        assert len(lane["completed"]) == 1
 
 
 def test_real_failed_git_diagnostics_retain_stderr_without_publishing_passing_output(

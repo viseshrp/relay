@@ -81,6 +81,7 @@ jobs:
         shell: bash
     env:
       RELAY_TEST_WORKERS: ${{ inputs.serial_python == true && '0' || (matrix.os == 'macos-latest' && '2' || '3') }}
+      RELAY_TEST_COVERAGE: ${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' && 'true' || 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
@@ -94,7 +95,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache-enabled: ${{ inputs.cold_cache != true }}
 
-      - name: Run complete Python coverage and verify execution
+      - name: Run complete Python suite and verify execution
         run: make test
 
       - name: Retain Python outcomes, coverage, and timings

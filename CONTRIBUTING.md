@@ -68,6 +68,9 @@ builds use the committed npm lockfile. Do not hand-edit generated files under
 
 CI runs the complete matrix with isolated Python workers and four separate
 browser shards. Inventories verify that every test finishes exactly once.
+Linux/Python 3.14 collects branch coverage; the other 14 environments run
+every test without suite-wide coverage instrumentation. Local tox runs keep
+coverage enabled by default.
 See [CI execution and test completeness](docs/ci-testing.md) for serial
 references, worker overrides, retained reports, and rollback controls.
 

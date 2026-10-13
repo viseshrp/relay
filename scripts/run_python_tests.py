@@ -177,6 +177,7 @@ def _summary(summary: dict[str, Any]) -> str:
         "",
         f"{summary['test_count']} tests; workers={summary['workers']}; "
         f"elapsed={summary['elapsed_seconds']:.1f}s; exit={summary['exit_code']}.",
+        f"Coverage: {'enabled' if summary['coverage_enabled'] else 'disabled'}.",
         "",
         "| Lane | Exit | Seconds |",
         "| --- | ---: | ---: |",
@@ -242,7 +243,14 @@ def _remove_scratch_root(root: Path) -> None:
     shutil.rmtree(root)
 
 
-def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: bool = False) -> int:
+def run(
+    workers: int,
+    reports_dir: Path,
+    paths: list[str],
+    *,
+    legacy_coverage: bool = False,
+    coverage_enabled: bool = True,
+) -> int:
     reports_dir = reports_dir.resolve()
     if not _prepare_report_dir(reports_dir):
         return 1
@@ -256,7 +264,18 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
         if fragment.is_file():
             fragment.unlink()
     environment = dict(os.environ)
-    environment["COVERAGE_FILE"] = str(reports_dir / ".coverage")
+    if coverage_enabled:
+        environment["COVERAGE_FILE"] = str(reports_dir / ".coverage")
+    else:
+        for name in (
+            "COVERAGE_FILE",
+            "COVERAGE_PROCESS_START",
+            "COV_CORE_SOURCE",
+            "COV_CORE_CONFIG",
+            "COV_CORE_DATAFILE",
+            "COV_CORE_BRANCH",
+        ):
+            environment.pop(name, None)
     environment["RELAY_TEST_CHECKOUT_SHA"] = _checkout_sha()
     environment["RELAY_TEST_REQUESTED_PATHS"] = json.dumps(paths)
     environment["PYTHONPATH"] = os.pathsep.join(
@@ -274,6 +293,8 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
         "tests.ci_reporting",
         *paths,
     ]
+    if not coverage_enabled:
+        base.extend(["-p", "no:pytest_cov"])
     commands: list[dict[str, Any]] = []
     started = time.perf_counter()
     try:
@@ -291,6 +312,8 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
                 "errors": [f"Cannot create isolated pytest storage: {error}"],
                 "elapsed_seconds": time.perf_counter() - started,
                 "exit_code": 1,
+                "coverage_enabled": coverage_enabled,
+                "coverage_reports": [],
             },
             reports_dir,
             environment,
@@ -324,15 +347,14 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
             "junit_logging=all",
             "-o",
             "junit_log_passing_tests=false",
-            "--cov",
-            f"--cov-config={ROOT / 'pyproject.toml'}",
-            "--cov-report=",
             "--relay-ci-report",
             str(reports_dir / f"{name}.json"),
             f"--junitxml={reports_dir / f'junit-{name}.xml'}",
         ]
-        if index:
-            arguments.append("--cov-append")
+        if coverage_enabled:
+            arguments.extend(["--cov", f"--cov-config={ROOT / 'pyproject.toml'}", "--cov-report="])
+            if index:
+                arguments.append("--cov-append")
         if name == "serial":
             arguments.extend(["-m", "serial_integration"])
         elif name == "parallel":
@@ -354,29 +376,30 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
     for command, lane in zip(commands[1:], lanes, strict=True):
         if command["exit_code"] == 5 and not lane["collected"] and not lane["collection_errors"]:
             command["expected_empty_lane"] = True
-    for format_name in ("xml", "json"):
-        execute(
-            f"coverage-{format_name}",
-            [
-                sys.executable,
-                "-m",
-                "coverage",
-                format_name,
-                "-o",
-                str(reports_dir / f"coverage.{format_name}"),
-            ],
-        )
-    coverage_report = _read_json(reports_dir / "coverage.json")
-    meta = coverage_report.get("meta")
-    totals = coverage_report.get("totals")
-    if not isinstance(meta, dict) or meta.get("branch_coverage") is not True:
-        errors.append("Coverage report is missing branch instrumentation")
-    if (
-        not isinstance(totals, dict)
-        or not isinstance(totals.get("covered_lines"), int)
-        or totals["covered_lines"] <= 0
-    ):
-        errors.append("Coverage report contains no executed Relay source lines")
+    if coverage_enabled:
+        for format_name in ("xml", "json"):
+            execute(
+                f"coverage-{format_name}",
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    format_name,
+                    "-o",
+                    str(reports_dir / f"coverage.{format_name}"),
+                ],
+            )
+        coverage_report = _read_json(reports_dir / "coverage.json")
+        meta = coverage_report.get("meta")
+        totals = coverage_report.get("totals")
+        if not isinstance(meta, dict) or meta.get("branch_coverage") is not True:
+            errors.append("Coverage report is missing branch instrumentation")
+        if (
+            not isinstance(totals, dict)
+            or not isinstance(totals.get("covered_lines"), int)
+            or totals["covered_lines"] <= 0
+        ):
+            errors.append("Coverage report contains no executed Relay source lines")
     durations: dict[str, float] = {}
     for lane in lanes:
         for report in lane["reports"]:
@@ -410,10 +433,13 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
         "exit_code": exit_code,
         "temporary_root": str(scratch_root),
         "temporary_root_retained": scratch_root.exists(),
+        "coverage_enabled": coverage_enabled,
+        "coverage_reports": ["coverage.xml", "coverage.json"] if coverage_enabled else [],
     }
     _publish_summary(summary, reports_dir, environment)
     if (
         legacy_coverage
+        and coverage_enabled
         and not os.environ.get("RELAY_TEST_REPORT_DIR")
         and (reports_dir / "coverage.xml").is_file()
     ):
@@ -423,6 +449,15 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    coverage_default = os.environ.get("RELAY_TEST_COVERAGE", "true").strip().casefold()
+    if coverage_default not in {"true", "false"}:
+        parser.error("RELAY_TEST_COVERAGE must be true or false")
+    parser.add_argument(
+        "--coverage",
+        action=argparse.BooleanOptionalAction,
+        default=coverage_default == "true",
+        help="Collect branch coverage (default: true, or RELAY_TEST_COVERAGE).",
+    )
     parser.add_argument("--workers", type=int, default=os.environ.get("RELAY_TEST_WORKERS", "0"))
     parser.add_argument(
         "--reports-dir",
@@ -443,6 +478,7 @@ def main() -> int:
         arguments.reports_dir,
         arguments.paths or ["tests"],
         legacy_coverage=arguments.legacy_coverage,
+        coverage_enabled=arguments.coverage,
     )
 
 

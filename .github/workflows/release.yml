@@ -57,6 +57,7 @@ jobs:
         shell: bash
     env:
       RELAY_TEST_WORKERS: ${{ matrix.os == 'macos-latest' && '2' || '3' }}
+      RELAY_TEST_COVERAGE: ${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' && 'true' || 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1

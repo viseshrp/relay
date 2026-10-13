@@ -22,10 +22,12 @@ internal thread and process concurrency remains unchanged. The other tests
 run with xdist work stealing. Both lanes execute even if one fails; worker
 crashes fail the job without automatic worker restarts.
 
-Both lanes record branch coverage into one job-specific database. Final XML
-and JSON reports include both lanes. All 15 environments retain coverage;
-the canonical Linux/Python 3.14 report also uploads to Codecov. Existing
-coverage thresholds and exclusions remain unchanged.
+Linux/Python 3.14 records branch coverage from both lanes into one
+job-specific database. Final XML and JSON reports include both lanes, and
+Main uploads this canonical report to Codecov. The other 14 environments
+run every test without suite-wide coverage instrumentation. Existing
+coverage thresholds and exclusions remain unchanged. Local runs collect
+coverage by default.
 
 ### Local execution and reports
 
@@ -48,7 +50,8 @@ as skips; CI requires both runtimes. Declared platform skips and unavailable
 symlink privileges retain their reasons.
 
 Reports contain the full inventory, selected lane identities, setup/call/
-teardown outcomes, JUnit XML, coverage XML/JSON, and JSON/Markdown summaries.
+teardown outcomes, JUnit XML, and JSON/Markdown summaries. Coverage-enabled
+runs also retain coverage XML/JSON; every summary identifies that setting.
 The runner rejects missing or duplicated cases, collection errors, incomplete
 phase reports, failed tests, and unexplained skips. A failed lane cannot be
 hidden by a later passing lane.
@@ -60,9 +63,11 @@ temporary directory. Failed runs retain that root and record its location
 in the summary. Failed test reports also retain bounded Git command stderr;
 passing tests do not expose that diagnostic output.
 
-Tox forwards `RELAY_TEST_WORKERS` and `RELAY_TEST_REPORT_DIR`. Without an
-explicit report directory, tox stores reports beneath each environment's
-temporary directory and also maintains the legacy root `coverage.xml`.
+Tox forwards `RELAY_TEST_WORKERS`, `RELAY_TEST_REPORT_DIR`, and
+`RELAY_TEST_COVERAGE`. Set the latter to `false` to run the complete suite
+without coverage instrumentation. Without an explicit report directory, tox
+stores reports beneath each environment's temporary directory and also
+maintains the legacy root `coverage.xml` when coverage is enabled.
 Ordinary direct pytest commands continue working without CI reporting.
 
 ## Browser preparation and shards

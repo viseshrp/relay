@@ -102,6 +102,30 @@ def test_python_workflows_preserve_every_environment_and_reject_test_filters(nam
             _assert_complete_python_workflow(changed)
 
 
+@pytest.mark.parametrize("name", ["main", "release"])
+def test_only_the_canonical_environment_collects_suite_coverage(name: str) -> None:
+    workflow = _load(f".github/workflows/{name}.yml")
+    assert workflow["jobs"]["tests"]["env"]["RELAY_TEST_COVERAGE"] == (
+        "${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' "
+        "&& 'true' || 'false' }}"
+    )
+    if name == "main":
+        assert workflow["env"]["MAIN_PYTHON_VERSION"] == "3.14"
+        upload = next(
+            step
+            for step in workflow["jobs"]["tests"]["steps"]
+            if step.get("uses", "").startswith("codecov/codecov-action@")
+        )
+        assert upload["if"] == (
+            "${{ matrix.python-version == env.MAIN_PYTHON_VERSION "
+            "&& matrix.os == 'ubuntu-latest' }}"
+        )
+        assert upload["with"]["files"] == "${{ runner.temp }}/python-results/coverage.xml"
+    configuration = ConfigParser()
+    configuration.read(ROOT / "tox.ini", encoding="utf-8")
+    assert "RELAY_TEST_COVERAGE" in configuration["testenv"]["pass_env"].split(", ")
+
+
 def _assert_shared_test_setup(workflow: dict[str, Any]) -> None:
     steps = workflow["jobs"]["tests"]["steps"]
     setup = [step for step in steps if step.get("uses") == "./.github/actions/setup-test-env"]
