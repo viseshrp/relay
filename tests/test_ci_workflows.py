@@ -67,7 +67,10 @@ def test_native_tox_keeps_paths_and_complete_lanes(tmp_path: Path, coverage: boo
     assert parallel[parallel.index("-n") + 1] == "3"
     assert "--dist=worksteal" in parallel and "--max-worker-restart=0" in parallel
     for lane, command in (("serial", serial), ("parallel", parallel)):
-        assert f"--junitxml={temporary / 'reports' / f'junit-{lane}.xml'}" in command
+        junit = next(argument for argument in command if argument.startswith("--junitxml="))
+        assert Path(junit.removeprefix("--junitxml=")) == (
+            temporary / "reports" / f"junit-{lane}.xml"
+        )
         assert ("--cov" in command) is coverage
         assert command[-1] == "tests"
     assert configuration["ignore_errors"] is True

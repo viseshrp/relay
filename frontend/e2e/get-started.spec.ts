@@ -287,6 +287,9 @@ test("the full starter requires Claude and the blank option remains available", 
     .getByRole("menuitem", { name: "Get started", exact: true })
     .click();
   const setup = page.getByRole("dialog", { name: "Get started", exact: true });
+  await expect(
+    setup.getByRole("article", { name: "Codex", exact: true }),
+  ).toContainText("Ready to connect");
   await setup
     .getByRole("button", { name: "Start from a template", exact: true })
     .click();
