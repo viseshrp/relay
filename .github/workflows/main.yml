@@ -58,6 +58,9 @@ jobs:
   tests:
     if: inputs.refresh_visual_baselines != true
     runs-on: ${{ matrix.os }}
+    env:
+      # Keep tox on the same managed patch release as the Windows 3.10 job.
+      UV_PYTHON_PREFERENCE: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' && 'only-managed' || 'system' }}
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -77,7 +80,13 @@ jobs:
       - name: Set up Python + Environment
         uses: ./.github/actions/setup-python-env
         with:
-          python-version: ${{ matrix.python-version }}
+          # setup-python's final Windows 3.10 build is 3.10.11. Match the
+          # managed 3.10.19 patch release exercised locally and on other OSes.
+          python-version: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' && '3.10.19' || matrix.python-version }}
+          managed-python: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' }}
+
+      - name: Report Python and SQLite runtime
+        run: uv run python -c "import sqlite3, sys; print(sys.version); print('SQLite', sqlite3.sqlite_version)"
 
       - name: Set up Node 20 for local action tests
         uses: actions/setup-node@v7.0.0

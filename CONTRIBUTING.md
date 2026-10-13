@@ -68,10 +68,15 @@ builds use the committed npm lockfile. Do not hand-edit generated files under
 
 All 15 CI compatibility jobs run the full Python suite. Coverage is collected
 only on the main Ubuntu interpreter, which uploads the existing Codecov
-report. Other jobs run without coverage instrumentation, avoiding unnecessary
-tracing of older interpreters during threaded execution. Local tox runs keep
+report. Other jobs run without coverage instrumentation or unused reports.
+Local tox runs keep
 coverage enabled by default. `RELAY_TEST_COVERAGE_ARGS` overrides those
 arguments; an empty value runs the same suite without coverage.
+
+Windows 3.10 CI uses uv's managed CPython 3.10.19 build. The setup action's
+`managed-python` input selects that runtime, and tox uses the same managed
+interpreter. Other jobs keep the default setup-python path. Each compatibility
+job reports its Python and SQLite versions before running tests.
 
 The Markdown hook checks every supplied file. Its `--` delimiter ends the
 list of disabled rules before file names. [Markdown configuration](.markdownlint.jsonc)

@@ -254,6 +254,18 @@ jobs and both Codecov checks. Patch coverage was 87.99%. Two jobs failed:
 
 [review-followup-ci]: https://github.com/viseshrp/relay/actions/runs/38335763189
 
+The next [CI run][review-runtime-ci] reproduced the Windows 3.10 native crash
+at `b62c9c3` with coverage disabled. Coverage is therefore not a sufficient
+explanation or repair. Its ten Linux/macOS jobs passed, including the main
+coverage job, and both Codecov checks passed. The failing Windows interpreter
+was CPython 3.10.11. CI now selects uv's managed CPython 3.10.19 for that job,
+including tox discovery, and reports both Python and SQLite versions. The
+full test selection and launch stress cases are retained. The native root
+cause remains unproven; final runtime results belong to the PR's current
+head, rather than a claimed fix based on the Python stack alone.
+
+[review-runtime-ci]: https://github.com/viseshrp/relay/actions/runs/38343083652
+
 The worker-count compatibility warning now contains only a fixed message;
 its regression test checks that no configuration value enters log arguments.
 The other CodeQL comments identify six intentional Protocol signatures,
@@ -263,7 +275,8 @@ coverage exercise their behavior. Review replies explain each use before
 the corresponding conversation is resolved. The final head's CI result is
 recorded on the PR after the checks complete.
 
-Local follow-up checks pass: 86 backend cases covering renewal, scheduling,
+Local follow-up checks pass: the full non-instrumented Python 3.10.19 tox
+suite has 2,890 passes and 13 skips; 86 backend cases cover renewal, scheduling,
 consumer lifecycle, disconnects, and supervisor behavior; both 40-launch
 burst cases through the non-instrumented Python 3.10 tox command; and the
 authoring browser case. `make check`, frontend lint/format, changed-file

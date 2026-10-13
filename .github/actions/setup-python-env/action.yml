@@ -10,11 +10,16 @@ inputs:
     description: "uv version to use"
     required: false
     default: "latest"
+  managed-python:
+    description: "Install the requested Python through uv instead of setup-python"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
   steps:
     - name: Setup Python
+      if: inputs.managed-python != 'true'
       uses: actions/setup-python@v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
@@ -26,12 +31,13 @@ runs:
         enable-cache: true
         cache-suffix: ${{ github.job }}-${{ inputs.python-version }}
         prune-cache: true
+        python-version: ${{ inputs.managed-python == 'true' && inputs.python-version || '' }}
 
     - name: Get resolved Python version
       id: resolved-python
       shell: bash
       run: |
-        PYTHON_VERSION=$(python -c "import sys; print('{}.{}.{}'.format(*sys.version_info[:3]))")
+        PYTHON_VERSION=$(uv run --no-project python -c "import sys; print('{}.{}.{}'.format(*sys.version_info[:3]))")
         echo "version=$PYTHON_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Cache .venv directory
