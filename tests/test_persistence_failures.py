@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 import logging
+from pathlib import Path
 import sqlite3
 import threading
 from typing import NoReturn
@@ -86,7 +87,8 @@ def unavailable_database(
         ("execution", "claim_dispatch", ("token", "worker"), {}),
         ("execution", "mark_dispatch_enqueued", ("token",), {}),
         ("execution", "mark_dispatch_consumed", ("token",), {}),
-        ("execution", "heartbeat_attempt", ("1", "worker"), {}),
+        ("execution", "attempt_owned", ("1", "worker"), {}),
+        ("execution", "renew_attempts", ((("1", "worker"),),), {}),
         ("execution", "record_attempt_process", ("1", None), {}),
         (
             "execution",
@@ -159,9 +161,17 @@ def test_concurrent_read_then_write_transactions_do_not_lose_updates_or_fail_wit
     assert Installation.objects.get(pk=1).settings == {"counter": workers}
 
 
-def test_heartbeat_contention_logs_the_database_cause_but_keeps_the_public_error_generic(
-    project: RelayProject, engine: InlineEngine, caplog: pytest.LogCaptureFixture
+def test_coordinator_contention_logs_the_database_cause_but_keeps_the_public_error_generic(
+    project: RelayProject,
+    engine: InlineEngine,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import threading
+
+    from relay.execution.heartbeat import HeartbeatCoordinator
+    from tests.sqlite_support import hold_write_lock
+
     project.write_workflow(
         "heartbeat",
         "version: 1\nname: Heartbeat\nnodes:\n  work: {type: command, run: [git, status]}\n",
@@ -169,34 +179,36 @@ def test_heartbeat_contention_logs_the_database_cause_but_keeps_the_public_error
     engine.launch(project, "heartbeat")
     claim = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id)
     assert claim.attempt is not None
-    with connection.cursor() as cursor:
-        cursor.execute("PRAGMA busy_timeout")
-        original_timeout = cursor.fetchone()[0]
-        cursor.execute("PRAGMA busy_timeout = 0")
-    blocker = sqlite3.connect(str(connection.settings_dict["NAME"]))
-    try:
-        # The held write lock makes the real UPDATE fail without relying on timing.
-        blocker.execute("BEGIN IMMEDIATE")
-        with (
-            caplog.at_level(logging.ERROR, logger="relay.web.repositories"),
-            pytest.raises(PersistenceError) as raised,
-        ):
-            engine.store.heartbeat_attempt(claim.attempt.attempt_id, engine.worker_id)
-    finally:
-        blocker.rollback()
-        blocker.close()
-        with connection.cursor() as cursor:
-            cursor.execute(f"PRAGMA busy_timeout = {original_timeout}")
-    assert raised.value.to_envelope() == {
+    monkeypatch.setattr("relay.web.repositories.ATTEMPT_STALE_AFTER_SECONDS", 0.08)
+    monkeypatch.setattr("relay.execution.heartbeat.ATTEMPT_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    stopped = threading.Event()
+    coordinator = HeartbeatCoordinator(engine.store, fatal=stopped.set)
+    with (
+        caplog.at_level(logging.WARNING, logger="relay.execution.heartbeat"),
+        coordinator.register(((claim.attempt.attempt_id, engine.worker_id),)),
+        hold_write_lock(Path(connection.settings_dict["NAME"])),
+    ):
+        coordinator.start()
+        try:
+            assert stopped.wait(2)
+        finally:
+            coordinator.stop()
+    records = [record for record in caplog.records if record.name == "relay.execution.heartbeat"]
+    native = next(
+        record
+        for record in records
+        if record.exc_info and isinstance(record.exc_info[1], OperationalError)
+    )
+    assert native.exc_info is not None
+    assert "database is locked" in str(native.exc_info[1])
+    assert isinstance(native.exc_info[1].__cause__, sqlite3.OperationalError)
+    public = next(
+        record.exc_info[1]
+        for record in records
+        if record.exc_info and isinstance(record.exc_info[1], PersistenceError)
+    )
+    assert public.to_envelope() == {
         "code": "persistence_error",
-        "message": "Relay could not update the attempt heartbeat.",
+        "message": "Relay could not renew the worker's active attempts.",
         "context": {},
     }
-    records = [record for record in caplog.records if record.name == "relay.web.repositories"]
-    assert len(records) == 1
-    record = records[0]
-    assert record.exc_info is not None
-    assert isinstance(record.exc_info[1], OperationalError)
-    assert "database is locked" in str(record.exc_info[1])
-    assert isinstance(record.exc_info[1].__cause__, sqlite3.OperationalError)
-    assert record.__dict__["attempt_id"] == claim.attempt.attempt_id

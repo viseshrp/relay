@@ -3753,25 +3753,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not mark the dispatch claim consumed."
             raise PersistenceError(message) from None
 
-    def heartbeat_attempt(self, attempt_id: str, worker_id: str) -> bool:
-        now = timezone.now()
-        try:
-            updated = NodeAttempt.objects.filter(
-                pk=attempt_id,
-                worker_id=worker_id,
-                status__in=(AttemptStatus.RUNNING.value, AttemptStatus.WAITING.value),
-            ).update(heartbeat_at=now)
-        except DatabaseError:
-            LOGGER.exception(
-                "Attempt heartbeat database update failed", extra={"attempt_id": attempt_id}
-            )
-            message = "Relay could not update the attempt heartbeat."
-            raise PersistenceError(message) from None
-        else:
-            if updated:
-                RunLock.objects.filter(attempt_id=attempt_id).update(heartbeat_at=now)
-            return updated == 1
-
     def attempt_owned(self, attempt_id: str, worker_id: str) -> bool:
         """Provider/command checks never reserve or renew SQLite's writer."""
         try:

@@ -297,10 +297,13 @@ ownership through reads.
 
 Heartbeat renewal retries transient SQLite busy errors within a 30-second
 total budget. Exhaustion stops the worker so the supervisor can prove it has
-exited before recovery. Launch persistence and control transactions retry only
-rolled-back SQLite busy failures within a 15-second total budget, including
-SQLite's own waiting. Git operations, provider calls, and agent execution are
-never repeated by a database retry. Other database errors propagate unchanged.
+exited before recovery. This is an unexpected child exit: Relay stops rather
+than automatically restarting the worker. Attempt heartbeats support control
+claim recovery; their age never authorizes workspace handoff. Launch
+persistence and control transactions retry only rolled-back SQLite busy
+failures within a 15-second total budget, including SQLite's own waiting.
+Git operations, provider calls, and agent execution are never repeated by a
+database retry. Other database errors propagate unchanged.
 
 ## Node execution
 

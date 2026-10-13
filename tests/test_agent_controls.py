@@ -222,7 +222,7 @@ def test_a_lost_mailbox_lease_is_recoverable_while_its_worker_is_alive(
     control = store.claim_next_control(attempt.attempt_id, attempt.worker_id)
     assert control is not None
     clock.advance(CONTROL_CLAIM_STALE_AFTER_SECONDS + 1)
-    store.heartbeat_attempt(attempt.attempt_id, attempt.worker_id)
+    store.renew_attempts(((attempt.attempt_id, attempt.worker_id),))
 
     recovered = store.recover_control_claims()
 
@@ -256,7 +256,7 @@ def test_mailbox_recovery_rechecks_a_claim_after_waiting_for_the_writer(
     control = store.claim_next_control(attempt.attempt_id, attempt.worker_id)
     assert control is not None
     clock.advance(CONTROL_CLAIM_STALE_AFTER_SECONDS + 1)
-    store.heartbeat_attempt(attempt.attempt_id, attempt.worker_id)
+    store.renew_attempts(((attempt.attempt_id, attempt.worker_id),))
     atomic = transaction.atomic
     first = True
 
