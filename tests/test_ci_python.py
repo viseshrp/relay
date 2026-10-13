@@ -291,3 +291,33 @@ def test_real_failed_git_diagnostics_retain_stderr_without_publishing_passing_ou
     cases = {case.attrib["name"]: case for case in junit.findall(".//testcase")}
     assert "PASS_OUTPUT_UNCHANGED" not in ET.tostring(cases["test_passing"], encoding="unicode")
     assert "relay-invalid-probe-command" in ET.tostring(cases["test_failing"], encoding="unicode")
+
+
+def test_diagnostic_fixture_preserves_shared_patch_and_temporary_cleanup_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    probe = tmp_path / "test_cleanup_probe.py"
+    probe.write_text(
+        "import os, pytest\n"
+        "original_scandir = os.scandir\n"
+        "@pytest.fixture\n"
+        "def tmp_path(tmp_path_factory):\n"
+        "    path = tmp_path_factory.mktemp('cleanup-probe')\n"
+        "    yield path\n"
+        "    assert os.scandir is original_scandir, 'filesystem patch outlived test cleanup'\n"
+        "def test_cleanup(tmp_path, monkeypatch):\n"
+        "    def entries(path):\n"
+        "        return original_scandir(path)\n"
+        "    monkeypatch.setattr(os, 'scandir', entries)\n"
+        "    assert os.scandir is entries\n",
+        encoding="utf-8",
+    )
+    reports = tmp_path / "reports"
+    assert runner.run(0, reports, [str(probe)], coverage_enabled=False) == 0
+    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
+    assert summary["test_count"] == 1
+    assert summary["errors"] == []
+    lane = json.loads((reports / "full.json").read_text(encoding="utf-8"))
+    assert [report["phase"] for report in lane["reports"]] == ["setup", "call", "teardown"]
+    assert all(report["outcome"] == "passed" for report in lane["reports"])

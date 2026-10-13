@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 import json
 import os
 from pathlib import Path
@@ -28,9 +28,10 @@ _GIT_DIAGNOSTICS = pytest.StashKey[list[str]]()
 
 
 @pytest.fixture(autouse=True)
-def failed_git_diagnostics(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+def failed_git_diagnostics(request: pytest.FixtureRequest) -> Iterator[None]:
     """Retain real Git stderr without changing calls or exposing passing output."""
     if not request.config.getoption("--relay-ci-report"):
+        yield
         return
     diagnostics: list[str] = []
     request.node.stash[_GIT_DIAGNOSTICS] = diagnostics
@@ -61,7 +62,11 @@ def failed_git_diagnostics(request: pytest.FixtureRequest, monkeypatch: pytest.M
             del diagnostics[:-8]
         return result
 
-    monkeypatch.setattr(subprocess, "run", execute)
+    # Requesting the shared monkeypatch fixture here would initialize it before
+    # tmp_path and leave test filesystem patches active during tmp_path cleanup.
+    with pytest.MonkeyPatch.context() as diagnostic_patch:
+        diagnostic_patch.setattr(subprocess, "run", execute)
+        yield
 
 
 @pytest.hookimpl(wrapper=True)
