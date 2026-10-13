@@ -1,159 +1,136 @@
 # CI execution and test completeness
 
-Relay runs the complete supported Python matrix and the complete browser
-suite on standard GitHub-hosted runners. Parallelism changes where tests run,
-while inventories verify that every collected case finishes exactly once.
+Relay runs the complete Python matrix and browser suite on standard
+GitHub-hosted runners. Native tox commands, pytest-xdist, and Playwright
+provide execution and reports. Small validators check complete execution.
 
 ## Python matrix
 
 Main and Release run Python 3.10 through 3.14 on Linux, macOS, and Windows.
-Both workflows install Node 20 and Node 24 and pass their executable paths to
-tox. This keeps local JavaScript action tests active on every platform.
-The shared setup retains uv's managed CPython 3.10.19 on Windows and reports
-the Python and SQLite versions. Other environments use setup-python.
+Both Node 20 and Node 24 remain available to every local-action integration
+test. Windows 3.10 retains managed CPython 3.10.19; other jobs use
+setup-python. Each job reports its Python and SQLite versions.
 
-The shared runner uses three pytest workers on Linux and Windows and two on
-macOS. Each worker owns its Django template database, Huey queue, environment
-overrides, provider transcripts, and temporary repositories. Every test still
-receives a fresh database copy. Real Git and provider subprocess integration
-remains enabled.
+[tox.toml](../tox.toml) declares collection, serial execution, parallel
+execution, coverage reports, and verification as ordinary tox commands.
+Native TOML conditions preserve the `RELAY_TEST_COVERAGE` switch. Tox's
+`ignore_errors` runs subsequent commands after failures and still fails the
+overall environment. Failed execution cannot be hidden by a later command.
 
-Tests that deliberately measure SQLite lock budgets, concurrent launch
-bursts, or supervisor process recovery run in a separate serial lane. Their
-internal thread and process concurrency remains unchanged. The other tests
-run with xdist work stealing. Both lanes execute even if one fails; worker
-crashes fail the job without automatic worker restarts.
+Timed SQLite contention, concurrent launch bursts, and process-recovery
+cases use the `serial_integration` marker and run serially. Their internal
+threads, subprocesses, lock durations, and assertions remain intact. Other
+cases use pytest-xdist work stealing with three workers on Linux/Windows
+and two on macOS. Worker restarts are disabled.
 
-Linux/Python 3.14 records branch coverage from both lanes into one
-job-specific database. Final XML and JSON reports include both lanes, and
-Main uploads this canonical report to Codecov. The other 14 environments
-run every test without suite-wide coverage instrumentation. Existing
-coverage thresholds and exclusions remain unchanged. Local runs collect
-coverage by default.
+Each worker owns its database template, Huey queue, environment, provider
+transcripts, and temporary repositories. Every test gets a fresh database
+copy. Real Git and deterministic provider subprocesses remain enabled.
+
+Linux/Python 3.14 records branch coverage from both lanes and uploads the
+canonical XML to Codecov. The other 14 jobs run every test without
+suite-wide coverage instrumentation. Sources, exclusions, and thresholds
+remain unchanged. Local tox runs collect coverage by default.
 
 ### Local execution and reports
 
-The ordinary supported-interpreter command remains serial:
+Run the supported interpreter matrix:
 
 ```bash
 make test
 ```
 
-Run the complete suite with explicit parallelism and retained reports:
+Use a supported interpreter and explicit workers for a focused run:
 
 ```bash
-uv run python scripts/run_python_tests.py \
-  --workers 2 --reports-dir /tmp/relay-python-results
+RELAY_TEST_WORKERS=2 uv run tox -e py313 -- tests/test_execution_core.py
 ```
 
-Pass test paths after the options for a focused run. Use `--workers 0` for a
-complete serial reference. Local missing Node 20/24 runtimes remain visible
-as skips; CI requires both runtimes. Declared platform skips and unavailable
-symlink privileges retain their reasons.
+Set `RELAY_TEST_WORKERS=0` for serial execution of both lanes. Set
+`RELAY_TEST_COVERAGE=false` to disable tracing and coverage report commands.
+An empty lane is valid for a focused file; an empty overall inventory fails.
+Local missing Node runtimes and declared platform skips keep their reasons.
+Both Node runtimes are required in CI.
 
-Reports contain the full inventory, selected lane identities, setup/call/
-teardown outcomes, JUnit XML, and JSON/Markdown summaries. Coverage-enabled
-runs also retain coverage XML/JSON; every summary identifies that setting.
-The runner rejects missing or duplicated cases, collection errors, incomplete
-phase reports, failed tests, and unexplained skips. A failed lane cannot be
-hidden by a later passing lane.
+Tox resets its own temporary directory before each invocation. Local
+reports live in `.tox/py313/tmp/reports` for the example above. CI supplies
+a short tox-owned root, `$RUNNER_TEMP/rp`, to avoid extending Windows Git
+paths. `RELAY_TEST_TEMP_DIR` overrides this disposable directory; tox resets
+its contents. Keep the default for ordinary local runs.
 
-Each invocation creates a fresh, short pytest storage root under
-`RUNNER_TEMP` when available, with separate directories for collection and
-each lane. This avoids extending Windows Git paths with the default user
-temporary directory. Failed runs retain that root and record its location
-in the summary. Failed test reports also retain bounded Git command stderr;
-passing tests do not expose that diagnostic output.
-
-Tox forwards `RELAY_TEST_WORKERS`, `RELAY_TEST_REPORT_DIR`, and
-`RELAY_TEST_COVERAGE`. Set the latter to `false` to run the complete suite
-without coverage instrumentation. Without an explicit report directory, tox
-stores reports beneath each environment's temporary directory and also
-maintains the legacy root `coverage.xml` when coverage is enabled.
-Ordinary direct pytest commands continue working without CI reporting.
+Each lane writes native pytest JUnit XML, including setup and teardown
+failures, captured failure diagnostics, test identities, and checkout
+identity. Pytest prints its slowest tests with `--durations=20`. The compact
+inventory validator rejects missing, duplicated, incorrectly routed,
+failed, or unexpectedly skipped tests. Collection and worker failures also
+fail tox through their native exit codes. Coverage-enabled runs retain
+coverage XML, JSON, and the coverage database in the reports directory.
 
 ## Browser preparation and shards
 
-Frontend preparation runs the complete Node build-script and expression
-suite, the frontend unit suite, TypeScript checks, and one browser build.
-Lint and formatting remain in the quality job. Existing local `npm test`
-and `make test-frontend` still run their complete checks.
+Preparation runs all build-script, expression, unit, and TypeScript checks,
+and builds the browser application once. Native Playwright collection
+provides inventories for functional, no-login, visual, and unit suites.
+Verification checks that four functional shards exactly partition the full
+functional inventory.
 
-Preparation collects functional, no-login, visual, and unit inventories and
-verifies that four functional shards exactly partition the functional
-suite. Every shard uses a separate Ubuntu machine and isolated Relay server.
-Playwright keeps one worker per server and file-level ordering. The fourth
-shard also runs the complete no-login and visual suites, even after a
-functional failure.
+GitHub Actions invokes Playwright directly on four separate Ubuntu jobs.
+Each job downloads the same prepared build and starts its own isolated
+Relay server. Playwright uses `--shard=N/4`, one worker per server, zero
+retries, and file-level ordering. Snapshot updates are forbidden.
 
-Preparation archives the build, including hidden manifests and compressed
-companions. A SHA-256 manifest identifies the archive, every asset, and the
-actual checkout commit. Each shard verifies those bytes before using
-`RELAY_TEST_ASSETS_ROOT` to serve the prepared application.
+The fourth shard also runs the complete no-login and visual suites in
+separate Actions steps. Both steps use `always()` after valid asset setup,
+so a functional failure cannot prevent either auxiliary suite from running.
+Native step failures remain job failures.
 
-The `browser-tests` aggregate requires preparation and every shard to
-succeed. It verifies the inventories, checkout identities, outcomes, and
-report completeness before merging browser reports. Missing, duplicate,
-interrupted, retried, unexpectedly skipped, or failed cases fail the gate.
-The frontend unit report is verified separately and retained with
-preparation because it has a different Playwright test directory.
-Trusted reports from failed tests still contribute their blobs to the
-merged HTML report. Their failures remain aggregate gate errors.
+Preparation archives the complete build, including hidden manifests and
+compressed files, using tar. It rejects symlinks and special files. Native
+`sha256sum --check` verifies the downloaded archive before extraction, and
+each shard checks its captured Git commit against its actual checkout.
+The isolated server serves these assets through `RELAY_TEST_ASSETS_ROOT`.
 
-Successful preparation and reports are retained for one day; failed
-browser traces and screenshot diffs retain the existing seven-day policy.
-The functional, login, visual, and unit reports have distinct output paths.
+Native Playwright JSON reports include checkout metadata. Blob reports
+retain traces and screenshots. The compact browser validator reads those
+reports and checks every shard, auxiliary suite, unit test, expected test
+identity, status, and checkout. Missing, duplicated, interrupted, retried,
+failed, or unexpectedly skipped execution fails the aggregate.
 
-### Local shard validation
+The aggregate requires preparation and every shard to succeed. It uses
+Playwright's native `merge-reports` command for the combined HTML report,
+including trusted reports containing failures. Unit reports remain separate
+because they use a different test directory. Successful reports last one
+day; failed browser traces and screenshot diffs last seven days.
 
-The browser helper exposes these commands:
+The verification helper has only two commands:
 
 ```text
-node frontend/scripts/ci-browser.mjs inventory
-node frontend/scripts/ci-browser.mjs prepare-assets
-node frontend/scripts/ci-browser.mjs verify-assets
-node frontend/scripts/ci-browser.mjs unit
-node frontend/scripts/ci-browser.mjs run
-node frontend/scripts/ci-browser.mjs verify
+node frontend/scripts/verify-browser.mjs inventory OUTPUT
+node frontend/scripts/verify-browser.mjs verify REPORTS INVENTORY BLOBS
 ```
 
-Each command rejects missing required arguments. Use the workflow invocations
-as complete examples. Set a distinct `PLAYWRIGHT_PORT` for each functional
-server when validating multiple shards on one machine. Set
-`PLAYWRIGHT_VISUAL_PORT` to isolate the visual server too; its default remains
-4176. No validation command reuses an existing server.
-
-Build and serve scratch assets when an owner instance is running. Do not
-replace that instance's compiled files to validate CI.
+It does not execute test suites. Existing `npm test` and
+`make test-frontend` still run all their checks. For concurrent local shard
+validation, use distinct `PLAYWRIGHT_PORT` and `PLAYWRIGHT_VISUAL_PORT`
+values. Each server uses temporary storage and deterministic providers.
+Build scratch assets separately from an owner's running application.
 
 ## Publication, rollback, and measurement
 
-Main keeps publication dependent on quality, all Python environments, and
-the complete browser aggregate. Release uses the same Python test setup and
-runs all 15 matrix jobs with a concurrency ceiling of 15. Production
-distributions are built and checked separately from browser test assets.
+Main publication still depends on quality, all 15 Python jobs, and the
+complete browser aggregate. Release uses the same Python setup and matrix.
+Production distributions are built and checked separately from test assets.
 
-The manual visual-baseline refresh remains an unsharded Linux workflow path.
-It retains generated baselines for review and runs the complete browser
-verification. Normal shard execution forbids updating committed snapshots.
+The unsharded visual-baseline refresh still generates candidate baselines
+and runs the complete browser verification. Main's manual inputs retain
+`serial_python`, `cold_cache`, and `refresh_visual_baselines`. Cold-cache
+runs disable dependency-cache restoration and saving.
 
-Main's manual inputs support validation without changing the test matrix:
+Compare executed identities and covered lines/branches across the same
+code and runtime versions. GitHub supplies native job and step timings;
+measure workflow creation-to-completion separately to include runner queues.
 
-| Input | Effect |
-| --- | --- |
-| `serial_python` | Run every Python environment serially as a reference or rollback |
-| `cold_cache` | Skip Python, frontend, and pre-commit dependency cache restoration and saving |
-| `refresh_visual_baselines` | Run the dedicated baseline generation and verification path |
-
-For before/after measurements, use the same commit and runtime versions.
-Compare executed identities and covered lines and branches, not only total
-test counts or coverage percentages. Inspect retained summaries for lane
-and test timings; GitHub's job steps show setup and installation time.
-Measure workflow creation-to-completion separately from job execution so
-runner queue and dependency wait time remain visible.
-
-The acceptance target is three consecutive complete optimized CI passes
-with a median workflow time at or below 20 minutes, including one cold-cache
-run at or below 25 minutes. These are validation targets, not an established
-performance guarantee. A local pass does not establish Windows/Linux
-behavior or the full OS/Python matrix.
+The acceptance target remains three consecutive complete optimized passes
+with a median workflow time at or below 20 minutes, including a cold-cache
+pass at or below 25 minutes. Local checks do not establish the complete
+OS/Python matrix or certify authenticated provider behavior.

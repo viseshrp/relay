@@ -106,7 +106,7 @@ jobs:
         with:
           name: python-results-${{ matrix.os }}-${{ matrix.python-version }}
           include-hidden-files: true
-          path: ${{ runner.temp }}/python-results/
+          path: ${{ runner.temp }}/rp/reports/
           if-no-files-found: error
           retention-days: 1
 
@@ -115,7 +115,7 @@ jobs:
         uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ runner.temp }}/python-results/coverage.xml
+          files: ${{ runner.temp }}/rp/reports/coverage.xml
           disable_search: true
           fail_ci_if_error: true
 
@@ -153,26 +153,34 @@ jobs:
 
       - name: Collect complete browser and unit inventories
         run: >-
-          node frontend/scripts/ci-browser.mjs inventory
-          --output "$RUNNER_TEMP/frontend-preparation/inventory.json"
-          --total 4
+          node frontend/scripts/verify-browser.mjs inventory
+          "$RUNNER_TEMP/frontend-preparation/inventory.json"
+
+      - name: Identify the actual browser checkout
+        run: echo "RELAY_TEST_CHECKOUT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Run and retain all frontend unit tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/frontend-preparation/results/unit/unit/report.json
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: ${{ runner.temp }}/frontend-preparation/results/unit/unit/blob
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-unit.zip
         run: >-
-          node frontend/scripts/ci-browser.mjs unit
-          --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json"
-          --reports-dir "$RUNNER_TEMP/frontend-preparation/results/unit"
+          npx playwright test --config playwright.unit.config.ts
+          --workers=1 --retries=0 --forbid-only --update-snapshots=none
+          --reporter=line,json,blob
 
       - name: Check types and build browser assets once
         run: npm --prefix frontend run build
 
       - name: Archive and identify the exact browser build
         run: |
+          test -f relay/static/index.html
+          test -z "$(find relay/static -mindepth 1 ! -type f ! -type d -print -quit)"
+          git rev-parse HEAD > "$RUNNER_TEMP/frontend-preparation/assets.commit"
           tar -C relay/static -czf "$RUNNER_TEMP/frontend-preparation/assets.tgz" .
-          node frontend/scripts/ci-browser.mjs prepare-assets \
-            --assets-root relay/static \
-            --output-dir "$RUNNER_TEMP/frontend-preparation" \
-            --archive "$RUNNER_TEMP/frontend-preparation/assets.tgz"
+          cd "$RUNNER_TEMP/frontend-preparation"
+          sha256sum assets.tgz > assets.sha256
 
       - name: Retain browser inputs and frontend unit results
         if: always()
@@ -227,20 +235,51 @@ jobs:
         run: echo "RELAY_TEST_ASSETS_ROOT=$RUNNER_TEMP/browser-assets" >> "$GITHUB_ENV"
 
       - name: Verify browser build bytes and checkout identity
+        id: assets
         run: |
+          test "$(cat "$RUNNER_TEMP/frontend-preparation/assets.commit")" = "$(git rev-parse HEAD)"
+          echo "RELAY_TEST_CHECKOUT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          (cd "$RUNNER_TEMP/frontend-preparation" && sha256sum --check assets.sha256)
           mkdir -p "$RELAY_TEST_ASSETS_ROOT"
           tar -xzf "$RUNNER_TEMP/frontend-preparation/assets.tgz" -C "$RELAY_TEST_ASSETS_ROOT"
-          node frontend/scripts/ci-browser.mjs verify-assets \
-            --assets-root "$RELAY_TEST_ASSETS_ROOT" \
-            --manifest "$RUNNER_TEMP/frontend-preparation/assets-manifest.json" \
-            --archive "$RUNNER_TEMP/frontend-preparation/assets.tgz"
 
-      - name: Run isolated browser shard and required auxiliary suites
+      - name: Run functional browser shard
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-results/shard-${{ matrix.shard }}/functional/report.json
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: ${{ runner.temp }}/browser-results/shard-${{ matrix.shard }}/functional/blob
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-functional-${{ matrix.shard }}.zip
         run: >-
-          node frontend/scripts/ci-browser.mjs run
-          --shard ${{ matrix.shard }} --total 4
-          --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json"
-          --reports-dir "$RUNNER_TEMP/browser-results/shard-${{ matrix.shard }}"
+          npx playwright test --config playwright.config.ts
+          --shard=${{ matrix.shard }}/4 --workers=1 --retries=0
+          --forbid-only --update-snapshots=none --reporter=line,json,blob
+          --output "$RUNNER_TEMP/browser-results/shard-${{ matrix.shard }}/functional/test-results"
+
+      - name: Run complete no-login suite
+        if: ${{ always() && matrix.shard == 4 && steps.assets.outcome == 'success' }}
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-results/shard-4/no-login/report.json
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: ${{ runner.temp }}/browser-results/shard-4/no-login/blob
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-no-login.zip
+        run: >-
+          npx playwright test --config playwright.no-login.config.ts
+          --workers=1 --retries=0 --forbid-only --update-snapshots=none
+          --reporter=line,json,blob
+          --output "$RUNNER_TEMP/browser-results/shard-4/no-login/test-results"
+
+      - name: Run complete visual suite
+        if: ${{ always() && matrix.shard == 4 && steps.assets.outcome == 'success' }}
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/browser-results/shard-4/visual/report.json
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: ${{ runner.temp }}/browser-results/shard-4/visual/blob
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-visual.zip
+        run: >-
+          npx playwright test --config playwright.visual.config.ts
+          --workers=1 --retries=0 --forbid-only --update-snapshots=none
+          --reporter=line,json,blob
+          --output "$RUNNER_TEMP/browser-results/shard-4/visual/test-results"
 
       - name: Retain browser outcomes and reports
         if: always()
@@ -288,15 +327,15 @@ jobs:
         with:
           pattern: browser-results-*
           path: ${{ runner.temp }}/browser-results
+          merge-multiple: true
 
       - name: Verify complete execution and collect mergeable reports
         run: |
           cp -R "$RUNNER_TEMP/frontend-preparation/results/unit" "$RUNNER_TEMP/browser-results/unit"
-          node frontend/scripts/ci-browser.mjs verify \
-            --reports-dir "$RUNNER_TEMP/browser-results" \
-            --inventory "$RUNNER_TEMP/frontend-preparation/inventory.json" \
-            --sha "$(git rev-parse HEAD)" \
-            --merged-blobs "$RUNNER_TEMP/merged-blobs"
+          node frontend/scripts/verify-browser.mjs verify \
+            "$RUNNER_TEMP/browser-results" \
+            "$RUNNER_TEMP/frontend-preparation/inventory.json" \
+            "$RUNNER_TEMP/merged-blobs"
 
       - name: Merge complete browser reports
         if: always()

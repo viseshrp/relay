@@ -1,14 +1,11 @@
-"""Collect identities and phase timings for serial and xdist CI runs."""
+"""Keep Relay-specific inventory and diagnostics around native pytest reports."""
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Generator, Iterator
 import json
-import os
 from pathlib import Path
 import subprocess
-import time
 from typing import Any
 
 import pytest
@@ -30,9 +27,6 @@ _GIT_DIAGNOSTICS = pytest.StashKey[list[str]]()
 @pytest.fixture(autouse=True)
 def failed_git_diagnostics(request: pytest.FixtureRequest) -> Iterator[None]:
     """Retain real Git stderr without changing calls or exposing passing output."""
-    if not request.config.getoption("--relay-ci-report"):
-        yield
-        return
     diagnostics: list[str] = []
     request.node.stash[_GIT_DIAGNOSTICS] = diagnostics
     original = subprocess.run
@@ -81,12 +75,7 @@ def pytest_runtest_makereport(
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--relay-ci-report", help="Write Relay's collection and execution report.")
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    if config.getoption("--relay-ci-report") and not hasattr(config, "workerinput"):
-        config.pluginmanager.register(CiRecorder(config), "relay-ci-recorder")
+    parser.addoption("--relay-ci-report", help="Write the collected test inventory.")
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -111,87 +100,50 @@ def _skip_reasons(item: pytest.Item) -> list[str]:
     return reasons
 
 
-class CiRecorder:
-    """Record in the controller; xdist forwards reports from isolated workers."""
+_CHECKOUT_SHA = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"],  # noqa: S607 - fixed, read-only Git command
+    cwd=Path(__file__).resolve().parents[1],
+    text=True,
+).strip()
 
-    config: pytest.Config
-    started: float
-    collected: list[dict[str, Any]]
-    reports: list[dict[str, Any]]
-    collection_errors: list[str]
-    collection_seconds: float
 
-    def __init__(self, config: pytest.Config) -> None:
-        self.config = config
-        self.started = time.perf_counter()
-        self.collected = []
-        self.reports = []
-        self.collection_errors = []
-        self.collection_seconds = 0.0
-
-    def pytest_collection_finish(self, session: pytest.Session) -> None:
-        self.collected = [
-            {
-                "nodeid": item.nodeid,
-                "skip_reasons": _skip_reasons(item),
-                "serial_integration": bool(item.get_closest_marker("serial_integration")),
-            }
-            for item in session.items
-        ]
-        self.collection_seconds = time.perf_counter() - self.started
-
-    @pytest.hookimpl(optionalhook=True)
-    def pytest_xdist_node_collection_finished(self, node: Any, ids: list[str]) -> None:
-        del node
-        if self.collected and [item["nodeid"] for item in self.collected] != ids:
-            self.collection_errors.append("xdist workers collected different test identities")
-        self.collected = [{"nodeid": nodeid} for nodeid in ids]
-        self.collection_seconds = time.perf_counter() - self.started
-
-    def pytest_collectreport(self, report: pytest.CollectReport) -> None:
-        if report.failed or report.skipped:
-            self.collection_errors.append(f"{report.nodeid}: {report.longrepr}")
-
-    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        reason = ""
-        if report.skipped:
-            reason = str(
-                report.longrepr[2] if isinstance(report.longrepr, tuple) else report.longrepr
-            )
-            reason = reason.removeprefix("Skipped: ")
-        self.reports.append(
-            {
-                "nodeid": report.nodeid,
-                "phase": report.when,
-                "outcome": report.outcome,
-                "seconds": report.duration,
-                "skip_reason": reason,
-                "worker": getattr(report, "worker_id", "main"),
-                "diagnostics": [
-                    content
-                    for name, content in report.sections
-                    if name == "Captured stderr failed Git commands"
-                ],
-            }
+def pytest_collection_finish(session: pytest.Session) -> None:
+    if destination := session.config.getoption("--relay-ci-report"):
+        path = Path(destination)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "checkout_sha": _CHECKOUT_SHA,
+                    "collected": [
+                        {
+                            "nodeid": item.nodeid,
+                            "skip_reasons": _skip_reasons(item),
+                            "serial_integration": bool(
+                                item.get_closest_marker("serial_integration")
+                            ),
+                        }
+                        for item in session.items
+                    ],
+                }
+            ),
+            encoding="utf-8",
         )
 
-    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
-        del session
-        completed = Counter(
-            report["nodeid"] for report in self.reports if report["phase"] == "teardown"
-        )
-        result = {
-            "schema_version": 1,
-            "checkout_sha": os.environ.get("RELAY_TEST_CHECKOUT_SHA", ""),
-            "requested_paths": json.loads(os.environ.get("RELAY_TEST_REQUESTED_PATHS", "[]")),
-            "exit_code": int(exitstatus),
-            "collected": self.collected,
-            "collection_errors": self.collection_errors,
-            "collection_seconds": self.collection_seconds,
-            "elapsed_seconds": time.perf_counter() - self.started,
-            "completed": dict(completed),
-            "reports": self.reports,
-        }
-        destination = Path(self.config.getoption("--relay-ci-report"))
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    # JUnit remains the result format, including setup/teardown failures.
+    for entry in (("relay_nodeid", report.nodeid), ("relay_checkout", _CHECKOUT_SHA)):
+        if entry not in report.user_properties:
+            report.user_properties.append(entry)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    # Focused tox runs can legitimately leave one lane empty. The separate
+    # inventory validator rejects an empty overall suite or missing execution.
+    if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED and session.config.option.markexpr in (
+        "serial_integration",
+        "not serial_integration",
+    ):
+        session.exitstatus = 0

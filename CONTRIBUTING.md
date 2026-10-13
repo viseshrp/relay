@@ -66,8 +66,9 @@ make check-dist
 builds use the committed npm lockfile. Do not hand-edit generated files under
 `relay/static/`; regenerate them through the frontend build.
 
-CI runs the complete matrix with isolated Python workers and four separate
-browser shards. Inventories verify that every test finishes exactly once.
+CI uses native tox commands, isolated pytest-xdist workers, and four
+separate Playwright browser shards. Inventories verify that every test
+finishes exactly once.
 Linux/Python 3.14 collects branch coverage; the other 14 environments run
 every test without suite-wide coverage instrumentation. Local tox runs keep
 coverage enabled by default. Set `RELAY_TEST_COVERAGE=false` to run without

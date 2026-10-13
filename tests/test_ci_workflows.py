@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from configparser import ConfigParser
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
-from types import SimpleNamespace
+import sys
 from typing import Any
 
 import pytest
@@ -21,34 +21,58 @@ _PYTHONS = {"3.10", "3.11", "3.12", "3.13", "3.14"}
 _OPERATING_SYSTEMS = {"ubuntu-latest", "macos-latest", "windows-latest"}
 
 
-@pytest.mark.parametrize("platform", ["linux", "win32"])
-@pytest.mark.parametrize("override", [False, True])
-def test_tox_keeps_spaced_checkout_and_report_paths_in_one_argument(
-    monkeypatch: pytest.MonkeyPatch, platform: str, override: bool
-) -> None:
-    configuration = ConfigParser()
-    configuration.read(ROOT / "tox.ini", encoding="utf-8")
-    template = configuration["testenv"]["commands"].strip()
-    directory = (
-        r"D:\checkout with spaces\.tox\py310\tmp\reports"
-        if platform == "win32"
-        else "/workspace/checkout with spaces/.tox/py310/tmp/reports"
+@pytest.mark.parametrize("coverage", [False, True])
+def test_native_tox_keeps_paths_and_complete_lanes(tmp_path: Path, coverage: bool) -> None:
+    temporary = tmp_path / "tox reports with spaces"
+    target = tmp_path / "config.json"
+    environment = {
+        **os.environ,
+        "RELAY_TEST_TEMP_DIR": str(temporary),
+        "RELAY_TEST_COVERAGE": str(coverage).lower(),
+        "RELAY_TEST_WORKERS": "3",
+    }
+    name = f"py{sys.version_info.major}{sys.version_info.minor}"
+    result = subprocess.run(  # noqa: S603 - inspect stock tox's resolved arguments
+        [
+            sys.executable,
+            "-m",
+            "tox",
+            "config",
+            "-c",
+            str(ROOT / "tox.toml"),
+            "-e",
+            name,
+            "--format",
+            "json",
+            "-k",
+            "commands",
+            "ignore_errors",
+            "pass_env",
+            "-o",
+            str(target),
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
-    if override:
-        directory = (
-            r"D:\custom test reports" if platform == "win32" else "/workspace/custom test reports"
-        )
-    command = template.replace("{env:RELAY_TEST_REPORT_DIR:{env_tmp_dir}/reports}", directory)
-    command = command.replace("{posargs}", "")
-    # Exercise tox's actual platform-specific quote and backslash conversion.
-    monkeypatch.setattr("tox.config.loader.str_convert.sys", SimpleNamespace(platform=platform))
-    assert StrConvert.to_command(command).args == [
-        "python",
-        "scripts/run_python_tests.py",
-        "--reports-dir",
-        directory,
-        "--legacy-coverage",
-    ]
+    assert result.returncode == 0, result.stdout + result.stderr
+    configuration = json.loads(target.read_text(encoding="utf-8"))["env"][name]
+    commands = [StrConvert.to_command(command).args for command in configuration["commands"]]
+    serial, parallel = commands[1:3]
+    assert serial[serial.index("-m", 3) + 1] == "serial_integration"
+    assert parallel[parallel.index("-m", 3) + 1] == "not serial_integration"
+    assert parallel[parallel.index("-n") + 1] == "3"
+    assert "--dist=worksteal" in parallel and "--max-worker-restart=0" in parallel
+    for lane, command in (("serial", serial), ("parallel", parallel)):
+        assert f"--junitxml={temporary / 'reports' / f'junit-{lane}.xml'}" in command
+        assert ("--cov" in command) is coverage
+        assert command[-1] == "tests"
+    assert configuration["ignore_errors"] is True
+    assert "PYTEST_ADDOPTS" not in configuration["pass_env"]
+    assert len(commands) == (6 if coverage else 4)
 
 
 def _load(relative: str) -> dict[str, Any]:
@@ -121,10 +145,7 @@ def test_only_the_canonical_environment_collects_suite_coverage(name: str) -> No
             "${{ matrix.python-version == env.MAIN_PYTHON_VERSION "
             "&& matrix.os == 'ubuntu-latest' }}"
         )
-        assert upload["with"]["files"] == "${{ runner.temp }}/python-results/coverage.xml"
-    configuration = ConfigParser()
-    configuration.read(ROOT / "tox.ini", encoding="utf-8")
-    assert "RELAY_TEST_COVERAGE" in configuration["testenv"]["pass_env"].split(", ")
+        assert upload["with"]["files"] == "${{ runner.temp }}/rp/reports/coverage.xml"
 
 
 def _assert_shared_test_setup(workflow: dict[str, Any]) -> None:
@@ -202,6 +223,16 @@ def _assert_main_gates(workflow: dict[str, Any]) -> dict[str, Any]:
     assert shards["needs"] == "frontend-prepare"
     assert shards["strategy"]["matrix"]["shard"] == ["1", "2", "3", "4"]
     assert shards["strategy"]["fail-fast"] == "false"
+    executions = [step for step in shards["steps"] if "npx playwright test" in step.get("run", "")]
+    assert len(executions) == 3
+    assert "--shard=${{ matrix.shard }}/4" in executions[0]["run"]
+    for step in executions:
+        assert "--workers=1" in step["run"] and "--retries=0" in step["run"]
+        assert "--forbid-only" in step["run"] and "--update-snapshots=none" in step["run"]
+        assert step.get("continue-on-error", "false") == "false"
+    for step in executions[1:]:
+        assert "always()" in step["if"] and "matrix.shard == 4" in step["if"]
+        assert "steps.assets.outcome == 'success'" in step["if"]
     aggregate = jobs["browser-tests"]
     assert set(aggregate["needs"]) == {"frontend-prepare", "browser-shards"}
     assert "always()" in aggregate["if"]
@@ -296,3 +327,82 @@ def test_runner_context_is_used_only_after_a_job_reaches_its_runner(name: str) -
         target.setdefault("env", {})["REPORT_DIR"] = "${{ runner.temp }}/reports"
         with pytest.raises(AssertionError):
             _assert_environment_contexts(changed)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Browser artifact commands run on Linux CI")
+@pytest.mark.parametrize("damage", ["none", "archive", "checkout", "symlink"])
+def test_native_browser_artifacts_preserve_bytes_and_reject_damage(
+    tmp_path: Path, damage: str
+) -> None:
+    workflow = _load(".github/workflows/main.yml")
+    prepare = next(
+        step["run"]
+        for step in workflow["jobs"]["frontend-prepare"]["steps"]
+        if step["name"] == "Archive and identify the exact browser build"
+    )
+    check = next(
+        step["run"]
+        for step in workflow["jobs"]["browser-shards"]["steps"]
+        if step.get("id") == "assets"
+    )
+    root = tmp_path / "repo"
+    assets = root / "relay" / "static"
+    assets.mkdir(parents=True)
+    for name in ("index.html", ".build.json", "app.js.gz"):
+        (assets / name).write_bytes(name.encode())
+    retained = tmp_path / "owner.txt"
+    retained.write_text("retain these bytes", encoding="utf-8")
+    if damage == "symlink":
+        (assets / "outside").symlink_to(retained)
+    temporary = tmp_path / "runner"
+    preparation = temporary / "frontend-preparation"
+    preparation.mkdir(parents=True)
+    environment = {
+        **os.environ,
+        "RUNNER_TEMP": str(temporary),
+        "GITHUB_ENV": str(tmp_path / "github-env"),
+        "RELAY_TEST_ASSETS_ROOT": str(tmp_path / "extracted"),
+    }
+    git = shutil.which("git")
+    bash = shutil.which("bash")
+    assert git and bash
+    subprocess.run([git, "init", str(root)], check=True, capture_output=True)  # noqa: S603
+    subprocess.run(  # noqa: S603 - disposable Git fixture
+        [
+            git,
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(  # noqa: S603 - actual CI command in disposable storage
+        [bash, "-e", "-c", prepare], cwd=root, env=environment, capture_output=True, check=False
+    )
+    if damage == "symlink":
+        assert result.returncode != 0
+    else:
+        assert result.returncode == 0, result.stderr
+        if damage == "archive":
+            with (preparation / "assets.tgz").open("ab") as stream:
+                stream.write(b"corruption")
+        if damage == "checkout":
+            (preparation / "assets.commit").write_text("wrong", encoding="utf-8")
+        result = subprocess.run(  # noqa: S603 - actual CI command in disposable storage
+            [bash, "-e", "-c", check], cwd=root, env=environment, capture_output=True, check=False
+        )
+        assert (result.returncode == 0) is (damage == "none"), result.stderr
+        if damage == "none":
+            for name in ("index.html", ".build.json", "app.js.gz"):
+                assert (Path(environment["RELAY_TEST_ASSETS_ROOT"]) / name).read_bytes() == (
+                    assets / name
+                ).read_bytes()
+    assert retained.read_text(encoding="utf-8") == "retain these bytes"

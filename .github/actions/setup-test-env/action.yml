@@ -71,6 +71,8 @@ runs:
             stream.write(f"RELAY_TEST_NODE_24={executable}\n")
         PY
 
-    - name: Configure isolated Python reports
+    - name: Configure tox-owned temporary storage
       shell: bash
-      run: echo "RELAY_TEST_REPORT_DIR=$RUNNER_TEMP/python-results" >> "$GITHUB_ENV"
+      run: |
+        echo "RELAY_TEST_TEMP_DIR=$RUNNER_TEMP/rp" >> "$GITHUB_ENV"
+        echo "RELAY_TEST_REPORT_DIR=$RUNNER_TEMP/rp/reports" >> "$GITHUB_ENV"

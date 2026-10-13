@@ -80,7 +80,7 @@ jobs:
         with:
           name: release-python-results-${{ matrix.os }}-${{ matrix.python-version }}
           include-hidden-files: true
-          path: ${{ runner.temp }}/python-results/
+          path: ${{ runner.temp }}/rp/reports/
           if-no-files-found: error
           retention-days: 1
 

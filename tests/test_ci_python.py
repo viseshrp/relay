@@ -1,302 +1,175 @@
-"""CI rejects dropped execution and still runs the other lane after a failure."""
+"""Native tox/pytest execution must retain every test and every failure."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
 from pathlib import Path
-import stat
-from typing import Any
+import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts import run_python_tests as runner
+from scripts.verify_python_tests import verify
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(autouse=True)
-def isolated_ci_summary(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Negative controls must not publish synthetic failures into the real CI summary."""
-    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+def _reports(directory: Path, *, skipped: str = "") -> None:
+    items = [
+        {
+            "nodeid": "test_a",
+            "serial_integration": True,
+            "skip_reasons": [skipped] if skipped else [],
+        },
+        {"nodeid": "test_b", "serial_integration": False, "skip_reasons": []},
+    ]
+    (directory / "inventory.json").write_text(
+        json.dumps({"checkout_sha": "head", "collected": items}), encoding="utf-8"
+    )
+    for lane, item in zip(("serial", "parallel"), items, strict=True):
+        tree = ET.Element("testsuites")
+        suite = ET.SubElement(tree, "testsuite", tests="1")
+        case = ET.SubElement(suite, "testcase", name=item["nodeid"])
+        properties = ET.SubElement(case, "properties")
+        for name, value in (("relay_nodeid", item["nodeid"]), ("relay_checkout", "head")):
+            ET.SubElement(properties, "property", name=name, value=value)
+        if skipped and lane == "serial":
+            ET.SubElement(case, "skipped", message=skipped)
+        ET.ElementTree(tree).write(directory / f"junit-{lane}.xml")
 
 
-def _report(nodeids: list[str], *, skip_reason: str = "") -> dict[str, Any]:
-    return {
-        "collection_errors": [],
-        "collected": [{"nodeid": nodeid, "skip_reasons": []} for nodeid in nodeids],
-        "reports": [
-            {
-                "nodeid": nodeid,
-                "phase": phase,
-                "outcome": "skipped" if skip_reason and phase == "call" else "passed",
-                "skip_reason": skip_reason if phase == "call" else "",
-                "seconds": 0.1,
-            }
-            for nodeid in nodeids
-            for phase in ("setup", "call", "teardown")
-        ],
-    }
-
-
-@pytest.mark.parametrize("damage", ["missing", "duplicate", "collection", "skip", "failed", "sha"])
-def test_completeness_rejects_incomplete_or_unexplained_execution(damage: str) -> None:
-    inventory = _report(["test_a", "test_b"])
-    lane = deepcopy(inventory)
+@pytest.mark.parametrize(
+    "damage",
+    ["missing", "duplicate", "collection", "skip", "failed", "sha", "wrong lane", "malformed"],
+)
+def test_native_junit_rejects_incomplete_or_unexplained_execution(
+    tmp_path: Path, damage: str
+) -> None:
+    _reports(tmp_path)
+    path = tmp_path / "junit-parallel.xml"
+    tree = ET.parse(path)  # noqa: S314 - generated test report
+    case = tree.find(".//testcase")
+    assert case is not None
     if damage == "missing":
-        lane = _report(["test_a"])
-    elif damage == "duplicate":
-        lane["reports"].extend(deepcopy(lane["reports"]))
-    elif damage == "collection":
-        lane["collection_errors"].append("cannot collect test_c")
-    elif damage == "skip":
-        lane = _report(["test_a", "test_b"], skip_reason="temporarily disabled")
-    elif damage == "failed":
-        lane["reports"][0]["outcome"] = "failed"
+        path.unlink()
+    elif damage == "malformed":
+        path.write_text("<broken>", encoding="utf-8")
     else:
-        lane["checkout_sha"] = "another-checkout"
-    assert runner.validate_reports(inventory, [lane])
+        if damage == "duplicate":
+            tree.find("testsuite").append(case)
+        elif damage in {"collection", "failed"}:
+            ET.SubElement(case, "error" if damage == "collection" else "failure")
+        elif damage == "skip":
+            ET.SubElement(case, "skipped", message="temporarily disabled")
+        elif damage == "sha":
+            case.find("./properties/property[@name='relay_checkout']").set("value", "wrong")
+        elif damage == "wrong lane":
+            case.find("./properties/property[@name='relay_nodeid']").set("value", "test_a")
+        tree.write(path)
+    with pytest.raises((ValueError, OSError, ET.ParseError)):
+        verify(tmp_path)
 
 
-def test_declared_platform_skip_remains_visible_and_allowed() -> None:
-    inventory = _report(["platform_test"])
-    inventory["collected"][0]["skip_reasons"] = ["Windows directory junction"]
-    lane = _report(["platform_test"], skip_reason="Windows directory junction")
-    assert runner.validate_reports(inventory, [lane]) == []
+def test_native_junit_preserves_declared_platform_skips(tmp_path: Path) -> None:
+    _reports(tmp_path, skipped="Windows-only behavior")
+    verify(tmp_path)
 
 
-@pytest.mark.parametrize("contents", ["{}", '{"collected": null}', '{"collected": []', "[]"])
-def test_malformed_reports_preserve_summary_diagnostics(tmp_path: Path, contents: str) -> None:
-    report = tmp_path / "parallel.json"
-    report.write_text(contents, encoding="utf-8")
-    loaded = runner._read_report(report)
-    assert loaded["collection_errors"]
-    assert runner.validate_reports(_report(["expected_test"]), [loaded])
-
-
-def test_teardown_alone_cannot_prove_execution() -> None:
-    inventory = _report(["expected_test"])
-    lane = deepcopy(inventory)
-    lane["reports"] = [phase for phase in lane["reports"] if phase["phase"] == "teardown"]
-    assert runner.validate_reports(inventory, [lane]) == [
-        "Incomplete execution phases: expected_test"
-    ]
-
-
-@pytest.mark.parametrize("foreign_marker", [False, True])
-def test_unverified_report_directory_preserves_existing_bytes(
-    tmp_path: Path, foreign_marker: bool
+@pytest.mark.parametrize("coverage", [False, True])
+@pytest.mark.parametrize("failed_serial", [False, True])
+def test_native_tox_runs_both_lanes_and_preserves_failure(
+    tmp_path: Path, coverage: bool, failed_serial: bool
 ) -> None:
-    owner_file = tmp_path / "full.json"
-    owner_file.write_bytes(b"owner report bytes\n")
-    if foreign_marker:
-        (tmp_path / ".relay-python-reports.json").write_text(
-            '{"owner": "another tool"}', encoding="utf-8"
-        )
-    assert runner.run(0, tmp_path, ["tests"]) == 1
-    assert owner_file.read_bytes() == b"owner report bytes\n"
-    assert not (tmp_path / "summary.json").exists()
-
-
-def test_owned_reuse_removes_stale_worker_coverage_without_deleting_unrelated_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reports_dir = tmp_path / "reports"
-    assert runner._prepare_report_dir(reports_dir)
-    fragment = reports_dir / ".coverage.old-worker.1234"
-    fragment.write_bytes(b"stale coverage bytes")
-    unrelated = reports_dir / "owner-notes.txt"
-    unrelated.write_text("retain these bytes", encoding="utf-8")
-
-    def execute(command: list[str], environment: dict[str, str]) -> tuple[int, float]:
-        del command, environment
-        assert not fragment.exists()
-        return 1, 0.1
-
-    monkeypatch.setattr(runner, "_execute", execute)
-    assert runner.run(0, reports_dir, ["tests"]) == 1
-    assert unrelated.read_text(encoding="utf-8") == "retain these bytes"
-    assert (reports_dir / "summary.json").is_file()
-
-
-@pytest.mark.parametrize("coverage_valid", [False, True])
-def test_failed_serial_lane_does_not_prevent_parallel_or_coverage_reports(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, coverage_valid: bool
-) -> None:
-    reports_dir = tmp_path / "reports"
-    names: list[str] = []
-    temporary = tmp_path / "short"
-    temporary.mkdir()
-    owner_file = temporary / "owner.txt"
-    owner_file.write_text("retain", encoding="utf-8")
-    monkeypatch.setenv("RUNNER_TEMP", str(temporary))
-    base_paths: list[Path] = []
-
-    def execute(command: list[str], environment: dict[str, str]) -> tuple[int, float]:
-        del environment
-        if "--relay-ci-report" in command:
-            base_paths.append(Path(command[command.index("--basetemp") + 1]))
-            report_path = Path(command[command.index("--relay-ci-report") + 1])
-            name = report_path.stem
-            names.append(name)
-            nodeids = (
-                ["timed_test", "parallel_test"]
-                if name == "inventory"
-                else ["timed_test" if name == "serial" else "parallel_test"]
-            )
-            report_path.write_text(json.dumps(_report(nodeids)), encoding="utf-8")
-            return (1 if name == "serial" else 0), 1.0
-        output = Path(command[-1])
-        if output.suffix == ".json":
-            output.write_text(
-                json.dumps(
-                    {"meta": {"branch_coverage": coverage_valid}, "totals": {"covered_lines": 3}}
-                ),
-                encoding="utf-8",
-            )
-        else:
-            output.write_text("<coverage/>", encoding="utf-8")
-        return 0, 0.1
-
-    monkeypatch.setattr(runner, "_execute", execute)
-    assert runner.run(2, reports_dir, ["tests"]) == 1
-    assert names == ["inventory", "serial", "parallel"]
-    summary = json.loads((reports_dir / "summary.json").read_text(encoding="utf-8"))
-    assert summary["commands"][1]["exit_code"] == 1
-    assert {path.name for path in base_paths} == {"i", "s", "p"}
-    assert len({path.parent for path in base_paths}) == 1
-    assert base_paths[0].parent.parent == temporary
-    assert summary["temporary_root_retained"] is True
-    assert owner_file.read_text(encoding="utf-8") == "retain"
-    assert bool(summary["errors"]) is not coverage_valid
-    assert (reports_dir / "coverage.json").is_file()
-    assert (reports_dir / "summary.md").is_file()
-
-
-def test_scratch_creation_failure_still_publishes_diagnostics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fail(*args: Any, **kwargs: Any) -> str:
-        del args, kwargs
-        message = "scratch filesystem unavailable"
-        raise OSError(message)
-
-    monkeypatch.setattr(runner.tempfile, "mkdtemp", fail)
-    reports = tmp_path / "reports"
-    assert runner.run(2, reports, ["tests"]) == 1
-    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
-    assert summary["commands"] == []
-    assert "scratch filesystem unavailable" in summary["errors"][0]
-
-
-def test_scratch_cleanup_removes_readonly_git_objects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = runner._new_scratch_root({"RUNNER_TEMP": str(tmp_path)})
-    git_object = root / "repo" / ".git" / "objects" / "ab" / "object"
-    git_object.parent.mkdir(parents=True)
-    git_object.write_bytes(b"retained Git object")
-    git_object.chmod(stat.S_IRUSR)
-    unlink = os.unlink
-    denied: list[Path] = []
-
-    def windows_unlink(path: str | os.PathLike[str], *, dir_fd: int | None = None) -> None:
-        # POSIX rmtree may unlink relative to a directory descriptor.
-        target = git_object if Path(path).name == git_object.name else Path(path)
-        if target == git_object and not target.stat().st_mode & stat.S_IWUSR:
-            denied.append(target)
-            message = "Windows read-only file"
-            raise PermissionError(message)
-        unlink(path, dir_fd=dir_fd)
-
-    monkeypatch.setattr(os, "unlink", windows_unlink)
-    runner._remove_scratch_root(root)
-    assert denied == [git_object]
-    assert not root.exists()
-
-
-def test_scratch_cleanup_preserves_unverified_readonly_files(tmp_path: Path) -> None:
-    owner_file = tmp_path / "owner.txt"
-    owner_file.write_bytes(b"owner bytes")
-    owner_file.chmod(stat.S_IRUSR)
-    try:
-        with pytest.raises(OSError, match="unverified pytest root"):
-            runner._remove_scratch_root(tmp_path)
-        assert owner_file.read_bytes() == b"owner bytes"
-        assert not owner_file.stat().st_mode & stat.S_IWUSR
-    finally:
-        owner_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
-
-
-@pytest.mark.parametrize("workers", [0, 2])
-def test_real_runner_collects_exact_identities_and_combines_branch_coverage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int
-) -> None:
-    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    monkeypatch.setenv("RELAY_TEST_COVERAGE", "false")
-    tests = tmp_path / "test_probe.py"
-    tests.write_text(
-        "import pytest\n"
-        "from relay.errors import RelayError\n"
-        "@pytest.mark.serial_integration\n"
-        "def test_serial():\n"
-        "    assert RelayError('serial').message == 'serial'\n"
-        "def test_parallel():\n"
-        "    assert RelayError('parallel').message == 'parallel'\n",
-        encoding="utf-8",
+    # Exercise stock tox and the real locked runner using cached dependencies.
+    configuration = (ROOT / "tox.toml").read_text(encoding="utf-8")
+    configuration = configuration.replace(
+        "[env_run_base]", "[env_run_base]\nbase_python = " + json.dumps([sys.executable])
     )
-    reports = tmp_path / "reports"
-    assert runner.run(workers, reports, [str(tests)], coverage_enabled=True) == 0
-    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
-    coverage = json.loads((reports / "coverage.json").read_text(encoding="utf-8"))
-    assert summary["test_count"] == 2
-    assert summary["errors"] == []
-    assert summary["coverage_enabled"] is True
-    assert summary["temporary_root_retained"] is False
-    assert not Path(summary["temporary_root"]).exists()
-    assert coverage["meta"]["branch_coverage"] is True
-    assert coverage["totals"]["covered_lines"] > 0
-    assert len(list(reports.glob("junit-*.xml"))) == (1 if workers == 0 else 2)
-
-
-@pytest.mark.parametrize("serial_failure", [False, True])
-def test_real_no_coverage_cli_runs_every_lane_and_preserves_failures(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, serial_failure: bool
-) -> None:
-    probe = tmp_path / "test_probe.py"
+    config = tmp_path / "tox.toml"
+    config.write_text(configuration, encoding="utf-8")
+    probe = tmp_path / "test_native_probe.py"
+    finished = tmp_path / "parallel-ran"
     probe.write_text(
-        "import pytest\n"
-        "@pytest.mark.serial_integration\n"
-        "def test_serial():\n"
-        f"    assert {not serial_failure!r}\n"
+        "import pytest\nfrom pathlib import Path\nfrom relay.errors import RelayError\n"
+        "@pytest.mark.serial_integration\ndef test_serial():\n"
+        f"    assert {not failed_serial!r}\n"
         "def test_parallel():\n"
-        "    assert True\n",
+        f"    Path({str(finished)!r}).write_text('ran')\n"
+        "    assert RelayError('probe').message == 'probe'\n",
         encoding="utf-8",
     )
-    reports = tmp_path / "reports"
-    monkeypatch.setenv("RELAY_TEST_COVERAGE", "false")
-    monkeypatch.setattr(
-        runner.sys,
-        "argv",
-        ["run_python_tests.py", "--workers", "2", "--reports-dir", str(reports), str(probe)],
+    temporary = tmp_path / "tox owned with spaces"
+    environment = {
+        **os.environ,
+        "RELAY_TEST_COVERAGE": str(coverage).lower(),
+        "RELAY_TEST_WORKERS": "2",
+        "RELAY_TEST_TEMP_DIR": str(temporary),
+        "PYTEST_ADDOPTS": "-k never_select",
+        "GITHUB_ACTIONS": "false",
+        "UV_OFFLINE": "true",
+    }
+    result = subprocess.run(  # noqa: S603 - run stock tox against our disposable probe
+        [
+            sys.executable,
+            "-m",
+            "tox",
+            "-c",
+            str(config),
+            "--root",
+            str(ROOT),
+            "--workdir",
+            str(tmp_path / "tox"),
+            "-e",
+            "py",
+            "--",
+            str(probe),
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=90,
     )
-    assert runner.main() == int(serial_failure)
-    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
-    assert summary["coverage_enabled"] is False
-    assert summary["coverage_reports"] == []
-    assert summary["test_count"] == 2
-    assert [command["name"] for command in summary["commands"]] == [
-        "inventory",
-        "serial",
-        "parallel",
-    ]
-    assert summary["commands"][-1]["exit_code"] == 0
-    assert bool(summary["errors"]) is serial_failure
-    assert not list(reports.glob("*coverage*"))
-    assert not list(reports.glob(".coverage*"))
-    for name in ("serial", "parallel"):
-        lane = json.loads((reports / f"{name}.json").read_text(encoding="utf-8"))
-        assert len(lane["completed"]) == 1
+    assert (result.returncode == 0) is not failed_serial, result.stdout + result.stderr
+    assert finished.read_text() == "ran"
+    reports = temporary / "reports"
+    assert (reports / "junit-serial.xml").is_file()
+    assert (reports / "junit-parallel.xml").is_file()
+    assert (reports / "coverage.xml").is_file() is coverage
+    if failed_serial:
+        with pytest.raises(ValueError, match="Failed Python execution"):
+            verify(reports)
+    else:
+        verify(reports)
+
+
+def _run_probe(tmp_path: Path, probe: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - execute our isolated pytest probe
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "tests.ci_reporting",
+            str(probe),
+            "--basetemp",
+            str(tmp_path / "scratch"),
+            f"--junitxml={tmp_path / 'junit.xml'}",
+            "-o",
+            "junit_logging=all",
+            "-o",
+            "junit_log_passing_tests=false",
+        ],
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "PYTEST_ADDOPTS": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
 
 
 def test_real_failed_git_diagnostics_retain_stderr_without_publishing_passing_output(
@@ -320,15 +193,9 @@ def test_real_failed_git_diagnostics_retain_stderr_without_publishing_passing_ou
         "    assert RelayError('probe').message == 'force failure'\n",
         encoding="utf-8",
     )
-    reports = tmp_path / "reports"
-    assert runner.run(0, reports, [str(probe)]) == 1
-    full = json.loads((reports / "full.json").read_text(encoding="utf-8"))
-    passing = [row for row in full["reports"] if row["nodeid"].endswith("test_passing")]
-    assert passing and all(not row["diagnostics"] for row in passing)
-    failed = [row for row in full["reports"] if row["outcome"] == "failed"]
-    assert len(failed) == 1
-    assert "relay-invalid-probe-command" in failed[0]["diagnostics"][0]
-    junit = ET.parse(reports / "junit-full.xml")  # noqa: S314 - XML generated solely by this probe
+    result = _run_probe(tmp_path, probe)
+    assert result.returncode == 1, result.stdout + result.stderr
+    junit = ET.parse(tmp_path / "junit.xml")  # noqa: S314 - XML generated solely by this probe
     cases = {case.attrib["name"]: case for case in junit.findall(".//testcase")}
     assert "PASS_OUTPUT_UNCHANGED" not in ET.tostring(cases["test_passing"], encoding="unicode")
     assert "relay-invalid-probe-command" in ET.tostring(cases["test_failing"], encoding="unicode")
@@ -354,11 +221,5 @@ def test_diagnostic_fixture_preserves_shared_patch_and_temporary_cleanup_order(
         "    assert os.scandir is entries\n",
         encoding="utf-8",
     )
-    reports = tmp_path / "reports"
-    assert runner.run(0, reports, [str(probe)], coverage_enabled=False) == 0
-    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
-    assert summary["test_count"] == 1
-    assert summary["errors"] == []
-    lane = json.loads((reports / "full.json").read_text(encoding="utf-8"))
-    assert [report["phase"] for report in lane["reports"]] == ["setup", "call", "teardown"]
-    assert all(report["outcome"] == "passed" for report in lane["reports"])
+    result = _run_probe(tmp_path, probe)
+    assert result.returncode == 0, result.stdout + result.stderr
