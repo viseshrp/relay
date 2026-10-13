@@ -105,10 +105,9 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
     fake_agents: FakeAgents,
     registry_network: RegistryNetwork,
     database_threads: None,
-    short_busy_timeout: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    del registry_network, database_threads, short_busy_timeout
+    del registry_network, database_threads
     from relay.web.repositories import DjangoExecutionStore
 
     release = tmp_path / "release-agent"
@@ -127,8 +126,10 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
     run_id = engine.launch(project, "nested_0")
     ready = threading.Event()
     renewing = threading.Event()
+    recovered = threading.Event()
+    probe = SqliteWriteProbe()
     append = DjangoExecutionStore.append_attempt_event
-    renew = DjangoExecutionStore._renew_attempts
+    renew = DjangoExecutionStore.renew_attempts
 
     def observe(
         self: DjangoExecutionStore,
@@ -144,11 +145,17 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
             ready.set()
 
     def renewing_attempts(self: DjangoExecutionStore, owners: tuple[tuple[str, str], ...]) -> None:
+        # Force retries on the coordinator's connection. Provider execution
+        # and shutdown retain their normal configured SQLite busy timeout.
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA busy_timeout=50")
         renewing.set()
         renew(self, owners)
+        if probe.first_busy.is_set():
+            recovered.set()
 
     monkeypatch.setattr(DjangoExecutionStore, "append_attempt_event", observe)
-    monkeypatch.setattr(DjangoExecutionStore, "_renew_attempts", renewing_attempts)
+    monkeypatch.setattr(DjangoExecutionStore, "renew_attempts", renewing_attempts)
     monkeypatch.setattr("relay.execution.heartbeat.ATTEMPT_HEARTBEAT_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr("relay.agents.acp_driver.ATTEMPT_HEARTBEAT_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr("relay.agents.acp_driver.CONTROL_POLL_INTERVAL_SECONDS", 0.05)
@@ -166,7 +173,7 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
             assert NodeAttempt.objects.filter(status="running").count() == 5
             renewing.clear()
             with (
-                SqliteWriteProbe() as probe,
+                probe,
                 hold_write_lock(Path(connection.settings_dict["NAME"])),
             ):
                 assert renewing.wait(2), "coordinator did not try renewing"
@@ -179,6 +186,10 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
                     assert not future.done()
                 finally:
                     timer.cancel()
+            # Keep the provider quiet until the contended renewal commits.
+            # This explicitly verifies recovery before finishing the agent.
+            assert recovered.wait(2), "renewal did not recover after writer release"
+            assert not future.done()
         finally:
             release.touch()
         future.result(timeout=15)
