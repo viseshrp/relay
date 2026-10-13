@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Generator
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 from typing import Any
 
@@ -22,6 +24,55 @@ _TIMED_TESTS = {
     _BURST_TEST,
     "test_coordinator_contention_logs_the_database_cause_but_keeps_the_public_error_generic",
 }
+_GIT_DIAGNOSTICS = pytest.StashKey[list[str]]()
+
+
+@pytest.fixture(autouse=True)
+def failed_git_diagnostics(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retain real Git stderr without changing calls or exposing passing output."""
+    if not request.config.getoption("--relay-ci-report"):
+        return
+    diagnostics: list[str] = []
+    request.node.stash[_GIT_DIAGNOSTICS] = diagnostics
+    original = subprocess.run
+
+    def execute(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+        result = original(*args, **kwargs)
+        argv = args[0] if args else kwargs.get("args")
+        if (
+            result.returncode
+            and isinstance(argv, (list, tuple))
+            and argv
+            and isinstance(argv[0], str)
+            and argv[0].replace("\\", "/").rsplit("/", 1)[-1].casefold() in {"git", "git.exe"}
+        ):
+            stderr = result.stderr or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            diagnostics.append(
+                json.dumps(
+                    {
+                        "argv": [str(argument)[:256] for argument in argv[:32]],
+                        "returncode": result.returncode,
+                        "stderr": str(stderr)[:4096],
+                    }
+                )
+            )
+            del diagnostics[:-8]
+        return result
+
+    monkeypatch.setattr(subprocess, "run", execute)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    del call
+    report = yield
+    if report.failed and (diagnostics := item.stash.get(_GIT_DIAGNOSTICS, [])):
+        report.sections.append(("Captured stderr failed Git commands", "\n".join(diagnostics)))
+    return report
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -111,6 +162,11 @@ class CiRecorder:
                 "seconds": report.duration,
                 "skip_reason": reason,
                 "worker": getattr(report, "worker_id", "main"),
+                "diagnostics": [
+                    content
+                    for name, content in report.sections
+                    if name == "Captured stderr failed Git commands"
+                ],
             }
         )
 

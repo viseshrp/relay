@@ -53,6 +53,13 @@ The runner rejects missing or duplicated cases, collection errors, incomplete
 phase reports, failed tests, and unexplained skips. A failed lane cannot be
 hidden by a later passing lane.
 
+Each invocation creates a fresh, short pytest storage root under
+`RUNNER_TEMP` when available, with separate directories for collection and
+each lane. This avoids extending Windows Git paths with the default user
+temporary directory. Failed runs retain that root and record its location
+in the summary. Failed test reports also retain bounded Git command stderr;
+passing tests do not expose that diagnostic output.
+
 Tox forwards `RELAY_TEST_WORKERS` and `RELAY_TEST_REPORT_DIR`. Without an
 explicit report directory, tox stores reports beneath each environment's
 temporary directory and also maintains the legacy root `coverage.xml`.
@@ -83,6 +90,8 @@ report completeness before merging browser reports. Missing, duplicate,
 interrupted, retried, unexpectedly skipped, or failed cases fail the gate.
 The frontend unit report is verified separately and retained with
 preparation because it has a different Playwright test directory.
+Trusted reports from failed tests still contribute their blobs to the
+merged HTML report. Their failures remain aggregate gate errors.
 
 Successful preparation and reports are retained for one day; failed
 browser traces and screenshot diffs retain the existing seven-day policy.

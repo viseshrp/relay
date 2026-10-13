@@ -6,6 +6,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -122,10 +123,17 @@ def test_failed_serial_lane_does_not_prevent_parallel_or_coverage_reports(
 ) -> None:
     reports_dir = tmp_path / "reports"
     names: list[str] = []
+    temporary = tmp_path / "short"
+    temporary.mkdir()
+    owner_file = temporary / "owner.txt"
+    owner_file.write_text("retain", encoding="utf-8")
+    monkeypatch.setenv("RUNNER_TEMP", str(temporary))
+    base_paths: list[Path] = []
 
     def execute(command: list[str], environment: dict[str, str]) -> tuple[int, float]:
         del environment
         if "--relay-ci-report" in command:
+            base_paths.append(Path(command[command.index("--basetemp") + 1]))
             report_path = Path(command[command.index("--relay-ci-report") + 1])
             name = report_path.stem
             names.append(name)
@@ -153,9 +161,30 @@ def test_failed_serial_lane_does_not_prevent_parallel_or_coverage_reports(
     assert names == ["inventory", "serial", "parallel"]
     summary = json.loads((reports_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["commands"][1]["exit_code"] == 1
+    assert {path.name for path in base_paths} == {"i", "s", "p"}
+    assert len({path.parent for path in base_paths}) == 1
+    assert base_paths[0].parent.parent == temporary
+    assert summary["temporary_root_retained"] is True
+    assert owner_file.read_text(encoding="utf-8") == "retain"
     assert bool(summary["errors"]) is not coverage_valid
     assert (reports_dir / "coverage.json").is_file()
     assert (reports_dir / "summary.md").is_file()
+
+
+def test_scratch_creation_failure_still_publishes_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> str:
+        del args, kwargs
+        message = "scratch filesystem unavailable"
+        raise OSError(message)
+
+    monkeypatch.setattr(runner.tempfile, "mkdtemp", fail)
+    reports = tmp_path / "reports"
+    assert runner.run(2, reports, ["tests"]) == 1
+    summary = json.loads((reports / "summary.json").read_text(encoding="utf-8"))
+    assert summary["commands"] == []
+    assert "scratch filesystem unavailable" in summary["errors"][0]
 
 
 @pytest.mark.parametrize("workers", [0, 2])
@@ -180,6 +209,43 @@ def test_real_runner_collects_exact_identities_and_combines_branch_coverage(
     coverage = json.loads((reports / "coverage.json").read_text(encoding="utf-8"))
     assert summary["test_count"] == 2
     assert summary["errors"] == []
+    assert summary["temporary_root_retained"] is False
+    assert not Path(summary["temporary_root"]).exists()
     assert coverage["meta"]["branch_coverage"] is True
     assert coverage["totals"]["covered_lines"] > 0
     assert len(list(reports.glob("junit-*.xml"))) == (1 if workers == 0 else 2)
+
+
+def test_real_failed_git_diagnostics_retain_stderr_without_publishing_passing_output(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_git_probe.py"
+    probe.write_text(
+        "import shutil, subprocess\n"
+        "from relay.errors import RelayError\n"
+        "def run_git():\n"
+        "    result = subprocess.run([shutil.which('git'), 'relay-invalid-probe-command'], "
+        "capture_output=True, text=True, check=False)\n"
+        "    assert result.returncode != 0\n"
+        "    assert 'relay-invalid-probe-command' in result.stderr\n"
+        "    return result\n"
+        "def test_passing():\n"
+        "    assert run_git().stdout == ''\n"
+        "    print('PASS_OUTPUT_UNCHANGED')\n"
+        "def test_failing():\n"
+        "    run_git()\n"
+        "    assert RelayError('probe').message == 'force failure'\n",
+        encoding="utf-8",
+    )
+    reports = tmp_path / "reports"
+    assert runner.run(0, reports, [str(probe)]) == 1
+    full = json.loads((reports / "full.json").read_text(encoding="utf-8"))
+    passing = [row for row in full["reports"] if row["nodeid"].endswith("test_passing")]
+    assert passing and all(not row["diagnostics"] for row in passing)
+    failed = [row for row in full["reports"] if row["outcome"] == "failed"]
+    assert len(failed) == 1
+    assert "relay-invalid-probe-command" in failed[0]["diagnostics"][0]
+    junit = ET.parse(reports / "junit-full.xml")  # noqa: S314 - XML generated solely by this probe
+    cases = {case.attrib["name"]: case for case in junit.findall(".//testcase")}
+    assert "PASS_OUTPUT_UNCHANGED" not in ET.tostring(cases["test_passing"], encoding="unicode")
+    assert "relay-invalid-probe-command" in ET.tostring(cases["test_failing"], encoding="unicode")

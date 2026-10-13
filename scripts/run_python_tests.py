@@ -11,11 +11,13 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 _OWNER_MARKER = ".relay-python-reports.json"
+_SCRATCH_MARKER = ".relay-pytest-root.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -207,6 +209,39 @@ def _prepare_report_dir(reports_dir: Path) -> bool:
     return True
 
 
+def _publish_summary(
+    summary: dict[str, Any], reports_dir: Path, environment: dict[str, str]
+) -> None:
+    (reports_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
+    rendered = _summary(summary)
+    (reports_dir / "summary.md").write_text(rendered, encoding="utf-8")
+    if destination := environment.get("GITHUB_STEP_SUMMARY"):
+        with Path(destination).open("a", encoding="utf-8") as stream:
+            stream.write(rendered)
+    print(rendered)
+
+
+def _scratch_owner(root: Path) -> dict[str, str]:
+    return {"owner": "relay-python-ci", "checkout": str(ROOT), "root": str(root)}
+
+
+def _new_scratch_root(environment: dict[str, str]) -> Path:
+    root = Path(
+        tempfile.mkdtemp(prefix="rp-", dir=environment.get("RUNNER_TEMP") or None)
+    ).resolve()
+    (root / _SCRATCH_MARKER).write_text(json.dumps(_scratch_owner(root)), encoding="utf-8")
+    return root
+
+
+def _remove_scratch_root(root: Path) -> None:
+    if _read_json(root / _SCRATCH_MARKER) != _scratch_owner(root):
+        message = f"Refusing cleanup of an unverified pytest root: {root}"
+        raise OSError(message)
+    shutil.rmtree(root)
+
+
 def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: bool = False) -> int:
     reports_dir = reports_dir.resolve()
     if not _prepare_report_dir(reports_dir):
@@ -241,6 +276,26 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
     ]
     commands: list[dict[str, Any]] = []
     started = time.perf_counter()
+    try:
+        scratch_root = _new_scratch_root(environment)
+    except OSError as error:
+        _publish_summary(
+            {
+                "schema_version": 1,
+                "workers": workers,
+                "paths": paths,
+                "checkout_sha": environment["RELAY_TEST_CHECKOUT_SHA"],
+                "test_count": 0,
+                "commands": [],
+                "slowest": [],
+                "errors": [f"Cannot create isolated pytest storage: {error}"],
+                "elapsed_seconds": time.perf_counter() - started,
+                "exit_code": 1,
+            },
+            reports_dir,
+            environment,
+        )
+        return 1
 
     def execute(name: str, arguments: list[str]) -> int:
         code, seconds = _execute(arguments, environment)
@@ -249,12 +304,26 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
 
     execute(
         "inventory",
-        [*base, "--collect-only", "-q", "--relay-ci-report", str(reports_dir / "inventory.json")],
+        [
+            *base,
+            "--basetemp",
+            str(scratch_root / "i"),
+            "--collect-only",
+            "-q",
+            "--relay-ci-report",
+            str(reports_dir / "inventory.json"),
+        ],
     )
     names = ["full"] if workers == 0 else ["serial", "parallel"]
     for index, name in enumerate(names):
         arguments = [
             *base,
+            "--basetemp",
+            str(scratch_root / name[0]),
+            "-o",
+            "junit_logging=all",
+            "-o",
+            "junit_log_passing_tests=false",
             "--cov",
             f"--cov-config={ROOT / 'pyproject.toml'}",
             "--cov-report=",
@@ -322,6 +391,12 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
     )
     if errors and not exit_code:
         exit_code = 1
+    if not exit_code:
+        try:
+            _remove_scratch_root(scratch_root)
+        except OSError as error:
+            errors.append(f"Cannot clean isolated pytest storage: {error}")
+            exit_code = 1
     summary = {
         "schema_version": 1,
         "workers": workers,
@@ -333,22 +408,16 @@ def run(workers: int, reports_dir: Path, paths: list[str], *, legacy_coverage: b
         "slowest": sorted(durations.items(), key=lambda entry: entry[1], reverse=True)[:20],
         "elapsed_seconds": time.perf_counter() - started,
         "exit_code": exit_code,
+        "temporary_root": str(scratch_root),
+        "temporary_root_retained": scratch_root.exists(),
     }
-    (reports_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
-    )
-    rendered = _summary(summary)
-    (reports_dir / "summary.md").write_text(rendered, encoding="utf-8")
-    if destination := environment.get("GITHUB_STEP_SUMMARY"):
-        with Path(destination).open("a", encoding="utf-8") as stream:
-            stream.write(rendered)
+    _publish_summary(summary, reports_dir, environment)
     if (
         legacy_coverage
         and not os.environ.get("RELAY_TEST_REPORT_DIR")
         and (reports_dir / "coverage.xml").is_file()
     ):
         shutil.copyfile(reports_dir / "coverage.xml", ROOT / "coverage.xml")
-    print(rendered)
     return exit_code if exit_code >= 0 else 1
 
 
