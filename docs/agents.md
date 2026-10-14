@@ -171,6 +171,8 @@ ACP metadata. Only these known public fields are copied; private updates and
 unrelated metadata are omitted. The browser appends each output delta once,
 including repeated fragments, and shows the exit code in tool details.
 Metadata-only updates with no retained fields produce no empty tool event.
+Terminal deltas and exit codes were verified on Windows with Codex ACP 2.2.2
+in the [Windows retest](../certification/2026-10-14-windows-relay-fixes.md).
 Actions steps decode these summaries before masking and event-size splitting.
 They mask output deltas as one stream per attempt and tool call, hold possible
 secret prefixes, and flush before a terminal result or exit is persisted.
@@ -182,8 +184,8 @@ ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to
 stop. On Windows it uses a console break followed by `taskkill /T /F` when
 needed; on Linux it signals the process group with `SIGTERM` then `SIGKILL`.
-The final exit wait is bounded. Windows behavior remains unverified until a
-Windows certification run.
+The final exit wait is bounded. Live Windows agent cancellation remains
+unverified.
 
 The Phase 1 profiles advertise no client-mediated file or terminal methods:
 
@@ -359,8 +361,12 @@ their concrete backend models were not identified.
 
 Claude's model menu is available without authentication, so model selection
 alone does not certify its account. Its certified writer run followed native
-CLI sign-in. All five agents passed the macOS certification bar. Live provider
-behavior on Linux and Windows, cancellation, model drift, elicitation,
-timeouts, and Antigravity soft denies remain unverified. The sanitized results,
-completed sign-in screenshots, and fresh validated registry fixture are under
+CLI sign-in. All five agents passed the macOS certification bar. The
+[Windows Codex retest](../certification/2026-10-14-windows-relay-fixes.md)
+verified Codex ACP 2.2.2 with exact model `gpt-6.1-sol`, including terminal
+deltas and exit codes. The other four Windows providers and live Linux
+provider behavior remain unverified. Live agent cancellation, model drift,
+elicitation, timeouts, and Antigravity soft denies also remain unverified.
+The sanitized results, completed sign-in screenshots, and fresh validated
+registry fixture are under
 [`certification/`](../certification/README.md).
