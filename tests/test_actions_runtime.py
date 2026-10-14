@@ -6,9 +6,50 @@ import pytest
 
 from relay.execution.launch import LaunchRequest, launch_workflow
 from relay.execution.nodes import node_executors
-from relay.web.models import NodeRun, Run, RunEvent, RunSnapshot
+from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent, RunSnapshot
 from relay.workflows.defaults import validate_defaults
 from tests.support import FakeAgents, InlineEngine, RelayProject, git
+
+
+def test_answered_action_wait_resumes_run_before_the_next_step_finishes(
+    project: RelayProject, tmp_path: Path
+) -> None:
+    project.write_workflow(
+        "resume-state",
+        """jobs:
+  main:
+    steps:
+      - uses: relay/human-wait@v1
+        with: {prompt: Continue?}
+      - run: print('continued')
+        shell: python
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "resume-state")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "paused_wait"
+    interaction = HumanInteraction.objects.get(run_id=run_id, status="pending")
+    engine.store.submit_control(
+        str(interaction.attempt_id), "wait_answer", "continue", {"value": "go"}, 600
+    )
+
+    assert engine.store.resolve_human_wait_controls() == 1
+
+    assert not HumanInteraction.objects.filter(run_id=run_id, status="pending").exists()
+    assert Run.objects.get(pk=run_id).status == "running"
+    assert not NodeAttempt.objects.filter(
+        node_run__run_id=run_id, node_run__scope_path="root.main.step_2"
+    ).exists()
+    assert RunEvent.objects.filter(run_id=run_id, type="run.resumed").count() == 1
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    assert (
+        NodeAttempt.objects.filter(
+            node_run__run_id=run_id, node_run__scope_path="root.main"
+        ).count()
+        == 1
+    )
 
 
 def test_local_contexts_and_command_files_expose_real_host_and_run_facts(

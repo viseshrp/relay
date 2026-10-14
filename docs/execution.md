@@ -72,6 +72,11 @@ attempts keep their failure details. An interrupted attempt in a canceling run
 settles as canceled instead of reopening its node. The run drains to `canceled`
 or `failed`; restart never reopens canceled nodes.
 
+After an owner answers a wait, resuming its enclosing job or nested scope
+also updates the run status. Once no waiting or failed nodes remain, the run
+returns to `running` before its next step finishes. A second pending wait
+keeps the run in `paused_wait`.
+
 ### Nodes
 
 <!-- relay-transitions:node:start -->

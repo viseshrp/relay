@@ -3454,6 +3454,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     },
                     node=node,
                 )
+                if resuming:
+                    self._resume_run_after_waits(run)
                 return token
         except PersistenceError:
             raise

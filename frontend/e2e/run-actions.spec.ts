@@ -83,6 +83,63 @@ test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: "wait" });
 });
 
+test("answering an Actions wait resumes the run while its named next step is active", async ({
+  page,
+}) => {
+  const created = await post(page, "/api/workflows", {
+    key: "wait-status",
+    holder: "wait-status-test",
+    yaml: stringify({
+      name: "Wait status",
+      jobs: {
+        main: {
+          steps: [
+            {
+              id: "approval",
+              uses: "relay/human-wait@v1",
+              with: {
+                prompt: "Continue the Windows check?",
+                options: '["Continue"]',
+              },
+            },
+            {
+              id: "followup",
+              name: "Windows follow-up script",
+              shell: "python",
+              run: "import time\nprint('ACTIVE_STEP', flush=True)\ntime.sleep(20)",
+            },
+          ],
+        },
+      },
+    }),
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const launched = await post(page, "/api/runs", {
+    workflow_key: "wait-status.yaml",
+    inputs: {},
+  });
+  expect(launched.ok(), await launched.text()).toBeTruthy();
+  const { run_id: id } = await launched.json();
+  await settled(page, id, "paused_wait");
+  await page.goto(`/?view=runs&run=${id}`);
+  await page.getByRole("button", { name: "Respond", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await settled(page, id, "running");
+  await expect(
+    page.getByRole("heading", { name: /In progress Wait status/ }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: /main In progress/ }).click();
+  await expect(
+    page.getByRole("button", { name: /2\. Windows follow-up script/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Cancel run", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Cancel this run?" })
+    .getByRole("button", { name: "Cancel run", exact: true })
+    .click();
+  await settled(page, id, "canceled");
+});
+
 test("Pause, Resume, and Cancel run work from the job log and finished controls disappear", async ({
   page,
 }) => {
