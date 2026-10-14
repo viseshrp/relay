@@ -5,7 +5,7 @@ authenticated model probe and an end-to-end run in a disposable Git worktree.
 Command discovery, registry metadata, and source review are supporting evidence,
 not a live certification.
 
-## Latest local pass
+## Latest five-provider pass
 
 The latest pass ran on macOS 26.6.1 arm64 on 2026-10-03. The structured record
 is in [`2026-10-03-macos-arm64.json`](2026-10-03-macos-arm64.json). Each successful
@@ -36,7 +36,7 @@ All five agents meet the certification bar below on this macOS arm64 host.
 Claude and Cursor completed native CLI account sign-in before their successful
 runs. The sanitized [Claude](2026-10-03-claude-sign-in.jpg) and
 [Cursor](2026-10-03-cursor-sign-in.jpg) screenshots show the completed browser
-handoffs. Live agent execution on Linux and Windows, live cancellation, model
+handoffs. Live agent execution on Linux, live cancellation, model
 drift, elicitation, provider timeout paths, and Antigravity's `respect_settings`
 soft-deny notice remain unverified. Passing offline CI on those operating
 systems does not certify a live provider.
@@ -55,6 +55,17 @@ output arrived without a reload, and the monitor showed `succeeded` with
 `SSE complete`. Refreshing history showed the same terminal status. The
 [screenshot](2026-10-03-browser-smoke.jpg) and the `browser_smoke` entry in the
 structured record capture that run. Ctrl+C stopped the supervisor cleanly.
+
+## Windows dogfood and fix retest
+
+On 2026-10-14, live Codex ACP 2.2.2 with exact model `gpt-6.1-sol` completed
+a retained SuspendIt workflow on Windows. The
+[initial run](2026-10-14-windows-suspendit.md) found four Relay defects. The
+[fix retest](2026-10-14-windows-relay-fixes.md) verifies their fixes through
+live execution, browser checks, an owner wait, and retained tool diagnostics.
+The [full Python follow-up](2026-10-14-windows-python-suite.md) records the
+fixture fix, real junction coverage, and a verified complete Python 3.14
+Windows pass. The other four providers remain unverified on Windows.
 
 ## Certification bar
 
