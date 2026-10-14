@@ -13,6 +13,7 @@ from relay.constants import API_MAX_PAGE_BYTES
 from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoReadStore
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
+from tests.support import InlineEngine, RelayProject
 from tests.test_web_api import client as client
 from tests.test_web_api import finished_run as finished_run
 from tests.test_web_api import owner as owner
@@ -43,6 +44,33 @@ def test_output_advances_the_event_cursor_without_invalidating_state(
     state = RunEvent.objects.create(run_id=finished_run, type="run.rerun", source="run", payload={})
     third = owner.get(f"/api/runs/{finished_run}/monitor").json()
     assert third["state_cursor"] == state.pk
+
+
+def test_resolved_action_names_advance_monitor_state_once(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    from relay.web.actions_repository import display_name
+
+    served.write_workflow(
+        "names", "jobs:\n  main:\n    steps:\n      - run: print('ready')\n        shell: python\n"
+    )
+    run_id = engine.launch(served, "names")
+    engine.drain(run_id)
+    attempt = NodeAttempt.objects.get(
+        node_run__run_id=run_id, node_run__scope_path="root.main.step_1"
+    )
+    first = owner.get(f"/api/runs/{run_id}/monitor").json()
+
+    display_name(str(attempt.pk), "Check Windows output")
+
+    updated = owner.get(f"/api/runs/{run_id}/monitor").json()
+    assert updated["state_cursor"] > first["state_cursor"]
+    step = next(row for row in updated["nodes"] if row["scope_path"] == "root.main.step_1")
+    assert step["display_name"] == "Check Windows output"
+    display_name(str(attempt.pk), "Check Windows output")
+    assert (
+        owner.get(f"/api/runs/{run_id}/monitor").json()["state_cursor"] == updated["state_cursor"]
+    )
 
 
 def test_monitor_returns_one_consistent_snapshot(

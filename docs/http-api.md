@@ -430,6 +430,11 @@ returned records. A client rebuilding several pages must restart when their
 state cursors differ. SQLite's single writer orders committed event IDs;
 a future database adapter must preserve that ordering contract.
 
+Resolving an Actions job or step name emits `node.display_name_changed` with
+its `scope_path` and masked `display_name` in the same transaction. This
+advances the state cursor so live monitors refresh the name. Resolving the
+same masked name again emits no event.
+
 ### Job history
 
 `GET /api/runs/{id}/job?job=root.check` returns `job` and `next`. The job

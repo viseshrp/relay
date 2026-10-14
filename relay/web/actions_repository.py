@@ -414,14 +414,27 @@ def scope_node_id(run_id: str, scope: str) -> str:
 def display_name(attempt_id: str, value: str) -> None:
     from relay.execution.masking import redactor
 
+    from .repositories import _append_event
+
     record = NodeAttempt.objects.select_related("node_run").get(pk=attempt_id)
     with transaction.atomic():
         run = Run.objects.select_for_update().get(pk=record.node_run.run_id)
         state = dict(run.actions_state)
-        state.setdefault("display_names", {})[cast(str, record.node_run.scope_path)] = redactor(
-            str(run.pk)
-        ).text(value)[:256]
+        scope = cast(str, record.node_run.scope_path)
+        name = redactor(str(run.pk)).text(value)[:256]
+        names = state.setdefault("display_names", {})
+        if names.get(scope) == name:
+            return
+        names[scope] = name
         Run.objects.filter(pk=run.pk).update(actions_state=state)
+        _append_event(
+            run,
+            "node.display_name_changed",
+            EventSource.NODE,
+            {"scope_path": scope, "display_name": name},
+            node=record.node_run,
+            attempt=record,
+        )
 
 
 def request_human_wait(
