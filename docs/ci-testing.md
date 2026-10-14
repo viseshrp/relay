@@ -52,6 +52,11 @@ An empty lane is valid for a focused file; an empty overall inventory fails.
 Local missing Node runtimes and declared platform skips keep their reasons.
 Both Node runtimes are required in CI.
 
+Symlink fixtures report the host capability error when link creation is
+unavailable. A separate Windows directory-junction test exercises artifact
+subject and product-selection rejection with a real reparse point without
+requiring symlink privileges.
+
 Tox resets its own temporary directory before each invocation. Local
 reports live in `.tox/py313/tmp/reports` for the example above. CI supplies
 a short tox-owned root, `$RUNNER_TEMP/rp`, to avoid extending Windows Git

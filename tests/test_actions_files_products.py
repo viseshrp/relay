@@ -20,6 +20,7 @@ from relay.execution.action_files import (
 from relay.execution.action_products import cache_mode, capture, checked_path, restore, verify
 from relay.execution.masking import Redactor
 from relay.workflows.actions.patterns import matches, select_paths
+from tests.support import symlink_or_skip
 
 
 def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path: Path) -> None:
@@ -129,11 +130,47 @@ def test_subject_and_product_links_are_rejected(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("private", encoding="utf-8")
     link = tmp_path / "link"
-    link.symlink_to(target)
+    symlink_or_skip(link, target)
     with pytest.raises(PathSafetyError):
         declared_subjects("link", tmp_path, [])
     with pytest.raises(PathSafetyError):
         select_paths(tmp_path, ["**"], files_only=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
+def test_subject_and_product_junctions_are_rejected(tmp_path: Path) -> None:
+    workspace, target = tmp_path / "workspace", tmp_path / "outside"
+    workspace.mkdir()
+    target.mkdir()
+    sentinel = target / "private.txt"
+    sentinel.write_text("private", encoding="utf-8")
+    link = workspace / "link"
+    subprocess.run(  # noqa: S603 - create a junction between owned temporary directories
+        [
+            str(Path(os.environ["SYSTEMROOT"]) / "System32" / "cmd.exe"),
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            str(link),
+            str(target),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=15,
+        shell=False,
+    )
+    try:
+        assert getattr(link.lstat(), "st_file_attributes", 0) & 0x400
+        assert (link / "private.txt").read_text(encoding="utf-8") == "private"
+        with pytest.raises(PathSafetyError, match="cannot contain links"):
+            declared_subjects("link/private.txt", workspace, [])
+        with pytest.raises(PathSafetyError, match="symbolic link"):
+            select_paths(workspace, ["**"], files_only=True)
+        assert sentinel.read_text(encoding="utf-8") == "private"
+    finally:
+        link.rmdir()
+    assert sentinel.read_text(encoding="utf-8") == "private"
 
 
 def test_retained_product_hashes_block_corruption_before_restore(tmp_path: Path) -> None:
