@@ -254,7 +254,7 @@ def script_arguments(
     elif shell == "python":
         import sys
 
-        arguments = [sys.executable, str(path)]
+        arguments = [sys.executable, "-X", "utf8", str(path)]
     else:
         arguments = shlex.split(shell)
         if sum(argument.count("{0}") for argument in arguments) != 1:

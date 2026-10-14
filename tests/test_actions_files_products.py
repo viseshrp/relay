@@ -44,6 +44,32 @@ def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path:
     assert key_values(file_text(output)) == {"value": "ready"}
 
 
+def test_python_shell_uses_utf8_for_redirected_output_and_files(tmp_path: Path) -> None:
+    arguments = shell_script(
+        tmp_path,
+        "from pathlib import Path\nprint('王秀英')\nPath('result.txt').write_text('王秀英')\n",
+        "python",
+    )
+    environment = {
+        **os.environ,
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "LC_ALL": "C",
+    }
+    environment.pop("PYTHONIOENCODING", None)
+    result = subprocess.run(  # noqa: S603 - owned script with Relay's Python interpreter
+        arguments,
+        cwd=tmp_path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        timeout=15,
+        shell=False,
+    )
+    assert result.stdout.decode("utf-8").strip() == "王秀英"
+    assert (tmp_path / "result.txt").read_text(encoding="utf-8") == "王秀英"
+
+
 def test_multiline_file_values_preserve_crlf_and_empty_values() -> None:
     assert key_values("a=\r\nb<<END\r\nfirst\r\nsecond\r\nEND\r\n") == {
         "a": "",

@@ -87,6 +87,11 @@ platform's ordinary script shell. Workflow and job `defaults.run` provide a
 shell and working directory; step values override them. Working directories
 must resolve inside the run workspace.
 
+The built-in `python` shell uses Relay's interpreter with `-X utf8`, so
+redirected output and default text-file encoding support Unicode on Windows.
+Custom interpreter commands and explicit command argument vectors retain
+their requested arguments.
+
 `relay/command@v1` requires exactly one of `argv` (a JSON string containing a
 nonempty argument vector) or `command` (an owner-configured command name).
 Arguments are never reinterpreted as shell syntax. Relay owns process groups
