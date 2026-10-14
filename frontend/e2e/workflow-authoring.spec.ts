@@ -119,6 +119,65 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   ).toBeVisible();
 });
 
+test("inventory refresh failure preserves save success and the next save base", async ({
+  page,
+}) => {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Workflow settings", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Workflow name", exact: true })
+    .fill("Saved despite inventory failure");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const inventory = /\/api\/workflows(?:\?.*)?$/;
+  let refreshes = 0;
+  await page.route(inventory, (route) => {
+    refreshes += 1;
+    return route.fulfill({
+      status: 503,
+      json: {
+        code: "inventory_unavailable",
+        message: "Inventory temporarily unavailable.",
+        context: {},
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+  expect(refreshes).toBe(1);
+  await expect(page.getByText(/Unsaved changes:/)).toHaveCount(0);
+  const saved = await (
+    await page.request.get("/api/workflows/workflow.yaml")
+  ).json();
+  expect(parse(saved.yaml).name).toBe("Saved despite inventory failure");
+  expect(saved.draft).toBeNull();
+  await page.unroute(inventory);
+  await page
+    .getByRole("button", { name: "Workflow settings", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Workflow name", exact: true })
+    .fill("Inventory recovered");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const saving = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        "/api/workflows/workflow.yaml/save" &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const response = await saving;
+  expect(response.request().postDataJSON().base_hash).toBe(saved.base_hash);
+  expect(response.status(), await response.text()).toBe(200);
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toHaveText("Inventory recovered");
+});
+
 test("drawing changes rewrite YAML and can be undone, redone, and formatted", async ({
   page,
 }) => {
