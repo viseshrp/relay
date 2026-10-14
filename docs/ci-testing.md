@@ -57,6 +57,11 @@ unavailable. A separate Windows directory-junction test exercises artifact
 subject and product-selection rejection with a real reparse point without
 requiring symlink privileges.
 
+Nested runner probes load the repository's pytest configuration and set
+`--rootdir` and `--confcutdir` to their own scratch directory. A collection
+guard rejects directories outside that root. On Windows, this prevents
+collection from inspecting temporary folders that another worker is deleting.
+
 Tox resets its own temporary directory before each invocation. Local
 reports live in `.tox/py313/tmp/reports` for the example above. CI supplies
 a short tox-owned root, `$RUNNER_TEMP/rp`, to avoid extending Windows Git
