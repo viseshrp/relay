@@ -27,6 +27,7 @@ from relay.errors import (
     PersistenceError,
     RelayError,
 )
+from relay.execution.action_commands import ActionRuntime
 from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
@@ -36,7 +37,7 @@ from relay.workflows.schema import AgentNode
 from .acp_driver import AcpDriver
 from .antigravity_driver import AntigravityDriver
 from .discovery import discover_agents, discovered_by_id
-from .events import AgentEvent, bounded_agent_events
+from .events import TOOL_EVENT_TYPES, AgentEvent, bounded_agent_events
 from .models import (
     AgentCommand,
     AgentConfiguration,
@@ -517,7 +518,15 @@ class RoutedAgentNodeDriver:
         context: AgentExecutionContext,
     ) -> ExecutionOutcome:
         async for event in driver.start_attempt(context):
-            for chunk in bounded_agent_events(event):
+            # Actions must decode and mask tool JSON before numbered splitting;
+            # a split summary is no longer independently valid JSON.
+            events = (
+                (event,)
+                if isinstance(context.attempt.runtime, ActionRuntime)
+                and event.event_type in TOOL_EVENT_TYPES
+                else bounded_agent_events(event)
+            )
+            for chunk in events:
                 await asyncio.to_thread(
                     context.attempt.runtime.append_attempt_event,
                     context.attempt.attempt.attempt_id,

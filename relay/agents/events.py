@@ -13,6 +13,7 @@ from relay.execution.state import EventSensitivity
 
 # Reserve half of the persistence limit for scope/attempt metadata and SSE framing.
 _SAFE_CHUNK_BYTES = EVENT_MAX_PAYLOAD_BYTES // 2
+TOOL_EVENT_TYPES = frozenset({"agent.tool_call", "agent.tool_result"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +144,8 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
         summary["content"] = visible
     metadata = update.field_meta
     if isinstance(metadata, dict):
+        # Public, matching terminal IDs only: {terminal_id: "c1", data: "denied\n"}
+        # becomes summary.output_delta = "denied\n"; other metadata stays private.
         for key in ("terminal_output_delta", "terminal_output"):
             output = metadata.get(key)
             if (
@@ -161,6 +164,7 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
         ):
             code = exited.get("exit_code")
             if isinstance(code, int) and not isinstance(code, bool):
+                # {terminal_id: "c1", exit_code: 3} becomes summary.exit_code = 3.
                 summary["exit_code"] = code
     return json.dumps(summary, separators=(",", ":"), ensure_ascii=False)
 
@@ -227,6 +231,7 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
         terminal = update.status in {"completed", "failed"}
         summary = _tool_summary(update)
         if summary == "{}" and not update.title:
+            # No visible fields or title remain, so there is nothing to render.
             return ()
         return (
             AgentEvent(
@@ -312,6 +317,7 @@ def normalize_antigravity_event(raw: Mapping[str, object]) -> tuple[AgentEvent, 
 
 
 __all__ = [
+    "TOOL_EVENT_TYPES",
     "AgentEvent",
     "bounded_agent_events",
     "normalize_acp_update",

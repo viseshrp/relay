@@ -171,6 +171,11 @@ ACP metadata. Only these known public fields are copied; private updates and
 unrelated metadata are omitted. The browser appends each output delta once,
 including repeated fragments, and shows the exit code in tool details.
 Metadata-only updates with no retained fields produce no empty tool event.
+Actions steps decode these summaries before masking and event-size splitting.
+They mask output deltas as one stream per attempt and tool call, hold possible
+secret prefixes, and flush before a terminal result or exit is persisted.
+Step shutdown also flushes unfinished tool streams. Numbered parts and tool
+IDs remain attached to the masked output.
 
 Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
@@ -243,9 +248,15 @@ while `PLAN_CRITIQUE.md` stays in the repository root. The Git cleanliness check
 still rejects an uncommitted `.skills/review.md` file in the checkout.
 
 Relay masks declared workflow secrets and `add-mask` values in public run
-output. Agent prose does not register workflow commands or masks. Arbitrary
-inherited variables, Git diffs, and retained files are not automatically
-redacted and can contain sensitive data until the owner deletes the run.
+output. Agent prose does not register workflow commands or masks.
+Actions terminal-delta masking decodes JSON escapes before matching secrets.
+For example, `TOKEN-12345` followed by `67890\n` becomes `***\n` when the
+declared secret is `TOKEN-1234567890`; a declared `a"b\c` also becomes `***`.
+Retained v1 agent execution does not use this
+Actions streaming proxy and remains outside that split-delta guarantee.
+Arbitrary inherited variables, Git diffs, and retained files are not
+automatically redacted and can contain sensitive data until the owner deletes
+the run.
 Provider authentication data stays in the provider's own CLI or
 operating-system credential store. Workflow secret references use the
 separate [binding contract](workflows.md#variables-secrets-and-environments).

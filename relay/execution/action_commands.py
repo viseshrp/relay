@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 import re
 from typing import TYPE_CHECKING, cast
 
+from relay.agents.events import TOOL_EVENT_TYPES, AgentEvent, bounded_agent_events
 from relay.execution.masking import Redactor
 from relay.execution.state import EventSensitivity, EventSource
 
@@ -28,6 +30,7 @@ class CommandLog:
     buffers: dict[str, str]
     stopped: str | None
     streams: dict[str, tuple[str, EventSource, EventSensitivity, str, dict[str, object]]]
+    tool_streams: dict[str, tuple[EventSensitivity, dict[str, object]]]
 
     def __init__(self, runtime: RunnerStore, attempt_id: str, masks: Redactor) -> None:
         self.runtime = runtime
@@ -36,6 +39,7 @@ class CommandLog:
         self.buffers = {}
         self.stopped = None
         self.streams = {}
+        self.tool_streams = {}
 
     def feed(self, event_type: str, chunk: str, *, final: bool = False) -> None:
         value = self.buffers.pop(event_type, "") + chunk
@@ -92,9 +96,44 @@ class CommandLog:
             {"message": self.masks.text(content), "properties": self.masks.payload(metadata)},
         )
 
+    def append_tool_event(
+        self,
+        event_type: str,
+        payload: Mapping[str, object],
+        sensitivity: EventSensitivity,
+    ) -> None:
+        for event in bounded_agent_events(AgentEvent(event_type, payload, sensitivity)):
+            self.runtime.append_attempt_event(
+                self.attempt_id,
+                event.event_type,
+                EventSource.AGENT,
+                event.payload,
+                sensitivity=event.sensitivity,
+            )
+
+    def flush_tool(self, key: str) -> None:
+        stream = self.tool_streams.pop(key, None)
+        if stream is None:
+            return
+        sensitivity, metadata = stream
+        chunk = self.masks.stream(key, "", final=True)
+        if chunk:
+            self.append_tool_event(
+                "agent.tool_call",
+                {
+                    **metadata,
+                    "summary": json.dumps(
+                        {"output_delta": chunk}, separators=(",", ":"), ensure_ascii=False
+                    ),
+                },
+                sensitivity,
+            )
+
     def flush(self) -> None:
         for name in tuple(self.buffers):
             self.feed(name, "", final=True)
+        for key in tuple(self.tool_streams):
+            self.flush_tool(key)
         for key, (event, source, sensitivity, field, payload) in self.streams.items():
             chunk = self.masks.stream(key, "", final=True)
             if chunk:
@@ -131,6 +170,51 @@ class ActionRuntime:
     def __getattr__(self, name: str) -> object:
         return getattr(self.runtime, name)
 
+    def _append_tool_event(
+        self,
+        attempt_id: str,
+        event_type: str,
+        payload: Mapping[str, object],
+        sensitivity: EventSensitivity,
+    ) -> None:
+        value = payload.get("summary")
+        try:
+            summary = json.loads(value) if isinstance(value, str) else None
+        except json.JSONDecodeError:
+            summary = None
+        metadata = cast(
+            dict[str, object],
+            self.masks.payload({name: item for name, item in payload.items() if name != "summary"}),
+        )
+        tool_id = payload.get("tool_call_id")
+        key = f"{attempt_id}:tool:{sensitivity.value}:{payload.get('turn')}:{tool_id}"
+        terminal = event_type == "agent.tool_result" or (
+            isinstance(summary, dict) and "exit_code" in summary
+        )
+        if isinstance(summary, dict):
+            delta = summary.get("output_delta")
+            if isinstance(tool_id, str) and isinstance(delta, str):
+                # Decode first: deltas 'TOKEN-12345' + '67890\n' become '***\n'
+                # even when the registered value contains JSON-escaped bytes.
+                summary["output_delta"] = self.masks.stream(key, delta, final=terminal)
+                if key in self.masks.pending:
+                    self.log.tool_streams[key] = (sensitivity, metadata)
+                else:
+                    self.log.tool_streams.pop(key, None)
+            elif terminal:
+                self.log.flush_tool(key)
+            masked = {
+                **metadata,
+                "summary": json.dumps(
+                    self.masks.payload(summary), separators=(",", ":"), ensure_ascii=False
+                ),
+            }
+        else:
+            if terminal:
+                self.log.flush_tool(key)
+            masked = cast(dict[str, object], self.masks.payload(payload))
+        self.log.append_tool_event(event_type, masked, sensitivity)
+
     def append_attempt_event(
         self,
         attempt_id: str,
@@ -140,7 +224,9 @@ class ActionRuntime:
         *,
         sensitivity: EventSensitivity = EventSensitivity.NORMAL,
     ) -> None:
-        if source is EventSource.COMMAND and isinstance(payload.get("chunk"), str):
+        if source is EventSource.AGENT and event_type in TOOL_EVENT_TYPES:
+            self._append_tool_event(attempt_id, event_type, payload, sensitivity)
+        elif source is EventSource.COMMAND and isinstance(payload.get("chunk"), str):
             self.log.feed(event_type, cast(str, payload["chunk"]))
         elif isinstance(payload.get("chunk"), str) or isinstance(payload.get("text"), str):
             field = "chunk" if isinstance(payload.get("chunk"), str) else "text"
