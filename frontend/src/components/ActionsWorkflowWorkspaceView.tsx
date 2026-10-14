@@ -60,6 +60,7 @@ export function ActionsWorkflowWorkspaceView({
     settings,
     setEnvironments,
     notice,
+    inventoryWarning,
     leaseError,
     takeOver,
     error,
@@ -178,6 +179,9 @@ export function ActionsWorkflowWorkspaceView({
               : "Connecting editor…"}
         </Typography>
         {notice && <Alert severity="success">{notice}</Alert>}
+        {inventoryWarning && (
+          <Alert severity="warning">{inventoryWarning}</Alert>
+        )}
         {!key && <Typography variant="h6">No workflows yet</Typography>}
         {leaseError && (
           <Alert

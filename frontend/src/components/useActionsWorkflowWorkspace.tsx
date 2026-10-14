@@ -62,6 +62,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [base, setBase] = useState("");
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [notice, setNotice] = useState("");
+  const [inventoryWarning, setInventoryWarning] = useState("");
   const [agents, setAgents] = useState<AgentRecord[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [providerDefaults, setProviderDefaults] = useState<
@@ -156,13 +157,15 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   currentDocument.current = path("");
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
+      const document = currentDocument.current;
       const result = await api<ReadResponse1>(
         projectPath("/api/workflows", requestProject),
         { signal },
       );
-      if (signal?.aborted) return;
+      if (signal?.aborted || currentDocument.current !== document) return;
       setInventory(result.workflows);
       setInventoryLoaded(true);
+      setInventoryWarning("");
       if (!key && result.workflows.length)
         setKey(
           (
@@ -195,6 +198,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setError("");
     setSearch("");
     setNotice("");
+    setInventoryWarning("");
     setText("");
     setSaved("");
     setDraft(null);
@@ -387,14 +391,15 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
           holder: holder.current,
         }),
       });
-      const [result, listing] = await Promise.all([
+      if (currentDocument.current !== target) return false;
+      const [result, refreshed] = await Promise.all([
         api<WorkflowDocumentResponse>(target),
-        api<ReadResponse1>(projectPath("/api/workflows", requestProject)).catch(
-          () => null,
+        refresh().then(
+          () => true,
+          () => false,
         ),
       ]);
       if (currentDocument.current !== target) return false;
-      if (listing) setInventory(listing.workflows);
       setText(editorYaml(result.yaml));
       setSaved(editorYaml(result.yaml));
       setBase(result.base_hash);
@@ -402,6 +407,11 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       setPromptEdits({});
       setError("");
       setNotice("Workflow and instructions saved and validated.");
+      setInventoryWarning(
+        refreshed
+          ? ""
+          : "The workflow list could not refresh. Reload this page to update workflow names.",
+      );
       return true;
     } catch (e) {
       if (currentDocument.current === target) setError(errorMessage(e));
@@ -633,6 +643,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     settings,
     setEnvironments,
     notice,
+    inventoryWarning,
     leaseError,
     takeOver,
     error,

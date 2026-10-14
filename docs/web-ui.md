@@ -349,7 +349,9 @@ keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
 again. A successful Save clears the draft, refreshes the base hash, and
 refreshes the saved name in the workflow picker and sidebar.
 An inventory refresh failure leaves the save successful and its base hash
-current, so the next save can proceed without an edit conflict.
+current, so the next save can proceed without an edit conflict. A non-blocking
+notice explains that workflow names in the picker and sidebar may be stale
+until the next successful list refresh or page reload.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
 edit keeps the last valid graph visible with an explanation.
