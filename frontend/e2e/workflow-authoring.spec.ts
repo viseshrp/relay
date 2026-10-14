@@ -386,10 +386,12 @@ test("script editing previews the host arguments, saves, executes, and deletes j
   });
   expect(launched.status(), await launched.text()).toBe(201);
   const run = (await launched.json()).run_id;
+  // Both successful jobs commit before the run reaches its terminal state.
   await expect
     .poll(
       async () =>
         (await (await page.request.get(`/api/runs/${run}`)).json()).run.status,
+      { timeout: 15_000 },
     )
     .toBe("succeeded");
   const events = (
