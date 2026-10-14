@@ -14,6 +14,7 @@
     "test": "npm run lint && npm run format:check && npm run test:build && npm run test:unit && npm run build && playwright test && playwright test --config playwright.no-login.config.ts && playwright test --config playwright.visual.config.ts",
     "test:e2e": "npm test",
     "capture:welcome": "playwright test --config playwright.capture.config.ts",
+    "demo": "node scripts/render-demo.mjs",
     "lint": "eslint src e2e unit *.ts scripts *.mjs --max-warnings 0",
     "format:check": "prettier --check src e2e unit scripts *.ts *.mjs *.json .prettierrc.json",
     "test:unit": "playwright test --config playwright.unit.config.ts"

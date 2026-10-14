@@ -9,9 +9,29 @@
 [![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 [![Typing: ty](https://img.shields.io/badge/typing-checked-blue.svg)](https://docs.astral.sh/ty/)
 
-Relay lets you draw, edit, and run coding-agent workflows in your browser.
+Relay runs coding-agent workflows on your computer. Connect agents, commands,
+and approval steps in a visual editor or YAML, then follow each run in your
+browser.
 
-![A completed Ask an agent run in Relay](docs/images/run-page.png)
+![Relay walkthrough: edit a workflow, choose agents, launch, approve, and inspect results](docs/images/demo.gif)
+
+The demo uses simulated agents in a disposable repository. The editor, run
+execution, approvals, logs, and artifact previews are real Relay screens.
+[Demo source and automatic regeneration](docs/readme-demo.md).
+
+## What you can do
+
+- **Plan, approve, implement, and test.** Start from one of seven workflows or
+  connect your own jobs and ordered steps.
+- **Use different agents for different jobs.** Choose Codex, Claude Code,
+  GitHub Copilot CLI, Cursor CLI, or Antigravity, with exact models and
+  provider-supported thinking effort.
+- **Stay in control.** Answer approval and permission requests, pause new
+  steps, cancel a run, or retry a failed step while keeping completed work.
+- **Review the result.** Follow job logs, inspect changes and saved reports,
+  and preview or download artifacts from run history.
+- **Keep workflows with your code.** Save portable sources under `.relay/`;
+  Relay keeps run state and isolated Git worktrees in local user storage.
 
 ## Quick start
 
