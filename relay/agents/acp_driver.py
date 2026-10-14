@@ -195,6 +195,7 @@ async def _apply_overrides(
 def _capabilities(profile: AgentProfile) -> schema.ClientCapabilities:
     methods = profile.required_client_methods
     return schema.ClientCapabilities(
+        field_meta={"terminal_output_delta": True},
         fs=schema.FileSystemCapabilities(
             readTextFile="fs/read_text_file" in methods,
             writeTextFile="fs/write_text_file" in methods,

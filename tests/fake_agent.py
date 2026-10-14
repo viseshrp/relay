@@ -386,6 +386,36 @@ class WireAgent:
                             "content": {"type": "text", "text": f"Message {index}\n"},
                         }
                     )
+            if self.mode == "terminal-metadata":
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "command-1",
+                        "title": "Execute",
+                        "kind": "execute",
+                        "status": "in_progress",
+                        "content": [{"type": "terminal", "terminalId": "command-1"}],
+                    }
+                )
+                for text in ("Access ", "denied\n", "denied\n"):
+                    self.update(
+                        {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": "command-1",
+                            "_meta": {
+                                "terminal_output_delta": {"terminal_id": "command-1", "data": text},
+                                "provider_private": "hidden",
+                            },
+                        }
+                    )
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "command-1",
+                        "status": "failed",
+                        "_meta": {"terminal_exit": {"terminal_id": "command-1", "exit_code": 3}},
+                    }
+                )
             if self.mode.startswith("configuration"):
                 self.update(
                     {

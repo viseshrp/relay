@@ -165,6 +165,13 @@ the browser join fragments without merging different messages or attempts.
 Tool summaries retain their call IDs; original numbered event parts remain
 available in diagnostics.
 
+Relay advertises terminal-output deltas and retains the adapter's
+`terminal_output_delta` or `terminal_output` text and terminal exit code from
+ACP metadata. Only these known public fields are copied; private updates and
+unrelated metadata are omitted. The browser appends each output delta once,
+including repeated fragments, and shows the exit code in tool details.
+Metadata-only updates with no retained fields produce no empty tool event.
+
 Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to

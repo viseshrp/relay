@@ -141,6 +141,27 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
             visible.append({"terminal_id": item.terminal_id})
     if visible:
         summary["content"] = visible
+    metadata = update.field_meta
+    if isinstance(metadata, dict):
+        for key in ("terminal_output_delta", "terminal_output"):
+            output = metadata.get(key)
+            if (
+                isinstance(output, dict)
+                and output.get("terminal_id") == update.tool_call_id
+                and isinstance(output.get("data"), str)
+                and output.get("private") is not True
+            ):
+                summary["output_delta"] = output["data"]
+                break
+        exited = metadata.get("terminal_exit")
+        if (
+            isinstance(exited, dict)
+            and exited.get("terminal_id") == update.tool_call_id
+            and exited.get("private") is not True
+        ):
+            code = exited.get("exit_code")
+            if isinstance(code, int) and not isinstance(code, bool):
+                summary["exit_code"] = code
     return json.dumps(summary, separators=(",", ":"), ensure_ascii=False)
 
 
@@ -188,6 +209,8 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
             () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
         )
     if isinstance(update, schema.ToolCallStart):
+        if _is_private(update):
+            return ()
         return (
             AgentEvent(
                 "agent.tool_call",
@@ -199,14 +222,19 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
             ),
         )
     if isinstance(update, schema.ToolCallProgress):
+        if _is_private(update):
+            return ()
         terminal = update.status in {"completed", "failed"}
+        summary = _tool_summary(update)
+        if summary == "{}" and not update.title:
+            return ()
         return (
             AgentEvent(
                 "agent.tool_result" if terminal else "agent.tool_call",
                 {
                     "tool": update.title or update.tool_call_id,
                     "tool_call_id": update.tool_call_id,
-                    "summary": _tool_summary(update),
+                    "summary": summary,
                 },
             ),
         )

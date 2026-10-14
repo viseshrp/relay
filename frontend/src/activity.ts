@@ -16,6 +16,7 @@ export interface ActivityMessage {
     status: string;
     input: string;
     output: string;
+    outputDelta?: boolean;
   };
 }
 
@@ -85,8 +86,15 @@ function readableOutput(
           .join("\n")
       : "";
     const native = record(summary?.tool_info);
-    const output = native?.output ?? summary?.raw_output;
-    const visible = text || (typeof output === "string" ? output : "");
+    const output =
+      summary?.output_delta ?? native?.output ?? summary?.raw_output;
+    const exit =
+      typeof summary?.exit_code === "number"
+        ? `Exit code: ${summary.exit_code}`
+        : "";
+    const visible = [text || (typeof output === "string" ? output : ""), exit]
+      .filter(Boolean)
+      .join("\n");
     const input = record(native?.parameters ?? summary?.raw_input);
     const command =
       input?.command ?? input?.CommandLine ?? input?.path ?? input?.file_path;
@@ -160,6 +168,7 @@ function toolDetails(
     ),
     input: inputText,
     output: lines.join("\n"),
+    outputDelta: typeof summary?.output_delta === "string",
   };
 }
 
@@ -305,8 +314,9 @@ export function activityRows(events: RunEvent[]): ActivityMessage[] {
           ? previous.tool.title
           : message.tool.title;
       const incoming = message.tool.output;
-      const output =
-        !incoming || previous.tool.output.includes(incoming)
+      const output = message.tool.outputDelta
+        ? previous.tool.output + incoming
+        : !incoming || previous.tool.output.includes(incoming)
           ? previous.tool.output
           : incoming.startsWith(previous.tool.output)
             ? incoming

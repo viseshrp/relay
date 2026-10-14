@@ -195,6 +195,54 @@ def test_acp_tool_progress_retains_the_result_state(status: str, expected: str) 
     assert json.loads(event.payload["summary"])["raw_output"] == {"ok": True}
 
 
+@pytest.mark.parametrize("channel", ["terminal_output_delta", "terminal_output"])
+def test_acp_terminal_metadata_retains_only_public_output(channel: str) -> None:
+    update = schema.ToolCallProgress.model_validate(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "command-1",
+            "_meta": {
+                channel: {
+                    "terminal_id": "command-1",
+                    "data": "same\nsame\n",
+                    "private_field": "secret",
+                },
+                "provider_private": "secret",
+            },
+        }
+    )
+    event = normalize_acp_update(update)[0]
+    assert json.loads(event.payload["summary"]) == {"output_delta": "same\nsame\n"}
+
+
+def test_acp_terminal_exit_retains_failure_and_discards_empty_or_private_updates() -> None:
+    base = {"sessionUpdate": "tool_call_update", "toolCallId": "command-1"}
+    update = schema.ToolCallProgress.model_validate(
+        {
+            **base,
+            "status": "failed",
+            "_meta": {
+                "terminal_exit": {"terminal_id": "command-1", "exit_code": 3, "signal": None}
+            },
+        }
+    )
+    event = normalize_acp_update(update)[0]
+    assert event.event_type == "agent.tool_result"
+    assert json.loads(event.payload["summary"]) == {"status": "failed", "exit_code": 3}
+    for metadata in (
+        {},
+        {"private": True, "terminal_output_delta": {"data": "secret", "terminal_id": "command-1"}},
+        {"terminal_output_delta": {"data": "wrong tool", "terminal_id": "other"}},
+        {"terminal_exit": {"private": True, "terminal_id": "command-1", "exit_code": 3}},
+    ):
+        assert (
+            normalize_acp_update(
+                schema.ToolCallProgress.model_validate({**base, "_meta": metadata})
+            )
+            == ()
+        )
+
+
 def test_acp_plan_updates_retain_owner_visible_entries() -> None:
     update = schema.SessionNotification.model_validate(
         {

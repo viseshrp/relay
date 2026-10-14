@@ -75,6 +75,22 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     )
 
 
+def test_acp_terminal_output_and_exit_survive_real_protocol_notifications(
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex", mode="terminal-metadata")
+    events, result = execute(AcpDriver(PROFILES["codex"], agent_context.command), agent_context)
+    assert result.succeeded
+    tools = [
+        json.loads(event.payload["summary"])
+        for event in events
+        if event.event_type in {"agent.tool_call", "agent.tool_result"}
+    ]
+    assert "".join(tool.get("output_delta", "") for tool in tools) == "Access denied\ndenied\n"
+    assert tools[-1] == {"status": "failed", "exit_code": 3}
+    assert "hidden" not in json.dumps(tools)
+
+
 @pytest.mark.parametrize("agent_context", ["claude"], indirect=True)
 @pytest.mark.parametrize("mode", ["quota", "quota-unknown"])
 def test_claude_limits_use_typed_errors_and_only_confirmed_resets(

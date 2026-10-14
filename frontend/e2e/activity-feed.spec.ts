@@ -26,6 +26,37 @@ function event(
   };
 }
 
+test("terminal output deltas preserve repeated fragments and failure details", () => {
+  const events = [
+    event(1, "agent.tool_call", {
+      tool: "Execute",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({
+        status: "in_progress",
+        raw_input: { command: "check" },
+      }),
+    }),
+    ...["Access ", "denied\n", "denied\n"].map((output_delta, index) =>
+      event(index + 2, "agent.tool_call", {
+        tool: "cmd",
+        tool_call_id: "cmd",
+        summary: JSON.stringify({ output_delta }),
+      }),
+    ),
+    event(5, "agent.tool_result", {
+      tool: "cmd",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({ status: "failed", exit_code: 3 }),
+    }),
+  ];
+  expect(activityRows(events)[0].tool).toMatchObject({
+    title: "Ran check",
+    status: "failed",
+    input: "check",
+    output: "Access denied\ndenied\n\nExit code: 3",
+  });
+});
+
 test("matched tools merge across messages without crossing attempts, jobs, or turns", () => {
   const rows = activityRows([
     event(1, "agent.tool_call", {
@@ -370,7 +401,8 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     original.events.some(
       (event) =>
         typeof event.payload.summary === "string" &&
-        event.payload.summary.includes(`${folder}/r-2/REVIEW.md`),
+        JSON.parse(event.payload.summary).raw_input?.file_path ===
+          `${folder}/r-2/REVIEW.md`,
     ),
   ).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
