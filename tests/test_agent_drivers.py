@@ -21,7 +21,7 @@ from relay.agents.driver import AgentDriver, RoutedAgentNodeDriver, preflight_ro
 from relay.agents.events import AgentEvent
 from relay.agents.models import AgentCommand, AgentExecutionContext, AgentResult, ProbeRequirement
 from relay.agents.profiles import PROFILES
-from relay.constants import ANTIGRAVITY_PROMPT_MAX_BYTES
+from relay.constants import ANTIGRAVITY_PROMPT_MAX_BYTES, EVENT_MAX_PAYLOAD_BYTES
 from relay.errors import (
     AgentAuthError,
     AgentLaunchError,
@@ -35,7 +35,8 @@ from relay.errors import (
 from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
 from relay.execution.runner import OutcomeKind
-from relay.web.models import NodeAttempt, RunEvent
+from relay.web.actions_bindings import put_binding
+from relay.web.models import NodeAttempt, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore
 from relay.workflows.routing import RouteRequirement
 from relay.workflows.schema import AgentNode
@@ -659,6 +660,86 @@ def test_routed_execution_persists_visible_provider_events(
     messages = RunEvent.objects.filter(run_id=run_id, type="agent.message")
     assert [message.payload["text"] for message in messages] == ["ready"]
     assert NodeAttempt.objects.get(node_run__run_id=run_id).agent_id == "codex"
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
+    project: RelayProject,
+    tmp_path: Path,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    masked_value = 'TOKEN-"\\\tEND'
+    prefix = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
+
+    class TerminalDeltaDriver(AcpDriver):
+        async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+            for delta in (prefix + masked_value[:8], masked_value[8:] + "\n"):
+                yield AgentEvent(
+                    "agent.tool_call",
+                    {
+                        "tool_call_id": "terminal",
+                        "turn": 1,
+                        "summary": json.dumps({"output_delta": delta}),
+                    },
+                )
+            yield AgentEvent(
+                "agent.tool_result",
+                {"tool_call_id": "terminal", "turn": 1, "summary": '{"exit_code":0}'},
+            )
+
+        async def finalize(self) -> AgentResult:
+            return AgentResult(True, "end_turn", 0)
+
+    fake_agents.install("codex")
+    monkeypatch.setattr("relay.agents.driver._driver", TerminalDeltaDriver)
+    monkeypatch.setenv("RELAY_TEST_SECRET", masked_value)
+    put_binding(
+        f"project:{project.project_id}",
+        "KEY",
+        "secret",
+        source="environment",
+        reference="RELAY_TEST_SECRET",
+    )
+    project.write_workflow(
+        "tool_output",
+        """on: workflow_dispatch
+jobs:
+  check:
+    env: {KEY: '${{ secrets.KEY }}'}
+    steps:
+      - uses: relay/agent@v1
+        with: {agent: codex, model: m1}
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "tool_output")
+    engine.drain(run_id)
+
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    payloads = list(
+        RunEvent.objects.filter(run_id=run_id, type="agent.tool_call")
+        .order_by("id")
+        .values_list("payload", flat=True)
+    )
+    fragments = [payload for payload in payloads if "part" in payload]
+    assert len(fragments) > 1
+    assert [payload["part"] for payload in fragments] == list(range(1, len(fragments) + 1))
+    assert all(payload["parts"] == len(fragments) for payload in fragments)
+    summary = json.loads("".join(payload["summary"] for payload in fragments))
+    assert summary["output_delta"] == prefix
+    assert (
+        "".join(
+            json.loads(payload["summary"])["output_delta"]
+            for payload in payloads
+            if "part" not in payload
+        )
+        == "***\n"
+    )
+    assert all(
+        payload["tool_call_id"] == "terminal" and payload["turn"] == 1 for payload in payloads
+    )
+    assert all(len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in payloads)
 
 
 @pytest.mark.usefixtures("registry_network")

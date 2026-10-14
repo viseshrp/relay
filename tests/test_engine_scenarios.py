@@ -276,6 +276,42 @@ nodes:
     assert HumanInteraction.objects.get(run_id=run_id).status == "expired"
 
 
+def test_a_nested_timeout_resumes_the_run_once(
+    project: RelayProject, engine: InlineEngine, clock: Clock
+) -> None:
+    project.write_workflow(
+        "timeout_child",
+        """version: 1
+name: Timeout child
+nodes:
+  approve: {type: human_wait, prompt: Continue?, deadline: 1s, on_timeout: stop}
+  stop: {type: command, needs: [approve], run: [git, status]}
+""",
+    )
+    project.write_workflow(
+        "nested_timeout",
+        """version: 1
+name: Nested timeout
+nodes:
+  release: {type: subworkflow, workflow: timeout_child}
+""",
+    )
+    run_id = engine.launch(project, "nested_timeout")
+    engine.drain(run_id)
+    assert run_status(run_id) == "paused_wait"
+    assert node_statuses(run_id)["root.release"] == "waiting"
+
+    clock.advance(2)
+    assert engine.store.expire_human_waits() == 1
+
+    assert run_status(run_id) == "running"
+    assert RunEvent.objects.filter(run_id=run_id, type="run.resumed").count() == 1
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+    assert HumanInteraction.objects.get(run_id=run_id).status == "expired"
+    assert RunEvent.objects.filter(run_id=run_id, type="run.resumed").count() == 1
+
+
 def test_an_expired_wait_without_a_timeout_edge_fails_the_run(
     project: RelayProject, engine: InlineEngine, clock: Clock
 ) -> None:

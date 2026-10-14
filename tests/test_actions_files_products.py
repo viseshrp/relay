@@ -1,8 +1,10 @@
 """File interfaces, masking, and retained products against isolated storage."""
 
+import json
 import os
 from pathlib import Path
 import subprocess
+from typing import cast
 
 import pytest
 
@@ -19,6 +21,8 @@ from relay.execution.action_files import (
 )
 from relay.execution.action_products import cache_mode, capture, checked_path, restore, verify
 from relay.execution.masking import Redactor
+from relay.execution.runner import RunnerStore
+from relay.execution.state import EventSource
 from relay.workflows.actions.patterns import matches, select_paths
 from tests.support import symlink_or_skip
 
@@ -246,6 +250,178 @@ class RecordingLog:
         **_kwargs: object,
     ) -> None:
         self.events.append((kind, payload))
+
+
+@pytest.fixture
+def action_log() -> tuple[ActionRuntime, CommandLog, RecordingLog]:
+    recorder = RecordingLog()
+    masks = Redactor()
+    log = CommandLog(cast(RunnerStore, recorder), "attempt", masks)
+    return ActionRuntime(cast(RunnerStore, recorder), log, masks), log, recorder
+
+
+def tool_output(recorder: RecordingLog) -> str:
+    return "".join(
+        json.loads(str(payload["summary"])).get("output_delta", "")
+        for kind, payload in recorder.events
+        if kind in {"agent.tool_call", "agent.tool_result"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("secret", "deltas"),
+    [
+        ("TOKEN-1234567890", ("prefix TOKEN-12345", "67890\n")),
+        ('TOKEN-"\\\tEND', ('prefix TOKEN-"\\\tEND\n',)),
+        ('TOKEN-"\\\tEND', ('prefix TOKEN-"\\', "\tEND\n")),
+    ],
+    ids=["split", "escaped", "split-escaped"],
+)
+def test_agent_tool_deltas_mask_decoded_secrets(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    secret: str,
+    deltas: tuple[str, ...],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register(secret)
+    for delta in deltas:
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "terminal", "turn": 1, "summary": json.dumps({"output_delta": delta})},
+        )
+    log.flush()
+    assert tool_output(recorder) == "prefix ***\n"
+    assert all(payload["tool_call_id"] == "terminal" for _, payload in recorder.events)
+
+
+@pytest.mark.parametrize(
+    ("other_attempt", "other_tool", "other_turn"),
+    [("other", "terminal", 1), ("attempt", "other", 1), ("attempt", "terminal", 2)],
+    ids=["attempt", "tool", "turn"],
+)
+def test_agent_tool_prefixes_do_not_cross_stream_boundaries(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    other_attempt: str,
+    other_tool: str,
+    other_turn: int,
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    other_recorder = RecordingLog()
+    other_log = CommandLog(cast(RunnerStore, other_recorder), other_attempt, proxy.masks)
+    other_proxy = ActionRuntime(cast(RunnerStore, other_recorder), other_log, proxy.masks)
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"TOKEN-12345"}'},
+    )
+    assert tool_output(recorder) == ""
+    other_proxy.append_attempt_event(
+        other_attempt,
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": other_tool, "turn": other_turn, "summary": '{"output_delta":"67890\\n"}'},
+    )
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"67890\\n"}'},
+    )
+    log.flush()
+    other_log.flush()
+    assert tool_output(recorder) == "***\n"
+    assert tool_output(other_recorder) == "67890\n"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "summary", "expected_summary"),
+    [
+        ("agent.tool_result", '{"status":"completed"}', {"status": "completed"}),
+        ("agent.tool_call", '{"exit_code":0}', {"exit_code": 0}),
+        ("agent.tool_result", '{"output_delta":""}', {"output_delta": "TOKEN-"}),
+    ],
+    ids=["result", "exit", "final-delta"],
+)
+def test_agent_tool_completion_flushes_safe_prefixes_before_step_shutdown(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    event_type: str,
+    summary: str,
+    expected_summary: dict[str, object],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    assert tool_output(recorder) == "prefix "
+    proxy.append_attempt_event(
+        "attempt",
+        event_type,
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": summary},
+    )
+    assert tool_output(recorder) == "prefix TOKEN-"
+    assert json.loads(str(recorder.events[-1][1]["summary"])) == expected_summary
+    completed_events = list(recorder.events)
+    log.flush()
+    assert recorder.events == completed_events
+
+
+def test_step_shutdown_flushes_unfinished_tool_output_once(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    assert tool_output(recorder) == "prefix "
+    log.flush()
+    assert tool_output(recorder) == "prefix TOKEN-"
+    assert all(
+        kind == "agent.tool_call" and payload["tool_call_id"] == "terminal" and payload["turn"] == 1
+        for kind, payload in recorder.events
+    )
+    flushed_events = list(recorder.events)
+    log.flush()
+    assert recorder.events == flushed_events
+
+
+def test_plain_tool_result_still_masks_secrets_and_flushes_held_output(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, _, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": "finished TOKEN-1234567890"},
+    )
+    assert (
+        "".join(
+            json.loads(str(payload["summary"]))["output_delta"]
+            for _, payload in recorder.events[:-1]
+        )
+        == "prefix TOKEN-"
+    )
+    assert recorder.events[-1][1]["summary"] == "finished ***"
 
 
 def test_workflow_commands_stop_resume_mask_and_annotate() -> None:
