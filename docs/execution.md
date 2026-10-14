@@ -519,6 +519,8 @@ Unstarted stale dispatches are repaired for both `running` and `paused_wait`
 runs. An unrelated human wait does not prevent a writer's delivery repair.
 A routed wait timeout resumes the run only when no waiting or failed node
 remains, using the same guard as an owner answer.
+If completing the wait wakes an enclosing scope, expiry reads the current run
+status so that the same resume transition is recorded only once.
 
 Consumer startup initializes each active run once in O(V+E). Compiled immutable
 graphs are cached in a bounded cache. Later committed node changes schedule

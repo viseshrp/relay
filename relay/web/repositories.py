@@ -5506,6 +5506,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                         _identifier(attempt), outcome, _string(attempt, "starting_head")
                     )
                     if isinstance(on_timeout, str):
+                        # Waking the enclosing scope may already have resumed the
+                        # run through another instance; do not emit that event twice.
+                        run.refresh_from_db(fields=["status"])
                         self._resume_run_after_waits(run)
                         self._finish_run_if_terminal(run)
                     self.release_attempt_lock(_identifier(attempt))
