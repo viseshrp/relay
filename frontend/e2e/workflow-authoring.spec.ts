@@ -73,6 +73,14 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   await expect(
     page.getByText("Workflow and instructions saved and validated."),
   ).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toHaveText("Authoring smoke");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workflow sidebar" })
+      .getByRole("link", { name: /Authoring smoke/ }),
+  ).toBeVisible();
   const source = await (
     await page.request.get("/api/workflows/workflow.yaml")
   ).json();
@@ -287,7 +295,7 @@ test("script editing previews the host arguments, saves, executes, and deletes j
     await page.request.get("/api/workflow-language")
   ).json();
   await expect(page.locator(".script-editor").locator("..")).toContainText(
-    manifest.host_scripts.python.argv[0],
+    JSON.stringify(manifest.host_scripts.python.argv[0]),
   );
   await page.getByRole("button", { name: "Close job settings" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();

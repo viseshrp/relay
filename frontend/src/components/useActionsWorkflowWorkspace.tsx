@@ -387,8 +387,12 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
           holder: holder.current,
         }),
       });
-      const result = await api<WorkflowDocumentResponse>(target);
+      const [result, listing] = await Promise.all([
+        api<WorkflowDocumentResponse>(target),
+        api<ReadResponse1>(projectPath("/api/workflows", requestProject)),
+      ]);
       if (currentDocument.current !== target) return false;
+      setInventory(listing.workflows);
       setText(editorYaml(result.yaml));
       setSaved(editorYaml(result.yaml));
       setBase(result.base_hash);

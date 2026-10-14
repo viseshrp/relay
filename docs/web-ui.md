@@ -346,7 +346,8 @@ protects readers and launch capture; an interrupted publication rolls back
 before the next source operation. Save sends the SHA-256 hashes loaded by the
 tab. If another process changed a file, Relay returns a conflict and
 keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
-again. A successful Save clears the draft and refreshes the base hash.
+again. A successful Save clears the draft, refreshes the base hash, and
+refreshes the saved name in the workflow picker and sidebar.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
 edit keeps the last valid graph visible with an explanation.
