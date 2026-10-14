@@ -126,12 +126,6 @@ To test a scratch frontend build without replacing a running app's assets, set
 the isolated browser-test server reads this variable; production serving keeps
 its packaged asset root.
 
-Regenerate the README walkthrough with `npm --prefix frontend run demo`.
-This builds into temporary storage and captures the real browser UI using
-deterministic test agents. It requires FFmpeg and Playwright Chromium.
-See [README demo generation](docs/readme-demo.md) for the scenario, tool
-comparison, and automatic update workflow.
-
 The pre-commit license gate checks runtime dependencies against the allow-list
 in `pyproject.toml`. Run it directly with `uv run liccheck`. The pinned
 `agent-client-protocol` 0.12.1 and `huey` 3.4.0 omit license metadata, so the
