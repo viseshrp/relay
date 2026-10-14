@@ -434,6 +434,8 @@ Resolving an Actions job or step name emits `node.display_name_changed` with
 its `scope_path` and masked `display_name` in the same transaction. This
 advances the state cursor so live monitors refresh the name. Resolving the
 same masked name again emits no event.
+Browser run and job monitors subscribe to this named SSE event and refresh
+their snapshots when it arrives.
 
 ### Job history
 

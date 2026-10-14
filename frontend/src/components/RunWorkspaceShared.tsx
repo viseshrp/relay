@@ -72,6 +72,7 @@ const EVENT_TYPES = [
   "node.interrupted",
   "node.pending",
   "node.settings_changed",
+  "node.display_name_changed",
   "attempt.started",
   "attempt.ended",
   "agent.message",
