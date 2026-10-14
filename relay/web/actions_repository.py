@@ -424,6 +424,8 @@ def display_name(attempt_id: str, value: str) -> None:
         name = redactor(str(run.pk)).text(value)[:256]
         names = state.setdefault("display_names", {})
         if names.get(scope) == name:
+            # "Deploy token" -> "Deploy ***": repeating the masked name leaves
+            # the monitor cursor unchanged, even if the original text differs.
             return
         names[scope] = name
         Run.objects.filter(pk=run.pk).update(actions_state=state)

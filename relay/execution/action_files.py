@@ -254,6 +254,8 @@ def script_arguments(
     elif shell == "python":
         import sys
 
+        # python script.py -> python -X utf8 script.py keeps redirected Unicode
+        # output and default open() encoding consistent with UTF-8 file commands.
         arguments = [sys.executable, "-X", "utf8", str(path)]
     else:
         arguments = shlex.split(shell)

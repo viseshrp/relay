@@ -3455,6 +3455,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                     node=node,
                 )
                 if resuming:
+                    # Re-dispatching a scope can settle the last wait. Resume
+                    # before its next step starts so monitors clear paused_wait.
                     self._resume_run_after_waits(run)
                 return token
         except PersistenceError:

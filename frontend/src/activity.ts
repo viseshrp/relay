@@ -92,6 +92,7 @@ function readableOutput(
       typeof summary?.exit_code === "number"
         ? `Exit code: ${summary.exit_code}`
         : "";
+    // Output "denied\n" plus exit 3 becomes "denied\n\nExit code: 3".
     const visible = [text || (typeof output === "string" ? output : ""), exit]
       .filter(Boolean)
       .join("\n");
@@ -314,6 +315,8 @@ export function activityRows(events: RunEvent[]): ActivityMessage[] {
           ? previous.tool.title
           : message.tool.title;
       const incoming = message.tool.output;
+      // Deltas append exactly: "Access " + "denied\n" + "denied\n" becomes
+      // "Access denied\ndenied\n". Snapshots below keep their dedupe rules.
       const output = message.tool.outputDelta
         ? previous.tool.output + incoming
         : !incoming || previous.tool.output.includes(incoming)

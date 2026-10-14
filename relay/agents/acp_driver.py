@@ -195,6 +195,8 @@ async def _apply_overrides(
 def _capabilities(profile: AgentProfile) -> schema.ClientCapabilities:
     methods = profile.required_client_methods
     return schema.ClientCapabilities(
+        # Request _meta.terminal_output_delta notifications from the adapter;
+        # see Codex ACP 2.2.2 dist/index.js, terminal-output capability handling.
         field_meta={"terminal_output_delta": True},
         fs=schema.FileSystemCapabilities(
             readTextFile="fs/read_text_file" in methods,
