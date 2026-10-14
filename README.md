@@ -11,7 +11,8 @@
 
 Relay lets you draw, edit, and run coding-agent workflows in your browser.
 
-![A completed Ask an agent run in Relay](docs/images/run-page.png)
+<!-- markdownlint-disable-next-line MD034 -->
+https://github.com/user-attachments/assets/4f4d6200-e51b-4f7b-a868-fd90659b0a57
 
 ## Quick start
 

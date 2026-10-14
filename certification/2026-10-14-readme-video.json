@@ -1,0 +1,94 @@
+{
+  "purpose": "Static README demonstration, not a cross-platform certification",
+  "date": "2026-10-14",
+  "platform": {
+    "os": "macOS",
+    "version": "26.6.1",
+    "architecture": "arm64"
+  },
+  "provider": {
+    "id": "antigravity",
+    "transport": "native headless CLI",
+    "cli_versions_observed": [
+      "1.3.2",
+      "1.3.5"
+    ],
+    "version_note": "The native adapter does not retain per-attempt CLI versions.",
+    "model": "gemini-3.8-flash-high",
+    "successful_agent_stages": 14,
+    "permission_mode": "auto_approve"
+  },
+  "browser": {
+    "playwright": "1.63.0",
+    "chromium": "153.0.8010.12"
+  },
+  "sources": {
+    "relay_commit": "4d397c332dc594b710f18bfd9c7c989f406f34a8",
+    "suspendit_base": "982657ffbf4168b8509a0fe99f83cbcf7634b747",
+    "run_baseline": "352c773d592cb1a14d9c12b83e913b2bba005628",
+    "protected_run_head": "535687bee31c763ee4e73cd81c5f8a9ec484fb87"
+  },
+  "workflow": {
+    "starter": "relay/workflows/starters/ai-coding-workflow.yaml",
+    "adaptations": [
+      "Gemini 3.8 Flash for every agent stage",
+      "Human gates removed; walkthrough reviewed by an agent",
+      "No feature publication"
+    ],
+    "adapted_yaml_sha256": "73553383719588921564e3213a4965caaa19620b671e5d18560c2da74d7e1f72"
+  },
+  "run": {
+    "id": "449e12b6-457f-472b-a3ed-98040dc13a99",
+    "status": "succeeded",
+    "successful_top_level_jobs": 9,
+    "node_timeout_seconds": 1800,
+    "human_approvals": 0,
+    "human_ux_review": "Not performed"
+  },
+  "earlier_attempt": {
+    "id": "4da56021-bdf0-4b73-9366-472e67b47962",
+    "status": "failed",
+    "error_code": "node_timeout",
+    "timeout_seconds": 300,
+    "evidence_retained": true
+  },
+  "verification": {
+    "quality": "passed",
+    "unit_integration_tests_passed": 95,
+    "chromium_tests_passed": 18,
+    "smoke": "passed",
+    "package": "passed",
+    "shortcut_capture": {
+      "real_chromium": true,
+      "mocked_apis": false,
+      "slash_focuses_search": true,
+      "escape_clears_query": true,
+      "collapse_state_restored": true,
+      "search_focus_retained": true
+    },
+    "final_review_sha256": "4c5cc3ae5e664699b3943b7622f48da925646338d97053f72a4b8a1e2eda21cc"
+  },
+  "video": {
+    "path": "docs/videos/suspendit-feature.mp4",
+    "duration_seconds": 54.799023,
+    "bytes": 2202943,
+    "playback_speed": 1.5,
+    "idle_time_removed": true,
+    "added_captions": false,
+    "codec": "H.264",
+    "width": 1440,
+    "height": 900,
+    "frames_per_second": 30,
+    "sha256": "bb89aed405d61f5ff5e39d0bd765f414c48082a3e8b3b856d80b6247f4a029b2",
+    "github_attachment": "https://github.com/user-attachments/assets/4f4d6200-e51b-4f7b-a868-fd90659b0a57"
+  },
+  "cleanup": {
+    "supervisor_stopped": true,
+    "web_stopped": true,
+    "worker_stopped": true,
+    "port_closed": true,
+    "run_worktree_retained": true,
+    "raw_footage_retained": true,
+    "isolated_browser_profiles_retained": true
+  }
+}
