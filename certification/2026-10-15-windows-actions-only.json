@@ -1,0 +1,366 @@
+{
+  "date": "2026-10-15",
+  "platform": {
+    "os": "Windows 11",
+    "build": "10.0.26300.0",
+    "architecture": "x64",
+    "python": "3.14.7",
+    "node": [
+      "20.20.2",
+      "24.12.0"
+    ],
+    "pwsh": "7.6.5",
+    "git": "2.54.0.windows.1",
+    "uv": "0.12.5",
+    "playwright": "1.63.0"
+  },
+  "format": "jobs-and-steps only; workflow version: 1/nodes has no execution or replay path",
+  "product_trees": {
+    "relay": "f4334979186eb7a7f36d9407de51ce67bf0e289b",
+    "frontend_src": "d23e85d6ce9e97850017054bfbb43f5cd7b8bc0a"
+  },
+  "python_checkpoint": {
+    "checkout": "32b3166698e9783fd9671c4ea273ec3340746203",
+    "command": "uv run tox -e py314",
+    "workers": 3,
+    "inventory": 2802,
+    "passed": 2770,
+    "skipped": 32,
+    "symlink_privilege_skips": 22,
+    "declared_platform_skips": 10,
+    "complete_inventory_verified": true,
+    "reports": [
+      {
+        "name": "inventory.json",
+        "sha256": "a14a81f11206f4c9987a1f06464a86b2ad0ed930c6de27c7d4264ecad90b2a34",
+        "bytes": 470271
+      },
+      {
+        "name": "junit-serial.xml",
+        "sha256": "f2d68934f57e62cea7890d5b6d287d77d4c058ae374b9e8e5f9795d2eb9f8a2a",
+        "bytes": 22485
+      },
+      {
+        "name": "junit-parallel.xml",
+        "sha256": "40e13c04ecb4ee47f96f97513decf55fd59b4a26f67aa8e65d1827f93277c415",
+        "bytes": 1142103
+      },
+      {
+        "name": "coverage.xml",
+        "sha256": "e5472e958a5689646b2f51aec182f62ede5665103142308d94d48dfeab13a46e",
+        "bytes": 767467
+      },
+      {
+        "name": "coverage.json",
+        "sha256": "606bc0621e1f9105412be95d204564965ad79856b5e2db908557802ad29a8e71",
+        "bytes": 1441030
+      }
+    ],
+    "log": {
+      "name": "python-full-windows-fixed.log",
+      "sha256": "5f4b05f2dfbe27e9f7a7797f325feeac2507bf6b74b4816f3d64e0710dc150c6",
+      "bytes": 919290
+    },
+    "checkout_fixed_for_entire_run": true
+  },
+  "later_focused_regressions": {
+    "product_checkpoint": "59adbf921df5716d5c2b55a6d056302492055fc1",
+    "approval_artifact_and_fixture_cases": 6,
+    "final_fixture_cases": 2,
+    "reports": [
+      {
+        "name": "last-runtime-focused.log",
+        "sha256": "47ae63755f805ae2191c48cafc469b54fa74801fdd22325f5825592363564e43",
+        "bytes": 1166
+      },
+      {
+        "name": "ui-fixtures-final-realistic.log",
+        "sha256": "5fe2b384550e85193f2f79b8442bf22c2d02da23197df57a8da497d898b912cf",
+        "bytes": 683
+      }
+    ]
+  },
+  "browser": {
+    "functional": {
+      "inventory_count": 297,
+      "accepted_count": 297,
+      "missing": 0,
+      "failed": 0,
+      "skipped": 0,
+      "automatic_retries": 0,
+      "manual_retests": true
+    },
+    "accepted_counts_by_report": {
+      "browser-final-shard-1.json": 99,
+      "browser-final-shard-2.json": 57,
+      "browser-fixtures-retest.json": 41,
+      "browser-focus-verified.json": 20,
+      "browser-last-seven.json": 5,
+      "browser-artifacts-verified.json": 2,
+      "browser-final-shard-3.json": 73
+    },
+    "accepted_outcomes": {
+      "name": "browser-current-verified.json",
+      "sha256": "4d4275fe6a54c917d0b41bdb67e050ede457679561f81473f39ab9760cda37c9",
+      "bytes": 70384
+    },
+    "reports": [
+      {
+        "name": "browser-final-shard-1.json",
+        "sha256": "2c1ec460ed961109c4a30c50898ba2842a122dd1ef1e835af3ad51d5cd8c10e4",
+        "bytes": 108609
+      },
+      {
+        "name": "browser-final-shard-2.json",
+        "sha256": "c4a61552e5228bdfd08d442c3ffd40a160017344cc8196d030192c3fe3e853ba",
+        "bytes": 275844
+      },
+      {
+        "name": "browser-final-shard-3.json",
+        "sha256": "d793ca88baf4d7af75369afb0b006281ade109c92df9933d6c73723c56db02f2",
+        "bytes": 121842
+      },
+      {
+        "name": "browser-fixtures-retest.json",
+        "sha256": "2fae4da2e970c96137a6aa72399e715a5ae1417a202f2b5271ca8c9022598bdf",
+        "bytes": 72112
+      },
+      {
+        "name": "browser-last-seven.json",
+        "sha256": "a269a1d2c4b1cd66ff7aadcb49079261d2be00e97dc92a8313e65c8edad99370",
+        "bytes": 18187
+      },
+      {
+        "name": "browser-artifacts-verified.json",
+        "sha256": "55026eff8c6fab7b6d77c3f5a14b622b88ca5454e848e402ef19b76b2df17114",
+        "bytes": 4701
+      },
+      {
+        "name": "browser-focus-verified.json",
+        "sha256": "bef66ec5644a2782a5541c10188de385b5390a138457313a81d80a1a1febb859",
+        "bytes": 24265
+      }
+    ],
+    "no_login_passed": 4,
+    "monitor_unit_passed": 16,
+    "visual_passed": 29,
+    "visual_checkout": "fc7c9184162470e6732dc59648aae30f98282ff3",
+    "visual_report": {
+      "name": "browser-visual-final.json",
+      "sha256": "da0ec0d4eef10d292d15b9003ef446b9c38b609290500d070307d240a7a5d119",
+      "bytes": 42659
+    },
+    "windows_baseline_sha256": {
+      "approval-1440.png": "4a26c4b76f12fcbe6ab703b1208bff61e94f544b25d3e65be1855bfd3248e2bd",
+      "approval-375.png": "e33574805c9525a05fd781d88013873f121e5380ab2a1a425535c4368dbb5a6d",
+      "approval-768.png": "960e79062e59b18cb26ad7cf41ba2cf16a3259f0e45aa16da5d9ca964dcec853",
+      "home-1440.png": "5187200ba1d26224da5cc7ad39c03ed21321682021dcb26df98fcf97e4744acf",
+      "home-375.png": "19803ec06178fdaf3f0e0e5e9999fd5ce8288161584b7d316f587eb40b57f9c9",
+      "home-768.png": "81feb7c9c1f8bd0b26887e430da671156b8ea90409c94a3e8a26009a2d52efc2",
+      "job-1440.png": "779c1bd1cd92c6fe523f656c3c3e741980c481880c36c9422ee80b6b0c7ee537",
+      "job-375.png": "0b2a25ba24318d8d4be5ea59925025cff063ec860af4cf9c529becea6d495a75",
+      "job-768.png": "44b60f0bf6daf400886b22c0d4d6a84624659f94eb5627f3d5632af99b3c0cec",
+      "runs-1440.png": "93c7dfdef07c42c88261228fc9eb5a55df2fa348e53ee92014cae66c7d6a9e5b",
+      "runs-375.png": "3c1639d40105e596ea718d56c2a7dd5bdd7e5df8eceb9852e9692519907e2d44",
+      "runs-768.png": "a1fd20d76781450388afb46db58cc802e621673e8ececa8142352484e571c37d",
+      "settings-1440.png": "fcc55cbbce03c4fa59ff205758bb013231e3c3ea2b06552921d99ebc2e8541a6",
+      "settings-375.png": "821b285641571a39b5e122e2d023b56109bcde168bfddfac7788c49daeb4826d",
+      "settings-768.png": "99952d906bcd6d7f455be6642bfb5f0c845168ec2f60d7d327c8e68d825b6fc6",
+      "summary-1440.png": "a40feef0ef5cf50456495f9e1309ad50ec2c89c70ea55e8d72cfa0dc5a893778",
+      "summary-375.png": "42aad0c0b9229c2022c13750fcdb2e1e01c6646fcd5cad3cbd1690c65bfe1999",
+      "summary-768.png": "b766e7ee2b5398079f3da44ec8aea75960c7eb1e333e76a172aae639bd23a0d8",
+      "workflows-1440.png": "92336315b6ef26d461b06e7124d0cdb1df7b5f9ff62b7f86f981f275a653aa82",
+      "workflows-375.png": "3a0f2d470bba0789f14995593b6d1cca6c20a9b84c1c1ed433a9f12f17d8b9d1",
+      "workflows-768.png": "93a7bebe475bdc5db6bdaeebf039f8ff474feb0c646a5ca2aaa3da974fa1955f"
+    },
+    "linux_baselines": {
+      "generation_checkout": "32b3166698e9783fd9671c4ea273ec3340746203",
+      "workflow_run": "https://github.com/viseshrp/relay/actions/runs/38819666477",
+      "artifact_id": 12012392665,
+      "reviewed_pngs": 21,
+      "sha256": {
+        "approval-1440.png": "809bdc06058e3ab52d6ae01c62dfd390a2d217a844fb1ad039f619fcf23f0687",
+        "approval-375.png": "704b67e56f8259e21c7eb28277f0d3f5acd16417a3deb89a39a3ac99d9bbbc2e",
+        "approval-768.png": "b9b9d11096593d603fc1d33d711ee10155a0729c991cc35dff67f5f9d765f0b6",
+        "home-1440.png": "3e486931d66f6a083092256330584d3b2da3b58eacd4c2f409560ba90153cfe2",
+        "home-375.png": "fabfec85a65594fe27f2a6c0cb2c2983b827e751830a26b05b8726d9843e0ca7",
+        "home-768.png": "6bc48c867177d03c55b19ed9208084783f7545337024dbb3d54948953f1b1a54",
+        "job-1440.png": "a8f7fc2b50f40a17dce235f2176d8f7465c35aceacdd7617c6feb6e1e120c6e8",
+        "job-375.png": "0a8e7256921e5392070c7f72d693a722fda0827ef4f50c415596b40c0935769b",
+        "job-768.png": "b8a46234230fd8f7eca4e13848c190baa6dc46480b8fd6db3f653e24485010f7",
+        "runs-1440.png": "d66da5b6d69e1375e09f9f50ad9e79e15db5d8a064dc5b8740c55b02ddff151a",
+        "runs-375.png": "9b8f7819492b5e84a755d75b65e8dfbaa99e4f4e94fddf1b66fd2a7bc3861121",
+        "runs-768.png": "8568e3d7413002b7d666a61c130050d2c850cee2080aa9737e647570b1aae011",
+        "settings-1440.png": "696f681337b944bce80ebd08b4f6a99a955db9ec200ada5cc4ea0ab0ab223062",
+        "settings-375.png": "497fffae5c0b36f5822b8f97631eb04fc0817212c7409f9260df9f3ead1ed978",
+        "settings-768.png": "d8fb26325343ee29a6b6199abb1c4867b8c6b6e7d9dbf92c372dbbbe5f9c77d5",
+        "summary-1440.png": "5ab3e6c9e803a751d0b70ae598d5f5b23feadf678a9eef9be9642440996737d1",
+        "summary-375.png": "49aacc9c760a38d527096ea25c5242718d2e5e9d6b0418e1b4c61e59a580099e",
+        "summary-768.png": "880dc9577326d9d55c9834ab43b8f2d89500807c41cbbae5a26cb3871ebe2307",
+        "workflows-1440.png": "2ea3e7fd70e4d52b6f43e176cb44ed6b6b89748908fd331510a48199b26e03cc",
+        "workflows-375.png": "7cb368cb63b796dda4e1190d2dfbec11f7594f2754c07471642831dd6f6cd683",
+        "workflows-768.png": "d775ec658751f38c9d68409e587fe7a4013ec10aa2a33c0c42669d5511b6fccf"
+      }
+    }
+  },
+  "build_script_tests": {
+    "passed": 1036,
+    "declared_oracle_skips": 5
+  },
+  "installed_wheel": {
+    "checkout": "6e23ab493cd9d1a45325be0fcf38b186e07cc6f5",
+    "wheel": {
+      "name": "relay_app-0.0.3.dev20261015220319-py3-none-any.whl",
+      "sha256": "8eda96921cbac061f88c05965755bc1b36e719d43549976649495c6e0758eac8",
+      "bytes": 8846555
+    },
+    "sdist": {
+      "name": "relay_app-0.0.3.dev20261015220319.tar.gz",
+      "sha256": "c9d34f02aea9f409981b9a0642494bf4d3c0be08850958a8ecf0093095f85597",
+      "bytes": 4196812
+    },
+    "node_available": false,
+    "verified": true,
+    "auth_status": 200,
+    "html_status": 200,
+    "asset_bytes": 146734,
+    "login_required": false,
+    "remaining_supervisor_leases": 0,
+    "clean_shutdown": true
+  },
+  "live_claude": {
+    "provider": "claude",
+    "run_id": "ae044e85-1721-4f4a-86e9-4236ed85557f",
+    "status": "succeeded",
+    "source_head": "6e23ab493cd9d1a45325be0fcf38b186e07cc6f5",
+    "model_value": "default",
+    "agent_version": "0.91.0",
+    "starting_head": "072439b470199b1c516fe043b5ac5cc2602aa5f2",
+    "job_commit": "d51247bd67d4f0207b0b7a4de3da3c655f1fc73f",
+    "protected_head": "d51247bd67d4f0207b0b7a4de3da3c655f1fc73f",
+    "commit_count": 1,
+    "report_sha256": "aa05fa2ba3b07a2fc074d0a5f8cb2128f191257860a4aa5607d2cc31f7de47a1",
+    "report_bytes": 225,
+    "all_downloads_verified": 8,
+    "permission_answers_once": 2,
+    "unicode_stdout": true,
+    "stderr": true,
+    "structured_exit_code": 3,
+    "masked_synthetic_secret": true,
+    "source_checkout_clean": true,
+    "worktree_clean": true,
+    "process_identities_cleared": true,
+    "terminal_delta_updates": 1,
+    "events_sha256": "9cfb66bfb2ecdac1f78292a93b434b5a8cb7c73f4b5bb57e7fbb183dff48fa83",
+    "claude_code_version": "2.1.300",
+    "cleanup": {
+      "run_id": "ae044e85-1721-4f4a-86e9-4236ed85557f",
+      "worktree_removed": true,
+      "worktree_state": "removed",
+      "provider_process_cleared": true,
+      "retained_downloads_reverified": 8,
+      "cleanup_scope": "worktrees"
+    },
+    "shutdown": {
+      "forced": false,
+      "owner_and_children_exited": true,
+      "ownership_record_removed": true,
+      "log_confirmed_clean_stop": true,
+      "provider_processes_already_cleared": true,
+      "worktrees_already_removed": true,
+      "retained_artifacts_reverified": 8
+    }
+  },
+  "preserved_untracked_review_sha256": {
+    "REVIEW.md": "f95e5dc1cac1f9499e5a5a3480d00769cc13a9907bf964d44477c9f836d7fd16",
+    "REVIEW_FIX_PROMPT.md": "69adcacd04763cff8380009981e0588ab6f6a582bcc903e1aea106128d8190c2",
+    "WALKTHROUGH.md": "79e838b496ac4b1b49a9d85f334fcf51c1afd3d7a9a1438fed30dfcea38f58f0"
+  },
+  "later_complete_verification": "https://github.com/viseshrp/relay/pull/23",
+  "limitations": [
+    "This file records completed checkpoints; later complete native and hosted results are on the pull request.",
+    "The earlier moving-checkout rerun passed its cases but failed checkout-identity verification. Its results are excluded from complete-run pass claims; the independent fixed-checkout run passed the verifier.",
+    "No owner database was migrated or reset.",
+    "Other live provider and OS certifications retain their original source checkpoints.",
+    "No SuspendIt files changed.",
+    "Merge remains on owner hold."
+  ],
+  "initial_python_checkpoint": {
+    "checkout": "6e23ab493cd9d1a45325be0fcf38b186e07cc6f5",
+    "command": "uv run tox -e py314",
+    "workers": 3,
+    "inventory": 2798,
+    "passed": 2766,
+    "skipped": 32,
+    "symlink_privilege_skips": 22,
+    "declared_platform_skips": 10,
+    "complete_inventory_verified": true,
+    "reports": [
+      {
+        "name": "inventory.json",
+        "sha256": "74ea8a0561632634e3d3dd510e745037cc56780ecbd143be82feb1360bbeee60",
+        "bytes": 469622
+      },
+      {
+        "name": "junit-serial.xml",
+        "sha256": "02bb2fae9ad72dfbe26de06ceda6d52c742a9552d18d15a905e2b37c21013647",
+        "bytes": 22426
+      },
+      {
+        "name": "junit-parallel.xml",
+        "sha256": "a2b59ec597cf570b1fd40effdf1de1bd2fd14ab8eb795c32bcee6c035c086967",
+        "bytes": 1139638
+      },
+      {
+        "name": "coverage.xml",
+        "sha256": "6f617336eedf4ed04582a215498bae6bb07471e66fa4a5f84137a9e82cff03fe",
+        "bytes": 767259
+      },
+      {
+        "name": "coverage.json",
+        "sha256": "588ab4f02694631da2aa7a8d615ffaf1906e1698b8c5ae9079c05bead9d5b80e",
+        "bytes": 1440886
+      }
+    ],
+    "log": {
+      "name": "python-full-windows-final.log",
+      "sha256": "be17a30aa13d8a892901e5cef2f363b6ea75e3f0c2be79f5e31e62f079f37f52",
+      "bytes": 918036
+    }
+  },
+  "codeql_cleanup": {
+    "checkout": "ba3a82a5f599acee360bd600c2320ee83c371e70",
+    "focused_passed": 165,
+    "symlink_privilege_skipped": 2,
+    "report": {
+      "name": "codeql-cleanup-focused.log",
+      "sha256": "1557419097b1d978720f437392ff21b3e57570caf7e2edefdee72b54157b01eb",
+      "bytes": 23076
+    },
+    "changes": [
+      "Shared workflow records remove the loader/validator/compiler import cycle.",
+      "Pass the recovery callback directly.",
+      "Document the admission-release protocol method without a no-effect placeholder."
+    ]
+  },
+  "focus_regression": {
+    "checkout": "b56b4e6a06ad73a7ea7e171762c225f0660c19b5",
+    "failed_before_fix": true,
+    "passed_after_fix": true,
+    "affected_browser_cases_passed": 20,
+    "before": {
+      "name": "browser-focus-regression-before.json",
+      "sha256": "6e92a4df36d6533ab5c2122049f6f9b2c7db52299915e6eaee21f331f6aa8fb4",
+      "bytes": 8724
+    },
+    "after": {
+      "name": "browser-focus-verified.json",
+      "sha256": "bef66ec5644a2782a5541c10188de385b5390a138457313a81d80a1a1febb859",
+      "bytes": 24265
+    },
+    "original_uncontrolled_repetition": {
+      "passed": 12,
+      "failure_reproduced_by_controlled_delayed_response": true
+    }
+  }
+}

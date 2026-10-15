@@ -80,6 +80,11 @@ job commits, browser output checks, and verified worktree cleanup. Copilot
 returns its command exit code in public text; Claude and Cursor also return
 structured exit fields. The final supervisor stopped cooperatively.
 
+The [Actions-only Windows validation](2026-10-15-windows-actions-only.md)
+records removal of the old workflow format, complete native tests, reviewed
+Windows screenshots, additional runtime fixes, and a fresh live Claude run.
+Earlier records retain their original commit and format context.
+
 ## Certification bar
 
 A complete agent record must contain:
