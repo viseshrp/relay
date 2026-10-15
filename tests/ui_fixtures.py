@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+import os
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 from django.db.models import Q
 import yaml
 
+from relay.projects.identity import canonical_path
 from relay.web.models import (
     Artifact,
     HumanInteraction,
@@ -27,16 +29,18 @@ PREFIX = "relay/ui-fixture/"
 WHEN = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
 
 
-def clear_ui_fixtures() -> None:
+def clear_ui_fixtures(root: Path) -> None:
     """Delete only records carrying this disposable server fixture's namespace."""
-    projects = Project.objects.filter(canonical_path__contains="/ui-fixture/project-")
+    # Include real runs launched from these projects, using the host's path separator.
+    prefix = canonical_path(root / "ui-fixture") + os.sep + "project-"
+    projects = Project.objects.filter(canonical_path__startswith=prefix)
     Run.objects.filter(Q(run_branch__startswith=PREFIX) | Q(project__in=projects)).delete()
     projects.delete()
 
 
 def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
     """Toggle between a compact demo and the audit's hostile display values."""
-    clear_ui_fixtures()
+    clear_ui_fixtures(root)
     names = (
         ["a-very-long-project-name-" * 3, "王秀英-客户端", "نور-الهدى", "j"] if worst else ["Demo"]
     )

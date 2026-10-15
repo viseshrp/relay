@@ -150,7 +150,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                 return JsonResponse(
                     {"message": "The preceding fixture has not stopped."}, status=503
                 )
-            clear_ui_fixtures()
+            clear_ui_fixtures(root)
             WorkflowControl.objects.all().delete()
             # The feedback scenario replaces Codex and the shared ACP mode.
             # Restore its configuration so later tests get the normal capabilities.
