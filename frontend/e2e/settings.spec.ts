@@ -1,6 +1,11 @@
 import { expect, test } from "./a11y-test";
 import { parse } from "yaml";
-import { post, openJobSettings, closeJobSettings } from "./setup-helpers";
+import {
+  post,
+  openJobSettings,
+  closeJobSettings,
+  expectRunStatus,
+} from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -641,12 +646,7 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: id } = await launched.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, id, "succeeded");
   const events = await (
     await page.request.get(`/api/runs/${id}/events`)
   ).json();

@@ -25,11 +25,14 @@ export async function expectRunStatus(
         const response = await page.request.get(`/api/runs/${id}`);
         expect(response.ok(), await response.text()).toBeTruthy();
         run = (await response.json()).run;
-        return run.status;
+        return (
+          run.status === status ||
+          ["succeeded", "failed", "canceled"].includes(run.status)
+        );
       },
       { timeout: 20_000 },
     )
-    .not.toMatch(/^(pending|running|canceling)$/);
+    .toBe(true);
   expect(run).toMatchObject({ status });
 }
 
@@ -65,7 +68,25 @@ export async function openJobSettings(page: Page, tab = "Steps") {
       .getByRole("button")
       .first()
       .click();
-  await page.getByRole("tab", { name: tab, exact: true }).click();
+  const dialog = page.getByRole("dialog").filter({
+    has: page.getByRole("heading", { name: "Job settings", exact: true }),
+  });
+  // Target the tab after the drawer reaches its final position.
+  await dialog.evaluate(async (element) => {
+    await Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity,
+        )
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
+  await dialog.getByRole("tab", { name: tab, exact: true }).click();
+  await expect(
+    dialog.getByRole("tabpanel", { name: tab, exact: true }),
+  ).toBeVisible();
 }
 
 export async function advancedField(page: Page, label: string, tab = "Steps") {
@@ -194,6 +215,7 @@ export async function runStarter(
     .click();
   const response = await launched;
   expect(response.status(), await response.text()).toBe(201);
+  const { run_id: runId } = await response.json();
   if (id === "plan-approve-implement") {
     await page
       .getByRole("region", { name: "Waiting for you", exact: true })
@@ -207,6 +229,7 @@ export async function runStarter(
       .getByRole("button", { name: "Send response and continue", exact: true })
       .click();
   }
+  await expectRunStatus(page, runId, "succeeded");
   await expect(
     page.getByText(
       "Work is complete. Review the saved documents and code changes below.",

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./a11y-test";
 import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { historicalPost as post, expectRunStatus } from "./setup-helpers";
 import { ansiSpans, commandLines, jobDuration } from "../src/job";
 import { jobListRows } from "../src/job-list";
 import type { RunEvent, RunNode } from "../src/types";
@@ -28,14 +28,6 @@ async function launch(page: Page, key: string) {
   expect(response.status(), await response.text()).toBe(201);
   const value: { run_id: string } = await response.json();
   return value.run_id;
-}
-async function settled(page: Page, id: string, status: string) {
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe(status);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -73,7 +65,7 @@ test("a failed command opens its late error, exact attempt, and downloadable out
     },
   });
   const id = await launch(page, "late-error");
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed");
   await page.goto(`/?view=runs&run=${id}`);
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
   await expect(
@@ -120,7 +112,7 @@ test("a failed command opens its late error, exact attempt, and downloadable out
         ).job.latest_attempt?.number,
     )
     .toBe(2);
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed");
   await expect(
     log.getByRole("combobox", { name: "Attempt", exact: true }),
   ).toContainText("Attempt 2");
@@ -156,7 +148,7 @@ test("a failed agent shows its captured instruction and error without loading th
     { model: "m1", agents: ["codex"] },
   );
   const id = await launch(page, "agent-log");
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed");
   const detail = (
     await (
       await page.request.get(`/api/runs/${id}/job?job=root.inspect`)
@@ -204,7 +196,7 @@ test("loop iterations and nested workflow jobs have individual logs and stable l
     child: { type: "subworkflow", needs: ["repeats"], workflow: "child-log" },
   });
   const id = await launch(page, "nested-log");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   await page.goto(
     `/?view=runs&run=${id}&job=${encodeURIComponent("root.repeats#2.check")}`,
   );
@@ -276,7 +268,7 @@ test("a waiting job is pinned above completed work and opens from the keyboard",
     },
   });
   const id = await launch(page, "waiting-list");
-  await settled(page, id, "paused_wait");
+  await expectRunStatus(page, id, "paused_wait");
   await page.goto(`/?view=runs&run=${id}`);
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
   const first = jobs.locator("[data-job-scope]").first();

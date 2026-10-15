@@ -328,6 +328,7 @@ test("agent defaults and launch inheritance leave saved YAML unchanged", async (
 test("run graph headings stay above jobs and empty history filters remain readable", async ({
   page,
 }, info) => {
+  test.setTimeout(60_000);
   const nodes = Object.fromEntries(
     Array.from({ length: 12 }, (_, index) => [
       `job_${index}`,

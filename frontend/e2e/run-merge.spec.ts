@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { post, currentWorkflow } from "./setup-helpers";
+import { post, currentWorkflow, expectRunStatus } from "./setup-helpers";
 
 const option = "Merge into the active branch, then delete working copies";
 
@@ -166,6 +166,7 @@ test("a successful run shows the merged branch and deleted working copies", asyn
   const response = await launched;
   expect(response.ok(), await response.text()).toBeTruthy();
   const { run_id: id } = await response.json();
+  await expectRunStatus(page, id, "succeeded");
   await expect(
     page.getByRole("alert").filter({ hasText: "Merged into main" }),
   ).toContainText("Run working copies deleted.");

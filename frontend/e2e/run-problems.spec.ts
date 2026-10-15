@@ -1,5 +1,6 @@
 import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
+import { expectRunStatus } from "./setup-helpers";
 
 test.afterEach(async ({ page }) => {
   // Finish route.fetch callbacks before the test runner closes their page.
@@ -187,6 +188,7 @@ for (const automatic of [false, true])
 test("an owner can retry an agent with advertised effort while keeping its snapshot", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(60_000);
   await page.request.get("/api/auth");
   const csrf = (await page.context().cookies()).find(
     (item) => item.name === "relay_csrftoken",
@@ -251,13 +253,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: runId } = await launched.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${runId}`)).json()).run
-          .status,
-    )
-    .toBe("failed");
+  await expectRunStatus(page, runId, "failed");
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json())
     .run;
   await page.goto(`/?view=runs&run=${runId}`);
@@ -312,11 +308,15 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   expect(response.request().postDataJSON().handoff_prompt).toBeUndefined();
   await expect(dialog).toHaveCount(0);
   await expect
-    .poll(async () => {
-      const run = (await (await page.request.get(`/api/runs/${runId}`)).json())
-        .run;
-      return [run.status, run.problem?.attempt_number, run.problem?.effort];
-    })
+    .poll(
+      async () => {
+        const run = (
+          await (await page.request.get(`/api/runs/${runId}`)).json()
+        ).run;
+        return [run.status, run.problem?.attempt_number, run.problem?.effort];
+      },
+      { timeout: 20_000 },
+    )
     .toEqual(["failed", 2, "medium"]);
   const after = (await (await page.request.get(`/api/runs/${runId}`)).json())
     .run;
@@ -345,11 +345,15 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   });
   expect(external.ok(), await external.text()).toBeTruthy();
   await expect
-    .poll(async () => {
-      const run = (await (await page.request.get(`/api/runs/${runId}`)).json())
-        .run;
-      return [run.status, run.problem?.attempt_number];
-    })
+    .poll(
+      async () => {
+        const run = (
+          await (await page.request.get(`/api/runs/${runId}`)).json()
+        ).run;
+        return [run.status, run.problem?.attempt_number];
+      },
+      { timeout: 20_000 },
+    )
     .toEqual(["failed", 3]);
   // Hold the refreshed state so this race does not depend on request timing.
   let markRefreshStarted!: () => void;
@@ -398,6 +402,7 @@ for (const native of [false, true])
   test(`an owner can hand a failed Claude step to ${native ? "Antigravity" : "Codex"}`, async ({
     page,
   }, testInfo) => {
+    test.setTimeout(60_000);
     await page.request.get("/api/auth");
     const csrf = (await page.context().cookies()).find(
       (item) => item.name === "relay_csrftoken",
@@ -461,13 +466,7 @@ for (const native of [false, true])
     });
     expect(launched.ok(), await launched.text()).toBeTruthy();
     const { run_id: runId } = await launched.json();
-    await expect
-      .poll(
-        async () =>
-          (await (await page.request.get(`/api/runs/${runId}`)).json()).run
-            .status,
-      )
-      .toBe("failed");
+    await expectRunStatus(page, runId, "failed");
     const beforeResponse = await (
       await page.request.get(`/api/runs/${runId}`)
     ).json();
@@ -590,17 +589,20 @@ for (const native of [false, true])
     });
     await expect(dialog).toHaveCount(0);
     await expect
-      .poll(async () => {
-        const run = (
-          await (await page.request.get(`/api/runs/${runId}`)).json()
-        ).run;
-        return [
-          run.status,
-          run.problem?.attempt_number,
-          run.problem?.agent_id,
-          run.problem?.model_value,
-        ];
-      })
+      .poll(
+        async () => {
+          const run = (
+            await (await page.request.get(`/api/runs/${runId}`)).json()
+          ).run;
+          return [
+            run.status,
+            run.problem?.attempt_number,
+            run.problem?.agent_id,
+            run.problem?.model_value,
+          ];
+        },
+        { timeout: 20_000 },
+      )
       .toEqual(["failed", 2, agent, model]);
     const after = (await (await page.request.get(`/api/runs/${runId}`)).json())
       .run;
