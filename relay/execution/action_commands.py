@@ -46,13 +46,36 @@ class CommandLog:
         lines = value.splitlines(keepends=True)
         if lines and not lines[-1].endswith(("\n", "\r")) and not final:
             self.buffers[event_type] = lines.pop()
+        plain = []
         for line in lines:
-            self.line(event_type, line)
+            boundary = (
+                line.startswith("::")
+                if not self.stopped
+                else (line.rstrip("\r\n") == f"::{self.stopped}::")
+            )
+            if boundary:
+                if plain:
+                    self._append_output(event_type, "".join(plain))
+                    plain.clear()
+                self.line(event_type, line)
+            else:
+                plain.append(line)
+        if plain:
+            self._append_output(event_type, "".join(plain))
         if len(self.buffers.get(event_type, "")) > 1_048_576:
             from relay.errors import NodeExecutionError
 
             message = "A workflow command log line exceeds 1 MiB."
             raise NodeExecutionError(message)
+
+    def _append_output(self, event_type: str, value: str) -> None:
+        # A process read containing 500 ordinary lines remains a bounded chunk,
+        # rather than requiring 500 SQLite transactions before the next poll.
+        chunk = self.masks.stream(self.attempt_id + event_type, value)
+        for event in bounded_agent_events(AgentEvent(event_type, {"chunk": chunk})):
+            self.runtime.append_attempt_event(
+                self.attempt_id, event_type, EventSource.COMMAND, event.payload
+            )
 
     def line(self, event_type: str, line: str) -> None:
         match = re.fullmatch(r"::([A-Za-z0-9_-]+)(?: ([^\r\n]*))?::(.*)", line.rstrip("\r\n"))
@@ -62,10 +85,7 @@ class CommandLog:
                 return
             match = None
         if not match:
-            chunk = self.masks.stream(self.attempt_id + event_type, line)
-            self.runtime.append_attempt_event(
-                self.attempt_id, event_type, EventSource.COMMAND, {"chunk": chunk}
-            )
+            self._append_output(event_type, line)
             return
         name, properties, content = match.groups()
         content = _unescape(content)

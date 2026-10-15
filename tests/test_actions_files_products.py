@@ -588,3 +588,43 @@ def test_workflow_commands_stop_resume_mask_and_annotate() -> None:
         for kind, payload in recorder.events
     )
     assert recorder.events[-1] == ("agent.message", {"text": "::error::***"})
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["ordinary line\n" * 20_000, 'Ω"\\' * 20_000 + "\n"],
+    ids=["many-lines", "escaped-unicode"],
+)
+def test_command_output_retains_large_reads_in_bounded_batches(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], output: str
+) -> None:
+    from relay.constants import EVENT_MAX_PAYLOAD_BYTES
+
+    _, log, recorder = action_log
+    log.feed("command.stdout", output)
+    log.flush()
+
+    assert "".join(str(payload["chunk"]) for _, payload in recorder.events) == output
+    assert len(recorder.events) < 100
+    assert all(
+        len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) < EVENT_MAX_PAYLOAD_BYTES
+        for _, payload in recorder.events
+    )
+
+
+def test_command_batches_preserve_mask_and_annotation_order(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    _, log, recorder = action_log
+    log.feed(
+        "command.stdout",
+        "before\n::add-mask::private\nprivate\n::notice::private\nafter\n",
+    )
+    log.flush()
+
+    assert recorder.events == [
+        ("command.stdout", {"chunk": "before\n"}),
+        ("command.stdout", {"chunk": "***\n"}),
+        ("actions.notice", {"message": "***", "properties": {}}),
+        ("command.stdout", {"chunk": "after\n"}),
+    ]
