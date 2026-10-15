@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { readFile } from "node:fs/promises";
+import { EOL } from "node:os";
 import { stringify } from "yaml";
 import { jobDuration } from "../src/job";
 import { logMatches, logRows, rawLog } from "../src/log";
@@ -178,7 +179,7 @@ test("long command logs stay searchable and downloadable with numbered virtual r
   const { python } = await (await post(page, "/__test__/reset")).json();
   const output = Array.from(
     { length: 3000 },
-    (_, index) => `row ${index}${index === 2999 ? " target" : ""}\n`,
+    (_, index) => `row ${index}${index === 2999 ? " target" : ""}${EOL}`,
   ).join("");
   const id = await launch(page, "long-log", {
     check: {
