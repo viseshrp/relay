@@ -1037,7 +1037,7 @@ Current argv steps use `relay/command@v1` with `argv` or a saved command name
 in `with.command`. Scripts use `run`, `shell`, and `working-directory`. Workflow,
 job, and step `env` mappings follow Actions precedence over frozen owner defaults.
 Owner command changes affect future launches; existing runs retain resolved
-arguments. Historical forms and run snapshots use their captured v1 rules.
+arguments. The removed v1 workflow format has no browser forms or replay path.
 
 An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested

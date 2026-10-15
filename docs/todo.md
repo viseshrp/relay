@@ -188,6 +188,11 @@ the audit. Items marked **Contract change** alter a runtime rule in
 [AGENTS.md](../AGENTS.md) and need explicit owner approval before
 implementation.
 
+The original observations below include fields from the removed v1 workflow
+format. They are audit history; the current jobs-and-steps contract is in
+[Workflows](workflows.md) and the
+[implementation index](backlog-implementation.md).
+
 ### Product principles
 
 1. **GitHub Actions is the reference.** Where GitHub Actions has a word, layout,
