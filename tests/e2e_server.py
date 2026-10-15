@@ -16,10 +16,13 @@ import sys
 import tempfile
 from threading import Event, Thread
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import uuid4
 
 import pytest
+
+if TYPE_CHECKING:
+    from tests.support import InlineEngine
 
 ThreadResult = TypeVar("ThreadResult")
 WORKFLOW = (
@@ -28,6 +31,20 @@ WORKFLOW = (
     "      - id: agent\n        uses: relay/agent@v1\n"
     '        with: {agents: \'["codex","claude"]\', model: m1}\n'
 )
+
+
+def advance_browser_runs(engine: InlineEngine) -> None:
+    """Schedule active fixture runs through the inline worker."""
+    from relay.web.models import Run
+
+    for run_id in (
+        Run.objects.filter(status__in=("running", "paused_wait"))
+        .exclude(run_branch__startswith="relay/ui-fixture/")
+        .values_list("id", flat=True)
+    ):
+        # A paused claim may already own an attempt and delivery intent. The
+        # production worker wakes it from events; the inline worker requeues it.
+        engine.advance(str(run_id))
 
 
 def serve(root: Path, port: int, *, login_required: bool = True) -> None:
@@ -62,7 +79,6 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     from relay.agents.driver import RoutedAgentNodeDriver
     from relay.errors import ConfigError
     from relay.execution.nodes import node_executors
-    from relay.execution.scheduler import dispatch_ready_nodes
     from relay.execution.state import EventSource
     from relay.manage import apply_migrations
     from relay.paths import artifacts_dir, settings_path
@@ -457,12 +473,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                     continue
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
-                for run_id in (
-                    Run.objects.filter(status="running")
-                    .exclude(run_branch__startswith="relay/ui-fixture/")
-                    .values_list("id", flat=True)
-                ):
-                    dispatch_ready_nodes(engine.store, str(run_id), engine.tokens.append)
+                advance_browser_runs(engine)
         finally:
             connections.close_all()
 

@@ -62,6 +62,8 @@ separate JavaScript integration retest.
 | Native tox, both Python 3.14 lanes | 2,982 collected: 2,944 passed and 38 verified skips |
 | Initial focused agent/domain/file tests | 180 passed, one symlink-privilege skip |
 | Final snapshot/driver/file tests | 121 passed, one symlink-privilege skip |
+| Browser consumer and dispatch-pause regressions | 19 passed |
+| Waiting-request browser retest after consumer fix | All 17 passed |
 | Both declared JavaScript runtimes | 12 passed with Node 20 and Node 24 |
 | Four ACP profiles and two output forms | Eight deterministic wire exchanges passed |
 | Complete functional browser suite | 302 passed; all collected cases executed once |
@@ -99,6 +101,15 @@ Its complete reports were preserved before rerunning that whole shard after
 the other browser and Python processes stopped.
 Whole shards are rerun, and accepted outcomes are never assembled from
 individual passing cases in failed runs.
+
+Hosted CI then exposed a deferred dispatch in the isolated browser consumer.
+It polled only running runs and scheduled new ready nodes; a paused token for
+an existing waiting scope could remain stranded after unpausing. Production's
+event worker already redelivers that intent. The browser fixture now polls
+running and waiting runs through the inline engine's advancement path. A new
+deterministic regression failed before the fix. The corrected fixture passed
+19 Python cases and all 17 waiting-request browser cases on Windows, without
+increasing time limits or adding retries.
 
 The new raw-exit and management Back regressions also failed against the
 retained earlier frontend build. The corrected frontend passed both.

@@ -92,6 +92,12 @@ Each job downloads the same prepared build and starts its own isolated
 Relay server. Playwright uses `--shard=N/4`, one worker per server, zero
 retries, and file-level ordering. Snapshot updates are forbidden.
 
+The isolated browser consumer polls both running and waiting runs. It uses
+the inline engine's advancement path to enqueue ready nodes and redeliver
+committed dispatch intent. A delivery deferred by an owner pause must be
+queued again after unpausing, including a suspended scope whose run remains
+`paused_wait` after its human response is accepted.
+
 The fourth shard also runs the complete no-login and visual suites in
 separate Actions steps. Both steps use `always()` after valid asset setup,
 so a functional failure cannot prevent either auxiliary suite from running.
