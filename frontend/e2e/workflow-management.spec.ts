@@ -87,9 +87,15 @@ test("a management refresh cannot reselect a workflow after browser Back", async
     .getByRole("textbox", { name: "Workflow display name" })
     .fill("Copy workflow");
   await page.getByRole("button", { name: "Confirm duplicate" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toHaveText("Copy workflow");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   const sidebar = page.getByRole("navigation", { name: "Workflow sidebar" });
-  await sidebar.getByRole("link", { name: /workflow\.yaml/ }).click();
+  await sidebar
+    .getByRole("link")
+    .filter({ has: page.getByText("workflow.yaml", { exact: true }) })
+    .click();
   await expect(page).toHaveURL(/workflow=workflow\.yaml/);
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   await page
