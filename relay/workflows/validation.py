@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -11,9 +10,8 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from relay.errors import WorkflowValidationError
 
-from .graph import CompiledGraph, compile_graph
-from .loader import LoadedWorkflow
-from .prompts import ResolvedPrompt
+from .graph import compile_graph
+from .records import LoadedWorkflow, ValidatedWorkflow
 from .schema import (
     BooleanInput,
     EnumInput,
@@ -22,15 +20,6 @@ from .schema import (
     NumberInput,
     StringInput,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ValidatedWorkflow:
-    """Validated root, dependency indexes, and resolved prompts."""
-
-    root: LoadedWorkflow
-    graph: CompiledGraph
-    prompts: tuple[ResolvedPrompt, ...]
 
 
 def _issue_text(issues: Iterable[str]) -> str:

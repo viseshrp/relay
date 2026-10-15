@@ -36,7 +36,7 @@ from .language import (
 )
 
 if TYPE_CHECKING:
-    from relay.workflows.validation import ValidatedWorkflow
+    from relay.workflows.records import ValidatedWorkflow
 
 
 def definition(

@@ -354,10 +354,7 @@ def _startup_reconcile(store: SupervisorStore) -> None:
     else:
         store.fail_worker_attempts()
     reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
-    resume_interrupted(
-        store,
-        lambda target: prepare_recovery_workspace(target),
-    )
+    resume_interrupted(store, prepare_recovery_workspace)
     marker.unlink(missing_ok=True)
 
 

@@ -2,25 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from relay.errors import PathSafetyError, WorkflowValidationError
 from relay.paths import safe_resolve
 
-from .schema import WorkflowDefinition
+from .records import LoadedWorkflow
 from .source_text import read_source
-
-
-@dataclass(frozen=True, slots=True)
-class LoadedWorkflow:
-    """Validated workflow paired with its exact source bytes and parsed tree."""
-
-    path: Path
-    text: str
-    document: Mapping[str, object]
-    definition: WorkflowDefinition
 
 
 def load_workflow(path: Path) -> LoadedWorkflow:

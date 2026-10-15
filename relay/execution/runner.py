@@ -185,7 +185,8 @@ class RunnerStore(AttemptRuntime, HeartbeatStore, Protocol):
         ending_head: str,
     ) -> None: ...
 
-    def release_attempt_admission(self, attempt_id: str) -> None: ...
+    def release_attempt_admission(self, attempt_id: str) -> None:
+        """Release admission after the terminal or waiting state is durable."""
 
     def close_heartbeat_connections(self) -> None: ...
 
