@@ -7,7 +7,7 @@ import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
 import type { ActionWorkflow } from "../src/actions-workflow";
-import { post } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 
 const longTask = "Describe the intended result and check its behavior. ".repeat(
   4,
@@ -113,12 +113,7 @@ test.beforeEach(async ({ page }) => {
   });
   expect(baseline.ok(), await baseline.text()).toBeTruthy();
   const { run_id: id } = await baseline.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, id, "succeeded", 30_000);
   await page.goto("/?view=author&workflow=workflow");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
 });

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./a11y-test";
-import { post } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 import { stringify } from "yaml";
 import type { ArtifactRecord, RunDetail, RunEvent } from "../src/types";
 import type { MonitorPage } from "../src/run-monitor";
@@ -39,7 +39,12 @@ async function detail(page: Page, id: string): Promise<RunDetail> {
   return ((await response.json()) as DetailPage).run;
 }
 
-async function launch(page: Page, key: string, nodes: object): Promise<string> {
+async function launch(
+  page: Page,
+  key: string,
+  nodes: object,
+  wait = true,
+): Promise<string> {
   const created = await post(page, "/api/workflows", {
     key,
     holder: key,
@@ -56,9 +61,7 @@ async function launch(page: Page, key: string, nodes: object): Promise<string> {
   expect(response.status(), await response.text()).toBe(201);
   const id: string = (await response.json()).run_id;
   activeRuns.push(id);
-  await expect
-    .poll(async () => (await detail(page, id)).status)
-    .toBe("paused_wait");
+  if (wait) await expectRunStatus(page, id, "paused_wait", 30_000);
   return id;
 }
 
@@ -456,6 +459,7 @@ for (const paused of [true, false])
 test("switching runs rejects a late detail page from the previous selection", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   const first = await launch(page, "previous-race-run", {
     approval: {
       steps: [
@@ -470,19 +474,24 @@ test("switching runs rejects a late detail page from the previous selection", as
     },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
-  const second = await launch(page, "selected-race-run", {
-    approval: {
-      steps: [
-        {
-          id: "work",
-          uses: "relay/human-wait@v1",
-          with: {
-            prompt: "The selected run's review.",
+  const second = await launch(
+    page,
+    "selected-race-run",
+    {
+      approval: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/human-wait@v1",
+            with: {
+              prompt: "The selected run's review.",
+            },
           },
-        },
-      ],
+        ],
+      },
     },
-  });
+    false,
+  );
   await page.goto(`/?view=runs&run=${first}&job=root.approval`);
   await expect(
     page.getByRole("region", { name: "Waiting for you", exact: true }),
@@ -492,7 +501,19 @@ test("switching runs rejects a late detail page from the previous selection", as
   );
   try {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    expect((await stale.captured).run.id).toBe(first);
+    const captured = await stale.captured;
+    expect(captured.run.id).toBe(first);
+    const request = captured.interactions[0];
+    expect(
+      (
+        await post(page, `/api/attempts/${request.attempt_id}/wait`, {
+          interaction_id: request.id,
+          idempotency_key: "advance-selected-run",
+          value: "Approved",
+        })
+      ).ok(),
+    ).toBeTruthy();
+    await expectRunStatus(page, second, "paused_wait", 30_000);
     await page
       .getByRole("button", { name: "Run history", exact: true })
       .click();
@@ -545,8 +566,9 @@ for (const streamTail of [true, false])
                 python,
                 "-c",
                 [
-                  "from pathlib import Path; import subprocess",
+                  "from pathlib import Path; import os, subprocess",
                   "Path('approval.txt').write_text('Ready: Yes\\n', encoding='utf-8')",
+                  "Path(os.environ['RELAY_ARTIFACTS']).write_text('approval.txt\\n', encoding='utf-8')",
                   "subprocess.run(['git', 'add', 'approval.txt'], check=True)",
                   "subprocess.run(['git', 'commit', '-q', '-m', 'Save approval'], check=True)",
                 ].join("; "),
@@ -568,7 +590,9 @@ for (const streamTail of [true, false])
       await page.getByRole("button", { name: "Refresh", exact: true }).click();
       const before = await stale.captured;
       expect(
-        before.artifacts.some((artifact) => artifact.name === "verdict"),
+        before.artifacts.some((artifact) =>
+          artifact.source_path.endsWith("approval.txt"),
+        ),
       ).toBe(false);
 
       expect(
@@ -580,9 +604,7 @@ for (const streamTail of [true, false])
           })
         ).ok(),
       ).toBeTruthy();
-      await expect
-        .poll(async () => (await detail(page, id)).status)
-        .toBe("succeeded");
+      await expectRunStatus(page, id, "succeeded", 30_000);
       const saved: ArtifactPage = await (
         await page.request.get(`/api/runs/${id}/artifacts`)
       ).json();

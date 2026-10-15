@@ -22,6 +22,7 @@ from relay.web.models import (
     RunEvent,
     RunSnapshot,
 )
+from relay.workflows.loader import load_workflow_text
 from relay.workflows.schema import ActionsJobNode, ActionsStepNode
 from tests.support import create_project, git
 
@@ -82,6 +83,7 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
         "jobs": jobs,
     }
     text = yaml.safe_dump(workflow, sort_keys=False, allow_unicode=True)
+    frozen = load_workflow_text(text).definition.model_dump(mode="json", by_alias=True)
     source = repository / ".relay/workflows/visual.yaml"
     source.write_text(text, encoding="utf-8")
     if git(repository, "status", "--porcelain", "--", ".relay/workflows/visual.yaml"):
@@ -95,6 +97,25 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
     )
 
     def run_record(index: int, status: str, *, waiting: bool = False) -> Run:
+        approval_job = {
+            "name": "Approval",
+            "steps": [
+                {
+                    "id": "work",
+                    "uses": "relay/human-wait@v1",
+                    "with": {"prompt": "Approve the release?"},
+                }
+            ],
+        }
+        captured_workflow = (
+            {**workflow, "jobs": {"approval": approval_job}} if waiting else workflow
+        )
+        captured_text = yaml.safe_dump(captured_workflow, sort_keys=False, allow_unicode=True)
+        captured_frozen = (
+            load_workflow_text(captured_text).definition.model_dump(mode="json", by_alias=True)
+            if waiting
+            else frozen
+        )
         run_id = uuid5(NAMESPACE_URL, f"relay-ui-fixture-{index}")
         run = Run.objects.create(
             id=run_id,
@@ -122,28 +143,37 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
         )
         RunSnapshot.objects.create(
             run=run,
-            workflow_yaml=text,
+            workflow_yaml=captured_text,
             relay_version="test-fixture",
             semantics_revision="relay-local-1",
+            resolved_definition=captured_frozen,
         )
         if waiting:
-            node = NodeRun.objects.create(
+            NodeRun.objects.create(
                 run=run,
                 node_id="approval",
+                scope_path="root.approval",
+                node_type="actions_job",
+                status="waiting",
+                frozen_def=ActionsJobNode(
+                    job_id="approval", job=approval_job, workflow=captured_workflow
+                ).model_dump(mode="json"),
+            )
+            node = NodeRun.objects.create(
+                run=run,
+                node_id="work",
                 scope_path="root.approval.work",
                 parent_scope_path="root.approval",
                 node_type="actions_step",
                 status="waiting",
-                frozen_def={
-                    "type": "actions_step",
-                    "job_id": "approval",
-                    "step_id": "work",
-                    "step": {
-                        "id": "work",
-                        "uses": "relay/human-wait@v1",
-                        "with": {"prompt": "Approve the release?"},
-                    },
-                },
+                frozen_def=ActionsStepNode(
+                    job_id="approval",
+                    step_id="work",
+                    step=approval_job["steps"][0],
+                    job=approval_job,
+                    workflow=captured_workflow,
+                    index=0,
+                ).model_dump(mode="json"),
             )
             attempt = NodeAttempt.objects.create(
                 node_run=node,

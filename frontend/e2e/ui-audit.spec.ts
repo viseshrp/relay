@@ -219,7 +219,7 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
   });
   const id = await launch(page, "audit-wait");
   await expectRunStatus(page, id, "paused_wait");
-  await page.goto(`/?view=runs&run=${id}&job=root.approval.step_1`);
+  await page.goto(`/?view=runs&run=${id}&job=root.approval.work`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
     log.getByRole("button", { name: "Human review", exact: true }),
@@ -232,8 +232,8 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
     .getByRole("link", { name: /^later / })
     .click();
   await expect(
-    log.getByText("No attempt has started yet.", { exact: true }),
-  ).toBeVisible();
+    log.getByRole("combobox", { name: "Attempt", exact: true }),
+  ).toHaveText("Not started");
   await expect(log.getByText(/Incomplete/)).toHaveCount(0);
   await expect(
     log.getByRole("button", { name: "Retry log history", exact: true }),

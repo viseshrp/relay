@@ -1,6 +1,6 @@
 import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
-import { post } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 
 test("refreshing unchanged job geometry keeps measured nodes and their connection visible", async ({
   page,
@@ -65,13 +65,7 @@ test("refreshing unchanged job geometry keeps measured nodes and their connectio
   });
   expect(launch.ok(), await launch.text()).toBeTruthy();
   const { run_id: runId } = await launch.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${runId}`)).json()).run
-          .status,
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, runId, "succeeded", 30_000);
   await page.goto(`/?view=runs&run=${runId}`);
   const graph = page.getByRole("region", {
     name: "Step progress",

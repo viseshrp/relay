@@ -267,7 +267,7 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
     });
   }
 
-test("returning from Workflows keeps the selected run when several runs are waiting", async ({
+test("returning from Workflows keeps the selected run while another run is queued", async ({
   page,
 }) => {
   await create(page, "other-waiting", {
@@ -297,15 +297,12 @@ test("returning from Workflows keeps the selected run when several runs are wait
     },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const selected = await launch(page, "selected-waiting");
+  await expectRunStatus(page, selected, "paused_wait", 30_000);
   const other = await launch(page, "other-waiting");
+  activeRun = selected;
   try {
-    const selected = await launch(page, "selected-waiting");
-    await expect
-      .poll(async () => (await detail(page, other)).interactions.length)
-      .toBe(1);
-    await expect
-      .poll(async () => (await detail(page, selected)).interactions.length)
-      .toBe(1);
+    expect((await detail(page, other)).interactions).toHaveLength(0);
     await page.goto(`/?view=runs&run=${selected}`);
     await expect(
       page.getByRole("region", { name: "Waiting for you", exact: true }),

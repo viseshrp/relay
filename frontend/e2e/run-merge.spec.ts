@@ -213,6 +213,7 @@ test("changes made while a run waits fail integration and remain untouched", asy
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const { run_id: id } = await response.json();
+  await expectRunStatus(page, id, "paused_wait", 30_000);
   await page.goto(`/?view=runs&run=${id}`);
   const waiting = page.getByRole("region", {
     name: "Waiting for you",
