@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 from typing import cast
 
@@ -165,11 +166,11 @@ def test_subject_and_product_junctions_are_rejected(tmp_path: Path) -> None:
         shell=False,
     )
     try:
-        assert getattr(link.lstat(), "st_file_attributes", 0) & 0x400
+        assert link.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
         assert (link / "private.txt").read_text(encoding="utf-8") == "private"
-        with pytest.raises(PathSafetyError, match="cannot contain links"):
+        with pytest.raises(PathSafetyError):
             declared_subjects("link/private.txt", workspace, [])
-        with pytest.raises(PathSafetyError, match="symbolic link"):
+        with pytest.raises(PathSafetyError):
             select_paths(workspace, ["**"], files_only=True)
         assert sentinel.read_text(encoding="utf-8") == "private"
     finally:

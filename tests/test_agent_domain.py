@@ -139,6 +139,18 @@ def test_acp_private_content_never_becomes_a_visible_event(privacy: dict[str, ob
     assert normalize_acp_update(update) == ()
 
 
+def test_acp_private_tool_starts_never_become_visible_events() -> None:
+    update = schema.ToolCallStart.model_validate(
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "private-call",
+            "title": "Private command",
+            "_meta": {"private": True},
+        }
+    )
+    assert normalize_acp_update(update) == ()
+
+
 def test_acp_non_text_content_is_preserved_without_private_metadata() -> None:
     update = schema.SessionNotification.model_validate(
         {
@@ -215,7 +227,7 @@ def test_acp_terminal_metadata_retains_only_public_output(channel: str) -> None:
     assert json.loads(event.payload["summary"]) == {"output_delta": "same\nsame\n"}
 
 
-def test_acp_terminal_exit_retains_failure_and_discards_empty_or_private_updates() -> None:
+def test_acp_terminal_exit_retains_failure() -> None:
     base = {"sessionUpdate": "tool_call_update", "toolCallId": "command-1"}
     update = schema.ToolCallProgress.model_validate(
         {
@@ -229,18 +241,27 @@ def test_acp_terminal_exit_retains_failure_and_discards_empty_or_private_updates
     event = normalize_acp_update(update)[0]
     assert event.event_type == "agent.tool_result"
     assert json.loads(event.payload["summary"]) == {"status": "failed", "exit_code": 3}
-    for metadata in (
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
         {},
         {"private": True, "terminal_output_delta": {"data": "secret", "terminal_id": "command-1"}},
         {"terminal_output_delta": {"data": "wrong tool", "terminal_id": "other"}},
         {"terminal_exit": {"private": True, "terminal_id": "command-1", "exit_code": 3}},
-    ):
-        assert (
-            normalize_acp_update(
-                schema.ToolCallProgress.model_validate({**base, "_meta": metadata})
-            )
-            == ()
-        )
+    ],
+    ids=["empty", "private-update", "different-terminal", "private-exit"],
+)
+def test_acp_unusable_terminal_updates_are_discarded(metadata: dict[str, object]) -> None:
+    update = schema.ToolCallProgress.model_validate(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "command-1",
+            "_meta": metadata,
+        }
+    )
+    assert normalize_acp_update(update) == ()
 
 
 def test_acp_plan_updates_retain_owner_visible_entries() -> None:
