@@ -352,6 +352,8 @@ An inventory refresh failure leaves the save successful and its base hash
 current, so the next save can proceed without an edit conflict. A non-blocking
 notice explains that workflow names in the picker and sidebar may be stale
 until the next successful list refresh or page reload.
+Workflow management shares this list refresh. A response that arrives after
+the owner switches workflows or projects cannot replace the new selection.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
 edit keeps the last valid graph visible with an explanation.

@@ -162,7 +162,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
         projectPath("/api/workflows", requestProject),
         { signal },
       );
-      if (signal?.aborted || currentDocument.current !== document) return;
+      if (signal?.aborted || currentDocument.current !== document) return null;
       setInventory(result.workflows);
       setInventoryLoaded(true);
       setInventoryWarning("");
@@ -173,6 +173,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
             result.workflows[0]
           ).key,
         );
+      return result.workflows;
     },
     [requestProject, key],
   );
@@ -625,7 +626,6 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     savedParsed,
     base,
     holder,
-    setInventory,
     setNotice,
     setSourceSettings,
     sourceSettings,

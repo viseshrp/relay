@@ -1,13 +1,10 @@
 import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 
-import { api, errorMessage } from "../api";
-import { projectPath } from "../navigation";
+import { errorMessage } from "../api";
 
 import { WorkflowManagement } from "./WorkflowManagement";
-import { type WorkflowEntry } from "./WorkflowSidebar";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
-type ReadResponse1 = { workflows: WorkflowEntry[] };
 
 export function WorkflowEditorHeader({
   state,
@@ -34,7 +31,7 @@ export function WorkflowEditorHeader({
     base,
     holder,
     props,
-    setInventory,
+    refresh,
     setNotice,
   } = state;
   return (
@@ -109,11 +106,9 @@ export function WorkflowEditorHeader({
         project={props.requestProject}
         disabled={disabled}
         onChanged={async (next) => {
-          const result = await api<ReadResponse1>(
-            projectPath("/api/workflows", props.requestProject),
-          );
-          setInventory(result.workflows);
-          setKey(next ?? result.workflows[0]?.key ?? "");
+          const workflows = await refresh();
+          if (!workflows) return;
+          setKey(next ?? workflows[0]?.key ?? "");
           if (next === key) setNotice("Workflow availability updated.");
         }}
       />
