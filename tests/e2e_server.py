@@ -361,7 +361,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         run_id, scope, event_type, payload = (
             body.get(field) for field in ("run_id", "scope", "type", "payload")
         )
-        allowed = {"agent.message", "agent.thought", "agent.tool_call", "agent.tool_result"}
+        allowed = {
+            "agent.message",
+            "agent.thought",
+            "agent.tool_call",
+            "agent.tool_result",
+            "node.display_name_changed",
+        }
         if (
             not isinstance(run_id, str)
             or not isinstance(scope, str)
@@ -379,9 +385,18 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         if attempt is None:
             message = "The browser-test job has no attempt."
             raise ConfigError(message)
-        DjangoExecutionStore().append_attempt_event(
-            str(attempt.pk), event_type, EventSource.AGENT, payload
-        )
+        if event_type == "node.display_name_changed":
+            from relay.web.actions_repository import display_name
+
+            value = payload.get("display_name")
+            if not isinstance(value, str):
+                message = "The browser-test display name is invalid."
+                raise ConfigError(message)
+            display_name(str(attempt.pk), value)
+        else:
+            DjangoExecutionStore().append_attempt_event(
+                str(attempt.pk), event_type, EventSource.AGENT, payload
+            )
         return JsonResponse({"ok": True})
 
     @api_errors
