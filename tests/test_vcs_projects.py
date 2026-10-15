@@ -216,6 +216,16 @@ def test_staged_checkpoint_changes_remain_a_writer_error(repository: Path) -> No
         validate_writer_result(repository, current_head(repository), allow_no_commit=True)
 
 
+def test_commit_ranges_are_unambiguous_in_deep_repository_paths(tmp_path: Path) -> None:
+    # A full SHA range plus this path exceeds Windows Git's filename probe limit.
+    repository = init_repository(tmp_path / ("w" * max(1, 190 - len(str(tmp_path)) - 1)))
+    starting_head = current_head(repository)
+    ending_head = commit(repository, "result.txt")
+
+    assert commits_between(repository, starting_head, ending_head) == (ending_head,)
+    assert commits_between(repository, ending_head, ending_head) == ()
+
+
 def test_writer_commit_attribution_lists_descendants_in_order(repository: Path) -> None:
     start = current_head(repository)
     first = commit(repository, "a.txt")

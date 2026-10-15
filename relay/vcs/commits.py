@@ -43,7 +43,8 @@ def commits_between(repository: Path, starting_head: str, ending_head: str) -> t
     """List accepted commits oldest first for durable attempt metadata."""
     output = git_stdout(
         repository,
-        ["rev-list", "--reverse", f"{starting_head}..{ending_head}"],
+        # Avoid Git's ambiguous filename probe for long SHA ranges on Windows.
+        ["rev-list", "--reverse", f"{starting_head}..{ending_head}", "--"],
     )
     return tuple(output.splitlines()) if output else ()
 
