@@ -132,6 +132,8 @@ ACP message, thought, tool-call, tool-result, and plan updates become Relay
 events. Content explicitly marked for an audience that excludes `user`, or
 marked private in ACP metadata, is dropped. A visible string larger than the
 event limit is split into numbered UTF-8-safe parts sized after JSON escaping.
+Attempt runtimes apply this size bound before persistence, after any Actions
+masking; transport drivers pass complete normalized events to the runtime.
 For example, a 70 KiB plain-text message becomes three ordered `agent.message`
 events; quotes, backslashes, and control characters can require more parts.
 Each provider payload stays within 32 KiB, reserving space for Relay metadata

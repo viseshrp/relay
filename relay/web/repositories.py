@@ -22,6 +22,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from pydantic import ValidationError
 
+from relay.agents.events import AgentEvent, bounded_agent_events
 from relay.agents.models import ModelObservation
 from relay.constants import (
     API_MAX_PAGE,
@@ -3226,6 +3227,16 @@ class DjangoExecutionStore(DjangoAgentStore):
             .values_list("pk", flat=True)[:RECONCILE_MAX_ITEMS]
         ):
             self._complete_merged_run(str(run_id))
+
+    def append_agent_event(self, attempt_id: str, event: AgentEvent) -> None:
+        for part in bounded_agent_events(event):
+            self.append_attempt_event(
+                attempt_id,
+                part.event_type,
+                EventSource.AGENT,
+                part.payload,
+                sensitivity=part.sensitivity,
+            )
 
     def append_attempt_event(
         self,

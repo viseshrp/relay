@@ -12,6 +12,7 @@ from pathlib import Path
 import time
 from typing import Protocol, TypeAlias
 
+from relay.agents.events import AgentEvent
 from relay.agents.usage_limits import ProviderUsageLimit
 from relay.errors import NodeExecutionError, RelayError, log_persistence_failure
 from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
@@ -84,6 +85,8 @@ class ScopeNodeRecord:
 
 class AttemptRuntime(DispatchStore, Protocol):
     """Durable callbacks an executor may use without knowing Django or Huey."""
+
+    def append_agent_event(self, attempt_id: str, event: AgentEvent) -> None: ...
 
     def append_attempt_event(
         self,

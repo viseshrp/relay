@@ -218,6 +218,19 @@ class ActionRuntime:
             masked = self.masks.mapping(payload)
         self.log.append_tool_event(event_type, masked, sensitivity)
 
+    def append_agent_event(self, attempt_id: str, event: AgentEvent) -> None:
+        # Tool JSON must reach the masking path whole; numbered parts cannot
+        # be decoded independently. Other agent streams retain their size bound.
+        events = (event,) if event.event_type in TOOL_EVENT_TYPES else bounded_agent_events(event)
+        for part in events:
+            self.append_attempt_event(
+                attempt_id,
+                part.event_type,
+                EventSource.AGENT,
+                part.payload,
+                sensitivity=part.sensitivity,
+            )
+
     def append_attempt_event(
         self,
         attempt_id: str,

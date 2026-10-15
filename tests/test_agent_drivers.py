@@ -663,6 +663,42 @@ def test_routed_execution_persists_visible_provider_events(
 
 
 @pytest.mark.usefixtures("registry_network", "database_threads")
+def test_routed_v1_execution_preserves_oversized_visible_events(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
+
+    class LargeMessageDriver(AcpDriver):
+        async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+            yield AgentEvent("agent.message", {"text": text, "message_id": "message-1", "turn": 1})
+
+        async def finalize(self) -> AgentResult:
+            return AgentResult(True, "end_turn", 0)
+
+    monkeypatch.setattr("relay.agents.driver._driver", LargeMessageDriver)
+    outcome = RoutedAgentNodeDriver().execute(agent_context.attempt, agent_context.node)
+
+    assert outcome.kind is OutcomeKind.SUCCEEDED
+    payloads = list(
+        RunEvent.objects.filter(
+            attempt_id=agent_context.attempt.attempt.attempt_id, type="agent.message"
+        )
+        .order_by("id")
+        .values_list("payload", flat=True)
+    )
+    assert len(payloads) > 1
+    assert "".join(payload["text"] for payload in payloads) == text
+    assert [payload["part"] for payload in payloads] == list(range(1, len(payloads) + 1))
+    assert all(
+        payload["parts"] == len(payloads)
+        and payload["message_id"] == "message-1"
+        and payload["turn"] == 1
+        for payload in payloads
+    )
+    assert all(len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in payloads)
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
 def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
     project: RelayProject,
     tmp_path: Path,

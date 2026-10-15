@@ -27,17 +27,16 @@ from relay.errors import (
     PersistenceError,
     RelayError,
 )
-from relay.execution.action_commands import ActionRuntime
 from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
-from relay.execution.state import AttemptStopReason, ControlKind, EventSource
+from relay.execution.state import AttemptStopReason, ControlKind
 from relay.workflows.routing import RouteEntry, RouteRequirement
 from relay.workflows.schema import AgentNode
 
 from .acp_driver import AcpDriver
 from .antigravity_driver import AntigravityDriver
 from .discovery import discover_agents, discovered_by_id
-from .events import TOOL_EVENT_TYPES, AgentEvent, bounded_agent_events
+from .events import AgentEvent
 from .models import (
     AgentCommand,
     AgentConfiguration,
@@ -518,23 +517,11 @@ class RoutedAgentNodeDriver:
         context: AgentExecutionContext,
     ) -> ExecutionOutcome:
         async for event in driver.start_attempt(context):
-            # Actions must decode and mask tool JSON before numbered splitting;
-            # a split summary is no longer independently valid JSON.
-            events = (
-                (event,)
-                if isinstance(context.attempt.runtime, ActionRuntime)
-                and event.event_type in TOOL_EVENT_TYPES
-                else bounded_agent_events(event)
+            await asyncio.to_thread(
+                context.attempt.runtime.append_agent_event,
+                context.attempt.attempt.attempt_id,
+                event,
             )
-            for chunk in events:
-                await asyncio.to_thread(
-                    context.attempt.runtime.append_attempt_event,
-                    context.attempt.attempt.attempt_id,
-                    chunk.event_type,
-                    EventSource.AGENT,
-                    chunk.payload,
-                    sensitivity=chunk.sensitivity,
-                )
         result = await driver.finalize()
         return ExecutionOutcome(
             OutcomeKind.SUCCEEDED if result.succeeded else OutcomeKind.FAILED,
