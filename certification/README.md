@@ -67,6 +67,10 @@ The [full Python follow-up](2026-10-14-windows-python-suite.md) records the
 fixture fix, real junction coverage, and a verified complete Python 3.14
 Windows pass. The other four providers remain unverified on Windows.
 
+The [2026-10-15 automated follow-up](2026-10-15-windows-end-to-end.md) records
+the complete Windows browser and Python passes, portable test fixtures,
+checklist focus restoration, and deep-path Git regression coverage.
+
 ## Certification bar
 
 A complete agent record must contain:
