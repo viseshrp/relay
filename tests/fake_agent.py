@@ -416,6 +416,23 @@ class WireAgent:
                         "_meta": {"terminal_exit": {"terminal_id": "command-1", "exit_code": 3}},
                     }
                 )
+            if self.mode == "raw-output-exit":
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "command-1",
+                        "title": "Execute",
+                        "status": "failed",
+                        "rawInput": {"command": "check"},
+                        "rawOutput": {"exit_code": 3},
+                        "content": [
+                            {
+                                "type": "content",
+                                "content": {"type": "text", "text": "Access denied\n"},
+                            }
+                        ],
+                    }
+                )
             if self.mode.startswith("configuration"):
                 self.update(
                     {

@@ -76,19 +76,38 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     )
 
 
+@pytest.mark.parametrize("agent_context", ["codex", "claude", "copilot", "cursor"], indirect=True)
+@pytest.mark.parametrize("mode", ["terminal-metadata", "raw-output-exit"])
 def test_acp_terminal_output_and_exit_survive_real_protocol_notifications(
-    agent_context: AgentExecutionContext, fake_agents: FakeAgents
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents, mode: str
 ) -> None:
-    fake_agents.install("codex", mode="terminal-metadata")
-    events, result = execute(AcpDriver(PROFILES["codex"], agent_context.command), agent_context)
+    fake_agents.install(agent_context.agent_id, mode=mode)
+    events, result = execute(
+        AcpDriver(PROFILES[agent_context.agent_id], agent_context.command), agent_context
+    )
     assert result.succeeded
     tools = [
         json.loads(event.payload["summary"])
         for event in events
         if event.event_type in {"agent.tool_call", "agent.tool_result"}
     ]
-    assert "".join(tool.get("output_delta", "") for tool in tools) == "Access denied\ndenied\n"
-    assert tools[-1] == {"status": "failed", "exit_code": 3}
+    if mode == "terminal-metadata":
+        assert "".join(tool.get("output_delta", "") for tool in tools) == "Access denied\ndenied\n"
+        assert tools[-1] == {"status": "failed", "exit_code": 3}
+    else:
+        assert tools[-1]["raw_output"] == {"exit_code": 3}
+        assert tools[-1]["content"] == [{"text": "Access denied\n"}]
+    initialization = next(
+        message["params"]
+        for message in fake_agents.messages()
+        if message.get("method") == "initialize"
+    )
+    capabilities = initialization["clientCapabilities"]
+    assert capabilities["_meta"] == {"terminal_output_delta": True}
+    assert capabilities.get("terminal", False) is False
+    filesystem = capabilities.get("fs", {})
+    assert filesystem.get("readTextFile", False) is False
+    assert filesystem.get("writeTextFile", False) is False
     assert "hidden" not in json.dumps(tools)
 
 
