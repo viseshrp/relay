@@ -57,20 +57,21 @@ test("terminal output deltas preserve repeated fragments and failure details", (
   });
 });
 
-for (const code of [0, 3, -1])
-  test(`raw tool output displays exit code ${code}`, () => {
-    const rows = activityRows([
-      event(1, "agent.tool_result", {
-        tool: "Execute",
-        tool_call_id: "cmd",
-        summary: JSON.stringify({
-          status: "completed",
-          raw_output: { exit_code: code },
+for (const field of ["exit_code", "exitCode"])
+  for (const code of [0, 3, -1])
+    test(`raw tool output displays ${field} ${code}`, () => {
+      const rows = activityRows([
+        event(1, "agent.tool_result", {
+          tool: "Execute",
+          tool_call_id: "cmd",
+          summary: JSON.stringify({
+            status: "completed",
+            raw_output: { [field]: code },
+          }),
         }),
-      }),
-    ]);
-    expect(rows[0].tool?.output).toBe(`Exit code: ${code}`);
-  });
+      ]);
+      expect(rows[0].tool?.output).toBe(`Exit code: ${code}`);
+    });
 
 for (const { code, name } of [
   { code: true, name: "boolean" },
@@ -100,7 +101,7 @@ test("terminal metadata takes precedence and command exits use the same wording"
       summary: JSON.stringify({
         status: "completed",
         exit_code: 0,
-        raw_output: { exit_code: 3 },
+        raw_output: { exit_code: 3, exitCode: 2 },
       }),
     }),
     event(2, "command.exit", { exit_code: 0 }),
@@ -331,6 +332,35 @@ test("a command without terminal metadata shows its raw exit code in tool detail
   await expect(tool.locator("summary")).toContainText("Failed");
   await tool.locator("summary").click();
   await expect(tool).toContainText("Access denied");
+  await expect(tool).toContainText("Exit code: 3");
+});
+
+test("Cursor command output shows Unicode, stderr, and its camel-case exit code", async ({
+  page,
+}) => {
+  const { id } = await setup(page, "cursor-command-output");
+  await append(page, id, "agent.tool_result", {
+    tool: "Shell",
+    tool_call_id: "cursor-command-1",
+    summary: JSON.stringify({
+      status: "failed",
+      raw_input: { command: "node diagnose.cjs" },
+      raw_output: {
+        exitCode: 3,
+        stdout: "RELAY_STDOUT café 雪 😀\n***\n",
+        stderr: "RELAY_STDERR expected exit 3\n",
+      },
+    }),
+  });
+  await page.goto(`/?view=runs&run=${id}`);
+  const tool = page
+    .getByRole("region", { name: "Activity feed", exact: true })
+    .locator("details.activity-tool")
+    .filter({ hasText: "Ran node diagnose.cjs" });
+  await expect(tool.locator("summary")).toContainText("Failed");
+  await tool.locator("summary").click();
+  await expect(tool).toContainText("RELAY_STDOUT café 雪 😀");
+  await expect(tool).toContainText("RELAY_STDERR expected exit 3");
   await expect(tool).toContainText("Exit code: 3");
 });
 

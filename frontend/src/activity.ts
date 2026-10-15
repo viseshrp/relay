@@ -92,13 +92,21 @@ function readableOutput(
           .join("\n")
       : "";
     const native = record(summary?.tool_info);
+    const raw = record(summary?.raw_output);
+    // Cursor returns {stdout: "denied\n", stderr: "", exitCode: 3}.
+    const rawText = [raw?.stdout, raw?.stderr]
+      .filter((value) => typeof value === "string")
+      .join("\n");
     const output =
       summary?.output_delta ?? native?.output ?? summary?.raw_output;
     const exit = exitCodeText(
-      summary?.exit_code ?? record(summary?.raw_output)?.exit_code,
+      summary?.exit_code ?? raw?.exit_code ?? raw?.exitCode,
     );
     // Output "denied\n" plus exit 3 becomes "denied\n\nExit code: 3".
-    const visible = [text || (typeof output === "string" ? output : ""), exit]
+    const visible = [
+      text || (typeof output === "string" ? output : rawText),
+      exit,
+    ]
       .filter(Boolean)
       .join("\n");
     const input = record(native?.parameters ?? summary?.raw_input);
