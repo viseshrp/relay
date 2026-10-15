@@ -15,7 +15,7 @@ from relay.vcs.artifacts import retained_attempt_ref
 from relay.vcs.git import git_stdout
 from relay.web.models import Artifact, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore
-from tests.support import PYTHON, InlineEngine, RelayProject, event_types, git
+from tests.support import PYTHON, InlineEngine, RelayProject, answer_wait, event_types, git
 
 
 def writer_workflow(project: RelayProject) -> None:
@@ -66,6 +66,63 @@ def writer_workflow(project: RelayProject) -> None:
             }
         ),
     )
+
+
+@pytest.mark.parametrize("dirty_target", [False, True], ids=["clean", "owner-edit"])
+def test_human_wait_keeps_job_evidence_and_strict_merge_cleanliness(
+    project: RelayProject, engine: InlineEngine, dirty_target: bool
+) -> None:
+    project.write_workflow(
+        "approval",
+        json.dumps(
+            {
+                "name": "Approved merge",
+                "jobs": {
+                    "review": {
+                        "steps": [
+                            {
+                                "id": "approve",
+                                "uses": "relay/human-wait@v1",
+                                "with": {"prompt": "Continue?"},
+                            },
+                            {
+                                "id": "write",
+                                "uses": "relay/command@v1",
+                                "with": {
+                                    "argv": json.dumps(
+                                        [
+                                            PYTHON,
+                                            "-c",
+                                            "from pathlib import Path; "
+                                            "Path('approved.txt').write_text('Approved')",
+                                        ]
+                                    )
+                                },
+                            },
+                        ]
+                    }
+                },
+            }
+        ),
+    )
+    run_id = engine.launch(project, "approval", cleanup_policy="merge_on_success")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "paused_wait"
+    if dirty_target:
+        project.write("owner.txt", "Owner work")
+    assert answer_wait(engine, run_id) == "accepted"
+    run = Run.objects.get(pk=run_id)
+    if dirty_target:
+        assert (run.status, run.failure_code) == ("failed", "dirty_repository_error")
+        assert (project.repository / "owner.txt").read_text() == "Owner work"
+        assert Path(run.worktree_path).is_dir()
+        assert not (project.repository / "approved.txt").exists()
+    else:
+        assert run.status == "succeeded", run.failure_summary
+        assert (project.repository / "approved.txt").read_text() == "Approved"
+        assert not Path(run.worktree_path).exists()
+        assert run.merged_commit == run.recorded_head
+    assert Artifact.objects.filter(attempt__node_run__run_id=run_id).exists()
 
 
 def test_merge_all_writer_commits_then_remove_every_run_worktree(

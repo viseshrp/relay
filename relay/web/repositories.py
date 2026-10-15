@@ -3067,10 +3067,16 @@ class DjangoExecutionStore(DjangoAgentStore):
         run = Run.objects.select_related("project").get(pk=run_id)
         project = _related(run, "project", Project)
         repository = Path(_string(project, "git_root"))
-        for attempt in NodeAttempt.objects.filter(
+        for attempt in NodeAttempt.objects.select_related("node_run").filter(
             node_run__run=run,
             node_run__node_type__in=(NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value),
         ):
+            frozen = _mapping(_related(attempt, "node_run", NodeRun), "frozen_def")
+            step = frozen.get("step")
+            if isinstance(step, Mapping) and step.get("uses") == "relay/human-wait@v1":
+                # Human waits only persist an owner answer; their enclosing job
+                # retains the shared worktree before integration.
+                continue
             validate_attempt_evidence(
                 repository, run_id, _identifier(attempt), _string(attempt, "starting_head")
             )
