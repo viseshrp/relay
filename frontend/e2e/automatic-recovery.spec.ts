@@ -3,13 +3,9 @@ import {
   openJobSettings,
   closeJobSettings,
 } from "./setup-helpers";
-import { historicalPost } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-
-async function post(page: Page, path: string, data: object = {}) {
-  return historicalPost(page, path, data);
-}
 
 test("enable recovery for a stopped report step and continue through the same provider", async ({
   page,
@@ -38,23 +34,30 @@ test("enable recovery for a stopped report step and continue through the same pr
         key: "automatic-recovery",
         holder,
         yaml: stringify({
-          version: 1,
           name: "Automatic recovery",
-          model: "m2",
-          agents: ["codex"],
-          nodes: {
+          jobs: {
             critique: {
-              type: "agent",
-              writes: true,
-              allow_no_commit: true,
-              agent_options: {
-                codex: { effort: "low", permission_mode: "auto" },
-              },
               outputs: {
-                author: {
-                  label: { artifact: "PLAN_CRITIQUE.md", label: "Created by" },
-                },
+                author: "${{ steps.work.outputs.value }}",
               },
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/agent@v1",
+                  with: {
+                    agent: "codex",
+                    model: "m2",
+                    effort: "low",
+                    report: "PLAN_CRITIQUE.md",
+                    selector: JSON.stringify({
+                      label: {
+                        artifact: "PLAN_CRITIQUE.md",
+                        label: "Created by",
+                      },
+                    }),
+                  },
+                },
+              ],
             },
           },
         }),
@@ -91,6 +94,7 @@ test("enable recovery for a stopped report step and continue through the same pr
       async () =>
         (await (await page.request.get(`/api/runs/${runId}`)).json()).run
           .status,
+      { timeout: 20_000 },
     )
     .toBe("succeeded");
   await expect(
@@ -108,13 +112,15 @@ test("enable recovery for a stopped report step and continue through the same pr
   expect(after.recovery.current).toMatchObject({
     state: "resumed",
     retry_number: 1,
-    scope_path: "root.critique",
+    scope_path: "root.critique.work",
   });
   const events = (
     await (await page.request.get(`/api/runs/${runId}/events?limit=200`)).json()
   ).events;
   const attempts = events.filter(
-    (event: { type: string }) => event.type === "attempt.started",
+    (event: { type: string; payload: { scope_path?: string } }) =>
+      event.type === "attempt.started" &&
+      event.payload.scope_path === "root.critique.work",
   );
   expect(attempts).toHaveLength(2);
   expect(attempts[1].payload).toMatchObject({
@@ -123,7 +129,7 @@ test("enable recovery for a stopped report step and continue through the same pr
   });
   const configured = events.filter(
     (event: { payload: { text?: string } }) =>
-      event.payload.text === "config: model=m2;effort=low;mode=auto",
+      event.payload.text === "config: model=m2;effort=low;mode=ask",
   );
   expect(configured).toHaveLength(2);
 });

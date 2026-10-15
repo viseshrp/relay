@@ -6,14 +6,14 @@ import { jobDuration } from "../src/job";
 import { logMatches, logRows, rawLog } from "../src/log";
 import { runSummaryGraph } from "../src/run-graph";
 import type { RunEvent, RunNode } from "../src/types";
-import { historicalPost as post, expectRunStatus } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 
 function event(id: number, type: string, chunk: string): RunEvent {
   return {
+    version: 1,
     id,
     type,
     source: "command",
-    version: 1,
     ts: "2026-10-07T12:00:00Z",
     payload: { chunk },
   };
@@ -23,14 +23,11 @@ function node(scope: string, dependencies: string[] = []): RunNode {
     id: scope,
     scope_path: scope,
     node_id: scope,
-    node_type: "command",
+    node_type: "actions_job",
     status: "succeeded",
     writes: false,
-    loop_index: null,
     dependencies,
-    controls: [],
     parent_scope: null,
-    selected_branch: null,
   };
 }
 
@@ -80,7 +77,7 @@ test("durations include hours, running time, and invalid or missing timestamps",
   );
 });
 
-test("parallel groups retain dependencies and repair state in the horizontal graph", () => {
+test("parallel job groups retain their dependencies in the horizontal graph", () => {
   const jobs = Array.from({ length: 20 }, (_, index) =>
     node(`root.check_${index}`, ["root.prepare"]),
   );
@@ -102,28 +99,6 @@ test("parallel groups retain dependencies and repair state in the horizontal gra
   expect(
     graph.nodes.find((value) => value.id === "root.finish")?.position.x,
   ).toBeGreaterThan(group?.position.x ?? Infinity);
-  const repair = runSummaryGraph(
-    [
-      node("root.work"),
-      {
-        ...node("root.repair"),
-        status: "running",
-        repair_for: "root.work",
-        repair_settings: {
-          legacy: false,
-          max_rounds: 2,
-          accepted_output: null,
-          accepted_value: true,
-          fix_instruction: null,
-          verify_instruction: null,
-          roles: {},
-        },
-      },
-    ],
-    0,
-  );
-  expect(repair.nodes).toHaveLength(1);
-  expect(repair.nodes[0].data.status).toBe("repairing");
 });
 
 test.beforeEach(async ({ page }) => {
@@ -147,7 +122,10 @@ async function launch(
   const created = await post(page, "/api/workflows", {
     key,
     holder: key,
-    yaml: stringify({ version: 1, name, nodes }),
+    yaml: stringify({
+      name: name,
+      jobs: nodes,
+    }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const response = await post(page, "/api/runs", {
@@ -165,7 +143,7 @@ async function append(
 ): Promise<void> {
   const response = await post(page, "/__test__/activity", {
     run_id: id,
-    scope: "root.review",
+    scope: "root.review.work",
     type,
     payload: { text, message_id: text },
   });
@@ -183,11 +161,18 @@ test("long command logs stay searchable and downloadable with numbered virtual r
   ).join("");
   const id = await launch(page, "long-log", {
     check: {
-      type: "command",
-      run: [
-        python,
-        "-c",
-        "for i in range(3000): print(f'row {i}' + (' target' if i == 2999 else ''))",
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify([
+              python,
+              "-c",
+              "for i in range(3000): print(f'row {i}' + (' target' if i == 2999 else ''))",
+            ]),
+          },
+        },
       ],
     },
   });
@@ -195,9 +180,10 @@ test("long command logs stay searchable and downloadable with numbered virtual r
     .poll(
       async () =>
         (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
+      { timeout: 30_000 },
     )
     .toBe("succeeded");
-  const history = `**/api/runs/${id}/events?job=root.check&limit=200&attempt=1&latest=true`;
+  const history = `**/api/runs/${id}/events?job=root.check.work&limit=200&attempt=1&latest=true`;
   await page.route(history, (route) =>
     route.fulfill({
       status: 503,
@@ -208,7 +194,7 @@ test("long command logs stay searchable and downloadable with numbered virtual r
       },
     }),
   );
-  await page.goto(`/?view=runs&run=${id}&job=root.check`);
+  await page.goto(`/?view=runs&run=${id}&job=root.check.work`);
   const log = page.locator(".job-log");
   await expect(
     page.getByRole("alert").filter({ hasText: "This log could not be read." }),
@@ -318,12 +304,23 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
   page,
 }) => {
   const id = await launch(page, "endless-log", {
-    review: { type: "human_wait", prompt: "Review this run." },
+    review: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Review this run.",
+          },
+        },
+      ],
+    },
   });
   await expect
     .poll(
       async () =>
         (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
+      { timeout: 30_000 },
     )
     .toBe("paused_wait");
   for (let index = 0; index < 215; index += 1)
@@ -331,7 +328,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
   await append(page, id, "Hidden searchable thought", "agent.thought");
   const pages: string[] = [];
   let failing = true;
-  const pattern = `**/api/runs/${id}/events?job=root.review&limit=200&attempt=1&latest=true&before=*`;
+  const pattern = `**/api/runs/${id}/events?job=root.review.work&limit=200&attempt=1&latest=true&before=*`;
   await page.route(pattern, async (route) => {
     pages.push(route.request().url());
     if (failing)
@@ -345,7 +342,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
       });
     else await route.continue();
   });
-  await page.goto(`/?view=runs&run=${id}&job=root.review`);
+  await page.goto(`/?view=runs&run=${id}&job=root.review.work`);
   await page.getByRole("button", { name: "Human review", exact: true }).click();
   await expect(
     page
@@ -416,6 +413,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
     .poll(
       async () =>
         (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
+      { timeout: 30_000 },
     )
     .toBe("canceled");
 });
@@ -428,19 +426,47 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
   const checks = Object.fromEntries(
     Array.from({ length: 8 }, (_, index) => [
       `check_${index}`,
-      { type: "command", run: ["git", "status"], needs: ["prepare"] },
+      {
+        needs: ["prepare"],
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
     ]),
   );
   const id = await launch(
     page,
     "actions-layout",
     {
-      prepare: { type: "command", run: ["git", "status"] },
+      prepare: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
       ...checks,
       finish: {
-        type: "command",
         needs: Object.keys(checks),
-        run: ["git", "status"],
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
       },
     },
     "Build and verify",
@@ -506,7 +532,7 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
     dialog.getByRole("button").filter({ hasText: /^Check/ }),
   ).toHaveCount(8);
   await dialog.getByRole("button").filter({ hasText: "Check 0" }).click();
-  await expect(page).toHaveURL(/job=root%2Echeck_0|job=root.check_0/);
+  await expect(page).toHaveURL(/job=root(?:%2E|\.)check_0/);
   for (const width of [900, 1440, 700]) {
     await page.setViewportSize({ width, height: 900 });
     expect(

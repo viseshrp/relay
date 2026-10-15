@@ -1,6 +1,6 @@
 import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 
 test("refreshing unchanged job geometry keeps measured nodes and their connection visible", async ({
   page,
@@ -30,11 +30,31 @@ test("refreshing unchanged job geometry keeps measured nodes and their connectio
     key: "measured-graph",
     holder: "graph-test",
     yaml: stringify({
-      version: 1,
       name: "Measured graph",
-      nodes: {
-        prepare: { type: "command", run: ["git", "status"] },
-        verify: { type: "command", needs: ["prepare"], run: ["git", "status"] },
+      jobs: {
+        prepare: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
+        verify: {
+          needs: ["prepare"],
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
       },
     }),
   });
@@ -103,20 +123,37 @@ test("a long run starts at its entry job and Refresh preserves the chosen viewpo
       `job_${index}`,
       index
         ? {
-            type: "command",
-            run: ["git", "status"],
             needs: [`job_${index - 1}`],
+            steps: [
+              {
+                id: "work",
+                uses: "relay/command@v1",
+                with: {
+                  argv: JSON.stringify(["git", "status"]),
+                },
+              },
+            ],
           }
         : {
-            type: "human_wait",
-            prompt: "Hold the graph while its viewport is inspected.",
+            steps: [
+              {
+                id: "work",
+                uses: "relay/human-wait@v1",
+                with: {
+                  prompt: "Hold the graph while its viewport is inspected.",
+                },
+              },
+            ],
           },
     ]),
   );
   const created = await post(page, "/api/workflows", {
     key: "audit-long",
     holder: "audit-long",
-    yaml: stringify({ version: 1, name: "Long run", nodes }),
+    yaml: stringify({
+      name: "Long run",
+      jobs: nodes,
+    }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();

@@ -6,7 +6,7 @@ import {
 } from "./setup-helpers";
 import { expect, test, type Locator, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-import { post, currentWorkflow } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import type { SettingsResponse, StorageUsage } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -161,13 +161,22 @@ test("long dropdown names stay within the screen and selected labels stay compac
       await post(page, "/api/workflows", {
         key: "long-control",
         holder: "layout-test",
-        yaml: stringify(
-          currentWorkflow({
-            version: 1,
-            name: title,
-            nodes: { check: { type: "command", run: ["git", "status"] } },
-          }),
-        ),
+        yaml: stringify({
+          name: title,
+          jobs: {
+            check: {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/command@v1",
+                  with: {
+                    argv: JSON.stringify(["git", "status"]),
+                  },
+                },
+              ],
+            },
+          },
+        }),
       })
     ).ok(),
   ).toBeTruthy();
@@ -222,12 +231,22 @@ test("action input forms preserve long command arguments and fit narrow screens"
     "git",
     ...Array.from({ length: 50 }, (_, index) => `argument ${index}`),
   ];
-  const source = stringify(
-    currentWorkflow({
-      name: "Command layout",
-      nodes: { check: { type: "command", run: argv } },
-    }),
-  );
+  const source = stringify({
+    name: "Command layout",
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(argv),
+            },
+          },
+        ],
+      },
+    },
+  });
   expect(
     (
       await post(page, "/api/workflows", {
@@ -334,9 +353,15 @@ test("run graph headings stay above jobs and empty history filters remain readab
     Array.from({ length: 12 }, (_, index) => [
       `job_${index}`,
       {
-        type: "command",
-        run: ["git", "status"],
-        ...(index ? { needs: [`job_${index - 1}`] } : {}),
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
       },
     ]),
   );
@@ -345,9 +370,10 @@ test("run graph headings stay above jobs and empty history filters remain readab
       await post(page, "/api/workflows", {
         key: "graph-layout",
         holder: "layout-test",
-        yaml: stringify(
-          currentWorkflow({ version: 1, name: "Graph layout", nodes }),
-        ),
+        yaml: stringify({
+          name: "Graph layout",
+          jobs: nodes,
+        }),
       })
     ).ok(),
   ).toBeTruthy();
@@ -367,12 +393,8 @@ test("run graph headings stay above jobs and empty history filters remain readab
   const heading = await bounds(
     graph.getByRole("heading", { name: "graph-layout", exact: true }),
   );
-  await expect(
-    graph.locator('.react-flow__node[data-id="root.job_0"]'),
-  ).toBeVisible();
-  const first = await bounds(
-    graph.locator('.react-flow__node[data-id="root.job_0"]'),
-  );
+  await expect(graph.locator(".react-flow__node").first()).toBeVisible();
+  const first = await bounds(graph.locator(".react-flow__node").first());
   expect(first.y).toBeGreaterThan(heading.y + heading.height);
   await page.screenshot({
     path: info.outputPath("run-graph-layout.png"),

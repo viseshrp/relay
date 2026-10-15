@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 import { runActions } from "../src/components/RunActions";
-import { historicalPost as post, currentWorkflow } from "./setup-helpers";
+import { post } from "./setup-helpers";
 
 async function launch(
   page: Page,
@@ -12,7 +12,10 @@ async function launch(
   const created = await post(page, "/api/workflows", {
     key,
     holder: `actions-${key}`,
-    yaml: stringify({ version: 1, name: key, ...value }),
+    yaml: stringify({
+      name: key,
+      ...value,
+    }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const response = await post(page, "/api/runs", { workflow_key: key, inputs });
@@ -144,7 +147,19 @@ test("Pause, Resume, and Cancel run work from the job log and finished controls 
   page,
 }) => {
   const id = await launch(page, "active-actions", {
-    nodes: { approval: { type: "human_wait", prompt: "Approve this change." } },
+    jobs: {
+      approval: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/human-wait@v1",
+            with: {
+              prompt: "Approve this change.",
+            },
+          },
+        ],
+      },
+    },
   });
   await settled(page, id, "paused_wait");
   await page.goto(`/?view=runs&run=${id}&job=root.approval`);
@@ -188,12 +203,37 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   page,
 }) => {
   const definition = {
-    inputs: {
-      task: { type: "string", default: "Initial default" },
-      approved: { type: "boolean", default: true },
-      count: { type: "integer", default: 5 },
+    on: {
+      workflow_dispatch: {
+        inputs: {
+          task: {
+            type: "string",
+            default: "Initial default",
+          },
+          approved: {
+            type: "boolean",
+            default: true,
+          },
+          count: {
+            type: "number",
+            default: 5,
+          },
+        },
+      },
     },
-    nodes: { check: { type: "command", run: ["git", "status"] } },
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
+    },
   };
   const id = await launch(page, "repeat-actions", definition, {
     task: "Previous task",
@@ -213,16 +253,23 @@ test("Re-run all jobs prefills previous values and creates a fresh run from edit
   const saved = await post(page, "/api/workflows/repeat-actions.yaml/save", {
     holder: "actions-repeat-actions",
     base_hash: (await document.json()).base_hash,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name: "Updated source",
-        ...definition,
-        nodes: {
-          updated: { type: "command", run: ["git", "status", "--short"] },
+    yaml: stringify({
+      name: "Updated source",
+      on: definition.on,
+      jobs: {
+        updated: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status", "--short"]),
+              },
+            },
+          ],
         },
-      }),
-    ),
+      },
+    }),
   });
   expect(saved.ok(), await saved.text()).toBeTruthy();
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
@@ -299,8 +346,18 @@ test("failed runs hide pause and cancel, and per-job retry appears only in the j
   page,
 }) => {
   const id = await launch(page, "failed-actions", {
-    nodes: {
-      check: { type: "command", run: ["git", "relay-no-such-command"] },
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "relay-no-such-command"]),
+            },
+          },
+        ],
+      },
     },
   });
   await settled(page, id, "failed");
@@ -317,7 +374,10 @@ test("failed runs hide pause and cancel, and per-job retry appears only in the j
   await expect(
     page.getByRole("button", { name: "Re-run job", exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open job log", exact: true })
+    .first()
+    .click();
   await page.getByRole("button", { name: "Re-run job", exact: true }).click();
   await expect
     .poll(
@@ -336,7 +396,19 @@ test("a stale re-run request shows an error and creates no run", async ({
   page,
 }) => {
   const id = await launch(page, "stale-actions", {
-    nodes: { check: { type: "command", run: ["git", "status"] } },
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
+    },
   });
   await settled(page, id, "succeeded");
   await page.goto(`/?view=runs&run=${id}`);
@@ -371,7 +443,19 @@ test("switching runs while repeat options load drops the previous request", asyn
   page,
 }) => {
   const definition = {
-    nodes: { check: { type: "command", run: ["git", "status"] } },
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
+    },
   };
   const first = await launch(page, "pending-options", definition);
   await settled(page, first, "succeeded");

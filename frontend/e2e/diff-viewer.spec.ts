@@ -1,4 +1,4 @@
-import { historicalPost as post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
@@ -161,22 +161,34 @@ async function review(
         key,
         holder,
         yaml: stringify({
-          version: 1,
           name: "Diff review",
-          nodes: {
+          jobs: {
             write: {
-              type: "command",
-              writes: true,
-              run: [
-                python,
-                "-c",
-                `from pathlib import Path; import subprocess; Path('diff-review.txt').write_text(${JSON.stringify(key)}); subprocess.run(['git','add','diff-review.txt'], check=True); subprocess.run(['git','commit','-m','Review fixture'], check=True)`,
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/command@v1",
+                  with: {
+                    argv: JSON.stringify([
+                      python,
+                      "-c",
+                      `from pathlib import Path; import subprocess; Path('diff-review.txt').write_text(${JSON.stringify(key)}); subprocess.run(['git','add','diff-review.txt'], check=True); subprocess.run(['git','commit','-m','Review fixture'], check=True)`,
+                    ]),
+                  },
+                },
               ],
             },
             review: {
-              type: "human_wait",
               needs: ["write"],
-              prompt: "Inspect changes before responding.",
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/human-wait@v1",
+                  with: {
+                    prompt: "Inspect changes before responding.",
+                  },
+                },
+              ],
             },
           },
         }),

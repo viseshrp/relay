@@ -39,161 +39,21 @@ export function arrangeGraph(nodes: Node<WorkflowNodeData>[], edges: Edge[]) {
   });
 }
 
-export function repairOwnership(records: RunNode[]): Map<string, string> {
-  const explicit = new Map(
-    records
-      .filter((node) => node.repair_for)
-      .map((node) => [node.scope_path, node.repair_for!]),
-  );
-  const resolved = new Map(explicit);
-  function owner(scope: string): string | undefined {
-    if (resolved.has(scope)) return resolved.get(scope);
-    // root.hidden#2.fix belongs to an explicitly marked root.hidden. Ordinary
-    // loops named "repairs" are not hidden unless the server marks them.
-    const coordinator = scope.replace(/#\d+$/, "");
-    const parent = scope.slice(0, scope.lastIndexOf("."));
-    const found =
-      explicit.get(coordinator) ??
-      (parent !== "root" && parent ? owner(parent) : undefined);
-    if (found) resolved.set(scope, found);
-    return found;
-  }
-  for (const node of records) owner(node.scope_path);
-  return resolved;
-}
-
-export function visibleRunStages(records: RunNode[]): RunNode[] {
-  const owners = repairOwnership(records);
-  const repairStates = new Map(
-    records
-      .filter((node) => node.repair_for && node.repair_settings)
-      .map((node) => [node.repair_for!, node.status]),
-  );
-  return records
-    .filter((node) => !owners.has(node.scope_path))
-    .map((node) => {
-      const state = repairStates.get(node.scope_path);
-      return {
-        ...node,
-        status:
-          node.status === "succeeded" &&
-          state &&
-          !["succeeded", "skipped"].includes(state)
-            ? ["failed", "canceled"].includes(state)
-              ? "repair_stopped"
-              : "repairing"
-            : node.status,
-        dependencies: Array.from(
-          new Set(
-            node.dependencies.map((source) => owners.get(source) ?? source),
-          ),
-        ).filter((source) => source !== node.scope_path),
-        controls: node.controls
-          .map((control) => ({
-            ...control,
-            target: owners.get(control.target) ?? control.target,
-          }))
-          .filter((control) => control.target !== node.scope_path),
-      };
-    });
-}
-
-export function capturedRunGraph(allRecords: RunNode[]): {
+export function capturedRunGraph(records: RunNode[]): {
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
 } {
-  const records = visibleRunStages(allRecords);
   const known = new Set(records.map((node) => node.scope_path));
-  const connections = new Map<string, Edge>();
-  const completionNodes: Node<WorkflowNodeData>[] = [];
-  function connect(source: string, target: string, label?: string) {
-    if (!known.has(source) || !known.has(target)) return;
-    const id = `${source}:${target}`;
-    const existing = connections.get(id);
-    connections.set(id, {
-      id,
-      source,
-      target,
-      type: "smoothstep",
-      ...(label || existing?.label
-        ? { label: label ?? existing?.label, style: { strokeDasharray: "5 4" } }
-        : {}),
-      markerEnd: { type: MarkerType.ArrowClosed },
-    });
-  }
-  const children = new Map<string, RunNode[]>();
-  const successors = new Map<string, string[]>();
-  const controlTargets = new Set<string>();
-  for (const node of records) {
-    for (const source of node.dependencies ?? []) {
-      connect(source, node.scope_path);
-      const next = successors.get(source) ?? [];
-      next.push(node.scope_path);
-      successors.set(source, next);
-    }
-    for (const control of node.controls ?? []) {
-      connect(node.scope_path, control.target, control.label);
-      controlTargets.add(control.target);
-    }
-    if (node.parent_scope && node.parent_scope !== "root") {
-      const group = children.get(node.parent_scope) ?? [];
-      group.push(node);
-      children.set(node.parent_scope, group);
-    }
-  }
-  const scopes = new Map<string, Array<[string, RunNode[]]>>();
-  const scopeEnds = new Map<string, string>();
-  const leafEnds: Array<[string, string]> = [];
-  for (const [scope, group] of children) {
-    // root.repeat#2 maps to root.repeat, ordered after root.repeat#1.
-    const coordinator = scope.replace(/#\d+$/, "");
-    const iterations = scopes.get(coordinator) ?? [];
-    iterations.push([scope, group]);
-    scopes.set(coordinator, iterations);
-  }
-  for (const [coordinator, iterations] of scopes) {
-    iterations.sort(
-      ([left], [right]) =>
-        Number(left.match(/#(\d+)$/)?.[1] ?? 0) -
-        Number(right.match(/#(\d+)$/)?.[1] ?? 0),
-    );
-    let previous = coordinator;
-    for (const [scope, group] of iterations) {
-      const completion = `${scope}::complete`;
-      known.add(completion);
-      completionNodes.push({
-        id: completion,
-        position: { x: 0, y: 0 },
-        data: {
-          label: `${stageLabel(scope)}\nChild steps finish`,
-          kind: "subworkflow",
-        },
-      });
-      const sources = new Set(
-        group.flatMap((node) => [
-          ...(node.dependencies ?? []),
-          ...(node.controls ?? []).map((control) => node.scope_path),
-        ]),
-      );
-      for (const node of group) {
-        if (
-          (node.dependencies ?? []).length === 0 &&
-          !controlTargets.has(node.scope_path)
-        )
-          connect(previous, node.scope_path, "Child steps");
-        if (!sources.has(node.scope_path))
-          leafEnds.push([node.scope_path, completion]);
-      }
-      previous = completion;
-    }
-    scopeEnds.set(coordinator, previous);
-    // One junction avoids connecting every leaf to every successor (quadratic fan-out).
-    for (const successor of successors.get(coordinator) ?? [])
-      connect(previous, successor, "Child complete");
-  }
-  for (const [source, target] of leafEnds)
-    connect(scopeEnds.get(source) ?? source, target);
-  const edges = Array.from(connections.values());
+  const edges: Edge[] = records.flatMap((node) =>
+    node.dependencies
+      .filter((source) => known.has(source))
+      .map((source) => ({
+        id: `${source}:${node.scope_path}`,
+        source,
+        target: node.scope_path,
+        markerEnd: { type: MarkerType.ArrowClosed },
+      })),
+  );
   const nodes: Node<WorkflowNodeData>[] = records.map((node) => ({
     id: node.scope_path,
     position: { x: 0, y: 0 },
@@ -204,5 +64,5 @@ export function capturedRunGraph(allRecords: RunNode[]): {
     },
     className: `node-status-${node.status}`,
   }));
-  return { nodes: arrangeGraph([...nodes, ...completionNodes], edges), edges };
+  return { nodes: arrangeGraph(nodes, edges), edges };
 }

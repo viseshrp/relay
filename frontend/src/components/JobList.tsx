@@ -28,7 +28,6 @@ import {
 export function JobList({
   nodes,
   selected,
-  repairOwners,
   hasMore,
   onSelect,
   onMore,
@@ -38,7 +37,6 @@ export function JobList({
 }: {
   nodes: RunNode[];
   selected: string | null;
-  repairOwners: Map<string, string>;
   hasMore: boolean;
   onSelect: (scope: string | null) => void;
   onMore: () => void;
@@ -59,7 +57,7 @@ export function JobList({
     else query.delete("job");
     return `/?${query}`;
   }
-  const rows = jobListRows(nodes, repairOwners).filter(
+  const rows = jobListRows(nodes).filter(
     (row) =>
       filter === "all" ||
       (filter === "attention" ? row.attention : row.node.status === filter),

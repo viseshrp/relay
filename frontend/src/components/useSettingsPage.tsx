@@ -152,10 +152,6 @@ export function useSettingsPage({
           ...effective.workflow_defaults.recovery,
           ...values.workflow_defaults?.recovery,
         },
-        repairs: {
-          ...effective.workflow_defaults.repairs,
-          ...values.workflow_defaults?.repairs,
-        },
       },
     };
     if (merged && Object.keys(settingsErrors(merged)).length) return;

@@ -6,13 +6,13 @@ import {
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
-import type { WorkflowValue } from "../src/workflow";
-import { post, currentWorkflow } from "./setup-helpers";
+import type { ActionWorkflow } from "../src/actions-workflow";
+import { post } from "./setup-helpers";
 
 const longTask = "Describe the intended result and check its behavior. ".repeat(
   4,
 );
-const inputs: WorkflowValue["inputs"] = {
+const inputs = {
   task: {
     type: "string",
     required: true,
@@ -20,7 +20,7 @@ const inputs: WorkflowValue["inputs"] = {
     description: "The result you want.",
   },
   count: {
-    type: "integer",
+    type: "number",
     default: 3,
     description: "How many checks to run.",
   },
@@ -35,9 +35,9 @@ const inputs: WorkflowValue["inputs"] = {
     description: "Whether the work is approved.",
   },
   mode: {
-    type: "enum",
+    type: "choice",
     default: "safe",
-    constraints: { values: [1, "safe", false] },
+    options: ["1", "safe", "false"],
     description: "Choose the review mode.",
   },
   optional: { type: "string", description: "An optional note." },
@@ -46,7 +46,7 @@ const inputs: WorkflowValue["inputs"] = {
 async function create(
   page: Page,
   key: string,
-  value: Partial<WorkflowValue> = {},
+  value: Partial<ActionWorkflow> = {},
 ): Promise<void> {
   const holder = await page.evaluate(() =>
     sessionStorage.getItem("relay.editor-holder"),
@@ -54,14 +54,24 @@ async function create(
   const response = await post(page, "/api/workflows", {
     key,
     holder,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name: key,
-        nodes: { check: { type: "command", run: ["git", "status"] } },
-        ...value,
-      }),
-    ),
+    yaml: stringify({
+      name: key,
+      ...value,
+      jobs: {
+        check: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
+      },
+      ...(value.jobs ? { jobs: value.jobs } : {}),
+    }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   await page.goto(`/?view=author&workflow=${key}.yaml`);
@@ -117,10 +127,20 @@ test("the header is reachable on a long workflow and Escape returns focus", asyn
   page,
 }) => {
   await create(page, "long-launch", {
-    nodes: Object.fromEntries(
+    jobs: Object.fromEntries(
       Array.from({ length: 24 }, (_, i) => [
         `check_${i}`,
-        { type: "command", run: ["git", "status"] },
+        {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
       ]),
     ),
   });
@@ -143,7 +163,9 @@ test("the header is reachable on a long workflow and Escape returns focus", asyn
 test("typed defaults and descriptions stay visible and untouched inputs are omitted", async ({
   page,
 }) => {
-  await create(page, "default-launch", { inputs });
+  await create(page, "default-launch", {
+    on: { workflow_dispatch: { inputs } },
+  });
   const panel = await open(page);
   await expect(panel.getByRole("textbox", { name: "Task" })).toHaveValue(
     longTask,
@@ -188,7 +210,9 @@ test("local workflows render and launch more than 25 typed inputs", async ({
       { type: "boolean" as const, default: true },
     ]),
   );
-  await create(page, "many-inputs", { inputs: definitions });
+  await create(page, "many-inputs", {
+    on: { workflow_dispatch: { inputs: definitions } },
+  });
   const panel = await open(page);
   await expect(panel.getByRole("checkbox")).toHaveCount(30);
   await panel.getByRole("checkbox").last().uncheck();
@@ -223,7 +247,7 @@ test("edited inputs preserve JSON types and advanced cleanup choices stay explic
   page,
 }) => {
   await create(page, "typed-launch", {
-    inputs,
+    on: { workflow_dispatch: { inputs } },
     entrypoints: [{ scope_path: "root.check" }],
   });
   const panel = await open(page);
@@ -247,7 +271,7 @@ test("edited inputs preserve JSON types and advanced cleanup choices stay explic
     .click();
   await expect(
     panel.getByRole("combobox", { name: "Start from job", exact: true }),
-  ).toHaveCount(0);
+  ).toHaveText("Start at the beginning");
   const created = page.waitForResponse(
     (r) => r.url().endsWith("/api/runs") && r.request().method() === "POST",
   );

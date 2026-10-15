@@ -1,12 +1,8 @@
 import { DefaultModelSettings } from "./DefaultModelSettings";
 import { DefaultRecoverySettings } from "./DefaultRecoverySettings";
 
-import { ActionIcon } from "./ActionIcon";
 import { HelpLabel, HelpTextField } from "./HelpTip";
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
   Button,
   FormControl,
@@ -36,9 +32,6 @@ export function DefaultSettingsFormView({
     defaults,
     update,
     errors,
-    tourActive,
-    repairOpen,
-    setRepairOpen,
   } = state;
   return (
     <Stack spacing={3}>
@@ -175,77 +168,6 @@ export function DefaultSettingsFormView({
         />
       </Box>
       <DefaultRecoverySettings state={state} />
-      <Box data-tour="repairs">
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          <HelpLabel topic="repairs">New repair rules</HelpLabel>
-        </Typography>
-        <Accordion
-          expanded={tourActive || repairOpen}
-          onChange={(_event, expanded) => setRepairOpen(expanded)}
-        >
-          <AccordionSummary expandIcon={<ActionIcon name="down" />}>
-            Defaults for new repair rules
-          </AccordionSummary>
-          <AccordionDetails>
-            <Stack spacing={2}>
-              <Typography variant="body2">
-                Used when adding a repair rule in the editor. Saved repair rules
-                keep their rounds and instructions.
-              </Typography>
-              {inherit("repairs")}
-              <HelpTextField
-                topic="repairRounds"
-                tour
-                label="Maximum repair rounds"
-                error={Boolean(errors.rounds)}
-                helperText={errors.rounds}
-                type="number"
-                value={defaults.repairs.max_rounds}
-                disabled={locked("repairs")}
-                onChange={(event) =>
-                  update("repairs", {
-                    ...defaults.repairs,
-                    max_rounds: Number(event.target.value),
-                  })
-                }
-                slotProps={{ htmlInput: { min: 1, max: 100 } }}
-              />
-              <HelpTextField
-                topic="fixer"
-                tour
-                label="Fixer instructions"
-                multiline
-                minRows={3}
-                maxRows={8}
-                value={defaults.repairs.fix_instruction}
-                disabled={locked("repairs")}
-                onChange={(event) =>
-                  update("repairs", {
-                    ...defaults.repairs,
-                    fix_instruction: event.target.value,
-                  })
-                }
-              />
-              <HelpTextField
-                topic="verifier"
-                tour
-                label="Verifier instructions"
-                multiline
-                minRows={3}
-                maxRows={8}
-                value={defaults.repairs.verify_instruction}
-                disabled={locked("repairs")}
-                onChange={(event) =>
-                  update("repairs", {
-                    ...defaults.repairs,
-                    verify_instruction: event.target.value,
-                  })
-                }
-              />
-            </Stack>
-          </AccordionDetails>
-        </Accordion>
-      </Box>
     </Stack>
   );
 }

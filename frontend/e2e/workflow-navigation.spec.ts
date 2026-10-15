@@ -1,20 +1,15 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
 
-import {
-  post,
-  currentWorkflow,
-  openJobSettings,
-  closeJobSettings,
-} from "./setup-helpers";
+import { post, openJobSettings, closeJobSettings } from "./setup-helpers";
 
-import type { WorkflowNodeValue } from "../src/workflow";
+import type { ActionJob } from "../src/actions-workflow";
 
 async function createWorkflow(
   page: Page,
   key: string,
   name: string,
-  nodes: Record<string, WorkflowNodeValue>,
+  nodes: Record<string, ActionJob>,
 ) {
   const holder = await page.evaluate(() =>
     sessionStorage.getItem("relay.editor-holder"),
@@ -22,20 +17,15 @@ async function createWorkflow(
   const response = await post(page, "/api/workflows", {
     key,
     holder,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name,
-        model: "m1",
-        agents: ["codex"],
-        nodes,
-      }),
-    ),
+    yaml: stringify({
+      name: name,
+      jobs: nodes,
+    }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
 }
 
-function longWorkflow(): Record<string, WorkflowNodeValue> {
+function longWorkflow(): Record<string, ActionJob> {
   const ids = [
     "prepare",
     ...Array.from({ length: 21 }, (_, index) => `step_${index + 1}`),
@@ -45,9 +35,17 @@ function longWorkflow(): Record<string, WorkflowNodeValue> {
     ids.map((id, index) => [
       id,
       {
-        type: "command",
-        run: ["git", "status"],
         ...(index > 0 ? { needs: [ids[index - 1]] } : {}),
+        ...(index > 0 ? { needs: [ids[index - 1]] } : {}),
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
       },
     ]),
   );
@@ -92,7 +90,17 @@ test("switching workflows resets the canvas and shows the first stage at a reada
   page,
 }) => {
   await createWorkflow(page, "canvas-short", "Canvas short", {
-    prepare: { type: "command", run: ["git", "status"] },
+    prepare: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   await createWorkflow(page, "canvas-long", "Canvas long", longWorkflow());
   await page.goto("/?view=author&workflow=canvas-short.yaml");
@@ -168,7 +176,18 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
   page,
 }) => {
   await createWorkflow(page, "navigation-agent", "Navigation agent", {
-    work: { type: "agent" },
+    work: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/agent@v1",
+          with: {
+            agent: "codex",
+            model: "m1",
+          },
+        },
+      ],
+    },
   });
   await page.goto("/?view=author&workflow=navigation-agent.yaml");
   await openJobSettings(page);

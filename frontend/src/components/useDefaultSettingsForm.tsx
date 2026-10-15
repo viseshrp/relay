@@ -2,7 +2,7 @@ import { settingsErrors } from "../settings-validation";
 
 import { HelpControl } from "./HelpTip";
 import { Box, FormControlLabel, Switch, Typography } from "@mui/material";
-import { useId, useState } from "react";
+import { useId } from "react";
 import type {
   OwnerSettings,
   ProviderDefaults,
@@ -21,7 +21,6 @@ export function useDefaultSettingsForm({
   tourActive = false,
 }: Props) {
   const prefix = useId();
-  const [repairOpen, setRepairOpen] = useState(false);
   const defaults = settings.workflow_defaults;
   const errors = settingsErrors(settings);
   const projectMode = overrides !== undefined;
@@ -125,8 +124,6 @@ export function useDefaultSettingsForm({
     providerChange,
     errors,
     tourActive,
-    repairOpen,
-    setRepairOpen,
   };
 }
 export type DefaultSettingsFormState = Extract<

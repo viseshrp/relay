@@ -38,22 +38,31 @@ for (const automatic of [false, true])
       sessionStorage.getItem("relay.editor-holder"),
     );
     const workflowKey = automatic ? "scheduled-review" : "limited-review";
-    const created = await page.request.post("/__test__/historical-workflows", {
+    const created = await page.request.post("/api/workflows", {
       headers,
       data: {
         key: workflowKey,
         holder,
         yaml: stringify({
-          version: 1,
           name: "Limited review",
-          nodes: {
-            review: { type: "command", run: ["git", "unknown-command"] },
+          jobs: {
+            review: {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/command@v1",
+                  with: {
+                    argv: JSON.stringify(["git", "unknown-command"]),
+                  },
+                },
+              ],
+            },
           },
         }),
       },
     });
     expect(created.ok(), await created.text()).toBeTruthy();
-    const launched = await page.request.post("/__test__/historical-runs", {
+    const launched = await page.request.post("/api/runs", {
       headers,
       data: { workflow_key: workflowKey, inputs: {} },
     });
@@ -74,7 +83,7 @@ for (const automatic of [false, true])
       const body = await response.json();
       if (body.run.status === "failed")
         body.run.problem = {
-          scope_path: "root.review",
+          scope_path: "root.review.work",
           attempt_number: 1,
           agent_id: "claude",
           model_value: "opus",
@@ -98,7 +107,7 @@ for (const automatic of [false, true])
     await page.goto(`/?view=runs&run=${runId}`);
     const notice = page
       .getByRole("alert")
-      .filter({ has: page.getByRole("heading", { name: "Review stopped" }) });
+      .filter({ has: page.getByRole("heading", { name: "Work stopped" }) });
     await expect(notice).toContainText(
       "You've hit your session limit · resets 1:50pm (UTC)",
     );
@@ -112,16 +121,17 @@ for (const automatic of [false, true])
         .click();
       const log = page.getByRole("region", { name: "Job log", exact: true });
       await expect(
-        log.getByRole("heading", { name: "Review", exact: true }),
+        log.getByRole("heading", { name: "work", exact: true }),
       ).toBeFocused();
       await expect(log.getByRole("alert")).toContainText("unknown-command");
-      await expect(page).toHaveURL(/job=root.review/);
+      await expect(page).toHaveURL(/job=root.review.work/);
       await page
         .getByRole("navigation", { name: "Jobs" })
         .getByRole("link", { name: "Summary", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Open job log", exact: true })
+        .last()
         .click();
       await expect(log.getByRole("alert")).toBeInViewport();
       await page
@@ -169,6 +179,7 @@ for (const automatic of [false, true])
     });
     await page
       .getByRole("button", { name: "Open job log", exact: true })
+      .last()
       .click();
     await page.getByRole("button", { name: "Re-run job", exact: true }).click();
     await page.unroute(`**/api/runs/${runId}/monitor?*`);
@@ -215,35 +226,43 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const holder = await page.evaluate(() =>
     sessionStorage.getItem("relay.editor-holder"),
   );
-  const created = await page.request.post("/__test__/historical-workflows", {
+  const created = await page.request.post("/api/workflows", {
     headers,
     data: {
       key: "retry-effort",
       holder,
       yaml: stringify({
-        version: 1,
         name: "Retry effort",
-        model: "m2",
-        agents: ["claude"],
-        nodes: {
+        jobs: {
           review: {
-            type: "agent",
-            agent_options: {
-              claude: { effort: "low", permission_mode: "auto" },
-            },
-            // The wire-level fake writes no artifact, so validation fails after its turn.
             outputs: {
-              verdict: {
-                json_path: { artifact: "result.json", path: "verdict" },
-              },
+              verdict: "${{ steps.work.outputs.value }}",
             },
+            steps: [
+              {
+                id: "work",
+                uses: "relay/agent@v1",
+                with: {
+                  agent: "claude",
+                  model: "m2",
+                  effort: "low",
+                  report: "result.json",
+                  selector: JSON.stringify({
+                    json_path: {
+                      artifact: "result.json",
+                      path: "verdict",
+                    },
+                  }),
+                },
+              },
+            ],
           },
         },
       }),
     },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
-  const launched = await page.request.post("/__test__/historical-runs", {
+  const launched = await page.request.post("/api/runs", {
     headers,
     data: {
       workflow_key: "retry-effort",
@@ -257,7 +276,10 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const before = (await (await page.request.get(`/api/runs/${runId}`)).json())
     .run;
   await page.goto(`/?view=runs&run=${runId}`);
-  await page.getByRole("button", { name: "Open job log", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Open job log", exact: true })
+    .last()
+    .click();
   await page
     .getByRole("button", { name: "Re-run with settings", exact: true })
     .click();
@@ -266,7 +288,9 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
     dialog.getByRole("combobox", { name: "Effort", exact: true }),
   ).toBeEnabled();
   await expect(dialog).toContainText("Keep current effort (Low)");
-  await expect(dialog).toContainText("Keep current permission mode (Auto)");
+  await expect(dialog).toContainText(
+    "Keep current permission mode (Agent’s default)",
+  );
   await expect(
     dialog.getByRole("textbox", { name: "Handoff instructions", exact: true }),
   ).toHaveCount(0);
@@ -338,7 +362,7 @@ test("an owner can retry an agent with advertised effort while keeping its snaps
   const external = await page.request.post(`/api/runs/${runId}/rerun-node`, {
     headers,
     data: {
-      scope_path: "root.review",
+      scope_path: "root.review.work",
       idempotency_key: "external-retry",
       effort: "low",
     },
@@ -430,37 +454,55 @@ for (const native of [false, true])
       sessionStorage.getItem("relay.editor-holder"),
     );
     const key = native ? "handoff-native" : "handoff-acp";
-    const created = await page.request.post("/__test__/historical-workflows", {
+    const created = await page.request.post("/api/workflows", {
       headers,
       data: {
         key,
         holder,
         yaml: stringify({
-          version: 1,
           name: "Provider handoff",
-          model: "m2",
-          agents: ["claude"],
-          nodes: {
-            first: { type: "command", run: ["git", "status"] },
-            review: {
-              type: "agent",
-              needs: ["first"],
-              permission_profile: "interactive",
-              agent_options: {
-                claude: { effort: "low", permission_mode: "auto" },
-              },
-              outputs: {
-                verdict: {
-                  json_path: { artifact: "result.json", path: "verdict" },
+          jobs: {
+            first: {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/command@v1",
+                  with: {
+                    argv: JSON.stringify(["git", "status"]),
+                  },
                 },
+              ],
+            },
+            review: {
+              outputs: {
+                verdict: "${{ steps.work.outputs.value }}",
               },
+              needs: ["first"],
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/agent@v1",
+                  with: {
+                    agent: "claude",
+                    model: "m2",
+                    effort: "low",
+                    report: "result.json",
+                    selector: JSON.stringify({
+                      json_path: {
+                        artifact: "result.json",
+                        path: "verdict",
+                      },
+                    }),
+                  },
+                },
+              ],
             },
           },
         }),
       },
     });
     expect(created.ok(), await created.text()).toBeTruthy();
-    const launched = await page.request.post("/__test__/historical-runs", {
+    const launched = await page.request.post("/api/runs", {
       headers,
       data: { workflow_key: key, inputs: {}, cleanup_policy: "retain" },
     });
@@ -497,6 +539,7 @@ for (const native of [false, true])
       ).toBeVisible();
     await page
       .getByRole("button", { name: "Open job log", exact: true })
+      .last()
       .click();
     await page
       .getByRole("button", { name: "Re-run with settings", exact: true })

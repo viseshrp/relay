@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./a11y-test";
-import { historicalPost as post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import { stringify } from "yaml";
 import type { ArtifactRecord, RunDetail, RunEvent } from "../src/types";
 import type { MonitorPage } from "../src/run-monitor";
@@ -44,11 +44,8 @@ async function launch(page: Page, key: string, nodes: object): Promise<string> {
     key,
     holder: key,
     yaml: stringify({
-      version: 1,
       name: key,
-      model: "m1",
-      agents: ["codex"],
-      nodes,
+      jobs: nodes,
     }),
   });
   expect(created.status(), await created.text()).toBe(201);
@@ -240,7 +237,18 @@ for (const kind of ["permission", "elicitation"] as const)
         ).ok(),
       ).toBeTruthy();
       const id = await launch(page, `late-${kind}-${linked}`, {
-        inspect: { type: "agent" },
+        inspect: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/agent@v1",
+              with: {
+                agent: "codex",
+                model: "m1",
+              },
+            },
+          ],
+        },
       });
       const request = (await detail(page, id)).interactions[0];
       expect(request?.kind).toBe(kind);
@@ -308,7 +316,17 @@ test("a canceled wait cannot be restored by a late pending-request read", async 
   page,
 }) => {
   const id = await launch(page, "late-canceled-wait", {
-    approval: { type: "human_wait", prompt: "Cancel this pending review." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Cancel this pending review.",
+          },
+        },
+      ],
+    },
   });
   const stream = await holdStream(page, id);
   let stale: Awaited<ReturnType<typeof holdRead<MonitorPage>>> | undefined;
@@ -358,7 +376,17 @@ for (const paused of [true, false])
     page,
   }) => {
     const id = await launch(page, `late-dispatch-${paused}`, {
-      approval: { type: "human_wait", prompt: "Keep this review pending." },
+      approval: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/human-wait@v1",
+            with: {
+              prompt: "Keep this review pending.",
+            },
+          },
+        ],
+      },
     });
     if (!paused)
       expect(
@@ -429,11 +457,31 @@ test("switching runs rejects a late detail page from the previous selection", as
   page,
 }) => {
   const first = await launch(page, "previous-race-run", {
-    approval: { type: "human_wait", prompt: "The previous run's review." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "The previous run's review.",
+          },
+        },
+      ],
+    },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const second = await launch(page, "selected-race-run", {
-    approval: { type: "human_wait", prompt: "The selected run's review." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "The selected run's review.",
+          },
+        },
+      ],
+    },
   });
   await page.goto(`/?view=runs&run=${first}&job=root.approval`);
   await expect(
@@ -475,24 +523,37 @@ for (const streamTail of [true, false])
     page,
   }) => {
     const id = await launch(page, `late-artifact-page-${streamTail}`, {
-      approval: { type: "human_wait", prompt: "Approve the saved report." },
-      save: {
-        type: "command",
-        needs: ["approval"],
-        writes: true,
-        run: [
-          python,
-          "-c",
-          [
-            "from pathlib import Path; import subprocess",
-            "Path('approval.txt').write_text('Ready: Yes\\n', encoding='utf-8')",
-            "subprocess.run(['git', 'add', 'approval.txt'], check=True)",
-            "subprocess.run(['git', 'commit', '-q', '-m', 'Save approval'], check=True)",
-          ].join("; "),
+      approval: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/human-wait@v1",
+            with: {
+              prompt: "Approve the saved report.",
+            },
+          },
         ],
-        outputs: {
-          verdict: { label: { artifact: "approval.txt", label: "Ready" } },
-        },
+      },
+      save: {
+        needs: ["approval"],
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify([
+                python,
+                "-c",
+                [
+                  "from pathlib import Path; import subprocess",
+                  "Path('approval.txt').write_text('Ready: Yes\\n', encoding='utf-8')",
+                  "subprocess.run(['git', 'add', 'approval.txt'], check=True)",
+                  "subprocess.run(['git', 'commit', '-q', '-m', 'Save approval'], check=True)",
+                ].join("; "),
+              ]),
+            },
+          },
+        ],
       },
     });
     const request = (await detail(page, id)).interactions[0];

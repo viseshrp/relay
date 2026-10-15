@@ -20,8 +20,8 @@ function failureReason(problem: RunProblem): string {
     agent_configuration_error:
       "The agent rejected the requested configuration.",
     output_validation_error: "The step did not produce its required output.",
-    repair_exhausted:
-      "The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.",
+    loop_exhausted:
+      "The loop reached its iteration limit without satisfying its stop condition. Open the step to inspect the retained results.",
     node_timeout: "The step reached its time limit.",
     worker_lost: "The worker stopped before finishing this step.",
     soft_denied: "The tool did not have permission to complete its work.",
@@ -83,8 +83,8 @@ export function RunProblemNotice({
                 "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved.")
               : problem.retry?.state === "canceled"
                 ? "Automatic retry is canceled. You can retry this step manually."
-                : problem.error_code === "repair_exhausted"
-                  ? "The repair budget stays spent. Change the rule in a new run if more rounds are needed."
+                : problem.error_code === "loop_exhausted"
+                  ? "The iteration limit stays spent. Change the workflow for a new run if more iterations are needed."
                   : "Retry this step when the cause is resolved."}
         </Typography>
         <Button

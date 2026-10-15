@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import type { MonitorPage } from "../src/run-monitor";
 
 function gate() {
@@ -16,9 +16,20 @@ async function waitingRun(page: Page, key: string) {
     key,
     holder: key,
     yaml: stringify({
-      version: 1,
       name: key,
-      nodes: { review: { type: "human_wait", prompt: `Approve ${key}.` } },
+      jobs: {
+        review: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/human-wait@v1",
+              with: {
+                prompt: `Approve ${key}.`,
+              },
+            },
+          ],
+        },
+      },
     }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();

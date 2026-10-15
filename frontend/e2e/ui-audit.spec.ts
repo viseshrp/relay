@@ -5,12 +5,7 @@ import {
 } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-import {
-  post,
-  currentWorkflow,
-  openSettings,
-  expectRunStatus,
-} from "./setup-helpers";
+import { post, openSettings, expectRunStatus } from "./setup-helpers";
 
 async function document(page: Page, key = "workflow.yaml") {
   return (await page.request.get(`/api/workflows/${key}`)).json();
@@ -22,7 +17,10 @@ async function create(page: Page, key: string, name: string, nodes: object) {
   const response = await post(page, "/api/workflows", {
     key,
     holder,
-    yaml: stringify(currentWorkflow({ version: 1, name, nodes })),
+    yaml: stringify({
+      name: name,
+      jobs: nodes,
+    }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
 }
@@ -120,10 +118,30 @@ test("workflow history filters persist in the URL and Back restores run and job 
   page,
 }) => {
   await create(page, "audit-a", "Audit A", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   await create(page, "audit-b", "Audit B", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const id = await launch(page, "audit-a");
@@ -175,8 +193,29 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
   page,
 }) => {
   await create(page, "audit-wait", "Audit waiting", {
-    approval: { type: "human_wait", prompt: "Review the result." },
-    later: { type: "command", needs: ["approval"], run: ["git", "status"] },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Review the result.",
+          },
+        },
+      ],
+    },
+    later: {
+      needs: ["approval"],
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   const id = await launch(page, "audit-wait");
   await expectRunStatus(page, id, "paused_wait");
@@ -254,7 +293,17 @@ test("Workflow file shows frozen source and empty internal artifacts remain hidd
   page,
 }) => {
   await create(page, "audit-frozen", "Original source", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   const id = await launch(page, "audit-frozen");
   await expectRunStatus(page, id, "succeeded");
@@ -366,7 +415,17 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
       ).toBeTruthy();
     const key = `audit-add-${type}`;
     await create(page, key, `Create ${type}`, {
-      base: { type: "command", run: ["git", "status"] },
+      base: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
     });
     await page.goto(`/?view=workflows&workflow=${key}.yaml`);
     await page.getByRole("button", { name: "Add job", exact: true }).click();

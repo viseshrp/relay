@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { post, currentWorkflow, expectRunStatus } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 
 const option = "Merge into the active branch, then delete working copies";
 
@@ -29,28 +29,45 @@ async function create(page: Page, key: string, wait = false) {
   const response = await post(page, "/api/workflows", {
     key,
     holder,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name: "Merge result",
-        nodes: {
-          write: {
-            type: "command",
-            writes: true,
-            run: ["git", "commit", "--allow-empty", "-q", "-m", "Run result"],
-          },
-          ...(wait
-            ? {
-                approve: {
-                  type: "human_wait",
-                  needs: ["write"],
-                  prompt: "Continue?",
-                },
-              }
-            : {}),
+    yaml: stringify({
+      name: "Merge result",
+      jobs: {
+        write: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify([
+                  "git",
+                  "commit",
+                  "--allow-empty",
+                  "-q",
+                  "-m",
+                  "Run result",
+                ]),
+              },
+            },
+          ],
         },
-      }),
-    ),
+        ...(wait
+          ? {
+              approve: {
+                needs: ["write"],
+                steps: [
+                  {
+                    id: "work",
+                    uses: "relay/human-wait@v1",
+                    with: {
+                      prompt: "Continue?",
+                    },
+                  },
+                ],
+              },
+            }
+          : {}),
+      },
+    }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   await page.goto(`/?view=workflows&workflow=${key}.yaml`);

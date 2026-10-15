@@ -55,10 +55,8 @@ export function runSummaryGraph(
       const status =
         [
           "failed",
-          "repair_stopped",
           "waiting",
           "running",
-          "repairing",
           "pending",
           "dispatched",
           "ready",

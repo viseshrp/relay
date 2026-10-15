@@ -4,7 +4,7 @@ import type { Edge, Node } from "@xyflow/react";
 import { arrangeGraph } from "./graph";
 import {
   isRecord,
-  type WorkflowValue,
+  type LaunchWorkflow,
   type WorkflowNodeData,
   type InputDefinition,
 } from "./workflow";
@@ -244,7 +244,7 @@ export function actionsGraph(value: ActionWorkflow | null): {
 export function launchView(
   value: ActionWorkflow | null,
   environments: string[] = [],
-): WorkflowValue | null {
+): LaunchWorkflow | null {
   if (!value) return null;
   const events = isRecord(value.on) ? value.on : {};
   const dispatch = isRecord(events.workflow_dispatch)
@@ -276,18 +276,9 @@ export function launchView(
     };
   }
   return {
-    version: 1,
     name: value.name || "Workflow",
+    jobs: Object.keys(value.jobs),
     entrypoints: value.entrypoints,
-    nodes: Object.fromEntries(
-      Object.entries(value.jobs).map(([name, job]) => [
-        name,
-        {
-          type: "actions_job",
-          needs: typeof job.needs === "string" ? [job.needs] : job.needs,
-        },
-      ]),
-    ),
     inputs,
   };
 }

@@ -49,11 +49,11 @@ export const help = {
   ],
   commands: [
     "Shared commands",
-    "Save a name with a program and argument list, then select that name in a command job. Each new run captures the resolved list. Relay executes arguments directly without a shell or shell expansion.",
+    "Save a name with a program and argument list, then select that name in a command step. Each new run captures the resolved list. Relay executes arguments directly without a shell or shell expansion.",
   ],
   environment: [
     "Environment variables",
-    "Defaults apply to command jobs, not agents. Workflow and job values take precedence. A project override replaces the whole global map. Values are stored locally and in run snapshots; command output is not masked.",
+    "Defaults apply to command processes. Workflow, job, and step values take precedence. A project override replaces the whole global map. Ordinary values are stored locally and in run snapshots; use a secret binding to register output masking.",
   ],
   variableName: [
     "Variable name",
@@ -77,7 +77,7 @@ export const help = {
   ],
   timeout: [
     "Job timeout",
-    "A limit for agent and command jobs that omit their own timeout. Use 30s, 15m, or 2h. Blank keeps workflow and provider limits. Human review deadlines remain explicit workflow choices.",
+    "A limit for jobs that omit timeout-minutes. Use 30s, 15m, or 2h. Blank keeps workflow and provider limits. Human review deadlines remain explicit workflow choices.",
   ],
   autoRetry: [
     "Automatic job retries",
@@ -85,31 +85,15 @@ export const help = {
   ],
   recovery: [
     "Automatic recovery",
-    "Retries eligible failed agent jobs within the configured budget. Captured models, permissions, original instructions, and completed work stay intact. Unsafe failures and exhausted budgets require your review.",
+    "Retries eligible failed agent steps within the configured budget. Captured models, permissions, original instructions, and completed work stay intact. Unsafe failures and exhausted budgets require your review.",
   ],
   retryLimit: [
     "Maximum automatic retries",
-    "One or two extra attempts per eligible failed agent job. The budget does not reset after a restart or an owner retry. Command jobs are not automatically rerun by this policy.",
+    "One or two extra attempts per eligible failed agent step. The budget does not reset after a restart or an owner retry. Command jobs are not automatically rerun by this policy.",
   ],
   cleanup: [
     "After a successful run",
     "Delete removes the working copy while retaining reports, commits, and history. Keep retains it. Merge fast-forwards the branch captured at launch, then removes working copies; a dirty, switched, or diverged checkout fails and retains the workspace.",
-  ],
-  repairs: [
-    "New repair rules",
-    "Defaults used when you add a fixer and verifier rule in the workflow editor. Existing rules keep their saved settings. Repairs are separate from automatic attempt recovery.",
-  ],
-  repairRounds: [
-    "Maximum repair rounds",
-    "How many fixer-and-verifier rounds a newly created repair rule may perform, from 1 to 100. Rejected verdicts remain saved. An exhausted rule follows its configured workflow path.",
-  ],
-  fixer: [
-    "Fixer instructions",
-    "Additional instructions for the job that repairs a rejected result. The fixer should use the retained reports and preserve the original task and acceptance criteria.",
-  ],
-  verifier: [
-    "Verifier instructions",
-    "Additional instructions for the job that independently checks repairs. A successful agent turn alone does not make a failed verdict pass.",
   ],
   override: [
     "Project overrides",
@@ -141,23 +125,11 @@ export const help = {
   ],
   stageType: [
     "Stage action",
-    "Choose agent work, a command, human review, a result check, repeated stages, or another workflow. Changing the type changes the fields required by the workflow validator.",
+    "Choose agent work, a command, human review, a conditional step, repeated steps, or another workflow. Changing the type changes the fields required by the workflow validator.",
   ],
   dependencies: [
     "Start after",
     "Jobs listed here must complete as required before this stage can start. Selecting multiple jobs joins their paths. Dependencies cannot create a cycle.",
-  ],
-  writes: [
-    "Allow file changes",
-    "Writing jobs use the run’s primary working copy and must commit their changes. Read-only jobs use detached copies and fail if they modify any files.",
-  ],
-  noCommit: [
-    "Allow no new commit",
-    "Allows a writing job to finish as a valid no-op when there are no changes to commit. It does not permit a dirty working copy or uncommitted code changes.",
-  ],
-  resultOutput: [
-    "Repair acceptance result",
-    "The original stage and verifier declare this named output. Its retained selector must produce the configured value with the correct type. Repair rounds stop after a passing verification or the configured bound.",
   ],
   retry: [
     "Retry settings",
@@ -173,11 +145,11 @@ export const help = {
   ],
   expression: [
     "Result expression",
-    "A safe workflow expression chooses a result branch or decides when a loop should stop. Expressions read declared inputs and outputs; they do not execute arbitrary code.",
+    "A safe workflow expression controls a step condition or decides when a loop should stop. Expressions read declared inputs and outputs; they do not execute arbitrary code.",
   ],
   loop: [
     "Loop settings",
-    "Repeat the declared body until its stop expression passes or the maximum iteration count is reached. The exhausted job handles the bounded failure path. Nested body definitions are edited in YAML.",
+    "Repeat the declared body until its stop expression passes or the maximum iteration count is reached. Exhausting the bound fails the loop with its retained iteration results. The body calls a captured reusable workflow.",
   ],
   subworkflow: [
     "Child workflow",

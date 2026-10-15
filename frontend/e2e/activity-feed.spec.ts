@@ -4,7 +4,7 @@ import { activityRows, relativeActivityText } from "../src/activity";
 import { safeMarkdownHref } from "../src/components/SafeMarkdown";
 import { toolStatus } from "../src/components/ActivityFeed";
 import type { RunEvent } from "../src/types";
-import { expectRunStatus, historicalPost as post } from "./setup-helpers";
+import { expectRunStatus, post } from "./setup-helpers";
 
 function event(
   id: number,
@@ -12,9 +12,9 @@ function event(
   payload: RunEvent["payload"],
 ): RunEvent {
   return {
+    version: 1,
     id,
     type,
-    version: 1,
     source: "agent",
     ts: "2026-10-07T12:00:00Z",
     payload: {
@@ -263,14 +263,30 @@ async function setup(
     key,
     holder: "activity-test",
     yaml: stringify({
-      version: 1,
       name: "Readable activity",
-      nodes: {
-        before: { type: "command", run: ["git", "status"] },
+      jobs: {
+        before: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
         review: {
-          type: "human_wait",
           needs: ["before"],
-          prompt: "Review the saved work.",
+          steps: [
+            {
+              id: "work",
+              uses: "relay/human-wait@v1",
+              with: {
+                prompt: "Review the saved work.",
+              },
+            },
+          ],
         },
       },
     }),
@@ -298,7 +314,7 @@ async function append(
 ): Promise<void> {
   const response = await post(page, "/__test__/activity", {
     run_id: id,
-    scope: "root.review",
+    scope: "root.review.work",
     type,
     payload,
   });
@@ -510,11 +526,8 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     ),
   ).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
-  await page.getByRole("button", { name: "Human review", exact: true }).click();
-  const jobLog = page.getByRole("region", {
-    name: "Human review log",
-    exact: true,
-  });
+  const jobLog = page.getByRole("region", { name: "Job log", exact: true });
+  await jobLog.getByRole("button", { name: /1\. Work/ }).click();
   await expect(
     jobLog.getByRole("heading", { name: "Review result", exact: true }),
   ).toBeVisible();
@@ -522,7 +535,9 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     jobLog.getByRole("combobox", { name: "Filter by job", exact: true }),
   ).toHaveCount(0);
   expect(
-    await jobLog.evaluate((element) => getComputedStyle(element).overflowY),
+    await jobLog
+      .getByRole("region", { name: "Human review log", exact: true })
+      .evaluate((element) => getComputedStyle(element).overflowY),
   ).toBe("auto");
 });
 

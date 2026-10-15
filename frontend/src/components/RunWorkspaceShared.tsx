@@ -55,7 +55,6 @@ const EVENT_TYPES = [
   "run.recovery_exhausted",
   "run.recovery_canceled",
   "run.dispatch_changed",
-  "run.repairs_changed",
   "run.cleanup_succeeded",
   "run.cleanup_failed",
   "resource.cleanup_succeeded",
