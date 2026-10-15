@@ -1,7 +1,7 @@
 # Optional review follow-up on Windows
 
 Date: 2026-10-15. Product code checkpoint:
-`772c9f91c2e35e123650ad9533e5af108d9b4c8c`.
+`c16a09cdc10063752bfb7b706e972b64baa8c382`.
 
 This pass addresses S1 through S9 from the owner's review. The required B1,
 B2, and N1 through N8 fixes remain documented in the
@@ -39,6 +39,11 @@ output, replaced fields, separate tools, shutdown, and large-event splitting.
 The fresh Copilot command output contains neither the registered value nor
 its previously exposed prefix.
 
+The final audit also reproduced an alias between a snapshot-field key and an
+opaque tool ID. Commit `c16a09c` encodes delta and snapshot identities with
+distinct JSON tags. Its regression failed before the fix. All three providers
+then repeated their live diagnostics and browser checks on that commit.
+
 Both fixes were retested through the production CLI, supervisor, worker,
 HTTP API, and browser in disposable repositories and isolated storage. No
 provider model, effort, or permission setting was changed to bypass failure.
@@ -56,7 +61,7 @@ separate JavaScript integration retest.
 | --- | --- |
 | Native tox, both Python 3.14 lanes | 2,982 collected: 2,944 passed and 38 verified skips |
 | Initial focused agent/domain/file tests | 180 passed, one symlink-privilege skip |
-| Final snapshot/driver/file tests | 120 passed, one symlink-privilege skip |
+| Final snapshot/driver/file tests | 121 passed, one symlink-privilege skip |
 | Both declared JavaScript runtimes | 12 passed with Node 20 and Node 24 |
 | Four ACP profiles and two output forms | Eight deterministic wire exchanges passed |
 | Complete functional browser suite | 302 passed; all collected cases executed once |
@@ -76,7 +81,9 @@ outcomes with no missing cases, duplicate outcomes, skips, or automatic
 retries. The test-only readiness amendments in `ce2ed46` were applied before
 the accepted first shard and committed after verification. They change
 fixture waits in `activity-feed.spec.ts` and `dashboard.spec.ts`; product
-source files remain identical to `772c9f9`.
+source files matched `772c9f9` during that browser pass. The later
+`c16a09c` change isolates private stream keys; the final focused and live
+provider runs verify that change. Hosted CI runs the complete current suites.
 
 Windows has no pixel baselines. The 21 pixel comparisons remain Linux checks;
 the eight native structural cases retain their accessibility, containment,
