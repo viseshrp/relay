@@ -78,7 +78,7 @@ export function useApp() {
   const [guide, setGuide] = useState<HelpGuide | null>(null);
   const [mobileNav, setMobileNav] = useState<HTMLElement | null>(null);
   const [setupForced, setSetupForced] = useState(false);
-  const focusLocation = useRef("");
+  const focusLocation = useRef<LocationState | null>(null);
   const [setupDismissed, setSetupDismissed] = useState(readSetupDismissed);
   const helpButton = useRef<HTMLButtonElement>(null);
   const header = useRef<HTMLDivElement | null>(null);
@@ -340,11 +340,23 @@ export function useApp() {
   }, [setupForced]);
 
   useEffect(() => {
-    const key = `${location.view}:${location.run}:${location.workflow}`;
-    const changed = focusLocation.current !== key;
-    focusLocation.current = key;
+    const previous = focusLocation.current;
+    const changed =
+      previous?.view !== location.view ||
+      previous?.run !== location.run ||
+      previous?.workflow !== location.workflow;
+    focusLocation.current = location;
+    // Choosing the initial workflow after its response arrives must preserve
+    // focus returned by a dialog, or focus already inside the workspace.
+    const initialWorkflowLoaded =
+      previous !== null &&
+      previous.view === location.view &&
+      previous.run === location.run &&
+      previous.workflow === null &&
+      location.workflow !== null;
     if (
       !changed ||
+      initialWorkflowLoaded ||
       welcomeOpen ||
       openingProject ||
       setupForced ||
@@ -354,15 +366,7 @@ export function useApp() {
     const main = document.getElementById("main-content");
     main?.scrollIntoView({ block: "start" });
     main?.focus({ preventScroll: true });
-  }, [
-    location.view,
-    location.run,
-    location.workflow,
-    welcomeOpen,
-    openingProject,
-    setupForced,
-    tourRequested,
-  ]);
+  }, [location, welcomeOpen, openingProject, setupForced, tourRequested]);
 
   function dismissSetup(): void {
     setSetupDismissed(true);

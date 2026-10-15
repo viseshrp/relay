@@ -125,6 +125,63 @@ test("switching to an empty project keeps the workspace and does not reopen setu
   ).toBeFocused();
 });
 
+test("delayed initial workflow selection preserves focus returned by the checklist", async ({
+  page,
+}) => {
+  let release!: () => void;
+  let captured!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/api/workflows/workflow.yaml",
+    async (route) => {
+      const response = await route.fetch();
+      captured();
+      await pending;
+      await route.fulfill({ response });
+    },
+  );
+  try {
+    await page.goto("/?view=workflows");
+    await page
+      .getByRole("button", { name: "Get started", exact: true })
+      .click();
+    const setup = page.getByRole("dialog", {
+      name: "Get started",
+      exact: true,
+    });
+    await setup
+      .getByRole("button", { name: "Close checklist", exact: true })
+      .click();
+    const account = page.getByRole("button", {
+      name: "Account menu for owner",
+      exact: true,
+    });
+    await expect(account).toBeFocused();
+    await held;
+    release();
+    await expect(page).toHaveURL(/workflow=workflow\.yaml/);
+    await expect(
+      page.getByText("Ready to edit", { exact: true }),
+    ).toBeVisible();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(account).toBeFocused();
+    await openSettings(page);
+    await expect(page.getByRole("main")).toBeFocused();
+  } finally {
+    release();
+  }
+});
+
 test("the checklist can close before a run and reopen from settings with keyboard focus restored", async ({
   page,
 }, info) => {
