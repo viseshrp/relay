@@ -191,7 +191,13 @@ def _preserve_declared(
 ) -> list[PreservedArtifact]:
     records = []
     for name, reference in declared.items():
-        safe_name = _component(name, "artifact name")
+        # Actions subjects such as "subject:report.txt" are logical names.
+        # Hash them for storage so the colon and Unicode stay out of filenames.
+        safe_name = (
+            "subject-" + sha256(name.encode("utf-8")).hexdigest()
+            if name.startswith("subject:")
+            else _component(name, "artifact name")
+        )
         try:
             source = safe_resolve(worktree, reference)
         except PathSafetyError:
