@@ -65,11 +65,20 @@ a retained SuspendIt workflow on Windows. The
 live execution, browser checks, an owner wait, and retained tool diagnostics.
 The [full Python follow-up](2026-10-14-windows-python-suite.md) records the
 fixture fix, real junction coverage, and a verified complete Python 3.14
-Windows pass. The other four providers remain unverified on Windows.
+Windows pass. Antigravity remains unverified on Windows.
 
 The [2026-10-15 automated follow-up](2026-10-15-windows-end-to-end.md) records
 the complete Windows browser and Python passes, portable test fixtures,
 checklist focus restoration, and deep-path Git regression coverage.
+
+The [optional review follow-up](2026-10-15-windows-optional-review.md) closes
+S1 through S9 and records two further defects found during live testing.
+The [Windows ACP record](2026-10-15-windows-acp.json) certifies Claude Code,
+Copilot CLI, and Cursor CLI on the fixed Actions runtime. All three completed
+fresh exact-model selection, one-use permission exchanges, retained reports,
+job commits, browser output checks, and verified worktree cleanup. Copilot
+returns its command exit code in public text; Claude and Cursor also return
+structured exit fields. The final supervisor stopped cooperatively.
 
 ## Certification bar
 

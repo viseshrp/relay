@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-15T17:03:55.384638+00:00",
+  "platform": {
+    "system": "Windows",
+    "version": "11",
+    "build": "26300",
+    "machine": "x64"
+  },
+  "relay_code_sha": "772c9f91c2e35e123650ad9533e5af108d9b4c8c",
+  "relay_code_tree": "ef93160c08ad88b0510af5264bb2f460850cdfef",
+  "scope": "Authenticated Actions diagnostic workflows in isolated production storage and disposable Git worktrees; public output, one-use permissions, reports, job commits, browser display, and cleanup.",
+  "source_sha256": {
+    "relay/execution/action_commands.py": "6afcc31a129909d4a85f317bb7d609a81c976f7c4342f15e8236395eed431326",
+    "relay/execution/masking.py": "c1765913e719c25e038f6eed9cba6ae27e50c7f22662022cdc7cb007d924d5c4",
+    "relay/agents/events.py": "bcdddcdba1b5c79536556e5f441417cc745ccffefe47b2b713e6057b61a6baea",
+    "frontend/src/activity.ts": "5eba3d16470fee560b6337607dcd48098deec995e8f9c1d3f848e3ca8b6902a7"
+  },
+  "agents": [
+    {
+      "id": "claude",
+      "status": "certified",
+      "execution_command": [
+        "claude-agent-acp"
+      ],
+      "binary_versions": {
+        "claude-agent-acp": "0.91.0",
+        "claude": "2.1.300"
+      },
+      "acp_reported_agent_version": "0.91.0",
+      "executed_relay_sha": "772c9f91c2e35e123650ad9533e5af108d9b4c8c",
+      "requested_model_value": "default",
+      "fresh_model_selection_confirmed": true,
+      "effort_override": null,
+      "permission_mode_override": null,
+      "confirmed_config_ids": {
+        "model": "model"
+      },
+      "run_id": "dc353e16-cfd0-4db6-b040-05795d6c135c",
+      "stop_reason": "completed",
+      "workflow_sha256": "1616b28764b05af2091642104bf987d833aed7b0e09739867b074cf4e8759ba6",
+      "source_commit": "4f51ce86d9d7988cf37a7b5642cd4cc8b207135d",
+      "job_commit": "35a1ea9466f3c9f0e3d9d1dc3499e56bdf9c8dc2",
+      "protected_head": "35a1ea9466f3c9f0e3d9d1dc3499e56bdf9c8dc2",
+      "commits_at_job_boundary": 1,
+      "report": {
+        "name": "PROVIDER-RETEST.md",
+        "sha256": "9dcbb07583e7abe04339bdebf9113f869cfc5e98a474ae6dd91605bf4c08ccfd",
+        "bytes": 322
+      },
+      "permission_answers_once": 2,
+      "public_output": {
+        "unicode_stdout_verified": true,
+        "stderr_verified": true,
+        "registered_value_masked": true,
+        "command_snapshot_prefix_withheld": true,
+        "terminal_delta_updates": 2,
+        "structured_exit_code": 3,
+        "provider_text_exit_footer": false
+      },
+      "browser_output_verified": true,
+      "browser_page_errors": [],
+      "process_identity_cleared": true,
+      "source_checkout_clean_and_unchanged": true,
+      "worktree_removed": true,
+      "cleanup_scope": "worktrees",
+      "retained_artifact_downloads_verified": 8,
+      "events_sha256": "cfc4c20c27d713326273c576fb4519836e9d04befd68735b14c50a627d64aa22",
+      "probe_cleanup_warning": "Pinned ACP SDK cannot delete the advertised provider-owned probe session.",
+      "agent_step_deferred_commit_to_job": true,
+      "cleanup_policy": "retain"
+    },
+    {
+      "id": "copilot",
+      "status": "certified",
+      "execution_command": [
+        "copilot",
+        "--acp"
+      ],
+      "binary_versions": {
+        "copilot": "1.0.98"
+      },
+      "acp_reported_agent_version": "1.0.98",
+      "executed_relay_sha": "772c9f91c2e35e123650ad9533e5af108d9b4c8c",
+      "requested_model_value": "auto",
+      "fresh_model_selection_confirmed": true,
+      "effort_override": null,
+      "permission_mode_override": null,
+      "confirmed_config_ids": {
+        "model": "model"
+      },
+      "run_id": "c7e7bf17-d966-4dd4-8aa4-d920f9b8d8d0",
+      "stop_reason": "completed",
+      "workflow_sha256": "83ace81e73b05df64d246cae132c792ea09d4a72abbb4dc2c2b7297a981c1f7e",
+      "source_commit": "4f51ce86d9d7988cf37a7b5642cd4cc8b207135d",
+      "job_commit": "27a605f51d3c869377b015977d06a9e9e3d122ff",
+      "protected_head": "27a605f51d3c869377b015977d06a9e9e3d122ff",
+      "commits_at_job_boundary": 1,
+      "report": {
+        "name": "PROVIDER-RETEST.md",
+        "sha256": "1b9d89e03a2035232896d2ee8788267271e05771120afa260278080d32b2934c",
+        "bytes": 110
+      },
+      "permission_answers_once": 2,
+      "public_output": {
+        "unicode_stdout_verified": true,
+        "stderr_verified": true,
+        "registered_value_masked": true,
+        "command_snapshot_prefix_withheld": true,
+        "terminal_delta_updates": 0,
+        "structured_exit_code": null,
+        "provider_text_exit_footer": true
+      },
+      "browser_output_verified": true,
+      "browser_page_errors": [],
+      "process_identity_cleared": true,
+      "source_checkout_clean_and_unchanged": true,
+      "worktree_removed": true,
+      "cleanup_scope": "worktrees",
+      "retained_artifact_downloads_verified": 8,
+      "events_sha256": "2edf86c619a0202cb4c419aa2e77d67a7a720ac947237b5686ef30e250fe6220",
+      "probe_cleanup_warning": null,
+      "agent_step_deferred_commit_to_job": true,
+      "cleanup_policy": "retain"
+    },
+    {
+      "id": "cursor",
+      "status": "certified",
+      "execution_command": [
+        "cursor-agent",
+        "acp"
+      ],
+      "binary_versions": {
+        "cursor-agent": "2026.10.14-941492e"
+      },
+      "acp_reported_agent_version": null,
+      "executed_relay_sha": "772c9f91c2e35e123650ad9533e5af108d9b4c8c",
+      "requested_model_value": "default[]",
+      "fresh_model_selection_confirmed": true,
+      "effort_override": null,
+      "permission_mode_override": null,
+      "confirmed_config_ids": {
+        "model": "model"
+      },
+      "run_id": "ed83bd94-9434-4e02-8982-dc67bf7ce7d9",
+      "stop_reason": "completed",
+      "workflow_sha256": "931175d649de5862dd1920ea66d9911d79d6e4013f1e1fac6e5766f50bf7ecbf",
+      "source_commit": "4f51ce86d9d7988cf37a7b5642cd4cc8b207135d",
+      "job_commit": "c0ed10052bf7e1b9e507891478c14f3a2df5e69f",
+      "protected_head": "c0ed10052bf7e1b9e507891478c14f3a2df5e69f",
+      "commits_at_job_boundary": 1,
+      "report": {
+        "name": "PROVIDER-RETEST.md",
+        "sha256": "d862fdb469119a8fd9873ae9ca454ed1eb52988487bf5a16d2f72b446a4ab8af",
+        "bytes": 74
+      },
+      "permission_answers_once": 1,
+      "public_output": {
+        "unicode_stdout_verified": true,
+        "stderr_verified": true,
+        "registered_value_masked": true,
+        "command_snapshot_prefix_withheld": true,
+        "terminal_delta_updates": 0,
+        "structured_exit_code": 3,
+        "provider_text_exit_footer": false
+      },
+      "browser_output_verified": true,
+      "browser_page_errors": [],
+      "process_identity_cleared": true,
+      "source_checkout_clean_and_unchanged": true,
+      "worktree_removed": true,
+      "cleanup_scope": "worktrees",
+      "retained_artifact_downloads_verified": 8,
+      "events_sha256": "f9c5c15de6f1742787cae45d7036dd4a70fd185cd1258015ea9f8ed2462175b5",
+      "probe_cleanup_warning": null,
+      "agent_step_deferred_commit_to_job": true,
+      "cleanup_policy": "retain"
+    }
+  ],
+  "supervisor_shutdown": {
+    "forced": false,
+    "owner_and_children_exited": true,
+    "ownership_record_removed": true,
+    "log_confirmed_clean_stop": true,
+    "provider_processes_already_cleared": true,
+    "worktrees_already_removed": true,
+    "retained_artifacts_reverified": 24
+  },
+  "limits": [
+    "The exact advertised selectors default, auto, and default[] do not identify concrete backend models.",
+    "Cursor omits an ACP agent version; its command version is recorded instead.",
+    "Copilot emits an exit-code footer in public tool content rather than a structured integer exit field. Relay displays that text and does not infer a numeric field.",
+    "Prefix validation targets the diagnostic command output. Separate source-code string literals are not the registered secret value.",
+    "Provider-owned probe history may remain where the pinned SDK cannot delete it.",
+    "Live cancellation, elicitation, model drift, and provider timeout behavior are outside this short output retest.",
+    "The initial Copilot diagnostic reached its five-minute step deadline; that failed run and artifacts were retained before the fresh bounded ten-minute diagnostic.",
+    "The first harness supervisor required forced shutdown after terminal attempts and worktree cleanup. The final harness used a process group and verified cooperative shutdown."
+  ]
+}

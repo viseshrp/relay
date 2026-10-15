@@ -187,6 +187,11 @@ suffix once. This prevents a partial snapshot from retaining a prefix of a
 secret that a later snapshot masks in full.
 Terminal deltas and exit codes were verified on Windows with Codex ACP 2.2.2
 in the [Windows retest](../certification/2026-10-14-windows-relay-fixes.md).
+The [2026-10-15 Windows ACP record](../certification/2026-10-15-windows-acp.json)
+also verifies Claude deltas, Cursor structured raw output, and Copilot
+cumulative snapshots through live Actions workflows and browser checks.
+Copilot returns its exit code in public text rather than a structured integer;
+Relay displays that footer without inferring an exit field.
 Actions steps decode these summaries before masking and event-size splitting.
 They mask output deltas as one stream per attempt and tool call, hold possible
 secret prefixes, and flush before a terminal result or exit is persisted.
@@ -378,9 +383,12 @@ alone does not certify its account. Its certified writer run followed native
 CLI sign-in. All five agents passed the macOS certification bar. The
 [Windows Codex retest](../certification/2026-10-14-windows-relay-fixes.md)
 verified Codex ACP 2.2.2 with exact model `gpt-6.1-sol`, including terminal
-deltas and exit codes. The other four Windows providers and live Linux
-provider behavior remain unverified. Live agent cancellation, model drift,
-elicitation, timeouts, and Antigravity soft denies also remain unverified.
+deltas and exit codes. The
+[Windows ACP follow-up](../certification/2026-10-15-windows-acp.json) verifies
+Claude Code, Copilot CLI, and Cursor CLI on the reviewed Actions runtime.
+Antigravity on Windows and live Linux provider behavior remain unverified.
+Live agent cancellation, model drift, elicitation, timeouts, and Antigravity
+soft denies also remain unverified.
 The sanitized results, completed sign-in screenshots, and fresh validated
 registry fixture are under
 [`certification/`](../certification/README.md).

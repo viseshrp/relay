@@ -161,8 +161,9 @@ cleanup are browser actions.
 
 Relay Phase 1 is implemented but unreleased. All five supported agents passed
 authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
-Codex ACP completed a live Windows workflow on 2026-10-14. The other four
-providers on Windows and live provider execution on Linux remain unverified.
+Codex ACP completed a live Windows workflow on 2026-10-14. Claude Code,
+Copilot CLI, and Cursor CLI passed Windows Actions diagnostics on 2026-10-15.
+Antigravity on Windows and live provider execution on Linux remain unverified.
 Exact versions, model selectors, artifact hashes, cleanup results, and remaining
 verification limits are recorded in [`certification/`](certification/README.md).
 The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
