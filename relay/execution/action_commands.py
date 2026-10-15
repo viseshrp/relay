@@ -112,6 +112,8 @@ class CommandLog:
             )
 
     def flush_tool(self, key: str) -> None:
+        # Emit held text as its own delta before the caller's terminal event,
+        # or at step shutdown if the tool never sends a terminal event.
         stream = self.tool_streams.pop(key, None)
         if stream is None:
             return
@@ -182,12 +184,13 @@ class ActionRuntime:
             summary = json.loads(value) if isinstance(value, str) else None
         except json.JSONDecodeError:
             summary = None
-        metadata = cast(
-            dict[str, object],
-            self.masks.payload({name: item for name, item in payload.items() if name != "summary"}),
+        metadata = self.masks.mapping(
+            {name: item for name, item in payload.items() if name != "summary"}
         )
         tool_id = payload.get("tool_call_id")
+        # Attempt a1, normal sensitivity, turn 1, call-7 -> a1:tool:normal:1:call-7.
         key = f"{attempt_id}:tool:{sensitivity.value}:{payload.get('turn')}:{tool_id}"
+        # Codex can report terminal_exit in a progress update, before a tool result.
         terminal = event_type == "agent.tool_result" or (
             isinstance(summary, dict) and "exit_code" in summary
         )
@@ -212,7 +215,7 @@ class ActionRuntime:
         else:
             if terminal:
                 self.log.flush_tool(key)
-            masked = cast(dict[str, object], self.masks.payload(payload))
+            masked = self.masks.mapping(payload)
         self.log.append_tool_event(event_type, masked, sensitivity)
 
     def append_attempt_event(

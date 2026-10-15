@@ -40,10 +40,14 @@ class Redactor:
         if isinstance(value, str):
             return self.text(value)
         if isinstance(value, Mapping):
-            return {self.text(str(key)): self.payload(item) for key, item in value.items()}
+            return self.mapping(value)
         if isinstance(value, (list, tuple)):
             return [self.payload(item) for item in value]
         return value
+
+    def mapping(self, value: Mapping[str, object]) -> dict[str, object]:
+        """A registered TOKEN masks {'TOKEN': ['TOKEN']} to {'***': ['***']}."""
+        return {self.text(str(key)): self.payload(item) for key, item in value.items()}
 
     def stream(self, key: str, chunk: str, *, final: bool = False) -> str:
         """Hold only a possible suffix of a secret; emit safe prefixes immediately."""
