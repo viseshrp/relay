@@ -4,6 +4,7 @@ import {
   openSettings,
   historicalPost as post,
   currentWorkflow,
+  expectRunStatus,
 } from "./setup-helpers";
 import type { DashboardData } from "../src/types";
 
@@ -288,13 +289,7 @@ test("compact recent results reveal loaded records and still page to older runs"
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const body: { run_id: string } = await launched.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${body.run_id}`)).json()).run
-          .status,
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, body.run_id, "succeeded");
   const data: DashboardData = await (
     await page.request.get("/api/dashboard")
   ).json();

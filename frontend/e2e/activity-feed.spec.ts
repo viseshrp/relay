@@ -4,7 +4,7 @@ import { activityRows, relativeActivityText } from "../src/activity";
 import { safeMarkdownHref } from "../src/components/SafeMarkdown";
 import { toolStatus } from "../src/components/ActivityFeed";
 import type { RunEvent } from "../src/types";
-import { historicalPost as post } from "./setup-helpers";
+import { expectRunStatus, historicalPost as post } from "./setup-helpers";
 
 function event(
   id: number,
@@ -283,12 +283,7 @@ async function setup(
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const id: string = (await response.json()).run_id;
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe("paused_wait");
+  await expectRunStatus(page, id, "paused_wait");
   const folder: string = (
     await (await page.request.get(`/api/runs/${id}`)).json()
   ).run.working_folder;
