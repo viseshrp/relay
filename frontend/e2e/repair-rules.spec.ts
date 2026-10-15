@@ -2,6 +2,7 @@ import {
   advancedField,
   openJobSettings,
   closeJobSettings,
+  expectRunStatus,
 } from "./setup-helpers";
 import { historicalPost } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
@@ -90,8 +91,14 @@ test("bounded repair loops save, reload and execute frozen local workflows", asy
     jobs: {
       repair: {
         steps: [
-          { run: "echo fixed > fixed.txt" },
-          { run: "test -f fixed.txt" },
+          {
+            shell: "python",
+            run: "from pathlib import Path; Path('fixed.txt').write_text('fixed\\n')",
+          },
+          {
+            shell: "python",
+            run: "from pathlib import Path; assert Path('fixed.txt').read_text() == 'fixed\\n'",
+          },
         ],
       },
     },
@@ -158,6 +165,7 @@ test("bounded repair loops save, reload and execute frozen local workflows", asy
   });
   expect(launch.ok(), await launch.text()).toBeTruthy();
   const { run_id: id } = await launch.json();
+  await expectRunStatus(page, id, "succeeded");
   await page.goto(`/?view=runs&run=${id}`);
   await expect(
     page.getByText(
@@ -294,6 +302,7 @@ test("exhausted repairs stop visibly at their source and keep every rejected rep
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const runId = (await response.json()).run_id;
+  await expectRunStatus(page, runId, "failed");
   await page.goto(`/?view=runs&run=${runId}`);
   await expect(
     page.getByRole("heading", { name: "Review stopped", exact: true }),

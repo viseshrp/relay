@@ -12,6 +12,27 @@ export async function post(page: Page, path: string, data: object = {}) {
   });
 }
 
+export async function expectRunStatus(
+  page: Page,
+  id: string,
+  status: string,
+): Promise<void> {
+  let run: { status: string; problem?: unknown } = { status: "pending" };
+  // Nested workflows start real Git and shell processes before the UI can settle.
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/runs/${id}`);
+        expect(response.ok(), await response.text()).toBeTruthy();
+        run = (await response.json()).run;
+        return run.status;
+      },
+      { timeout: 20_000 },
+    )
+    .not.toMatch(/^(pending|running|canceling)$/);
+  expect(run).toMatchObject({ status });
+}
+
 export async function closeJobSettings(page: Page) {
   const close = page.getByRole("button", {
     name: "Close job settings",

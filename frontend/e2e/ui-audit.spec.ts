@@ -5,7 +5,12 @@ import {
 } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-import { post, currentWorkflow, openSettings } from "./setup-helpers";
+import {
+  post,
+  currentWorkflow,
+  openSettings,
+  expectRunStatus,
+} from "./setup-helpers";
 
 async function document(page: Page, key = "workflow.yaml") {
   return (await page.request.get(`/api/workflows/${key}`)).json();
@@ -29,14 +34,6 @@ async function launch(page: Page, key: string): Promise<string> {
   expect(response.ok(), await response.text()).toBeTruthy();
   const result: { run_id: string } = await response.json();
   return result.run_id;
-}
-async function settled(page: Page, id: string, status: string) {
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe(status);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -130,7 +127,7 @@ test("workflow history filters persist in the URL and Back restores run and job 
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const id = await launch(page, "audit-a");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   await page.goto("/?view=runs&workflow=audit-a.yaml");
   await expect(
     page.getByRole("heading", { name: "Audit A", exact: true }),
@@ -182,7 +179,7 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
     later: { type: "command", needs: ["approval"], run: ["git", "status"] },
   });
   const id = await launch(page, "audit-wait");
-  await settled(page, id, "paused_wait");
+  await expectRunStatus(page, id, "paused_wait");
   await page.goto(`/?view=runs&run=${id}&job=root.approval.step_1`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
@@ -230,7 +227,7 @@ test("a named script step opens its terminal output", async ({ page }) => {
             {
               id: "script",
               name: "Visible command",
-              run: "echo Captured terminal output",
+              run: "echo 'Captured terminal output'",
             },
           ],
         },
@@ -239,7 +236,7 @@ test("a named script step opens its terminal output", async ({ page }) => {
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const id = await launch(page, "script-log");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   await page.goto(`/?view=runs&run=${id}&job=root.check.script`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
@@ -260,7 +257,7 @@ test("Workflow file shows frozen source and empty internal artifacts remain hidd
     check: { type: "command", run: ["git", "status"] },
   });
   const id = await launch(page, "audit-frozen");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   const original = await document(page, "audit-frozen.yaml");
   const saved = await post(page, "/api/workflows/audit-frozen.yaml/save", {
     holder: await page.evaluate(() =>
@@ -402,6 +399,6 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
     const saved = parse((await document(page, `${key}.yaml`)).yaml);
     expect(saved.jobs.job_1).toBeDefined();
     const id = await launch(page, key);
-    await settled(page, id, "succeeded");
+    await expectRunStatus(page, id, "succeeded");
   });
 }
