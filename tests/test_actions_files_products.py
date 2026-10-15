@@ -472,6 +472,30 @@ def test_replaced_snapshot_arrays_discard_removed_text_fields(
     assert not proxy.masks.pending
 
 
+def test_snapshot_field_keys_cannot_alias_another_tools_opaque_id(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    other_tool = 'terminal:snapshot:["content",0,"text"]'
+    for tool, summary in (
+        ("terminal", {"content": [{"text": "prefix TOKEN-12345"}]}),
+        (other_tool, {"output_delta": "67890\n"}),
+        ("terminal", {"content": [{"text": "prefix TOKEN-1234567890\n"}]}),
+    ):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": tool, "turn": 1, "summary": json.dumps(summary)},
+        )
+    log.flush()
+    other = [payload for _, payload in recorder.events if payload["tool_call_id"] == other_tool]
+    assert len(other) == 1
+    assert json.loads(str(other[0]["summary"])) == {"output_delta": "67890\n"}
+    assert "TOKEN-" not in json.dumps(recorder.events)
+
+
 @pytest.mark.parametrize("shutdown", [False, True], ids=["tool-result", "step-shutdown"])
 def test_snapshot_completion_flushes_only_its_own_safe_suffixes_once(
     action_log: tuple[ActionRuntime, CommandLog, RecordingLog], shutdown: bool
