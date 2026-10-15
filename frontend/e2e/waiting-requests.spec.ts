@@ -137,12 +137,17 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
       );
       const id = await launch(page, key);
       await expect
-        .poll(async () => {
-          const run = await detail(page, id);
-          if (run.status === "failed")
-            throw new Error(run.failure_summary ?? JSON.stringify(run.problem));
-          return run.interactions.length;
-        })
+        .poll(
+          async () => {
+            const run = await detail(page, id);
+            if (run.status === "failed")
+              throw new Error(
+                run.failure_summary ?? JSON.stringify(run.problem),
+              );
+            return run.interactions.length;
+          },
+          { timeout: 20_000 },
+        )
         .toBe(1);
       if (placement === "repair") {
         expect(

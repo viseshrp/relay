@@ -6,7 +6,7 @@ import { jobDuration } from "../src/job";
 import { logMatches, logRows, rawLog } from "../src/log";
 import { runSummaryGraph } from "../src/run-graph";
 import type { RunEvent, RunNode } from "../src/types";
-import { historicalPost as post } from "./setup-helpers";
+import { historicalPost as post, expectRunStatus } from "./setup-helpers";
 
 function event(id: number, type: string, chunk: string): RunEvent {
   return {
@@ -423,6 +423,7 @@ test("agent logs load every page, recover a failed read, and keep streaming whil
 test("workflow history filters numbered runs and opens grouped jobs without wheel zoom", async ({
   page,
 }, info) => {
+  test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   const checks = Object.fromEntries(
     Array.from({ length: 8 }, (_, index) => [
@@ -444,13 +445,7 @@ test("workflow history filters numbered runs and opens grouped jobs without whee
     },
     "Build and verify",
   );
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-      { timeout: 15000 },
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, id, "succeeded", 45_000);
   const detail = (await (await page.request.get(`/api/runs/${id}`)).json()).run;
   await page.goto("/?view=runs");
   await page

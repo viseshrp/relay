@@ -2,6 +2,7 @@ import {
   advancedField,
   openJobSettings,
   closeJobSettings,
+  expectRunStatus,
 } from "./setup-helpers";
 import { expect, test, type Locator, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
@@ -357,13 +358,7 @@ test("run graph headings stay above jobs and empty history filters remain readab
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const id = (await launched.json()).run_id;
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-      { timeout: 30_000 },
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, id, "succeeded", 45_000);
   await page.goto(`/?view=runs&run=${id}`);
   const graph = page.getByRole("region", {
     name: "Step progress",

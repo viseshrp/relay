@@ -16,6 +16,7 @@ export async function expectRunStatus(
   page: Page,
   id: string,
   status: string,
+  timeout = 20_000,
 ): Promise<void> {
   let run: { status: string; problem?: unknown } = { status: "pending" };
   // Nested workflows start real Git and shell processes before the UI can settle.
@@ -30,7 +31,7 @@ export async function expectRunStatus(
           ["succeeded", "failed", "canceled"].includes(run.status)
         );
       },
-      { timeout: 20_000 },
+      { timeout },
     )
     .toBe(true);
   expect(run).toMatchObject({ status });

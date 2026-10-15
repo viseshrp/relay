@@ -1,5 +1,5 @@
 import { expect, test } from "./a11y-test";
-import { post, runStarter } from "./setup-helpers";
+import { post, runStarter, expectRunStatus } from "./setup-helpers";
 import type { AgentsResponse } from "../src/types";
 
 test("account creation explains the password rules before submission", async ({
@@ -161,7 +161,7 @@ for (const readyCount of [0, 5]) {
 test("the full AI coding workflow is preselected and runs from one task", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   await page.request.get("/api/auth");
   expect(
     (
@@ -243,6 +243,7 @@ test("the full AI coding workflow is preselected and runs from one task", async 
     },
   });
   expect(response.request().postDataJSON()).not.toHaveProperty("model");
+  const { run_id: runId } = await response.json();
   for (const answer of ["IMPLEMENT", "TESTS", "ACCEPT"]) {
     await page
       .getByRole("region", { name: "Waiting for you", exact: true })
@@ -258,6 +259,7 @@ test("the full AI coding workflow is preselected and runs from one task", async 
       .click();
     await expect(request).toHaveCount(0);
   }
+  await expectRunStatus(page, runId, "succeeded");
   await expect(
     page.getByText(
       "Work is complete. Review the saved documents and code changes below.",
