@@ -179,6 +179,12 @@ raw output also displays its string `stdout` and `stderr` fields. Terminal
 metadata takes precedence. Tools and command steps display the same
 `Exit code: N` wording.
 Metadata-only updates with no retained fields produce no empty tool event.
+Actions also hold possible secret suffixes in cumulative tool `content` and
+`raw_output` snapshots. Each text field has its own stream identity. A new
+snapshot replaces its previous pending suffix; it does not append that suffix
+to the new value. Tool completion or step shutdown flushes any remaining safe
+suffix once. This prevents a partial snapshot from retaining a prefix of a
+secret that a later snapshot masks in full.
 Terminal deltas and exit codes were verified on Windows with Codex ACP 2.2.2
 in the [Windows retest](../certification/2026-10-14-windows-relay-fixes.md).
 Actions steps decode these summaries before masking and event-size splitting.

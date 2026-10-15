@@ -66,6 +66,12 @@ class Redactor:
                     value = value[:-hold]
             return self.text(value)
 
+    def snapshot(self, key: str, value: str, *, final: bool = False) -> str:
+        """Replace a cumulative snapshot without prepending its previous suffix."""
+        with self.lock:
+            self.pending.pop(key, None)
+            return self.stream(key, value, final=final)
+
 
 _REDACTORS: dict[str, Redactor] = {}
 _GUARD = threading.Lock()

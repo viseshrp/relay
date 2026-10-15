@@ -718,17 +718,33 @@ def test_routed_v1_execution_preserves_oversized_visible_events(
 
 
 @pytest.mark.usefixtures("registry_network", "database_threads")
+@pytest.mark.parametrize("representation", ["deltas", "snapshots"])
 def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
     project: RelayProject,
     tmp_path: Path,
     fake_agents: FakeAgents,
     monkeypatch: pytest.MonkeyPatch,
+    representation: str,
 ) -> None:
     masked_value = 'TOKEN-"\\\tEND'
     prefix = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
 
     class TerminalDeltaDriver(AcpDriver):
         async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+            if representation == "snapshots":
+                for kind, text in (
+                    ("agent.tool_call", prefix + masked_value[:8]),
+                    ("agent.tool_result", prefix + masked_value + "\n"),
+                ):
+                    yield AgentEvent(
+                        kind,
+                        {
+                            "tool_call_id": "terminal",
+                            "turn": 1,
+                            "summary": json.dumps({"content": [{"text": text}]}),
+                        },
+                    )
+                return
             for delta in (prefix + masked_value[:8], masked_value[8:] + "\n"):
                 yield AgentEvent(
                     "agent.tool_call",
@@ -782,6 +798,20 @@ jobs:
     assert [payload["part"] for payload in fragments] == list(range(1, len(fragments) + 1))
     assert all(payload["parts"] == len(fragments) for payload in fragments)
     summary = json.loads("".join(payload["summary"] for payload in fragments))
+    if representation == "snapshots":
+        assert summary["content"] == [{"text": prefix}]
+        results = list(
+            RunEvent.objects.filter(run_id=run_id, type="agent.tool_result")
+            .order_by("id")
+            .values_list("payload", flat=True)
+        )
+        assert len(results) > 1
+        result = json.loads("".join(payload["summary"] for payload in results))
+        assert result["content"] == [{"text": prefix + "***\n"}]
+        assert all(
+            len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in results
+        )
+        return
     assert summary["output_delta"] == prefix
     assert (
         "".join(

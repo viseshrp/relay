@@ -30,7 +30,7 @@ class CommandLog:
     buffers: dict[str, str]
     stopped: str | None
     streams: dict[str, tuple[str, EventSource, EventSensitivity, str, dict[str, object]]]
-    tool_streams: dict[str, tuple[EventSensitivity, dict[str, object]]]
+    tool_streams: dict[str, tuple[str, EventSensitivity, dict[str, object]]]
 
     def __init__(self, runtime: RunnerStore, attempt_id: str, masks: Redactor) -> None:
         self.runtime = runtime
@@ -114,27 +114,27 @@ class CommandLog:
     def flush_tool(self, key: str) -> None:
         # Emit held text as its own delta before the caller's terminal event,
         # or at step shutdown if the tool never sends a terminal event.
-        stream = self.tool_streams.pop(key, None)
-        if stream is None:
-            return
-        sensitivity, metadata = stream
-        chunk = self.masks.stream(key, "", final=True)
-        if chunk:
-            self.append_tool_event(
-                "agent.tool_call",
-                {
-                    **metadata,
-                    "summary": json.dumps(
-                        {"output_delta": chunk}, separators=(",", ":"), ensure_ascii=False
-                    ),
-                },
-                sensitivity,
-            )
+        for stream_key, (owner, sensitivity, metadata) in tuple(self.tool_streams.items()):
+            if owner != key:
+                continue
+            self.tool_streams.pop(stream_key)
+            chunk = self.masks.stream(stream_key, "", final=True)
+            if chunk:
+                self.append_tool_event(
+                    "agent.tool_call",
+                    {
+                        **metadata,
+                        "summary": json.dumps(
+                            {"output_delta": chunk}, separators=(",", ":"), ensure_ascii=False
+                        ),
+                    },
+                    sensitivity,
+                )
 
     def flush(self) -> None:
         for name in tuple(self.buffers):
             self.feed(name, "", final=True)
-        for key in tuple(self.tool_streams):
+        for key in dict.fromkeys(owner for owner, _, _ in self.tool_streams.values()):
             self.flush_tool(key)
         for key, (event, source, sensitivity, field, payload) in self.streams.items():
             chunk = self.masks.stream(key, "", final=True)
@@ -172,6 +172,38 @@ class ActionRuntime:
     def __getattr__(self, name: str) -> object:
         return getattr(self.runtime, name)
 
+    def _mask_tool_snapshot(
+        self,
+        value: object,
+        key: str,
+        path: tuple[str | int, ...],
+        sensitivity: EventSensitivity,
+        metadata: dict[str, object],
+        terminal: bool,
+    ) -> object:
+        if isinstance(value, str):
+            # content[0].text and raw_output.stdout are independent snapshots.
+            stream_key = f"{key}:snapshot:{json.dumps(path, separators=(',', ':'))}"
+            text = self.masks.snapshot(stream_key, value, final=terminal)
+            if stream_key in self.masks.pending:
+                self.log.tool_streams[stream_key] = (key, sensitivity, metadata)
+            else:
+                self.log.tool_streams.pop(stream_key, None)
+            return text
+        if isinstance(value, dict):
+            return {
+                name: self._mask_tool_snapshot(
+                    item, key, (*path, str(name)), sensitivity, metadata, terminal
+                )
+                for name, item in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._mask_tool_snapshot(item, key, (*path, index), sensitivity, metadata, terminal)
+                for index, item in enumerate(value)
+            ]
+        return value
+
     def _append_tool_event(
         self,
         attempt_id: str,
@@ -201,10 +233,22 @@ class ActionRuntime:
                 # even when the registered value contains JSON-escaped bytes.
                 summary["output_delta"] = self.masks.stream(key, delta, final=terminal)
                 if key in self.masks.pending:
-                    self.log.tool_streams[key] = (sensitivity, metadata)
+                    self.log.tool_streams[key] = (key, sensitivity, metadata)
                 else:
                     self.log.tool_streams.pop(key, None)
-            elif terminal:
+            if isinstance(tool_id, str):
+                for field in ("content", "raw_output"):
+                    if field in summary:
+                        # A replacement array may remove a previously held text field.
+                        prefix = f"{key}:snapshot:[{json.dumps(field)}"
+                        for stream_key, (owner, _, _) in tuple(self.log.tool_streams.items()):
+                            if owner == key and stream_key.startswith(prefix):
+                                self.masks.snapshot(stream_key, "", final=True)
+                                self.log.tool_streams.pop(stream_key)
+                        summary[field] = self._mask_tool_snapshot(
+                            summary[field], key, (field,), sensitivity, metadata, terminal
+                        )
+            if terminal:
                 self.log.flush_tool(key)
             masked = {
                 **metadata,

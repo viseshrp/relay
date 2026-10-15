@@ -398,6 +398,117 @@ def test_step_shutdown_flushes_unfinished_tool_output_once(
     assert recorder.events == flushed_events
 
 
+@pytest.mark.parametrize("field", ["content", "raw_output", "nested_output"])
+def test_cumulative_tool_snapshots_hold_secret_prefixes_until_replaced(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], field: str
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for text in ("prefix TOKEN-12345", "prefix TOKEN-1234567890\n"):
+        if field == "content":
+            summary = {"content": [{"text": text}]}
+        elif field == "raw_output":
+            summary = {"raw_output": {"stdout": text}}
+        else:
+            summary = {"raw_output": {"contents": [{"text": text}]}}
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": json.dumps(summary)},
+        )
+    first, second = (json.loads(str(payload["summary"])) for _, payload in recorder.events)
+    assert "TOKEN-" not in json.dumps(first)
+    assert "prefix " in json.dumps(first)
+    assert "TOKEN-" not in json.dumps(second)
+    assert "prefix ***\\n" in json.dumps(second)
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "snapshot", "turn": 1, "summary": '{"status":"completed"}'},
+    )
+    log.flush()
+    assert len(recorder.events) == 3
+
+
+def test_replaced_snapshots_discard_their_previous_pending_suffix(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for text in ("prefix TOKEN-", "different output"):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {
+                "tool_call_id": "snapshot",
+                "turn": 1,
+                "summary": json.dumps({"content": [{"text": text}]}),
+            },
+        )
+    log.flush()
+    assert len(recorder.events) == 2
+    assert json.loads(str(recorder.events[-1][1]["summary"])) == {
+        "content": [{"text": "different output"}]
+    }
+
+
+def test_replaced_snapshot_arrays_discard_removed_text_fields(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for content in ([{"text": "unchanged"}, {"text": "TOKEN-"}], [{"text": "unchanged"}]):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": json.dumps({"content": content})},
+        )
+    log.flush()
+    assert len(recorder.events) == 2
+    assert not proxy.masks.pending
+
+
+@pytest.mark.parametrize("shutdown", [False, True], ids=["tool-result", "step-shutdown"])
+def test_snapshot_completion_flushes_only_its_own_safe_suffixes_once(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], shutdown: bool
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for tool, summary in (
+        (
+            "snapshot",
+            {"content": [{"text": "first TOKEN-"}], "raw_output": {"stderr": "second TOKEN-"}},
+        ),
+        ("other", {"content": [{"text": "other TOKEN-"}]}),
+    ):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": tool, "turn": 1, "summary": json.dumps(summary)},
+        )
+    if shutdown:
+        log.flush()
+    else:
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_result",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": '{"status":"completed"}'},
+        )
+        assert all(payload["tool_call_id"] == "snapshot" for _, payload in recorder.events[2:])
+        assert recorder.events[-1][0] == "agent.tool_result"
+        log.flush()
+    assert tool_output(recorder) == "TOKEN-TOKEN-TOKEN-"
+    flushed = list(recorder.events)
+    log.flush()
+    assert recorder.events == flushed
+
+
 def test_plain_tool_result_still_masks_secrets_and_flushes_held_output(
     action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
 ) -> None:
