@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { expectRunStatus, historicalPost as post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
 import type { RunDetail, RunEvent } from "../src/types";
 
@@ -243,9 +243,7 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
             })
           ).ok(),
         ).toBeTruthy();
-      await expect
-        .poll(async () => (await detail(page, id)).status)
-        .toBe("succeeded");
+      await expectRunStatus(page, id, "succeeded");
       await expect(banner).toHaveCount(0);
       await page
         .getByRole("navigation", { name: "Jobs", exact: true })
