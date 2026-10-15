@@ -71,7 +71,7 @@ def test_acp_permissions_wait_for_the_offered_owner_decision(
     if not cancel:
         assert response.outcome.option_id == "allow"
         assert HumanInteraction.objects.get().status == "answered"
-        assert NodeRun.objects.get().status == "running"
+        assert NodeRun.objects.get(pk=agent_context.attempt.attempt.node_run_id).status == "running"
 
 
 @pytest.mark.parametrize(("answer", "action"), [(None, "decline"), ({"ready": True}, "accept")])

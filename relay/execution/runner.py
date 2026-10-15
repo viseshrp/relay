@@ -19,10 +19,8 @@ from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import (
     accept_job_result,
     current_head,
-    validate_reader_result,
-    validate_writer_result,
 )
-from relay.vcs.worktree import create_reader_worktree, remove_worktree, require_project_worktree
+from relay.vcs.worktree import require_project_worktree
 
 from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
@@ -80,7 +78,6 @@ class ScopeNodeRecord:
     node_id: str
     status: str
     outputs: Mapping[str, object]
-    selected_branch: str | None
 
 
 class AttemptRuntime(DispatchStore, Protocol):
@@ -135,7 +132,6 @@ class AttemptRuntime(DispatchStore, Protocol):
         parent_scope: str,
         nodes: Mapping[str, Mapping[str, object]],
         inputs: Mapping[str, object],
-        loop_index: int | None,
     ) -> None: ...
 
     def scope_node_records(
@@ -151,15 +147,6 @@ class AttemptRuntime(DispatchStore, Protocol):
         self, node_run_id: str, action: str, *, expected_status: str | None = None
     ) -> str: ...
 
-    def record_loop_iteration(
-        self,
-        coordinator_node_run_id: str,
-        scope_path: str,
-        iteration: int,
-        kind: OutcomeKind,
-        outputs: Mapping[str, Mapping[str, object]],
-    ) -> None: ...
-
     def resolve_human_wait_controls(self) -> int: ...
 
     def expire_human_waits(self) -> int: ...
@@ -173,7 +160,6 @@ class ExecutionOutcome:
     stop_reason: AttemptStopReason | None = None
     outputs: Mapping[str, object] = field(default_factory=dict)
     declared_artifacts: Mapping[str, str] = field(default_factory=dict)
-    selected_branch: str | None = None
     exit_code: int | None = None
     error_code: str | None = None
     wait_timeout_seconds: float | None = None
@@ -199,7 +185,7 @@ class RunnerStore(AttemptRuntime, HeartbeatStore, Protocol):
         ending_head: str,
     ) -> None: ...
 
-    def release_attempt_lock(self, attempt_id: str) -> None: ...
+    def release_attempt_admission(self, attempt_id: str) -> None: ...
 
     def close_heartbeat_connections(self) -> None: ...
 
@@ -211,24 +197,6 @@ def _heartbeat_lease(
     """Renew ownership while subprocess, output, Git, and preservation work runs."""
     with heartbeat_registration(store, ((claim.attempt_id, claim.worker_id), *owners)):
         yield
-
-
-def _uses_git(node_type: str) -> bool:
-    return node_type in {NodeType.AGENT.value, NodeType.COMMAND.value, NodeType.ACTIONS_JOB.value}
-
-
-def _assigned_worktree(claim: ClaimedAttempt) -> tuple[Path, bool]:
-    primary = Path(claim.primary_worktree)
-    require_project_worktree(Path(claim.project_path), primary)
-    if not _uses_git(claim.node_type) or claim.writes:
-        return primary, False
-    reader, _commit = create_reader_worktree(
-        Path(claim.project_path),
-        primary,
-        claim.attempt_id,
-        claim.recorded_head,
-    )
-    return reader, True
 
 
 def _failure(error: RelayError) -> ExecutionOutcome:
@@ -284,17 +252,13 @@ def execute_attempt(
     """Execute once, preserve evidence, persist terminal state, then release admission."""
     with _heartbeat_lease(store, claim, heartbeat_owners):
         try:
-            resources = (
-                allocate_attempt_resources(claim.run_id, claim.attempt_id)
-                if _uses_git(claim.node_type) or claim.node_type == NodeType.ACTIONS_STEP.value
-                else None
-            )
+            resources = allocate_attempt_resources(claim.run_id, claim.attempt_id)
         except RelayError as error:
             # Allocation failures finish the claimed attempt instead of leaving it running.
             outcome = _failure(error)
             store.finish_attempt(claim.attempt_id, outcome, claim.starting_head)
             store.mark_dispatch_consumed(claim.claim_token)
-            store.release_attempt_lock(claim.attempt_id)
+            store.release_attempt_admission(claim.attempt_id)
             return outcome
         if resources is not None:
             claim = replace(
@@ -348,10 +312,9 @@ def _execute_attempt(
     resources: AttemptResources | None,
 ) -> ExecutionOutcome:
     worktree = Path(claim.primary_worktree)
-    ephemeral_reader = False
     worktree_assigned = False
     try:
-        worktree, ephemeral_reader = _assigned_worktree(claim)
+        require_project_worktree(Path(claim.project_path), worktree)
         worktree_assigned = True
         timeout_value = claim.frozen_def.get("timeout")
         deadline = attempt_deadline(
@@ -371,20 +334,13 @@ def _execute_attempt(
             deadline_at=deadline,
             resources=resources,
         )
-        if context.timed_out() and claim.node_type not in {
-            NodeType.HUMAN_WAIT.value,
-            NodeType.ACTIONS_JOB.value,
-            NodeType.ACTIONS_STEP.value,
-        }:
+        outcome = executor.execute(context)
+        if (
+            outcome.kind is OutcomeKind.SUCCEEDED
+            and context.timed_out()
+            and claim.node_type != NodeType.ACTIONS_STEP.value
+        ):
             outcome = _timeout_failure()
-        else:
-            outcome = executor.execute(context)
-            if (
-                outcome.kind is OutcomeKind.SUCCEEDED
-                and context.timed_out()
-                and claim.node_type != NodeType.ACTIONS_STEP.value
-            ):
-                outcome = _timeout_failure()
     except RelayError as error:
         outcome = _failure(error)
     except Exception:
@@ -397,11 +353,9 @@ def _execute_attempt(
     if outcome.kind is OutcomeKind.WAITING:
         store.mark_attempt_waiting(claim.attempt_id, outcome.wait_timeout_seconds)
         store.mark_dispatch_consumed(claim.claim_token)
-        store.release_attempt_lock(claim.attempt_id)
+        store.release_attempt_admission(claim.attempt_id)
         return outcome
-    if (
-        _uses_git(claim.node_type) or claim.node_type == NodeType.ACTIONS_STEP.value
-    ) and worktree_assigned:
+    if worktree_assigned:
         try:
             if (
                 claim.node_type == NodeType.ACTIONS_STEP.value
@@ -426,17 +380,6 @@ def _execute_attempt(
                         worktree, claim.starting_head, claim.node_id, snapshot_files=snapshot_files
                     )
                     ending_head = commit.ending_head
-                elif claim.writes:
-                    allow_no_commit = claim.frozen_def.get("allow_no_commit") is True
-                    commit = validate_writer_result(
-                        worktree,
-                        claim.starting_head,
-                        allow_no_commit=allow_no_commit,
-                    )
-                    ending_head = commit.ending_head
-                else:
-                    validate_reader_result(worktree, claim.starting_head)
-                    ending_head = current_head(worktree)
             else:
                 ending_head = current_head(worktree)
         except RelayError as error:
@@ -455,17 +398,6 @@ def _execute_attempt(
             outcome = _failure(error)
             LOGGER.exception("Attempt preservation failed", extra={"attempt_id": claim.attempt_id})
 
-    # A reader checkout must disappear before its node can unlock downstream work.
-    try:
-        if ephemeral_reader and preservation is not None:
-            remove_worktree(Path(claim.project_path), worktree)
-    except RelayError as error:
-        outcome = _failure(error)
-        LOGGER.exception(
-            "Reader worktree removal failed",
-            extra={"attempt_id": claim.attempt_id},
-        )
-
     terminal_persisted = False
     try:
         store.finish_attempt(claim.attempt_id, outcome, ending_head)
@@ -473,7 +405,7 @@ def _execute_attempt(
         store.mark_dispatch_consumed(claim.claim_token)
     finally:
         if terminal_persisted:
-            store.release_attempt_lock(claim.attempt_id)
+            store.release_attempt_admission(claim.attempt_id)
     return outcome
 
 
@@ -503,7 +435,7 @@ def run_claim_token(
             store.mark_dispatch_consumed(claim.claim_token)
         finally:
             if terminal_persisted:
-                store.release_attempt_lock(claim.attempt_id)
+                store.release_attempt_admission(claim.attempt_id)
         return outcome
     return execute_attempt(
         store,

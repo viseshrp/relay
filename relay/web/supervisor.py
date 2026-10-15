@@ -41,7 +41,7 @@ from relay.execution.process_identity import (
     process_identity,
 )
 from relay.execution.reconcile import ReconcileStore, reconcile_once
-from relay.execution.recovery import RecoveryEvidenceStore, prepare_recovery_workspace
+from relay.execution.recovery import prepare_recovery_workspace
 from relay.execution.resume import ResumeStore, resume_interrupted
 from relay.execution.scheduler import SchedulingStore
 from relay.manage import MigrationLock, apply_migrations
@@ -60,7 +60,6 @@ class SupervisorStore(
     ReconcileStore,
     ResumeStore,
     SchedulingStore,
-    RecoveryEvidenceStore,
     Protocol,
 ):
     """Durable operations coordinated by the parent process."""
@@ -357,7 +356,7 @@ def _startup_reconcile(store: SupervisorStore) -> None:
     reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
     resume_interrupted(
         store,
-        lambda target: prepare_recovery_workspace(store, target),
+        lambda target: prepare_recovery_workspace(target),
     )
     marker.unlink(missing_ok=True)
 

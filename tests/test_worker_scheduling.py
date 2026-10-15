@@ -51,8 +51,13 @@ def test_environment_resume_is_delivered_from_committed_events(
     )
     project.write_workflow(
         "gate",
-        "name: Gate\njobs:\n  main:\n    environment: prod\n"
-        "    steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]\n",
+        (
+            "name: Gate\n"
+            "jobs:\n"
+            "  main:\n"
+            "    environment: prod\n"
+            "    steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]\n"
+        ),
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "gate")
@@ -100,7 +105,7 @@ def test_settings_api_rejects_new_parallel_worker_values(monkeypatch: pytest.Mon
 def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(
     project: RelayProject,
 ) -> None:
-    from relay.web.models import Run
+    from relay.web.models import Run, RunSnapshot
 
     Run.objects.bulk_create(
         [
@@ -116,5 +121,8 @@ def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(
             )
             for index in range(205)
         ]
+    )
+    RunSnapshot.objects.bulk_create(
+        [RunSnapshot(run=run, workflow_yaml="jobs: {}") for run in Run.objects.all()]
     )
     assert len(DjangoExecutionStore().active_run_ids()) == 205

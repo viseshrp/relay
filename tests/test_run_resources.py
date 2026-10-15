@@ -195,8 +195,21 @@ def test_command_temporary_and_profile_storage_disappears_after_execution(
     )
     project.write_workflow(
         "scratch",
-        "version: 1\nname: Scratch\nnodes:\n"
-        f"  work: {{type: command, run: {json.dumps([sys.executable, '-c', program])}}}\n",
+        json.dumps(
+            {
+                "name": "Scratch",
+                "jobs": {
+                    "work": {
+                        "steps": [
+                            {
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([sys.executable, "-c", program])},
+                            }
+                        ]
+                    }
+                },
+            }
+        ),
     )
     run_id = engine.launch(project, "scratch")
     outcomes = engine.drain(run_id)

@@ -206,7 +206,7 @@ def _children(
     runtime = context.runtime
     scope = context.attempt.scope_path
     frozen = {key: item.model_dump(mode="json", by_alias=True) for key, item in nodes.items()}
-    runtime.ensure_scope_nodes(context.attempt.run_id, scope, frozen, inputs, None)
+    runtime.ensure_scope_nodes(context.attempt.run_id, scope, frozen, inputs)
     executors = {
         "actions_job": ActionsJobExecutor(driver),
         "actions_step": ActionsStepExecutor(driver),
@@ -980,7 +980,7 @@ class ActionsStepExecutor:
         if reference == "relay/validate-input@v1":
             from pydantic import TypeAdapter, ValidationError
 
-            from relay.workflows.schema import InputDefinition, WorkflowDefinition
+            from relay.workflows.schema import InputDefinition
             from relay.workflows.validation import resolve_inputs as validate_typed_inputs
 
             raw = expressions.string(inputs.get("value", ""))
@@ -1000,9 +1000,7 @@ class ActionsStepExecutor:
                 message = "The input type or constraint declaration is invalid."
                 raise NodeExecutionError(message) from None
             validate_typed_inputs(
-                WorkflowDefinition(
-                    version=1, name="Input validation", inputs={"value": definition}, nodes={}
-                ),
+                {"value": definition},
                 {"value": value},
             )
             return ExecutionOutcome(OutcomeKind.SUCCEEDED, outputs={"value": raw, "valid": "true"})

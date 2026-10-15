@@ -62,12 +62,6 @@ class NodeStatus(ChoiceEnum):
 class NodeType(ChoiceEnum):
     ACTIONS_JOB = "actions_job", "Job"
     ACTIONS_STEP = "actions_step", "Step"
-    AGENT = "agent", "Agent"
-    COMMAND = "command", "Command"
-    HUMAN_WAIT = "human_wait", "Human wait"
-    CONDITION = "condition", "Condition"
-    LOOP = "loop", "Loop"
-    SUBWORKFLOW = "subworkflow", "Subworkflow"
 
 
 class AttemptStatus(ChoiceEnum):
@@ -151,11 +145,6 @@ class ControlState(ChoiceEnum):
     APPLIED = "applied", "Applied"
     STALE = "stale", "Stale"
     INVALID = "invalid", "Invalid"
-
-
-class LockMode(ChoiceEnum):
-    READ = "read", "Read"
-    WRITE = "write", "Write"
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,13 +375,6 @@ NODE_TRANSITIONS: tuple[Transition, ...] = (
         "node.dispatched",
     ),
     Transition(
-        NodeStatus.WAITING,
-        "timeout_routed",
-        "on_timeout_declared",
-        NodeStatus.SUCCEEDED,
-        "node.succeeded",
-    ),
-    Transition(
         NodeStatus.RUNNING,
         "complete",
         "outputs_and_commit_valid",
@@ -570,7 +552,6 @@ __all__ = [
     "EventSource",
     "InteractionKind",
     "InteractionStatus",
-    "LockMode",
     "NodeStatus",
     "NodeType",
     "PreservationState",

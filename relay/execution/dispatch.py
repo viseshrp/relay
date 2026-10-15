@@ -86,7 +86,6 @@ class ClaimedAttempt:
     run_metadata: Mapping[str, object]
     prompt_contents: tuple[str, ...]
     route: Mapping[str, object]
-    subworkflows: Mapping[str, object]
     writes: bool
     starting_head: str
     recorded_head: str

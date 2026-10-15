@@ -14,22 +14,15 @@ def test_browser_consumer_redelivers_a_paused_waiting_scope(
     project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow(
-        "nested-wait",
-        """version: 1
-name: Nested wait
-nodes:
-  rounds:
-    type: loop
-    max_iterations: 1
-    until: '${{ loop.index >= 1 }}'
-    exhausted: fallback
-    body:
-      approval: {type: human_wait, prompt: Continue?}
-  fallback:
-    type: command
-    needs: [rounds]
-    run: [git, status]
-""",
+        "wait-child",
+        (
+            "on: workflow_call\n"
+            "jobs: {approval: {steps: [{uses: relay/human-wait@v1, with: {prompt: "
+            "Continue?}}]}}\n"
+        ),
+    )
+    project.write_workflow(
+        "nested-wait", "jobs: {rounds: {uses: ./.relay/workflows/wait-child.yaml}}\n"
     )
     run_id = engine.launch(project, "nested-wait")
     engine.drain(run_id)

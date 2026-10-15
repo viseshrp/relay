@@ -7,10 +7,9 @@ from hashlib import sha256
 from django.test import Client
 import pytest
 
+from relay.execution.preflight import load_launch_workflow
 from relay.workflows.editor import read_prompt_document, save_prompt_document
-from relay.workflows.loader import load_workflow
 from relay.workflows.snapshot import build_snapshot
-from relay.workflows.validation import validate_loaded_workflow
 from tests.support import RelayProject
 from tests.test_editor_recovery import SOURCE, owner, post
 
@@ -94,8 +93,16 @@ def test_launch_snapshot_retains_exact_workflow_and_prompt_bytes(
     project: RelayProject, newline: str
 ) -> None:
     text = (
-        "version: 1\nname: Snapshot\nnodes:\n"
-        "  check: {type: agent, prompts: [{local: prompts/check.md}]}\n"
+        "name: Snapshot\n"
+        "jobs:\n"
+        "  check:\n"
+        "    steps:\n"
+        "    - id: work\n"
+        "      uses: relay/agent@v1\n"
+        "      with:\n"
+        "        agent: codex\n"
+        "        model: m1\n"
+        '        prompt-files: "prompts/check.md"\n'
     )
     workflow = project.write(".relay/workflows/check.yaml", "")
     raw = text.replace("\n", newline).encode()
@@ -103,7 +110,7 @@ def test_launch_snapshot_retains_exact_workflow_and_prompt_bytes(
     prompt = project.write(".relay/prompts/check.md", "")
     prompt_raw = f"First instruction{newline}Second instruction{newline}".encode()
     prompt.write_bytes(prompt_raw)
-    loaded = validate_loaded_workflow(load_workflow(workflow), project.relay_root)
+    loaded = load_launch_workflow(project.relay_root, "check")
     snapshot = build_snapshot(loaded, typed_inputs={}, routes=[])
     assert snapshot.workflow_yaml.encode() == raw
     assert snapshot.hashes["workflow"] == sha256(raw).hexdigest()

@@ -65,12 +65,6 @@ class ProjectRelinkError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_CONFLICT
 
 
-class SchemaVersionError(RelayError):
-    error_code: ClassVar[str] = "schema_version_error"
-    cli_exit_code: ClassVar[int] = constants.EXIT_SCHEMA_VERSION_ERROR
-    http_status: ClassVar[int] = constants.HTTP_UNPROCESSABLE_CONTENT
-
-
 class WorkflowValidationError(RelayError):
     error_code: ClassVar[str] = "workflow_validation_error"
     cli_exit_code: ClassVar[int] = constants.EXIT_WORKFLOW_VALIDATION_ERROR
@@ -265,7 +259,6 @@ __all__ = [
     "ProjectRelinkError",
     "PromptResolutionError",
     "RelayError",
-    "SchemaVersionError",
     "WorkflowValidationError",
     "WorktreeError",
     "log_persistence_failure",

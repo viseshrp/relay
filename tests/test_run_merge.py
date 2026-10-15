@@ -31,20 +31,36 @@ def writer_workflow(project: RelayProject) -> None:
         "writer",
         json.dumps(
             {
-                "version": 1,
                 "name": "Merge result",
-                "nodes": {
-                    "first": {"type": "command", "writes": True, "run": [PYTHON, "-c", scripts[0]]},
+                "jobs": {
+                    "first": {
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([PYTHON, "-c", scripts[0]])},
+                            }
+                        ]
+                    },
                     "second": {
-                        "type": "command",
-                        "writes": True,
                         "needs": ["first"],
-                        "run": [PYTHON, "-c", scripts[1]],
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([PYTHON, "-c", scripts[1]])},
+                            }
+                        ],
                     },
                     "review": {
-                        "type": "command",
                         "needs": ["second"],
-                        "run": ["git", "status", "--short"],
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps(["git", "status", "--short"])},
+                            }
+                        ],
                     },
                 },
             }
@@ -202,8 +218,16 @@ def test_failed_job_does_not_merge_or_delete_the_workspace(
 ) -> None:
     project.write_workflow(
         "failure",
-        "version: 1\nname: Failure\nnodes:\n"
-        f'  fail: {{type: command, run: ["{PYTHON}", -c, "raise SystemExit(2)"]}}\n',
+        (
+            f"name: Failure\n"
+            f"jobs:\n"
+            f"  fail:\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/command@v1\n"
+            f"      with:\n"
+            f'        argv: \'["{PYTHON}", "-c", "raise SystemExit(2)"]\'\n'
+        ),
     )
     head = git(project.repository, "rev-parse", "HEAD")
     run_id = engine.launch(project, "failure", cleanup_policy="merge_on_success")

@@ -1,4 +1,4 @@
-"""The six provider-independent Relay node executors."""
+"""Worker executors for the current job and step execution records."""
 
 from __future__ import annotations
 
@@ -6,19 +6,12 @@ from relay.execution.runner import AttemptExecutor
 from relay.execution.state import NodeType
 
 from .actions import ActionsJobExecutor, ActionsStepExecutor
-from .agent import AgentExecutor, AgentNodeDriver
-from .base import NestedScopeRunner, SynchronousScopeRunner
-from .command import CommandExecutor
-from .condition import ConditionExecutor
-from .human_wait import HumanWaitExecutor
-from .loop import LoopExecutor
-from .subworkflow import SubworkflowExecutor
+from .agent import AgentNodeDriver
 
 
 def node_executors(
     *,
     agent_driver: AgentNodeDriver | None = None,
-    scope_runner: NestedScopeRunner | None = None,
 ) -> dict[str, AttemptExecutor]:
     """Build one registry keyed by the stable persisted node-type values."""
     if agent_driver is None:
@@ -28,25 +21,10 @@ def node_executors(
         driver = RoutedAgentNodeDriver()
     else:
         driver = agent_driver
-    scopes = scope_runner if scope_runner is not None else SynchronousScopeRunner(driver)
     return {
-        NodeType.AGENT.value: AgentExecutor(driver),
-        NodeType.COMMAND.value: CommandExecutor(),
-        NodeType.HUMAN_WAIT.value: HumanWaitExecutor(),
-        NodeType.CONDITION.value: ConditionExecutor(),
-        NodeType.LOOP.value: LoopExecutor(scopes),
-        NodeType.SUBWORKFLOW.value: SubworkflowExecutor(scopes),
         NodeType.ACTIONS_JOB.value: ActionsJobExecutor(driver),
         NodeType.ACTIONS_STEP.value: ActionsStepExecutor(driver),
     }
 
 
-__all__ = [
-    "AgentExecutor",
-    "CommandExecutor",
-    "ConditionExecutor",
-    "HumanWaitExecutor",
-    "LoopExecutor",
-    "SubworkflowExecutor",
-    "node_executors",
-]
+__all__ = ["node_executors"]

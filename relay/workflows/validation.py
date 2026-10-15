@@ -9,38 +9,27 @@ from typing import Annotated
 
 from pydantic import Field, TypeAdapter, ValidationError
 
-from relay.constants import MAX_EXPANDED_NODES
-from relay.errors import PromptResolutionError, WorkflowValidationError
+from relay.errors import WorkflowValidationError
 
 from .graph import CompiledGraph, compile_graph
-from .loader import LoadedWorkflow, load_workflow_tree, resolve_workflow_path, subworkflow_nodes
-from .prompts import ResolvedPrompt, iter_agent_nodes, resolve_prompt
+from .loader import LoadedWorkflow
+from .prompts import ResolvedPrompt
 from .schema import (
-    NODE_ID_PATTERN,
-    AgentNode,
     BooleanInput,
-    CommandNode,
     EnumInput,
     InputDefinition,
     IntegerInput,
-    LoopNode,
-    NodeDefinition,
     NumberInput,
     StringInput,
-    SubworkflowNode,
-    WorkflowDefinition,
 )
-from .scope import parse_scope_path
 
 
 @dataclass(frozen=True, slots=True)
 class ValidatedWorkflow:
-    """Validated root, dependency indexes, children, and resolved prompts."""
+    """Validated root, dependency indexes, and resolved prompts."""
 
     root: LoadedWorkflow
     graph: CompiledGraph
-    subworkflows: Mapping[str, LoadedWorkflow]
-    subworkflow_graphs: Mapping[str, CompiledGraph]
     prompts: tuple[ResolvedPrompt, ...]
 
 
@@ -58,156 +47,17 @@ def _pattern_adapter(pattern: str) -> TypeAdapter[str]:
         raise WorkflowValidationError(message) from None
 
 
-def _definition_issues(definition: WorkflowDefinition, *, label: str) -> list[str]:
-    issues = []
-    for input_id, item in definition.inputs.items():
-        if isinstance(item, StringInput) and item.constraints.pattern is not None:
-            try:
-                _pattern_adapter(item.constraints.pattern)
-            except WorkflowValidationError as error:
-                issues.append(f"{label}.inputs.{input_id}: {error.message}")
-    for entry in definition.entrypoints:
-        scope = entry.scope_path
-        if NODE_ID_PATTERN.fullmatch(scope) is not None:
-            top_id = scope
-        else:
-            try:
-                top_id = parse_scope_path(scope)[0].node_id
-            except WorkflowValidationError as error:
-                issues.append(f"{label}.entrypoints: {error.message}")
-                continue
-        if top_id not in definition.nodes:
-            issues.append(f"{label}.entrypoints references unknown node {scope!r}")
-        for input_id in entry.inputs:
-            if input_id not in definition.inputs:
-                issues.append(f"{label}.entrypoints references unknown input {input_id!r}")
-    return issues
-
-
-def _declared_outputs(definition: WorkflowDefinition) -> set[str]:
-    outputs = set()
-    for node_id, node in definition.nodes.items():
-        if isinstance(node, (AgentNode, CommandNode, SubworkflowNode)):
-            outputs.update(f"{node_id}.{name}" for name in node.outputs)
-    return outputs
-
-
-def _subworkflow_io_issues(
-    definition: WorkflowDefinition,
-    workflows_root: Path,
-    subworkflows: Mapping[str, LoadedWorkflow],
-    *,
-    label: str,
-) -> list[str]:
-    issues = []
-    for node in subworkflow_nodes(definition.nodes):
-        path = resolve_workflow_path(workflows_root, node.workflow)
-        key = path.relative_to(workflows_root.resolve()).as_posix()
-        child = subworkflows.get(key)
-        if child is None:
-            continue
-        unknown_inputs = node.inputs.keys() - child.definition.inputs.keys()
-        for input_id in sorted(unknown_inputs):
-            issues.append(f"{label} subworkflow {node.workflow!r} has unknown input {input_id!r}")
-        for input_id, item in child.definition.inputs.items():
-            if item.required and item.default is None and input_id not in node.inputs:
-                issues.append(f"{label} subworkflow {node.workflow!r} requires input {input_id!r}")
-        child_outputs = _declared_outputs(child.definition)
-        for output_name, child_selector in node.outputs.items():
-            if child_selector not in child_outputs:
-                issues.append(
-                    f"{label} output {output_name!r} references unknown child output "
-                    f"{child_selector!r}"
-                )
-    return issues
-
-
-def _expanded_node_count(
-    nodes: Mapping[str, NodeDefinition],
-    workflows_root: Path,
-    subworkflows: Mapping[str, LoadedWorkflow],
-) -> int:
-    """Count the largest materialized graph, stopping above the fixed ceiling."""
-    total = 0
-    for node in nodes.values():
-        total += 1
-        if isinstance(node, LoopNode):
-            nested = _expanded_node_count(node.body, workflows_root, subworkflows)
-            total += node.max_iterations * nested
-        elif isinstance(node, SubworkflowNode):
-            path = resolve_workflow_path(workflows_root, node.workflow)
-            key = path.relative_to(workflows_root.resolve()).as_posix()
-            child = subworkflows.get(key)
-            if child is not None:
-                total += _expanded_node_count(child.definition.nodes, workflows_root, subworkflows)
-        if total > MAX_EXPANDED_NODES:
-            return total
-    return total
-
-
-def _resolved_prompts(
-    workflows: Iterable[LoadedWorkflow], relay_root: Path, issues: list[str]
-) -> list[ResolvedPrompt]:
-    prompts = []
-    for workflow in workflows:
-        for node in iter_agent_nodes(workflow.definition.nodes):
-            for reference in node.prompts:
-                try:
-                    prompts.append(resolve_prompt(reference, relay_root))
-                except PromptResolutionError as error:
-                    issues.append(f"{workflow.path.name}: {error.message}")
-    return prompts
-
-
 def validate_loaded_workflow(root: LoadedWorkflow, relay_root: Path) -> ValidatedWorkflow:
-    """Validate root and transitive workflows, aggregating independent issues."""
-    if root.definition.actions:
-        from dataclasses import replace
+    """Capture current workflow sources and compile their job dependencies."""
+    from dataclasses import replace
 
-        from .actions.compiler import definition as compile_actions
-        from .actions.language import capture_sources
-        from .actions.language import load as load_actions
+    from .actions.compiler import definition
+    from .actions.language import capture_sources, load
 
-        document = load_actions(root.text, source=root.path)
-        captured = capture_sources(document, relay_root.parent)
-        root = replace(root, definition=compile_actions(document, captured))
-        return ValidatedWorkflow(root, compile_graph(root.definition.nodes), {}, {}, ())
-    workflows_root = (relay_root / "workflows").resolve()
-    subworkflows = load_workflow_tree(root, workflows_root)
-    issues = _definition_issues(root.definition, label=root.path.name)
-    try:
-        graph = compile_graph(root.definition.nodes)
-    except WorkflowValidationError as error:
-        issues.append(error.message)
-        graph = CompiledGraph({}, (), {}, {}, {}, {}, {})
-
-    subworkflow_graphs = {}
-    for key, workflow in subworkflows.items():
-        issues.extend(_definition_issues(workflow.definition, label=key))
-        try:
-            subworkflow_graphs[key] = compile_graph(workflow.definition.nodes, location=key)
-        except WorkflowValidationError as error:
-            issues.append(error.message)
-    issues.extend(
-        _subworkflow_io_issues(root.definition, workflows_root, subworkflows, label=root.path.name)
-    )
-    for key, workflow in subworkflows.items():
-        issues.extend(
-            _subworkflow_io_issues(workflow.definition, workflows_root, subworkflows, label=key)
-        )
-    expanded = _expanded_node_count(root.definition.nodes, workflows_root, subworkflows)
-    if expanded > MAX_EXPANDED_NODES:
-        issues.append(f"expanded workflow has {expanded} nodes; limit is {MAX_EXPANDED_NODES}")
-    prompts = _resolved_prompts((root, *subworkflows.values()), relay_root, issues)
-    if issues:
-        raise WorkflowValidationError(_issue_text(issues), context={"workflow": str(root.path)})
-    return ValidatedWorkflow(
-        root=root,
-        graph=graph,
-        subworkflows=subworkflows,
-        subworkflow_graphs=subworkflow_graphs,
-        prompts=tuple(prompts),
-    )
+    document = load(root.text, source=root.path)
+    captured = capture_sources(document, relay_root.parent)
+    root = replace(root, definition=definition(document, captured))
+    return ValidatedWorkflow(root, compile_graph(root.definition.nodes), ())
 
 
 def _input_value(item: InputDefinition, value: object, input_id: str) -> object:
@@ -262,14 +112,14 @@ def _input_value(item: InputDefinition, value: object, input_id: str) -> object:
 
 
 def resolve_inputs(
-    definition: WorkflowDefinition, supplied: Mapping[str, object]
+    inputs: Mapping[str, InputDefinition], supplied: Mapping[str, object]
 ) -> dict[str, object]:
     """Apply defaults and validate every launch input without coercion."""
     issues = []
-    unknown = supplied.keys() - definition.inputs.keys()
+    unknown = supplied.keys() - inputs.keys()
     issues.extend(f"unknown launch input {name!r}" for name in sorted(unknown))
     resolved = {}
-    for input_id, item in definition.inputs.items():
+    for input_id, item in inputs.items():
         if input_id in supplied:
             value = supplied[input_id]
         elif item.default is not None:

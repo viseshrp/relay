@@ -670,19 +670,33 @@ def test_routed_execution_persists_visible_provider_events(
     fake_agents.install("codex")
     project.write_workflow(
         "routed",
-        "version: 1\nname: Routed\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work: {type: agent, writes: true, allow_no_commit: true}\n",
+        (
+            "name: Routed\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+        ),
     )
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     run_id = engine.launch(project, "routed")
     engine.drain(run_id)
     messages = RunEvent.objects.filter(run_id=run_id, type="agent.message")
     assert [message.payload["text"] for message in messages] == ["ready"]
-    assert NodeAttempt.objects.get(node_run__run_id=run_id).agent_id == "codex"
+    assert (
+        NodeAttempt.objects.get(
+            node_run__run_id=run_id, node_run__node_type="actions_step"
+        ).agent_id
+        == "codex"
+    )
 
 
 @pytest.mark.usefixtures("registry_network", "database_threads")
-def test_routed_v1_execution_preserves_oversized_visible_events(
+def test_routed_execution_preserves_oversized_visible_events(
     agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     text = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
@@ -774,14 +788,15 @@ def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
     )
     project.write_workflow(
         "tool_output",
-        """on: workflow_dispatch
-jobs:
-  check:
-    env: {KEY: '${{ secrets.KEY }}'}
-    steps:
-      - uses: relay/agent@v1
-        with: {agent: codex, model: m1}
-""",
+        (
+            "on: workflow_dispatch\n"
+            "jobs:\n"
+            "  check:\n"
+            "    env: {KEY: '${{ secrets.KEY }}'}\n"
+            "    steps:\n"
+            "      - uses: relay/agent@v1\n"
+            "        with: {agent: codex, model: m1}\n"
+        ),
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "tool_output")
@@ -836,14 +851,29 @@ def test_the_agent_node_port_validates_its_writers_output_handoff(
     fake_agents.install("codex")
     project.write_workflow(
         "handoff",
-        "version: 1\nname: Handoff\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work:\n    type: agent\n    writes: true\n    outputs:\n"
-        "      ready: {label: {artifact: agent-output.md, label: Ready}}\n",
+        (
+            "name: Handoff\n"
+            "jobs:\n"
+            "  work:\n"
+            "    outputs:\n"
+            "      ready: ${{ steps.work.outputs.value }}\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            "        report: agent-output.md\n"
+            "        label: Ready\n"
+        ),
     )
+    from tests.support import FakeAgentDriver
+
+    engine.executors = node_executors(agent_driver=FakeAgentDriver(edit_file=True))
     run_id = engine.launch(project, "handoff")
     starting_head = Run.objects.get(pk=run_id).recorded_head
 
     engine.drain(run_id)
 
-    assert NodeRun.objects.get(run_id=run_id).outputs == {"ready": "Yes"}
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.work").outputs == {"ready": "Yes"}
     assert Run.objects.get(pk=run_id).recorded_head != starting_head

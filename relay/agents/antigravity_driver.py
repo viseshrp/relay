@@ -38,10 +38,8 @@ from relay.execution.cancellation import (
     terminate_async_process_tree,
 )
 from relay.execution.control import cancel_stop_reason
-from relay.execution.nodes.base import declared_output_artifacts
 from relay.execution.state import ControlKind
 from relay.execution.timing import attempt_deadline, duration_seconds
-from relay.vcs.commits import current_head
 
 from .configuration import native_configuration, validate_native_requirement
 from .events import AgentEvent, normalize_antigravity_event
@@ -74,7 +72,7 @@ def _prompt(context: AgentExecutionContext) -> str:
         ("Relay agent selection", context.agent_selection()),
     )
     suffix = "".join(
-        f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}"
+        (f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}")
         for heading, value in sections
     )
     workspace = f"\n\n{context.workspace_instructions()}"
@@ -533,20 +531,10 @@ class AntigravityDriver:
             if requested_stop is None:
                 await sender
             await process.wait()
-            required = set(declared_output_artifacts(context.node.outputs).values())
-            denied_required = any(
-                requested == target
-                or requested.startswith(target.rstrip("/") + "/")
-                or target.startswith(requested.rstrip("/") + "/")
-                for requested in required
-                for target in denied
-            )
-            denied_without_commit = (
-                context.node.writes
-                and bool(denied)
-                and current_head(context.cwd) == context.attempt.attempt.starting_head
-            )
-            soft_denied = context.node.writes and (denied_required or denied_without_commit)
+            # Actions agents edit the shared job workspace; Relay commits at
+            # the job boundary. A verified denied write cannot be inferred from
+            # a provider-owned commit or an obsolete writer flag.
+            soft_denied = bool(denied)
             succeeded = (
                 requested_stop is None
                 and process.returncode == 0

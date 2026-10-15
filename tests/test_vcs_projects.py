@@ -25,17 +25,14 @@ from relay.vcs import git as git_module
 from relay.vcs.artifacts import preserve_attempt_evidence, preserve_then_reset, retained_attempt_ref
 from relay.vcs.cleanliness import require_clean, status_porcelain
 from relay.vcs.commits import (
+    accept_job_result,
     commits_between,
     current_head,
     is_ancestor,
-    validate_reader_result,
-    validate_writer_result,
 )
 from relay.vcs.git import git_executable, run_git, run_git_bytes, run_git_to_file
 from relay.vcs.worktree import (
     create_primary_worktree,
-    create_reader_worktree,
-    remove_worktree,
     require_project_worktree,
     reset_worktree,
     run_branch,
@@ -159,21 +156,17 @@ def test_a_checkout_from_another_project_cannot_be_used_for_execution(
     require_project_worktree(repository, repository)
 
 
-def test_a_writer_must_commit_its_changes(repository: Path) -> None:
+def test_a_job_commits_its_changed_code(repository: Path) -> None:
     start = current_head(repository)
     (repository / "loose.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(CommitValidationError, match="uncommitted"):
-        validate_writer_result(repository, start)
+    result = accept_job_result(repository, start, job_id="build")
+    assert result.commit_count == 1
+    assert status_porcelain(repository) == ()
 
 
-def test_a_writer_without_a_commit_is_rejected(repository: Path) -> None:
-    with pytest.raises(CommitValidationError):
-        validate_writer_result(repository, current_head(repository))
-
-
-def test_an_explicit_writer_noop_keeps_the_same_head(repository: Path) -> None:
+def test_a_clean_job_noop_keeps_the_same_head(repository: Path) -> None:
     head = current_head(repository)
-    result = validate_writer_result(repository, head, allow_no_commit=True)
+    result = accept_job_result(repository, head, job_id="build")
     assert (result.starting_head, result.ending_head, result.commit_count) == (head, head, 0)
 
 
@@ -191,20 +184,21 @@ def test_autonomous_run_reports_can_remain_uncommitted(repository: Path, name: s
     head = current_head(repository)
     (repository / name).write_text('{"ready": false}\n', encoding="utf-8")
 
-    result = validate_writer_result(repository, head, allow_no_commit=True)
+    result = accept_job_result(repository, head, job_id="build")
 
     assert result.ending_head == head
     assert status_porcelain(repository) == (f"?? {name}",)
 
 
 @pytest.mark.parametrize("name", ["settings.json", "nested/PLAN_CHECKPOINT.json"])
-def test_other_uncommitted_json_remains_a_writer_error(repository: Path, name: str) -> None:
+def test_other_uncommitted_json_is_committed_as_job_code(repository: Path, name: str) -> None:
     path = repository / name
     path.parent.mkdir(exist_ok=True)
     path.write_text('{"ready": false}\n', encoding="utf-8")
 
-    with pytest.raises(CommitValidationError):
-        validate_writer_result(repository, current_head(repository), allow_no_commit=True)
+    result = accept_job_result(repository, current_head(repository), job_id="build")
+    assert result.commit_count == 1
+    assert status_porcelain(repository) == ()
 
 
 def test_staged_checkpoint_changes_remain_a_writer_error(repository: Path) -> None:
@@ -213,7 +207,7 @@ def test_staged_checkpoint_changes_remain_a_writer_error(repository: Path) -> No
     git(repository, "add", name)
 
     with pytest.raises(CommitValidationError):
-        validate_writer_result(repository, current_head(repository), allow_no_commit=True)
+        accept_job_result(repository, current_head(repository), job_id="build")
 
 
 def test_commit_ranges_are_unambiguous_in_deep_repository_paths(tmp_path: Path) -> None:
@@ -226,32 +220,21 @@ def test_commit_ranges_are_unambiguous_in_deep_repository_paths(tmp_path: Path) 
     assert commits_between(repository, ending_head, ending_head) == ()
 
 
-def test_writer_commit_attribution_lists_descendants_in_order(repository: Path) -> None:
+def test_job_commit_attribution_lists_descendants_in_order(repository: Path) -> None:
     start = current_head(repository)
     first = commit(repository, "a.txt")
     second = commit(repository, "b.txt")
-    result = validate_writer_result(repository, start)
+    result = accept_job_result(repository, start, job_id="build")
     assert (result.ending_head, result.commit_count) == (second, 2)
     assert commits_between(repository, start, second) == (first, second)
 
 
-def test_a_writer_cannot_move_to_an_unrelated_history(repository: Path) -> None:
+def test_a_job_cannot_move_to_an_unrelated_history(repository: Path) -> None:
     start = current_head(repository)
     git(repository, "checkout", "-q", "--orphan", "elsewhere")
     git(repository, "commit", "-q", "-m", "unrelated")
     with pytest.raises(CommitValidationError):
-        validate_writer_result(repository, start)
-
-
-@pytest.mark.parametrize("change", ["uncommitted", "committed"])
-def test_a_reader_cannot_change_its_attributed_worktree(repository: Path, change: str) -> None:
-    start = current_head(repository)
-    if change == "committed":
-        commit(repository, "changed.txt")
-    else:
-        (repository / "changed.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(CommitValidationError):
-        validate_reader_result(repository, start)
+        accept_job_result(repository, start, job_id="build")
 
 
 def test_ancestry_distinguishes_descendants_from_ancestors(repository: Path) -> None:
@@ -266,21 +249,6 @@ def test_unknown_ancestry_is_a_git_error(repository: Path) -> None:
         is_ancestor(repository, "unknown", current_head(repository))
 
 
-def test_primary_and_reader_worktrees_use_the_recorded_commit(
-    repository: Path, tmp_path: Path
-) -> None:
-    head = current_head(repository)
-    branch, primary, resolved = create_primary_worktree(
-        repository, "run-1", head, root=tmp_path / "trees"
-    )
-    reader, reader_head = create_reader_worktree(repository, primary, "attempt-1", resolved)
-    assert branch == run_branch("run-1")
-    assert resolved == reader_head == head
-    assert reader.parent == primary and (reader / "README.md").is_file()
-    remove_worktree(repository, reader)
-    assert not reader.exists()
-
-
 @pytest.mark.parametrize("collision", ["branch", "path"])
 def test_primary_worktree_creation_cannot_replace_existing_state(
     repository: Path, tmp_path: Path, collision: str
@@ -292,18 +260,6 @@ def test_primary_worktree_creation_cannot_replace_existing_state(
         git(repository, "branch", run_branch("run-1"))
     with pytest.raises(WorktreeError):
         create_primary_worktree(repository, "run-1", current_head(repository), root=root)
-
-
-def test_reader_worktree_creation_cannot_replace_existing_state(
-    repository: Path, tmp_path: Path
-) -> None:
-    head = current_head(repository)
-    _branch, primary, _resolved = create_primary_worktree(
-        repository, "run-1", head, root=tmp_path / "trees"
-    )
-    create_reader_worktree(repository, primary, "attempt-1", head)
-    with pytest.raises(WorktreeError):
-        create_reader_worktree(repository, primary, "attempt-1", head)
 
 
 def test_reset_removes_uncommitted_files_after_protecting_the_head(repository: Path) -> None:

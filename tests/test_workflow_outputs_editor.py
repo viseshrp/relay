@@ -29,7 +29,16 @@ from relay.workflows.schema import (
 )
 from tests.support import symlink_or_skip
 
-VALID = "version: 1\nname: Saved\nnodes: {}\n"
+VALID = (
+    "name: Saved\n"
+    "jobs:\n"
+    "  main:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+)
 ACTIONS = (
     "name: Saved\non: workflow_dispatch\njobs:\n  check:\n    steps:\n      - run: echo Ready\n"
 )

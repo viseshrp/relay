@@ -48,7 +48,7 @@ def revision(values: Mapping[str, object]) -> str:
 def validate_project_defaults(raw: object) -> dict[str, object]:
     try:
         values = ProjectDefaults.model_validate(raw).model_dump(mode="json", exclude_unset=True)
-        # Reuse owner settings validation for the legacy agent-order contract.
+        # Reuse owner settings validation for the shared agent-order contract.
         validate_config({key: value for key, value in values.items() if key != "workflow_defaults"})
     except ValidationError as error:
         issues = [

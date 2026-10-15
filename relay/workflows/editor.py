@@ -17,7 +17,6 @@ from relay.execution.state import DraftValidationState
 from relay.paths import safe_resolve
 
 from .loader import load_workflow_text, resolve_workflow_path, workflow_key_parts
-from .schema import AgentNode, CommandNode, ExistsSelector, LoopNode, NodeDefinition
 from .source_files import (
     WorkflowEditorStore,
     _atomic_create,
@@ -165,35 +164,6 @@ def save_prompt_document(
         return read_prompt_document(relay_root, reference)
 
 
-def workflow_handoff_warnings(nodes: dict[str, NodeDefinition]) -> list[dict[str, str]]:
-    """Explain boolean-only outputs, including ones inside a loop body."""
-    warnings = []
-
-    def visit(items: dict[str, NodeDefinition], parent: str) -> None:
-        for node_id, node in items.items():
-            scope = f"{parent}.{node_id}"
-            if isinstance(node, (AgentNode, CommandNode)):
-                for output_name, selector in node.outputs.items():
-                    if isinstance(selector, ExistsSelector):
-                        warnings.append(
-                            {
-                                "scope_path": scope,
-                                "output": output_name,
-                                "artifact": selector.exists,
-                                "message": (
-                                    "This output records only whether the file exists. "
-                                    "Use label, json_path, or yaml_path to retain a report. "
-                                    "A condition can check its verdict before a human review step."
-                                ),
-                            }
-                        )
-            if isinstance(node, LoopNode):
-                visit(node.body, scope)
-
-    visit(nodes, "root")
-    return warnings
-
-
 def autosave_workflow_draft(
     store: WorkflowEditorStore,
     relay_root: Path,
@@ -249,5 +219,4 @@ __all__ = [
     "read_workflow_document",
     "save_prompt_document",
     "save_workflow_document",
-    "workflow_handoff_warnings",
 ]

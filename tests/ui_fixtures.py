@@ -130,13 +130,19 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
             node = NodeRun.objects.create(
                 run=run,
                 node_id="approval",
-                scope_path="root.approval",
-                node_type="human_wait",
+                scope_path="root.approval.work",
+                parent_scope_path="root.approval",
+                node_type="actions_step",
                 status="waiting",
                 frozen_def={
-                    "type": "human_wait",
-                    "prompt": "Approve the release?",
-                    "deadline": "10d",
+                    "type": "actions_step",
+                    "job_id": "approval",
+                    "step_id": "work",
+                    "step": {
+                        "id": "work",
+                        "uses": "relay/human-wait@v1",
+                        "with": {"prompt": "Approve the release?"},
+                    },
                 },
             )
             attempt = NodeAttempt.objects.create(

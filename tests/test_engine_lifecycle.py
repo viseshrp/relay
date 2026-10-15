@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from functools import partial
 import json
 import os
 from pathlib import Path
@@ -13,7 +12,6 @@ import pytest
 
 from relay.errors import ConfigError, PersistenceError
 from relay.execution import huey_app
-from relay.execution.cancellation import request_cancellation
 from relay.execution.control import ControlResult
 from relay.execution.reconcile import reconcile_once
 from relay.execution.recovery import prepare_recovery_workspace
@@ -24,21 +22,45 @@ from relay.execution.state import AttemptStopReason
 from relay.paths import shutdown_marker_path
 from relay.web.models import Instance, NodeAttempt, NodeRun, Run
 from relay.web.repositories import DjangoExecutionStore
-from tests.support import PYTHON, Clock, InlineEngine, RelayProject, git, node_statuses, run_status
+from tests.support import PYTHON, Clock, InlineEngine, RelayProject, node_statuses, run_status
 
-APPROVAL = """version: 1
-name: Approval
-nodes:
-  approve: {type: human_wait, prompt: Continue?}
-  ship: {type: command, needs: [approve], run: [git, status]}
-"""
+APPROVAL = (
+    "name: Approval\n"
+    "jobs:\n"
+    "  approve:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/human-wait@v1\n"
+    "      with:\n"
+    "        prompt: Continue?\n"
+    "  ship:\n"
+    "    needs:\n"
+    "    - approve\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+)
 
-CHAIN = """version: 1
-name: Chain
-nodes:
-  first: {type: command, run: [git, status]}
-  second: {type: command, needs: [first], run: [git, status]}
-"""
+CHAIN = (
+    "name: Chain\n"
+    "jobs:\n"
+    "  first:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+    "  second:\n"
+    "    needs:\n"
+    "    - first\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+)
 
 
 def test_a_live_supervisor_lease_rejects_another_owner() -> None:
@@ -83,9 +105,14 @@ def test_canceling_a_paused_run_settles_it_as_canceled(
 
     engine.store.request_run_cancellation(run_id, "cancel-1")
     engine.store.resolve_human_wait_controls()
+    engine.drain(run_id)
 
     assert run_status(run_id) == "canceled"
-    assert node_statuses(run_id) == {"root.approve": "canceled", "root.ship": "canceled"}
+    assert node_statuses(run_id) == {
+        "root.approve": "canceled",
+        "root.approve.work": "canceled",
+        "root.ship": "canceled",
+    }
 
 
 def test_repeating_a_cancel_is_idempotent(project: RelayProject, engine: InlineEngine) -> None:
@@ -109,23 +136,32 @@ def test_a_failed_node_can_be_rerun_as_a_new_attempt(
     )
     project.write_workflow(
         "rerun",
-        f"""version: 1
-name: Rerun
-nodes:
-  retry:
-    type: command
-    run: ["{PYTHON}", -c, {json.dumps(script)}]
-    env: {{MARKER: {json.dumps(marker)}}}
-  after: {{type: command, needs: [retry], run: [git, status]}}
-""",
+        json.dumps(
+            {
+                "jobs": {
+                    "retry": {
+                        "env": {"MARKER": marker},
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([PYTHON, "-c", script])},
+                            }
+                        ],
+                    },
+                    "after": {
+                        "needs": ["retry"],
+                        "steps": [{"run": "print(1)", "shell": "python"}],
+                    },
+                }
+            }
+        ),
     )
     run_id = engine.launch(project, "rerun")
     engine.drain(run_id)
     store = engine.store
 
-    result = rerun_failed_node(
-        store, run_id, "root.retry", "r1", partial(prepare_recovery_workspace, store)
-    )
+    result = rerun_failed_node(store, run_id, "root.retry", "r1", prepare_recovery_workspace)
     dispatch_ready_nodes(store, run_id, engine.tokens.append)
     engine.drain(run_id)
 
@@ -141,8 +177,16 @@ def test_a_rerun_in_preparation_rejects_a_concurrent_request(
 ) -> None:
     project.write_workflow(
         "failed",
-        f"version: 1\nname: Failed\nnodes:\n"
-        f'  a: {{type: command, run: ["{PYTHON}", -c, "exit(1)"]}}\n',
+        (
+            f"name: Failed\n"
+            f"jobs:\n"
+            f"  a:\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/command@v1\n"
+            f"      with:\n"
+            f'        argv: \'["{PYTHON}", "-c", "exit(1)"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "failed")
     engine.drain(run_id)
@@ -156,125 +200,14 @@ def test_a_rerun_in_preparation_rejects_a_concurrent_request(
                 run_id,
                 "root.a",
                 "other",
-                partial(prepare_recovery_workspace, store),
+                prepare_recovery_workspace,
             )
         )
-        prepare_recovery_workspace(store, target)
+        prepare_recovery_workspace(target)
 
     rerun_failed_node(store, run_id, "root.a", "first", prepare)
 
     assert duplicate == [ControlResult.STALE]
-
-
-@pytest.mark.parametrize("nested", [False, True])
-@pytest.mark.parametrize("cancel_stage", [None, "before_dispatch", "after_claim"])
-def test_rerunning_a_child_reopens_its_failed_iteration_summaries(
-    project: RelayProject,
-    engine: InlineEngine,
-    tmp_path: Path,
-    nested: bool,
-    cancel_stage: str | None,
-) -> None:
-    marker = str(tmp_path / "second-try")
-    script = (
-        "from pathlib import Path; import os,sys; p=Path(os.environ['MARKER']); "
-        "existed=p.exists(); p.touch(); sys.exit(0 if existed else 1)"
-    )
-    body = {
-        "before": {"type": "command", "run": ["git", "status"]},
-        "retry": {
-            "type": "command",
-            "needs": ["before"],
-            "run": [PYTHON, "-c", script],
-            "env": {"MARKER": marker},
-        },
-        "after": {"type": "command", "needs": ["retry"], "run": ["git", "status"]},
-    }
-    parent = "root.repeat#1"
-    summaries = [parent]
-    if nested:
-        body = {
-            "inner": {
-                "type": "loop",
-                "max_iterations": 1,
-                "until": "${{ True }}",
-                "exhausted": "inner_exhausted",
-                "body": body,
-            },
-            "inner_exhausted": {
-                "type": "command",
-                "needs": ["inner"],
-                "run": ["git", "status"],
-            },
-        }
-        parent += ".inner#1"
-        summaries.append(parent)
-    project.write_workflow(
-        "iteration-rerun",
-        json.dumps(
-            {
-                "version": 1,
-                "name": "Iteration rerun",
-                "nodes": {
-                    "repeat": {
-                        "type": "loop",
-                        "max_iterations": 1,
-                        "until": "${{ True }}",
-                        "exhausted": "exhausted",
-                        "body": body,
-                    },
-                    "exhausted": {
-                        "type": "command",
-                        "needs": ["repeat"],
-                        "run": ["git", "status"],
-                    },
-                },
-            }
-        ),
-    )
-    run_id = engine.launch(project, "iteration-rerun")
-    engine.drain(run_id)
-    assert all(node_statuses(run_id)[scope] == "failed" for scope in summaries)
-    store = engine.store
-
-    result = rerun_failed_node(
-        store, run_id, parent + ".retry", "nested-rerun", partial(prepare_recovery_workspace, store)
-    )
-
-    assert result is ControlResult.ACCEPTED
-    assert all(node_statuses(run_id)[scope] == "running" for scope in summaries)
-    assert node_statuses(run_id)[parent + ".before"] == "succeeded"
-    if cancel_stage == "after_claim":
-        dispatch_ready_nodes(store, run_id, engine.tokens.append)
-        coordinator = store.claim_dispatch(engine.tokens.popleft(), "worker").attempt
-        assert coordinator is not None
-        assert request_cancellation(store, run_id, "cancel-retry") is ControlResult.ACCEPTED
-        assert run_status(run_id) == "canceling"
-        assert node_statuses(run_id)[summaries[0]] == "running"
-        if nested:
-            assert node_statuses(run_id)[summaries[1]] == "canceled"
-        store.record_loop_iteration(
-            coordinator.node_run_id, summaries[0], 1, OutcomeKind.FAILED, {}
-        )
-        store.finish_attempt(
-            coordinator.attempt_id,
-            ExecutionOutcome(OutcomeKind.FAILED, stop_reason=AttemptStopReason.CANCELED),
-            coordinator.starting_head,
-        )
-        assert run_status(run_id) == "canceled"
-        assert node_statuses(run_id)[summaries[0]] == "failed"
-    elif cancel_stage == "before_dispatch":
-        assert request_cancellation(store, run_id, "cancel-retry") is ControlResult.ACCEPTED
-        assert run_status(run_id) == "canceled"
-        assert all(node_statuses(run_id)[scope] == "canceled" for scope in summaries)
-    else:
-        dispatch_ready_nodes(store, run_id, engine.tokens.append)
-        engine.drain(run_id)
-        assert run_status(run_id) == "succeeded"
-        assert all(node_statuses(run_id)[scope] == "succeeded" for scope in summaries)
-    assert (
-        NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__node_id="before").count() == 1
-    )
 
 
 def test_orderly_shutdown_interrupts_attempts_and_restart_resumes_them(
@@ -290,7 +223,7 @@ def test_orderly_shutdown_interrupts_attempts_and_restart_resumes_them(
     store.interrupt_active_attempts()
     store.release_instance(instance)
 
-    resumed = resume_interrupted(store, partial(prepare_recovery_workspace, store))
+    resumed = resume_interrupted(store, prepare_recovery_workspace)
     dispatch_ready_nodes(store, run_id, engine.tokens.append)
     engine.drain(run_id)
 
@@ -301,58 +234,6 @@ def test_orderly_shutdown_interrupts_attempts_and_restart_resumes_them(
         .order_by("attempt_number")
         .values_list("stop_reason", flat=True)
     ) == ["interrupted", "completed"]
-
-
-@pytest.mark.parametrize("intent", ["owner", "fail_fast"])
-def test_cancel_and_shutdown_keep_a_completed_writers_outputs_and_commit(
-    project: RelayProject, engine: InlineEngine, intent: str
-) -> None:
-    project.write_workflow(
-        "drain",
-        """version: 1
-name: Drain
-nodes:
-  writer: {type: command, writes: true, run: [git, status]}
-  sibling: {type: human_wait, prompt: Wait}
-""",
-    )
-    run_id = engine.launch(project, "drain")
-    store = engine.store
-    claims = [store.claim_dispatch(token, "worker") for token in engine.tokens]
-    writer, sibling = [item.attempt for item in claims]
-    assert writer is not None and sibling is not None
-    if intent == "owner":
-        store.request_run_cancellation(run_id, "cancel")
-    else:
-        store.finish_attempt(
-            sibling.attempt_id,
-            ExecutionOutcome(
-                OutcomeKind.FAILED,
-                stop_reason=AttemptStopReason.FAILED,
-                error_code="output_invalid",
-                exit_code=3,
-            ),
-            sibling.starting_head,
-        )
-    worktree = Path(writer.primary_worktree)
-    git(worktree, "commit", "--allow-empty", "-q", "-m", "Finished writer")
-    completed_head = git(worktree, "rev-parse", "HEAD")
-
-    store.finish_attempt(
-        writer.attempt_id,
-        ExecutionOutcome(OutcomeKind.SUCCEEDED, outputs={"ready": "Yes"}, exit_code=0),
-        completed_head,
-    )
-    instance = store.acquire_instance(os.getpid(), "host")
-    store.request_orderly_shutdown(instance)
-    store.interrupt_active_attempts()
-    store.release_instance(instance)
-
-    assert NodeRun.objects.get(pk=writer.node_run_id).outputs == {"ready": "Yes"}
-    run = Run.objects.get(pk=run_id)
-    assert run.recorded_head == completed_head
-    assert run.status == ("canceled" if intent == "owner" else "failed")
-    assert resume_interrupted(store, partial(prepare_recovery_workspace, store)) == ()
 
 
 def test_a_failure_during_owner_cancel_keeps_its_own_diagnostic(
@@ -394,7 +275,7 @@ def test_a_canceled_node_cannot_satisfy_the_runs_success_guard(
 
     engine.run_token(engine.tokens.popleft())
 
-    assert run_status(run_id) == "running"
+    assert run_status(run_id) == "canceled"
 
 
 @pytest.mark.parametrize("paused", [False, True])
@@ -402,9 +283,22 @@ def test_reconciliation_repairs_lost_delivery_in_active_runs(
     project: RelayProject, engine: InlineEngine, clock: Clock, paused: bool
 ) -> None:
     workflow = (
-        "version: 1\nname: Waiting sibling\nnodes:\n"
-        "  approve: {type: human_wait, prompt: Continue?}\n"
-        "  independent: {type: command, run: [git, status]}\n"
+        (
+            "name: Waiting sibling\n"
+            "jobs:\n"
+            "  approve:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Continue?\n"
+            "  independent:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        )
         if paused
         else CHAIN
     )

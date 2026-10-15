@@ -17,7 +17,7 @@ from relay.execution.heartbeat import HeartbeatCoordinator
 from relay.execution.nodes import node_executors
 from relay.execution.state import EventSensitivity, EventSource
 from relay.web.db_retry import retry_database_busy
-from relay.web.models import NodeAttempt, NodeRun, Project, Run, RunLock
+from relay.web.models import ActionsJobLease, NodeAttempt, NodeRun, Project, Run
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
 from tests.support import Clock, FakeAgents, InlineEngine, RegistryNetwork, RelayProject
 
@@ -34,7 +34,7 @@ def test_nested_registrations_renew_once_in_one_transaction(
             run_id=claim.run_id,
             scope_path=f"root.parent_{level}",
             node_id=f"parent_{level}",
-            node_type="subworkflow",
+            node_type="actions_job",
             status="running",
             frozen_def={},
         )
@@ -56,7 +56,7 @@ def test_nested_registrations_renew_once_in_one_transaction(
     assert probe.empty_transactions == 0
     assert probe.autocommit_writes == 0
     assert NodeAttempt.objects.filter(heartbeat_at=clock.now()).count() == 5
-    assert RunLock.objects.filter(attempt_id=claim.attempt_id, heartbeat_at=clock.now()).exists()
+    assert ActionsJobLease.objects.filter(node__run_id=claim.run_id).exists()
     with SqliteWriteProbe() as probe:
         coordinator.renew()
     assert probe.transactions == 0
@@ -113,15 +113,19 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
     release = tmp_path / "release-agent"
     fake_agents.install("codex", mode=f"quiet-until:{release}")
     for level in range(5):
-        node = (
-            f"{{type: subworkflow, workflow: nested_{level + 1}}}"
+        source = (
+            (
+                f"on: workflow_call\n"
+                f"jobs: {{work: {{uses: ./.relay/workflows/nested_{level + 1}.yaml}}}}\n"
+            )
             if level < 4
-            else "{type: agent, prompts: [{local: prompts/prompt.md}], writes: false}"
+            else (
+                "on: workflow_call\n"
+                "jobs: {work: {steps: [{id: agent, uses: relay/agent@v1, with: {agent: "
+                "codex, model: m1, prompt-files: prompts/prompt.md}}]}}\n"
+            )
         )
-        project.write_workflow(
-            f"nested_{level}",
-            f"version: 1\nname: Nested\nagents: [codex]\nmodel: m1\nnodes:\n  work: {node}\n",
-        )
+        project.write_workflow(f"nested_{level}", source)
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "nested_0")
     ready = threading.Event()
@@ -179,7 +183,7 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
         future = executor.submit(execute)
         try:
             assert ready.wait(15), "fake agent did not reach its quiet gate"
-            assert NodeAttempt.objects.filter(status="running").count() == 5
+            assert NodeAttempt.objects.filter(status="running").count() == 6
             renewing.clear()
             with (
                 probe,
@@ -203,7 +207,7 @@ def test_quiet_five_level_agent_survives_a_write_lock_beyond_five_seconds(
             release.touch()
         future.result(timeout=15)
     assert Run.objects.get(pk=run_id).status == "succeeded"
-    assert NodeAttempt.objects.filter(status="terminal", stop_reason="completed").count() == 5
+    assert NodeAttempt.objects.filter(status="terminal", stop_reason="completed").count() == 6
 
 
 def test_a_rolled_back_busy_transaction_retries_until_the_gate_opens(
@@ -277,13 +281,23 @@ def test_streaming_step_lock_profile(
     fake_agents.install("codex", mode="stream-200")
     project.write_workflow(
         "stream-child",
-        "version: 1\nname: Stream\nagents: [codex]\nmodel: m1\nnodes:\n"
-        "  agent: {type: agent, prompts: [{local: prompts/prompt.md}], writes: false}\n",
+        (
+            "name: Stream\n"
+            "on: workflow_call\n"
+            "jobs:\n"
+            "  agent:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            '        prompt-files: "prompts/prompt.md"\n'
+        ),
     )
     project.write_workflow(
         "stream-parent",
-        "version: 1\nname: Parent\nagents: [codex]\nmodel: m1\nnodes:\n"
-        "  child: {type: subworkflow, workflow: stream-child}\n",
+        "jobs: {child: {uses: ./.relay/workflows/stream-child.yaml}}\n",
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "stream-parent")

@@ -12,6 +12,7 @@ import pytest
 from relay.constants import API_MAX_PAGE_BYTES
 from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoReadStore
+from relay.workflows.schema import ActionsJobNode
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
 from tests.support import InlineEngine, RelayProject
 from tests.test_web_api import client as client
@@ -156,8 +157,10 @@ def test_monitor_pages_all_nodes_beyond_a_thousand(owner: Client, finished_run: 
                 run_id=finished_run,
                 scope_path=f"root.extra_{index}",
                 node_id=f"extra_{index}",
-                node_type="command",
-                frozen_def={"type": "command", "run": ["echo", "ok"]},
+                node_type="actions_job",
+                frozen_def=ActionsJobNode(
+                    job_id=f"extra_{index}", job={"steps": [{"run": "echo ok"}]}, workflow={}
+                ).model_dump(mode="json"),
             )
             for index in range(1005)
         ]
@@ -176,13 +179,13 @@ def test_monitor_pages_all_nodes_beyond_a_thousand(owner: Client, finished_run: 
             break
         assert value["nodes_next"] > cursor
         cursor = value["nodes_next"]
-    assert len(set(ids)) == len(ids) == 1006
+    assert len(set(ids)) == len(ids) == 1007
 
 
 def test_job_pages_include_metadata_in_the_byte_budget_and_continue_beyond_a_thousand(
     owner: Client, finished_run: str
 ) -> None:
-    node = NodeRun.objects.get(run_id=finished_run)
+    node = NodeRun.objects.get(run_id=finished_run, node_type="actions_job")
     head = NodeAttempt.objects.get(node_run=node).starting_head
     attempts = NodeAttempt.objects.bulk_create(
         [

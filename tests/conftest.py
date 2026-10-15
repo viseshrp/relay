@@ -221,6 +221,9 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     # Model defaults can retain timezone.now; freeze its datetime lookup as well.
     monkeypatch.setattr(timezone, "datetime", FrozenDateTime)
     monkeypatch.setattr(runner, "datetime", FrozenDateTime)
+    from relay.web import actions_repository
+
+    monkeypatch.setattr(actions_repository, "datetime", FrozenDateTime)
     return controlled
 
 
@@ -286,15 +289,49 @@ def agent_context(
     executable = fake_agents.install(agent_id)
     project.write_workflow(
         "agent",
-        "version: 1\nname: Agent\nmodel: m1\n"
-        f"agents: [{agent_id}]\nnodes:\n"
-        "  work: {type: agent, prompts: [{local: prompts/prompt.md}], "
-        "writes: true, allow_no_commit: true}\n",
+        (
+            f"name: Agent\n"
+            f"jobs:\n"
+            f"  work:\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/agent@v1\n"
+            f"      with:\n"
+            f"        agent: {agent_id}\n"
+            f"        model: m1\n"
+            f"        prompt-files: prompts/prompt.md\n"
+        ),
     )
     run_id = engine.launch(project, "agent")
-    claim = engine.store.claim_dispatch(engine.tokens.popleft(), "provider-worker").attempt
+    from relay.execution.dispatch import dispatch_node
+    from relay.web.models import NodeRun
+    from relay.workflows.schema import ActionsJobNode, ActionsStepNode
+
+    parent = engine.store.claim_dispatch(engine.tokens.popleft(), "provider-worker").attempt
+    assert parent is not None
+    job = ActionsJobNode.model_validate(parent.frozen_def)
+    step = ActionsStepNode(
+        job_id=job.job_id,
+        step_id="work",
+        step=job.job["steps"][0],
+        job=job.job,
+        workflow=job.workflow,
+        state_scope=parent.scope_path,
+        index=0,
+        bound_agent=job.bound_agents["work"],
+    )
+    engine.store.ensure_scope_nodes(
+        run_id, parent.scope_path, {"work": step.model_dump(mode="json")}, {}
+    )
+    row = NodeRun.objects.get(run_id=run_id, scope_path=f"{parent.scope_path}.work")
+    engine.store.transition_scope_node(
+        str(row.pk), "dependencies_satisfied", expected_status="pending"
+    )
+    token = dispatch_node(engine.store, str(row.pk), lambda _token: None)
+    assert token is not None
+    claim = engine.store.claim_dispatch(token, "provider-worker").attempt
     assert claim is not None and claim.run_id == run_id
-    node = AgentNode.model_validate(claim.frozen_def)
+    node = AgentNode.model_validate(claim.frozen_def["bound_agent"])
     return AgentExecutionContext(
         AttemptContext(claim, Path(claim.primary_worktree), engine.store),
         node,

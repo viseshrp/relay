@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 import json
+from pathlib import Path
 from typing import NoReturn
 
 from asgiref.sync import sync_to_async
@@ -20,7 +21,6 @@ import pytest
 from relay.constants import DATABASE_INTEGER_MAX, SSE_MAX_FRAME_BYTES
 from relay.errors import ConfigError, ProjectDiscoveryError
 from relay.web.models import AutomaticRetry, RunEvent
-from relay.web.repositories import DjangoExecutionStore
 from relay.web.views import (
     api_errors,
     canonical_record_id,
@@ -42,7 +42,17 @@ from tests.test_usage_retries import limited_run
 @pytest.fixture
 def finished_run(project: RelayProject, engine: InlineEngine) -> str:
     project.write_workflow(
-        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "done",
+        (
+            "name: Done\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "done")
     engine.drain(run_id)
@@ -140,9 +150,24 @@ def test_completion_between_event_and_status_reads_drains_every_batch(
     command = "relay-test-missing-command" if terminal == "failed" else "status"
     project.write_workflow(
         "stream-race",
-        "version: 1\nname: Stream race\nnodes:\n"
-        "  review: {type: human_wait, prompt: Continue?}\n"
-        f"  finish: {{type: command, needs: [review], run: [git, {command}]}}\n",
+        (
+            f"name: Stream race\n"
+            f"jobs:\n"
+            f"  review:\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/human-wait@v1\n"
+            f"      with:\n"
+            f"        prompt: Continue?\n"
+            f"  finish:\n"
+            f"    needs:\n"
+            f"    - review\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/command@v1\n"
+            f"      with:\n"
+            f'        argv: \'["git", "{command}"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "stream-race")
     engine.drain(run_id)
@@ -163,6 +188,7 @@ def test_completion_between_event_and_status_reads_drains_every_batch(
         if terminal == "canceled":
             engine.store.request_run_cancellation(run_id, "cancel-at-read-boundary")
             engine.store.resolve_human_wait_controls()
+            engine.drain(run_id)
         else:
             assert answer_wait(engine, run_id) == "accepted"
         assert run_status(run_id) == terminal
@@ -235,19 +261,17 @@ def test_a_stream_failure_reconnects_after_the_last_delivered_page(
 @pytest.mark.parametrize("state", ["scheduled", "preparing"])
 def test_an_automatic_recovery_keeps_a_failed_stream_open_until_canceled(
     project: RelayProject,
-    engine: InlineEngine,
+    tmp_path: Path,
     fake_agents: FakeAgents,
     registry_network: RegistryNetwork,
     monkeypatch: pytest.MonkeyPatch,
     state: str,
 ) -> None:
-    from relay.execution.nodes import node_executors
     from tests.test_automatic_recovery import ReportDriver, launch_report_run
 
     del registry_network
-    fake_agents.install("codex", mode="configuration")
-    engine.executors = node_executors(agent_driver=ReportDriver())
-    run_id = launch_report_run(project, engine)
+    engine, run_id = launch_report_run(project, tmp_path, fake_agents, ReportDriver())
+    engine.store.configure_recovery(run_id, True, "enable-stream-recovery")
     retry = AutomaticRetry.objects.get(attempt__node_run__run_id=run_id)
     AutomaticRetry.objects.filter(pk=retry.pk).update(state=state)
     polls = 0
@@ -274,7 +298,16 @@ def test_disconnecting_during_a_live_poll_propagates_cancellation(
 ) -> None:
     project.write_workflow(
         "disconnect",
-        "version: 1\nname: Disconnect\nnodes:\n  review: {type: human_wait, prompt: Continue?}\n",
+        (
+            "name: Disconnect\n"
+            "jobs:\n"
+            "  review:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Continue?\n"
+        ),
     )
     run_id = engine.launch(project, "disconnect")
     engine.drain(run_id)
@@ -323,19 +356,24 @@ def test_disabled_login_replays_live_events_without_a_session(finished_run: str)
     assert not User.objects.exists()
 
 
-def test_a_scheduled_failed_run_streams_until_the_owner_cancels_its_retry(
-    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+def test_a_scheduled_job_streams_until_the_owner_cancels_its_retry(
+    project: RelayProject,
+    engine: InlineEngine,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import timedelta
 
     from django.utils import timezone
 
-    run_id = limited_run(project, engine, timezone.now() + timedelta(hours=1))
+    run_id, _ = limited_run(project, engine, fake_agents, timezone.now() + timedelta(hours=1))
+
+    def cancel() -> None:
+        engine.store.request_run_cancellation(run_id, "stop-schedule")
+        engine.drain(run_id)
 
     async def cancel_at_poll(_interval: float) -> None:
-        await sync_to_async(DjangoExecutionStore().request_run_cancellation)(
-            run_id, "stop-schedule"
-        )
+        await sync_to_async(cancel)()
 
     monkeypatch.setattr("relay.web.views.stream.asyncio.sleep", cancel_at_poll)
     status, chunks, _body = stream(f"/api/runs/{run_id}/stream")

@@ -1,19 +1,15 @@
-"""Normative Pydantic schema for Relay workflow version 1."""
+"""Internal job/step execution records and builtin operation arguments."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from relay.constants import (
-    DEFAULT_FIX_INSTRUCTION,
-    DEFAULT_REPAIR_ROUNDS,
-    DEFAULT_VERIFY_INSTRUCTION,
     MAX_AUTOMATIC_RETRIES,
-    MAX_LOOP_ITERATIONS,
-    REPAIR_NODE_PREFIX,
 )
 
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -202,12 +198,10 @@ def _duration(value: str | None) -> str | None:
 
 
 class NodeBase(StrictModel):
-    """Fields shared by all six node types."""
+    """Dependency and deadline fields shared by execution records."""
 
     needs: list[str] = Field(default_factory=list)
-    condition: str | None = Field(default=None, alias="if")
     timeout: str | None = None
-    on_timeout: str | None = None
 
     validate_timeout = field_validator("timeout")(_duration)
 
@@ -232,8 +226,6 @@ class AgentNode(NodeBase):
     """A coding-agent attempt using an exact model route."""
 
     type: Literal["agent"]
-    writes: bool = False
-    allow_no_commit: bool = False
     outputs: dict[str, OutputSelector] = Field(default_factory=dict)
     prompts: list[PromptReference] = Field(default_factory=list)
     model: str | None = None
@@ -243,72 +235,15 @@ class AgentNode(NodeBase):
     auto_retry: bool = True
 
 
-class SharedCommandReference(StrictModel):
-    """Select a named owner command whose arguments are frozen at launch."""
-
-    command: str = Field(pattern=NODE_ID_PATTERN.pattern)
-
-
 class CommandNode(NodeBase):
     """A shell-free argument-vector process."""
 
     type: Literal["command"]
-    writes: bool = False
-    allow_no_commit: bool = False
     outputs: dict[str, OutputSelector] = Field(default_factory=dict)
-    run: Annotated[list[str], Field(min_length=1)] | SharedCommandReference
+    run: Annotated[list[str], Field(min_length=1)]
     env: dict[str, str] = Field(default_factory=dict)
-    inherit_env: bool = True
 
     validate_env = field_validator("env")(validate_environment)
-
-
-class HumanWaitNode(NodeBase):
-    """An owner interaction that may remain open indefinitely."""
-
-    type: Literal["human_wait"]
-    prompt: str = Field(min_length=1)
-    deadline: str | None = None
-
-    validate_deadline = field_validator("deadline")(_duration)
-
-
-class ConditionNode(NodeBase):
-    """A deterministic expression selecting one named branch."""
-
-    type: Literal["condition"]
-    expr: str = Field(min_length=1)
-    branches: dict[str, str] = Field(min_length=1)
-
-
-class RepairAcceptance(StrictModel):
-    """Frozen acceptance and instructions for an implicit repair coordinator."""
-
-    source: str
-    accepted_output: str
-    accepted_value: Scalar
-    fix_instruction: str
-    verify_instruction: str
-
-
-class LoopNode(NodeBase):
-    """A bounded, scoped subgraph repeated until its condition holds."""
-
-    type: Literal["loop"]
-    body: dict[str, NodeDefinition] = Field(min_length=1)
-    max_iterations: int = Field(ge=1, le=MAX_LOOP_ITERATIONS)
-    until: str | None = None
-    exhausted: str
-    repair_rule: RepairAcceptance | None = None
-
-
-class SubworkflowNode(NodeBase):
-    """A synchronous, scoped invocation of another workflow file."""
-
-    type: Literal["subworkflow"]
-    workflow: str = Field(min_length=1)
-    inputs: dict[str, Scalar] = Field(default_factory=dict)
-    outputs: dict[str, str] = Field(default_factory=dict)
 
 
 class ActionsStepNode(NodeBase):
@@ -335,7 +270,6 @@ class ActionsJobNode(NodeBase):
 
     type: Literal["actions_job"] = "actions_job"
     writes: bool = True
-    allow_no_commit: bool = True
     job_id: str
     job: dict[str, Any]
     workflow: dict[str, Any]
@@ -352,17 +286,7 @@ class ActionsJobNode(NodeBase):
     workflow_scope: str = "root"
 
 
-NodeDefinition = Annotated[
-    AgentNode
-    | CommandNode
-    | HumanWaitNode
-    | ConditionNode
-    | LoopNode
-    | SubworkflowNode
-    | ActionsJobNode
-    | ActionsStepNode,
-    Field(discriminator="type"),
-]
+NodeDefinition = Annotated[ActionsJobNode | ActionsStepNode, Field(discriminator="type")]
 
 
 class EntryArtifact(StrictModel):
@@ -396,69 +320,19 @@ class RecoveryPolicy(StrictModel):
     max_retries: int = Field(default=MAX_AUTOMATIC_RETRIES, ge=1, le=MAX_AUTOMATIC_RETRIES)
 
 
-class RepairRule(StrictModel):
-    """A stage's bounded fix-and-verify policy, separate from its main graph."""
-
-    enabled: bool = True
-    max_rounds: int = Field(default=DEFAULT_REPAIR_ROUNDS, ge=1, le=MAX_LOOP_ITERATIONS)
-    accepted_output: str = Field(min_length=1)
-    accepted_value: Scalar = "Yes"
-    fix: AgentNode | CommandNode
-    verify: AgentNode | CommandNode
-    fix_instruction: str = Field(default=DEFAULT_FIX_INSTRUCTION, min_length=1)
-    verify_instruction: str = Field(default=DEFAULT_VERIFY_INSTRUCTION, min_length=1)
-
-    @model_validator(mode="after")
-    def validate_roles(self) -> RepairRule:
-        for role in (self.fix, self.verify):
-            if role.needs or role.condition is not None or role.on_timeout is not None:
-                message = "repair roles cannot declare needs, if, or on_timeout"
-                raise ValueError(message)
-        if self.accepted_output not in self.verify.outputs:
-            message = "the verifier must declare the accepted_output"
-            raise ValueError(message)
-        return self
-
-
 class WorkflowDefinition(StrictModel):
-    """Internal execution IR; version 1 is retained for historical snapshots."""
+    """Frozen execution plan compiled exclusively from a jobs/steps workflow."""
 
-    version: int
     name: str = Field(min_length=1)
     inputs: dict[str, InputDefinition] = Field(default_factory=dict)
-    model: str | None = None
-    agents: list[str] = Field(default_factory=list)
-    nodes: dict[str, NodeDefinition]
-    env: dict[str, str] = Field(default_factory=dict)
-    inherit_env: bool = True
+    nodes: dict[str, ActionsJobNode]
     entrypoints: list[EntryPoint] = Field(default_factory=list)
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
-    repairs: dict[str, RepairRule] = Field(default_factory=dict)
-    actions: dict[str, Any] = Field(default_factory=dict)
-
-    validate_env = field_validator("env")(validate_environment)
+    actions: dict[str, Any] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_identifiers(self) -> WorkflowDefinition:
         _validate_node_map(self.nodes, "nodes")
-        for source, rule in self.repairs.items():
-            node = self.nodes.get(source)
-            if node is None or node.type not in {"agent", "command"}:
-                message = f"repair source {source!r} must be an agent or command stage"
-                raise ValueError(message)
-            if (
-                isinstance(node, (AgentNode, CommandNode))
-                and rule.accepted_output not in node.outputs
-            ):
-                message = f"repair source {source!r} must declare {rule.accepted_output!r}"
-                raise ValueError(message)
-            if f"{REPAIR_NODE_PREFIX}{source}" in self.nodes:
-                message = f"repair coordinator id conflicts with a stage for {source!r}"
-                raise ValueError(message)
-        for name in self.inputs:
-            if not self.actions and NODE_ID_PATTERN.fullmatch(name) is None:
-                message = f"input id {name!r} must match {NODE_ID_PATTERN.pattern}"
-                raise ValueError(message)
         scopes = [entry.scope_path for entry in self.entrypoints]
         if len(scopes) != len(set(scopes)):
             message = "entrypoint scope_path values must be unique"
@@ -466,7 +340,7 @@ class WorkflowDefinition(StrictModel):
         return self
 
 
-def _validate_node_map(nodes: dict[str, NodeDefinition], location: str) -> None:
+def _validate_node_map(nodes: Mapping[str, NodeDefinition], location: str) -> None:
     for node_id, node in nodes.items():
         pattern = (
             r"^[A-Za-z_][A-Za-z0-9_-]*$"
@@ -476,40 +350,30 @@ def _validate_node_map(nodes: dict[str, NodeDefinition], location: str) -> None:
         if re.fullmatch(pattern, node_id) is None:
             message = f"{location} id {node_id!r} must match {NODE_ID_PATTERN.pattern}"
             raise ValueError(message)
-        if isinstance(node, LoopNode):
-            if node.repair_rule is not None:
-                message = "repair_rule is internal; configure repairs on the workflow instead"
-                raise ValueError(message)
-            _validate_node_map(node.body, f"{location}.{node_id}.body")
 
 
-LoopNode.model_rebuild()
 WorkflowDefinition.model_rebuild()
 
 __all__ = [
     "AgentNode",
     "BooleanInput",
     "CommandNode",
-    "ConditionNode",
     "DataPathSelectorValue",
     "EntryArtifact",
     "EntryPoint",
     "EnumInput",
     "ExistsSelector",
     "GlobalPrompt",
-    "HumanWaitNode",
     "InputDefinition",
     "IntegerInput",
     "JsonPathSelector",
     "LabelSelector",
     "LocalPrompt",
-    "LoopNode",
     "NodeDefinition",
     "NumberInput",
     "OutputSelector",
     "PromptReference",
     "StringInput",
-    "SubworkflowNode",
     "WorkflowDefinition",
     "YamlPathSelector",
 ]

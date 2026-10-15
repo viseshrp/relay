@@ -16,7 +16,16 @@ from relay.vcs.commits import current_head
 from relay.web.models import Run
 from tests.support import InlineEngine, RelayProject, git, init_repository, symlink_or_skip
 
-COMMAND = "version: 1\nname: Check\nnodes:\n  check: {type: command, run: [git, status]}\n"
+COMMAND = (
+    "name: Check\n"
+    "jobs:\n"
+    "  check:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+)
 
 
 @pytest.mark.parametrize("kind", ["modified", "untracked", "staged", "staged-report", "deleted"])
@@ -83,12 +92,23 @@ def test_preview_exempts_only_the_validated_subworkflow_and_prompt_sources(
 ) -> None:
     project.write(
         ".relay/workflows/check.yaml",
-        "version: 1\nname: Check\nnodes:\n  child: {type: subworkflow, workflow: child}\n",
+        "jobs: {child: {uses: ./.relay/workflows/child.yaml}}\n",
     )
     project.write(
         ".relay/workflows/child.yaml",
-        "version: 1\nname: Child\nnodes:\n"
-        "  review: {type: agent, prompts: [{local: prompts/review.md}]}\n",
+        (
+            "name: Child\n"
+            "on: workflow_call\n"
+            "jobs:\n"
+            "  review:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            '        prompt-files: "prompts/review.md"\n'
+        ),
     )
     project.write(".relay/prompts/review.md", "Review the code.\n")
     project.write(".relay/prompts/unused.md", "Unused owner notes.\n")

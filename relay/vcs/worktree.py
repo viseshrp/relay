@@ -36,11 +36,6 @@ def run_worktree_path(run_id: str, *, root: Path | None = None) -> Path:
     return base / _component(run_id, label="run id")
 
 
-def reader_worktree_path(primary: Path, attempt_id: str) -> Path:
-    """Return the plan-defined nested `r-<attempt>` reader checkout path."""
-    return primary / f"r-{_component(attempt_id, label='attempt id')}"
-
-
 def require_project_worktree(repository: Path, worktree: Path) -> None:
     """Stop execution if a checkout is no longer bound to its run's repository."""
     expected = git_stdout(repository, ["rev-parse", "--git-common-dir"])
@@ -96,29 +91,6 @@ def create_primary_worktree(
     return branch, target, resolved_commit
 
 
-def create_reader_worktree(
-    repository: Path,
-    primary: Path,
-    attempt_id: str,
-    commit: str,
-) -> tuple[Path, str]:
-    """Create a detached reader checkout at the recorded committed HEAD."""
-    target = reader_worktree_path(primary, attempt_id)
-    resolved_commit = _resolve_commit(repository, commit)
-    if target.exists():
-        message = f"Reader worktree path {target} already exists."
-        raise WorktreeError(message, context={"project": str(repository)})
-    try:
-        run_git(
-            repository,
-            ["worktree", "add", "--detach", str(target), resolved_commit],
-        )
-    except GitError:
-        message = "Relay could not create an isolated reader worktree."
-        raise WorktreeError(message, context={"project": str(repository)}) from None
-    return target, resolved_commit
-
-
 def remove_worktree(repository: Path, worktree: Path) -> None:
     """Force-remove a known worktree with Windows-only bounded backoff."""
     delays = CLEANUP_BACKOFF_SECONDS if os.name == "nt" else ()
@@ -166,8 +138,6 @@ def reset_worktree(
 
 __all__ = [
     "create_primary_worktree",
-    "create_reader_worktree",
-    "reader_worktree_path",
     "remove_worktree",
     "require_project_worktree",
     "reset_worktree",

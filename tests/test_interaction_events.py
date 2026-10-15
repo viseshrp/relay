@@ -112,7 +112,7 @@ def test_lost_attempts_discard_requests_with_events(
         with pytest.raises(PersistenceError):
             store.fail_worker_attempts()
     else:
-        assert store.fail_worker_attempts() == 1
+        assert store.fail_worker_attempts() == 2
         event = RunEvent.objects.get(type=f"{kind}.discarded", attempt_id=attempt.attempt_id)
         assert event.payload["interaction_id"] == interaction_id
         assert event.payload["scope_path"] == attempt.scope_path

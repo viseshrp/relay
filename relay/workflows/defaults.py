@@ -8,13 +8,7 @@ from dataclasses import replace
 from pydantic import Field, ValidationError, field_validator
 
 from relay.agents.profiles import PROFILES
-from relay.constants import (
-    DEFAULT_FIX_INSTRUCTION,
-    DEFAULT_REPAIR_ROUNDS,
-    DEFAULT_VERIFY_INSTRUCTION,
-    MAX_LOOP_ITERATIONS,
-)
-from relay.errors import ConfigError, WorkflowValidationError
+from relay.errors import ConfigError
 
 from .routing import effective_agent_order
 from .schema import (
@@ -23,11 +17,7 @@ from .schema import (
     ActionsJobNode,
     AgentNode,
     AgentOptions,
-    CommandNode,
-    LoopNode,
-    NodeDefinition,
     RecoveryPolicy,
-    SharedCommandReference,
     StrictModel,
     WorkflowDefinition,
     validate_environment,
@@ -41,16 +31,6 @@ class ProviderDefaults(AgentOptions):
     model: str | None = Field(default=None, min_length=1, max_length=500)
 
 
-class RepairDefaults(StrictModel):
-    """Initial values for new repair rules; saved rules retain their own values."""
-
-    max_rounds: int = Field(default=DEFAULT_REPAIR_ROUNDS, ge=1, le=MAX_LOOP_ITERATIONS)
-    fix_instruction: str = Field(default=DEFAULT_FIX_INSTRUCTION, min_length=1, max_length=16000)
-    verify_instruction: str = Field(
-        default=DEFAULT_VERIFY_INSTRUCTION, min_length=1, max_length=16000
-    )
-
-
 class WorkflowDefaults(StrictModel):
     """Cross-project fallbacks with the same bounds as workflow settings."""
 
@@ -59,7 +39,6 @@ class WorkflowDefaults(StrictModel):
     timeout: str | None = None
     auto_retry: bool = True
     recovery: RecoveryPolicy = Field(default_factory=RecoveryPolicy)
-    repairs: RepairDefaults = Field(default_factory=RepairDefaults)
     commands: dict[str, list[str]] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
 
@@ -117,66 +96,52 @@ def validate_defaults(raw: object) -> WorkflowDefaults:
     return defaults
 
 
-def _nodes_with_defaults(
-    nodes: Mapping[str, NodeDefinition],
-    definition: WorkflowDefinition,
+def _agent_with_defaults(
+    node: AgentNode,
     defaults: WorkflowDefaults,
     owner_agents: tuple[str, ...],
     launch_model: str | None,
-) -> dict[str, NodeDefinition]:
-    resolved: dict[str, NodeDefinition] = {}
+) -> AgentNode:
+    order = effective_agent_order(node.agents, owner_agents)
+    model = node.model or launch_model or defaults.model
+    if model is None and order:
+        provider = defaults.providers.get(order[0])
+        model = provider.model if provider is not None else None
+    updates: dict[str, object] = {"model": model}
+    if "timeout" not in node.model_fields_set:
+        updates["timeout"] = defaults.timeout
+    options = dict(node.agent_options)
+    for agent, provider in defaults.providers.items():
+        # An absent choice inherits; explicit null keeps the provider default.
+        inherited = provider.model_dump(exclude={"model"}) if provider.model == model else {}
+        if node.permission_profile is not None:
+            inherited.pop("permission_mode", None)
+        explicit = options.get(agent)
+        if explicit is not None:
+            inherited.update(explicit.model_dump(exclude_unset=True))
+        options[agent] = AgentOptions.model_validate(inherited)
+    updates["agent_options"] = options
+    if "auto_retry" not in node.model_fields_set:
+        updates["auto_retry"] = defaults.auto_retry
+    return node.model_copy(update=updates)
+
+
+def _nodes_with_defaults(
+    nodes: Mapping[str, ActionsJobNode],
+    defaults: WorkflowDefaults,
+    owner_agents: tuple[str, ...],
+    launch_model: str | None,
+) -> dict[str, ActionsJobNode]:
+    resolved = {}
     for key, node in nodes.items():
-        updates: dict[str, object] = {}
-        # Human waits and structural deadlines remain workflow decisions.
-        if isinstance(node, (AgentNode, CommandNode)) and "timeout" not in node.model_fields_set:
+        updates: dict[str, object] = {
+            "bound_agents": {
+                step: _agent_with_defaults(agent, defaults, owner_agents, launch_model)
+                for step, agent in node.bound_agents.items()
+            }
+        }
+        if "timeout-minutes" not in node.job and defaults.timeout:
             updates["timeout"] = defaults.timeout
-        if isinstance(node, AgentNode):
-            order = effective_agent_order(node.agents, definition.agents, owner_agents)
-            model = node.model or launch_model or definition.model or defaults.model
-            if model is None and order:
-                provider = defaults.providers.get(order[0])
-                model = provider.model if provider is not None else None
-            updates["model"] = model
-            options = dict(node.agent_options)
-            for agent, provider in defaults.providers.items():
-                # An option's absence inherits; an explicit null preserves agent defaults.
-                inherited = (
-                    provider.model_dump(exclude={"model"}) if provider.model == model else {}
-                )
-                if node.permission_profile is not None:
-                    inherited.pop("permission_mode", None)
-                explicit = options.get(agent)
-                if explicit is not None:
-                    inherited.update(explicit.model_dump(exclude_unset=True))
-                options[agent] = AgentOptions.model_validate(inherited)
-            updates["agent_options"] = options
-            if "auto_retry" not in node.model_fields_set:
-                updates["auto_retry"] = defaults.auto_retry
-        elif isinstance(node, CommandNode):
-            if isinstance(node.run, SharedCommandReference):
-                arguments = defaults.commands.get(node.run.command)
-                if arguments is None:
-                    message = (
-                        f"Shared command {node.run.command!r} is not configured for this project."
-                    )
-                    raise WorkflowValidationError(message)
-                updates["run"] = list(arguments)
-            inherited_env = defaults.env if definition.inherit_env else {}
-            updates["env"] = (
-                {**inherited_env, **definition.env, **node.env}
-                if node.inherit_env
-                else dict(node.env)
-            )
-        elif isinstance(node, ActionsJobNode):
-            if "timeout-minutes" not in node.job and defaults.timeout:
-                updates["timeout"] = defaults.timeout
-            updates["bound_agents"] = _nodes_with_defaults(
-                node.bound_agents, definition, defaults, owner_agents, launch_model
-            )
-        elif isinstance(node, LoopNode):
-            updates["body"] = _nodes_with_defaults(
-                node.body, definition, defaults, owner_agents, launch_model
-            )
         resolved[key] = node.model_copy(update=updates)
     return resolved
 
@@ -193,7 +158,6 @@ def apply_workflow_defaults(
         updates: dict[str, object] = {
             "nodes": _nodes_with_defaults(
                 definition.nodes,
-                definition,
                 defaults,
                 owner_agents,
                 launch_model,
@@ -208,8 +172,4 @@ def apply_workflow_defaults(
     return replace(
         workflow,
         root=replace(workflow.root, definition=resolve(workflow.root.definition)),
-        subworkflows={
-            key: replace(child, definition=resolve(child.definition))
-            for key, child in workflow.subworkflows.items()
-        },
     )

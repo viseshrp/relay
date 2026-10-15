@@ -16,7 +16,6 @@ from relay.errors import (
     NodeExecutionError,
     PermissionFlowError,
     PersistenceError,
-    WorkflowValidationError,
 )
 from relay.execution.control import (
     ClaimedControl,
@@ -34,7 +33,6 @@ from relay.execution.dispatch import (
     set_dispatch_notifier,
 )
 from relay.execution.launch import LaunchRequest, launch_workflow
-from relay.execution.locks import decide_admission
 from relay.execution.machine import (
     TransitionResult,
     apply_transition,
@@ -52,7 +50,7 @@ from relay.execution.scheduler import (
     initial_scope_candidates,
     reachable_node_ids,
 )
-from relay.execution.state import AttemptStopReason, ControlKind, LockMode, Transition
+from relay.execution.state import AttemptStopReason, ControlKind, Transition
 from relay.execution.timing import attempt_deadline, duration_seconds, remaining_seconds
 from relay.web.models import DispatchClaim, NodeAttempt, NodeRun, RunEvent
 from relay.web.repositories import DjangoExecutionStore
@@ -62,24 +60,21 @@ from relay.workflows.schema import NodeDefinition
 from tests.support import Clock, InlineEngine, RelayProject, node_statuses, run_status
 
 GUARDED: Mapping[str, NodeDefinition] = load_workflow_text(
-    "version: 1\nname: S\nnodes:\n"
-    "  a: {type: command, run: [x]}\n"
-    '  b: {type: command, run: [x], needs: [a], if: "${{ inputs.go }}"}\n'
-    '  c: {type: command, run: [x], needs: [a], if: "${{ inputs.count }}"}\n'
+    "on: {workflow_dispatch: {inputs: {go: {type: boolean}}}}\n"
+    "jobs:\n"
+    "  a: {steps: [{run: echo ready}]}\n"
+    '  b: {steps: [{run: echo ready}], needs: [a], if: "${{ inputs.go }}"}\n'
 ).definition.nodes
 
 
-def _graph(text: str) -> CompiledGraph:
-    nodes = load_workflow_text(f"version: 1\nname: S\nnodes:\n{text}").definition.nodes
-    return compile_graph(nodes)
-
-
-BRANCHING: CompiledGraph = _graph(
-    "  a: {type: command, run: [x]}\n"
-    "  b: {type: command, run: [x], needs: [a]}\n"
-    '  choose:\n    type: condition\n    needs: [b]\n    expr: "${{ True }}"\n'
-    '    branches: {"yes": c}\n'
-    "  c: {type: command, run: [x], needs: [choose]}\n"
+BRANCHING: CompiledGraph = compile_graph(
+    load_workflow_text(
+        "jobs:\n"
+        "  a: {steps: [{run: echo ready}]}\n"
+        "  b: {steps: [{run: echo ready}], needs: [a]}\n"
+        "  choose: {steps: [{run: echo ready}], needs: [b]}\n"
+        "  c: {steps: [{run: echo ready}], needs: [choose]}\n"
+    ).definition.nodes
 )
 
 
@@ -193,24 +188,6 @@ def test_a_cancel_from_shutdown_interrupts_and_any_other_cancels(
 
 
 @pytest.mark.parametrize(
-    ("writes", "active", "allowed", "mode"),
-    [
-        (False, [], True, LockMode.READ),
-        (False, ["read"], True, LockMode.READ),
-        (False, ["write"], False, LockMode.READ),
-        (True, [], True, LockMode.WRITE),
-        (True, ["read"], False, LockMode.WRITE),
-    ],
-)
-def test_admission_allows_many_readers_or_one_writer(
-    writes: bool, active: list[str], allowed: bool, mode: LockMode
-) -> None:
-    decision = decide_admission(writes, active)
-
-    assert (decision.allowed, decision.mode) == (allowed, mode)
-
-
-@pytest.mark.parametrize(
     ("value", "seconds"),
     [("250ms", 0.25), ("4s", 4.0), ("3m", 180.0), ("2h", 7200.0), (None, None)],
 )
@@ -274,7 +251,7 @@ def test_worker_commits_the_claim_before_enqueuing_its_token(
 ) -> None:
     project.write_workflow(
         "dispatch",
-        "version: 1\nname: Dispatch\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        "name: Dispatch\njobs: {work: {steps: [{run: print(1), shell: python}]}}\n",
     )
     observed = []
 
@@ -316,12 +293,20 @@ def test_a_stale_scheduling_pass_uses_a_concurrent_workers_outputs(
 ) -> None:
     project.write_workflow(
         "concurrent",
-        "version: 1\nname: Concurrent\nnodes:\n"
-        "  first: {type: command, run: [git, status]}\n"
-        "  report:\n    type: command\n    needs: [first]\n    run: [git, status]\n"
-        "    outputs: {present: {exists: README.md}}\n"
-        "  check:\n    type: command\n    needs: [report]\n    run: [git, status]\n"
-        '    if: "${{ needs.report.outputs.present }}"\n',
+        """jobs:
+  first: {steps: [{run: print(1), shell: python}]}
+  report:
+    needs: [first]
+    outputs: {present: '${{ steps.check.outputs.value }}'}
+    steps:
+      - id: check
+        uses: relay/validate-report@v1
+        with: {path: README.md, format: exists}
+  check:
+    needs: [report]
+    if: '${{ needs.report.outputs.present }}'
+    steps: [{run: print(1), shell: python}]
+""",
     )
     run_id = engine.launch(project, "concurrent")
     engine.run_token(engine.tokens.popleft())
@@ -359,9 +344,9 @@ def test_a_stale_scheduling_pass_uses_a_concurrent_workers_outputs(
 
     assert run_status(run_id) == "succeeded"
     assert node_statuses(run_id)["root.check"] == "succeeded"
-    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 3
-    assert DispatchClaim.objects.filter(node_run__run_id=run_id).count() == 3
-    assert RunEvent.objects.filter(run_id=run_id, type="node.ready").count() == 3
+    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 6
+    assert DispatchClaim.objects.filter(node_run__run_id=run_id).count() == 6
+    assert RunEvent.objects.filter(run_id=run_id, type="node.ready").count() == 6
 
 
 @pytest.mark.parametrize("status", ["running", "succeeded", "canceled"])
@@ -370,7 +355,7 @@ def test_a_stale_dispatch_cannot_restart_an_advanced_node(
 ) -> None:
     project.write_workflow(
         "advanced",
-        "version: 1\nname: Advanced\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        "name: Advanced\njobs: {work: {steps: [{run: print(1), shell: python}]}}\n",
     )
     run_id = engine.launch(project, "advanced")
     if status == "running":
@@ -440,7 +425,7 @@ def test_a_failed_wake_up_is_logged_and_not_raised(caplog: pytest.LogCaptureFixt
     ("node_id", "statuses", "go", "action"),
     [
         ("b", {"a": "running"}, True, None),
-        ("b", {"a": "failed"}, True, "dependencies_unreachable"),
+        ("b", {"a": "failed"}, True, "guard_false"),
         ("b", {"a": "succeeded"}, True, "dependencies_satisfied"),
         ("b", {"a": "succeeded"}, False, "guard_false"),
     ],
@@ -448,20 +433,13 @@ def test_a_failed_wake_up_is_logged_and_not_raised(caplog: pytest.LogCaptureFixt
 def test_eligibility_follows_dependencies_and_guards(
     node_id: str, statuses: dict[str, str], go: bool, action: str | None
 ) -> None:
-    context = {"inputs": {"go": go, "count": 1}, "needs": {}, "run": {}, "loop": {}}
+    context = {"inputs": {"go": go, "count": 1}, "needs": {}, "run": {}, "child": {}}
 
     assert evaluate_eligibility(GUARDED[node_id], statuses, context).action == action
 
 
-def test_a_guard_that_is_not_boolean_is_rejected() -> None:
-    context = {"inputs": {"go": True, "count": 1}, "needs": {}, "run": {}, "loop": {}}
-
-    with pytest.raises(WorkflowValidationError):
-        evaluate_eligibility(GUARDED["c"], {"a": "succeeded"}, context)
-
-
 @pytest.mark.parametrize(
-    ("parent", "expected"), [(None, ("root.a",)), ("root.loop#1", ("root.loop#1.a",))]
+    ("parent", "expected"), [(None, ("root.a",)), ("root.child", ("root.child.a",))]
 )
 def test_initial_candidates_are_the_root_nodes_in_scope(
     parent: str | None, expected: tuple[str, ...]
@@ -474,7 +452,7 @@ def test_downstream_candidates_are_the_direct_dependents() -> None:
 
 
 def test_reachable_nodes_follow_data_and_control_edges() -> None:
-    assert reachable_node_ids("b", BRANCHING, BRANCHING.control_downstream) == {"b", "choose", "c"}
+    assert reachable_node_ids("b", BRANCHING) == {"b", "choose", "c"}
 
 
 @pytest.mark.parametrize(
@@ -482,10 +460,10 @@ def test_reachable_nodes_follow_data_and_control_edges() -> None:
     [
         (None, None, None),
         ("b", None, "b"),
-        ("root.loop#2.check", None, "loop"),
-        ("root.loop#2.check", "root.loop#2", "check"),
-        ("root.loop#2.inner#1.x", "root.loop#2", "inner"),
-        ("root.other.x", "root.loop#2", None),
+        ("root.child.check", None, "child"),
+        ("root.child.check", "root.child", "check"),
+        ("root.child.nested.x", "root.child", "nested"),
+        ("root.other.x", "root.child", None),
     ],
 )
 def test_an_entry_point_selects_one_direct_child_per_scope(

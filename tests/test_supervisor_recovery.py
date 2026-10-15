@@ -248,7 +248,16 @@ def test_restart_recovers_real_orphan_children_and_preserves_completed_runs(
 ) -> None:
     project.write_workflow(
         "complete",
-        "version: 1\nname: Complete\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        (
+            "name: Complete\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "complete")
     engine.drain(run_id)

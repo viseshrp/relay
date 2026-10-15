@@ -9,9 +9,7 @@ from typing import Protocol, cast
 
 from relay.errors import WorkflowValidationError
 from relay.execution.dispatch import DispatchStore, dispatch_node
-from relay.workflows.expressions import evaluate_expression
 from relay.workflows.graph import CompiledGraph
-from relay.workflows.repairs import effective_dependency_outputs
 from relay.workflows.schema import ActionsJobNode, NodeDefinition
 from relay.workflows.scope import node_scope, parse_scope_path
 
@@ -35,7 +33,6 @@ class ScheduledNode:
     definition: NodeDefinition
     status: str
     outputs: Mapping[str, object]
-    selected_branch: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,52 +78,37 @@ def evaluate_eligibility(
     expression_context: Mapping[str, object],
 ) -> Eligibility:
     """Decide readiness from named dependencies without scanning other nodes."""
-    if isinstance(node, ActionsJobNode):
-        from relay.workflows.actions.expressions import condition
+    if not isinstance(node, ActionsJobNode):
+        message = "Only compiled workflow jobs can enter the root scheduling queue."
+        raise WorkflowValidationError(message)
+    from relay.workflows.actions.expressions import condition
 
-        terminal = {"succeeded", "failed", "skipped", "canceled"}
-        if any(dependency_statuses.get(item) not in terminal for item in node.needs):
-            return Eligibility(None, "job dependencies are still active")
-        names = {
-            "succeeded": "success",
-            "failed": "failure",
-            "canceled": "cancelled",
-            "skipped": "skipped",
-        }
-        needs = cast(dict, expression_context.get("needs", {}))
-        values = {
-            "relay": cast(dict, expression_context.get("run", {})).get("relay", {}),
-            "inputs": expression_context.get("inputs", {}),
-            "vars": cast(dict, expression_context.get("run", {})).get("vars", {}),
-            "needs": {
-                key: {**needs.get(key, {}), "result": names[status]}
-                for key, status in dependency_statuses.items()
-            },
-            "_statuses": [names[status] for status in dependency_statuses.values()],
-            "_cancelled": cast(dict, expression_context.get("run", {})).get("status")
-            in {"canceling", "canceled"},
-        }
-        return Eligibility(
-            "dependencies_satisfied" if condition(node.job.get("if"), values) else "guard_false",
-            "the job condition was evaluated",
-        )
-    unavailable = {
-        NodeStatus.FAILED.value,
-        NodeStatus.CANCELED.value,
-        NodeStatus.SKIPPED.value,
+    terminal = {"succeeded", "failed", "skipped", "canceled"}
+    if any(dependency_statuses.get(item) not in terminal for item in node.needs):
+        return Eligibility(None, "job dependencies are still active")
+    names = {
+        "succeeded": "success",
+        "failed": "failure",
+        "canceled": "cancelled",
+        "skipped": "skipped",
     }
-    if any(dependency_statuses.get(item) in unavailable for item in node.needs):
-        return Eligibility("dependencies_unreachable", "an upstream dependency is unreachable")
-    if any(dependency_statuses.get(item) != NodeStatus.SUCCEEDED.value for item in node.needs):
-        return Eligibility(None, "dependencies are still active")
-    if node.condition is not None:
-        result = evaluate_expression(node.condition, expression_context)
-        if not isinstance(result, bool):
-            message = "A node `if` expression must return a boolean."
-            raise WorkflowValidationError(message)
-        if not result:
-            return Eligibility("guard_false", "the node guard evaluated false")
-    return Eligibility("dependencies_satisfied", "all dependencies and the guard passed")
+    needs = cast(dict, expression_context.get("needs", {}))
+    values = {
+        "relay": cast(dict, expression_context.get("run", {})).get("relay", {}),
+        "inputs": expression_context.get("inputs", {}),
+        "vars": cast(dict, expression_context.get("run", {})).get("vars", {}),
+        "needs": {
+            key: {**needs.get(key, {}), "result": names[status]}
+            for key, status in dependency_statuses.items()
+        },
+        "_statuses": [names[status] for status in dependency_statuses.values()],
+        "_cancelled": cast(dict, expression_context.get("run", {})).get("status")
+        in {"canceling", "canceled"},
+    }
+    return Eligibility(
+        "dependencies_satisfied" if condition(node.job.get("if"), values) else "guard_false",
+        "the job condition was evaluated",
+    )
 
 
 def initial_scope_candidates(graph: CompiledGraph, parent_scope: str | None) -> tuple[str, ...]:
@@ -149,13 +131,6 @@ def downstream_scope_candidates(
     )
 
 
-def activation_sources(
-    graph: CompiledGraph,
-) -> tuple[Mapping[str, tuple[str, ...]], Mapping[str, tuple[str, ...]]]:
-    """Reuse the control indexes compiled with the dependency graph."""
-    return graph.activators, graph.control_downstream
-
-
 def entry_node_for_scope(entry_point: str | None, parent_scope: str | None) -> str | None:
     """``root.loop#2.check`` -> ``loop`` at root, or ``check`` under ``root.loop#2``."""
     if entry_point is None:
@@ -174,7 +149,6 @@ def entry_node_for_scope(entry_point: str | None, parent_scope: str | None) -> s
 def reachable_node_ids(
     start: str,
     graph: CompiledGraph,
-    control_downstream: Mapping[str, tuple[str, ...]],
 ) -> frozenset[str]:
     reachable = set()
     queue = deque((start,))
@@ -184,7 +158,6 @@ def reachable_node_ids(
             continue
         reachable.add(node_id)
         queue.extend(graph.downstream[node_id])
-        queue.extend(control_downstream[node_id])
     return frozenset(reachable)
 
 
@@ -193,7 +166,6 @@ def advance_run_schedule(
 ) -> tuple[str, ...]:
     """Initialize once, then evaluate only changed nodes and direct successors."""
     graph = store.run_graph(run_id)
-    incoming, control_downstream = activation_sources(graph)
     seeds = None
     if changed_node_ids is not None:
         seeds = tuple(
@@ -207,7 +179,6 @@ def advance_run_schedule(
                         path.removeprefix("root.")
                         for path in downstream_scope_candidates(graph, None, node_id)
                     ),
-                    *control_downstream[node_id],
                 )
             )
         )
@@ -246,8 +217,8 @@ def advance_run_schedule(
     propagated = set()
 
     def enqueue_candidates(node_id: str) -> None:
-        # Every terminal node can wake only its direct data and control successors.
-        for candidate in (*graph.downstream[node_id], *control_downstream[node_id]):
+        # Every terminal node can wake only its direct dependency successors.
+        for candidate in graph.downstream[node_id]:
             if candidate not in queued and candidate not in propagated:
                 queue.append(candidate)
                 queued.add(candidate)
@@ -255,7 +226,7 @@ def advance_run_schedule(
     while queue:
         node_id = queue.popleft()
         queued.remove(node_id)
-        required = (*graph.dependencies[node_id], *incoming[node_id], node_id)
+        required = (*graph.dependencies[node_id], node_id)
         if any(name not in rows for name in required):
             extra = store.load_run_schedule(run_id, (node_id,))
             rows.update(extra.nodes)
@@ -276,33 +247,20 @@ def advance_run_schedule(
             # Declared entry-point inputs and artifacts were proven before this run row existed.
             action = "dependencies_satisfied"
         else:
-            activators = incoming[node_id]
-            if activators:
-                selected = any(rows[source].selected_branch == node_id for source in activators)
-                complete = all(statuses[source] in terminal for source in activators)
-                if complete and not selected:
-                    action = "dependencies_unreachable"
-                elif not selected:
-                    continue
-            if action is None:
-                dependencies = {needed: rows[needed] for needed in graph.dependencies[node_id]}
-                eligibility = evaluate_eligibility(
-                    row.definition,
-                    {needed: statuses[needed] for needed in dependencies},
-                    {
-                        "inputs": dict(schedule.inputs),
-                        "needs": {
-                            needed: {"outputs": dict(outputs)}
-                            for needed, outputs in effective_dependency_outputs(
-                                graph.nodes,
-                                {needed: item.outputs for needed, item in dependencies.items()},
-                            ).items()
-                        },
-                        "run": dict(schedule.run_metadata),
-                        "loop": {},
+            dependencies = {needed: rows[needed] for needed in graph.dependencies[node_id]}
+            eligibility = evaluate_eligibility(
+                row.definition,
+                {needed: statuses[needed] for needed in dependencies},
+                {
+                    "inputs": dict(schedule.inputs),
+                    "needs": {
+                        needed: {"outputs": dict(item.outputs)}
+                        for needed, item in dependencies.items()
                     },
-                )
-                action = eligibility.action
+                    "run": dict(schedule.run_metadata),
+                },
+            )
+            action = eligibility.action
         if action is None:
             continue
         status = store.transition_scope_node(
@@ -341,7 +299,6 @@ __all__ = [
     "RunSchedule",
     "ScheduledNode",
     "SchedulingStore",
-    "activation_sources",
     "advance_run_schedule",
     "dispatch_ready_nodes",
     "downstream_scope_candidates",

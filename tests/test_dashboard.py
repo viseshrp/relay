@@ -56,7 +56,7 @@ def request_for(run: Run, *, attempt_status: str = "waiting", number: int = 1) -
         run=run,
         scope_path=f"root.review{number}",
         node_id=f"review{number}",
-        node_type="human_wait",
+        node_type="actions_step",
         status="waiting",
     )
     attempt = NodeAttempt.objects.create(

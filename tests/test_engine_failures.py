@@ -13,7 +13,16 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome
 from relay.web.models import Artifact, NodeAttempt, Run, RunEvent
 from tests.support import InlineEngine, RelayProject
 
-COMMAND = "version: 1\nname: Command\nnodes:\n  work: {type: command, run: [git, status]}\n"
+COMMAND = (
+    "name: Command\n"
+    "jobs:\n"
+    "  work:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
+)
 
 
 def refuse_removal(target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,53 +70,31 @@ def test_a_failed_success_cleanup_keeps_the_success_and_reports_the_retained_che
     )
 
 
-def test_reader_removal_failure_keeps_evidence_and_fails_the_attempt(
-    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from relay.vcs.worktree import reader_worktree_path
-
-    project.write_workflow("reader", COMMAND)
-    run_id = engine.launch(project, "reader")
-    token = engine.tokens.popleft()
-    claim = engine.store.claim_dispatch(token, engine.worker_id)
-    assert claim.attempt is not None
-    checkout = reader_worktree_path(Path(claim.attempt.primary_worktree), claim.attempt.attempt_id)
-    refuse_removal(checkout, monkeypatch)
-    from relay.execution.runner import execute_attempt
-
-    execute_attempt(
-        engine.store,
-        claim.attempt,
-        engine.executors["command"],
-        artifact_root=engine.artifact_root,
-    )
-
-    assert Run.objects.get(pk=run_id).failure_code == "worktree_error"
-    assert Artifact.objects.filter(attempt_id=claim.attempt.attempt_id).exists()
-    assert checkout.exists()
-
-
 def test_a_worker_exit_does_not_classify_a_workerless_human_wait_as_worker_lost(
     project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow(
         "loss",
-        "version: 1\nname: Worker loss\nnodes:\n"
-        "  approve: {type: human_wait, prompt: Continue?}\n"
-        "  work: {type: command, run: [git, status]}\n",
+        (
+            "name: Worker loss\n"
+            "jobs:\n"
+            "  approve:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Continue?\n"
+        ),
     )
     run_id = engine.launch(project, "loss")
-    engine.run_token(engine.tokens.popleft())
-    assert engine.store.claim_dispatch(engine.tokens.popleft(), "lost-worker").attempt is not None
+    engine.drain(run_id)
 
-    stopped = engine.store.fail_worker_attempts()
-
-    assert stopped == 1
-    assert list(
-        NodeAttempt.objects.filter(node_run__run_id=run_id, stop_reason="worker_lost").values_list(
-            "node_run__node_id", flat=True
-        )
-    ) == ["work"]
+    assert engine.store.fail_worker_attempts() == 0
+    assert not NodeAttempt.objects.filter(
+        node_run__run_id=run_id, stop_reason="worker_lost"
+    ).exists()
+    assert NodeAttempt.objects.filter(node_run__run_id=run_id, status="waiting").count() == 2
+    assert Run.objects.get(pk=run_id).status == "paused_wait"
 
 
 @dataclass
@@ -133,7 +120,7 @@ def test_executor_faults_settle_the_run_with_relay_error_codes(
 ) -> None:
     project.write_workflow("fault", COMMAND)
     run_id = engine.launch(project, "fault")
-    engine.executors = {"command": FailingExecutor(failure)}
+    engine.executors = {"actions_job": FailingExecutor(failure)}
     engine.drain(run_id)
     assert (Run.objects.get(pk=run_id).status, NodeAttempt.objects.get().error_code) == (
         "failed",

@@ -21,8 +21,6 @@ def _static_action_prompts(workflow: ValidatedWorkflow, relay_root: Path) -> Val
     from relay.workflows.prompts import resolve_prompt
     from relay.workflows.schema import GlobalPrompt, LocalPrompt
 
-    if not workflow.root.definition.actions:
-        return workflow
     steps = [
         step
         for job in workflow.root.definition.actions["jobs"].values()
@@ -69,7 +67,7 @@ def load_launch_workflow(relay_root: Path, workflow_key: str) -> ValidatedWorkfl
 
 
 def launch_source_files(workflow: ValidatedWorkflow, repository: Path) -> frozenset[str]:
-    captured = [workflow.root.path, *(item.path for item in workflow.subworkflows.values())]
+    captured = [workflow.root.path]
     captured.extend(Path(prompt.path) for prompt in workflow.prompts if prompt.source == "local")
     for node in workflow.root.definition.nodes.values():
         if isinstance(node, ActionsJobNode):

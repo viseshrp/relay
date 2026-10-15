@@ -1,4 +1,4 @@
-"""Django adapters for serial Actions execution, separate from legacy policy."""
+"""Django adapters for serial job and step execution."""
 
 from __future__ import annotations
 
@@ -36,13 +36,8 @@ from .models import (
 def claim_job_lease(node: NodeRun) -> bool:
     """Called inside the attempt-claim transaction, before creating any attempt."""
     node_type = cast(str, node.node_type)
-    if node_type not in {
-        NodeType.ACTIONS_JOB.value,
-        NodeType.ACTIONS_STEP.value,
-        NodeType.AGENT.value,
-        NodeType.COMMAND.value,
-    }:
-        return True
+    if node_type not in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}:
+        return False
     lease, _ = ActionsJobLease.objects.select_for_update().get_or_create(pk=1)
     owner_id = lease.node_id
     owner = (
@@ -65,12 +60,6 @@ def claim_job_lease(node: NodeRun) -> bool:
             scope == owner["scope_path"] or scope.startswith(owner["scope_path"] + ".")
         )
     if node_type == NodeType.ACTIONS_STEP.value:
-        return False
-    if node_type != NodeType.ACTIONS_JOB.value:
-        return True  # Historical snapshots retain their original admission policy.
-    if NodeAttempt.objects.filter(
-        status__in=("running", "waiting"), node_run__node_type__in=("agent", "command")
-    ).exists():
         return False
     ActionsJobLease.objects.filter(pk=1).update(node=node)
     return True
@@ -607,7 +596,7 @@ def retry_step(node_id: str) -> str:
     state["steps"].pop(cast(str, node.scope_path), None)
     state.get("anonymous_statuses", {}).pop(cast(str, node.scope_path), None)
     atomic_state(path, state)
-    DjangoExecutionStore().release_attempt_lock(str(attempt.pk))
+    DjangoExecutionStore().release_attempt_admission(str(attempt.pk))
     return "ready"
 
 

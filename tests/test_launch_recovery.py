@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from functools import partial
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -23,9 +21,8 @@ from relay.execution.resume import RecoveryTarget, resume_interrupted
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.projects.service import initialize_project, register_current_project
 from relay.vcs.cleanliness import status_porcelain
-from relay.vcs.commits import current_head
-from relay.web.models import Artifact, NodeAttempt, NodeRun, Run, RunSnapshot
-from relay.web.repositories import DjangoExecutionStore, DjangoProjectStore, DjangoReadStore
+from relay.web.models import NodeAttempt, NodeRun, Run, RunSnapshot
+from relay.web.repositories import DjangoProjectStore
 from tests.support import InlineEngine, RelayProject, git, init_repository, run_status
 
 
@@ -46,7 +43,16 @@ def test_first_launch_preserves_untracked_untouched_initial_files(
     starter.write_bytes(starter.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", line_ending))
     workflow = project.write(
         ".relay/workflows/first.yaml",
-        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: First run\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     initial = {
         path: path.read_bytes()
@@ -74,7 +80,16 @@ def test_unused_initial_files_with_owner_edits_still_block_first_launch(
     project.write(".relay/" + relative, "Owner's uncommitted content\n")
     project.write(
         ".relay/workflows/first.yaml",
-        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: First run\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
 
     with pytest.raises(DirtyRepositoryError):
@@ -89,7 +104,16 @@ def test_staged_initial_files_still_block_first_launch(
     project = uncommitted_initial_project
     project.write(
         ".relay/workflows/first.yaml",
-        "version: 1\nname: First run\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: First run\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     git(project.repository, "add", ".relay/prompts/prompt.md")
 
@@ -110,7 +134,16 @@ def test_launch_preserves_owner_reports_and_snapshots_an_uncommitted_workflow(
     report = project.repository / "REVIEW.md"
     report.write_text("Owner's review\n", encoding="utf-8")
     workflow = project.relay_root / "workflows" / "new.yaml"
-    text = "version: 1\nname: New\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    text = (
+        "name: New\n"
+        "jobs:\n"
+        "  check:\n"
+        "    steps:\n"
+        "    - id: work\n"
+        "      uses: relay/command@v1\n"
+        "      with:\n"
+        '        argv: \'["git", "status"]\'\n'
+    )
     raw = text.replace("\n", newline).encode("utf-8")
     workflow.write_bytes(raw)
     run_id = engine.launch(project, "new")
@@ -134,17 +167,22 @@ def test_launch_still_rejects_uncommitted_code_beside_owner_reports(
     assert not Run.objects.exists()
 
 
-ENTRY_WORKFLOW = """version: 1
-name: Midstream
-inputs:
-  target: {type: string}
-entrypoints:
-  - scope_path: root.implement
-    inputs: [target]
-nodes:
-  prepare: {type: command, run: [git, status]}
-  implement: {type: command, needs: [prepare], run: [git, status]}
-"""
+ENTRY_WORKFLOW = (
+    "name: Midstream\n"
+    "on:\n"
+    "  workflow_dispatch:\n"
+    "    inputs:\n"
+    "      target: {type: string}\n"
+    "entrypoints:\n"
+    "  - scope_path: root.implement\n"
+    "    inputs: [target]\n"
+    "jobs:\n"
+    "  prepare:\n"
+    "    steps: [{run: print(1), shell: python}]\n"
+    "  implement:\n"
+    "    needs: [prepare]\n"
+    "    steps: [{run: print(1), shell: python}]\n"
+)
 
 
 @pytest.mark.parametrize("requested", ["implement", "root.implement"])
@@ -218,12 +256,12 @@ def test_declared_entrypoints_cannot_name_impossible_node_scopes(
 ) -> None:
     project.write_workflow(
         "scope",
-        "version: 1\nname: Scopes\nentrypoints:\n"
-        f"  - scope_path: {scope}\nnodes:\n"
-        "  repeat:\n    type: loop\n    max_iterations: 2\n    exhausted: after\n"
-        '    until: "${{ loop.index >= 1 }}"\n    body:\n'
-        "      child: {type: command, run: [git, status]}\n"
-        "  after: {type: command, run: [git, status]}\n",
+        (
+            f"entrypoints: [{{scope_path: {scope}}}]\n"
+            "jobs:\n"
+            "  after: {steps: [{run: print(1), shell: python}]}\n"
+            "  repeat: {steps: [{run: print(1), shell: python}]}\n"
+        ),
     )
     with pytest.raises(WorkflowValidationError):
         engine.launch(project, "scope", entry_point=scope)
@@ -234,7 +272,17 @@ def test_a_failed_git_worktree_creation_leaves_a_failed_launch_record(
     project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project.write_workflow(
-        "one", "version: 1\nname: One\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "one",
+        (
+            "name: One\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run = subprocess.run
 
@@ -258,8 +306,16 @@ def test_a_failed_git_worktree_creation_leaves_a_failed_launch_record(
 def interrupted_writer(project: RelayProject, engine: InlineEngine) -> RecoveryTarget:
     project.write_workflow(
         "writer",
-        "version: 1\nname: Writer\nnodes:\n"
-        "  write: {type: command, writes: true, allow_no_commit: true, run: [git, status]}\n",
+        (
+            "name: Writer\n"
+            "jobs:\n"
+            "  write:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     engine.launch(project, "writer")
     store = engine.store
@@ -275,57 +331,25 @@ def interrupted_writer(project: RelayProject, engine: InlineEngine) -> RecoveryT
     return store.interrupted_targets()[0]
 
 
-def test_writer_recovery_preserves_unfinished_bytes_before_restoring_the_checkout(
-    interrupted_writer: RecoveryTarget,
-) -> None:
-    store = DjangoExecutionStore()
-    prepare_recovery_workspace(store, interrupted_writer)
-    artifact = Artifact.objects.get(declared_name="unfinished.txt")
-    path, _name, _mime = DjangoReadStore().artifact_file(str(artifact.pk))
-    assert path.read_bytes() == b"unfinished report"
-    assert status_porcelain(Path(interrupted_writer.worktree_path)) == ()
-    assert current_head(Path(interrupted_writer.worktree_path)) == interrupted_writer.starting_head
-
-
-def test_repeating_workspace_recovery_keeps_the_original_evidence(
-    interrupted_writer: RecoveryTarget,
-) -> None:
-    store = DjangoExecutionStore()
-    prepare_recovery_workspace(store, interrupted_writer)
-    ids = list(Artifact.objects.values_list("id", flat=True))
-    prepare_recovery_workspace(store, interrupted_writer)
-    assert list(Artifact.objects.values_list("id", flat=True)) == ids
-
-
 def test_a_missing_primary_worktree_cannot_be_silently_recovered(
     interrupted_writer: RecoveryTarget,
 ) -> None:
     shutil.rmtree(interrupted_writer.worktree_path)
     with pytest.raises(WorktreeError):
-        prepare_recovery_workspace(DjangoExecutionStore(), interrupted_writer)
-
-
-def test_a_missing_ephemeral_reader_needs_no_workspace_repair(
-    interrupted_writer: RecoveryTarget,
-) -> None:
-    shutil.rmtree(interrupted_writer.worktree_path)
-    prepare_recovery_workspace(
-        DjangoExecutionStore(), replace(interrupted_writer, ephemeral_reader=True)
-    )
-    assert not Artifact.objects.exists()
+        prepare_recovery_workspace(interrupted_writer)
 
 
 @pytest.fixture
-def interrupted_paused_loop(project: RelayProject, engine: InlineEngine) -> RecoveryTarget:
+def interrupted_paused_job(project: RelayProject, engine: InlineEngine) -> RecoveryTarget:
     project.write_workflow(
-        "loop",
-        "version: 1\nname: Paused loop\nnodes:\n"
-        "  repeat:\n    type: loop\n    max_iterations: 1\n    exhausted: stop\n"
-        '    until: "${{ loop.index >= 1 }}"\n'
-        "    body:\n      wait: {type: human_wait, prompt: Continue}\n"
-        "      check: {type: command, needs: [wait], run: [git, status]}\n"
-        "  stop: {type: command, run: [git, status]}\n",
+        "wait-child",
+        (
+            "on: workflow_call\n"
+            "jobs: {wait: {steps: [{uses: relay/human-wait@v1, with: {prompt: "
+            "Continue?}}, {id: check, run: print(1), shell: python}]}}\n"
+        ),
     )
+    project.write_workflow("loop", "jobs: {repeat: {uses: ./.relay/workflows/wait-child.yaml}}\n")
     run_id = engine.launch(project, "loop")
     engine.run_token(engine.tokens.popleft())
     store = engine.store
@@ -342,16 +366,16 @@ def interrupted_paused_loop(project: RelayProject, engine: InlineEngine) -> Reco
     return target
 
 
-def test_paused_loop_restart_keeps_reports_snapshots_and_unstarted_children(
-    interrupted_paused_loop: RecoveryTarget, engine: InlineEngine
+def test_paused_reusable_job_restart_keeps_reports_snapshots_and_unstarted_children(
+    interrupted_paused_job: RecoveryTarget, engine: InlineEngine
 ) -> None:
-    target = interrupted_paused_loop
+    target = interrupted_paused_job
     report = Path(target.worktree_path) / "REVIEW.md"
     snapshot = RunSnapshot.objects.get(run_id=target.run_id)
     frozen = (snapshot.workflow_yaml, snapshot.resolved_prompts, snapshot.hashes)
     attempt_ids = list(NodeAttempt.objects.values_list("id", flat=True))
 
-    resumed = resume_interrupted(engine.store, partial(prepare_recovery_workspace, engine.store))
+    resumed = resume_interrupted(engine.store, prepare_recovery_workspace)
     dispatch_ready_nodes(engine.store, target.run_id, engine.tokens.append)
     engine.drain(target.run_id)
 
@@ -363,16 +387,16 @@ def test_paused_loop_restart_keeps_reports_snapshots_and_unstarted_children(
     snapshot.refresh_from_db()
     assert (snapshot.workflow_yaml, snapshot.resolved_prompts, snapshot.hashes) == frozen
     assert list(NodeAttempt.objects.values_list("id", flat=True)) == attempt_ids
-    assert not NodeAttempt.objects.filter(node_run__scope_path="root.repeat#1.check").exists()
+    assert not NodeAttempt.objects.filter(node_run__scope_path="root.repeat.wait.check").exists()
 
 
 @pytest.mark.parametrize(
     "change", ["untracked_code", "modified_code", "staged_report", "nested_report", "moved_head"]
 )
-def test_loop_restart_still_rejects_code_staged_reports_and_head_movement(
-    interrupted_paused_loop: RecoveryTarget, change: str
+def test_job_restart_still_rejects_code_staged_reports_and_head_movement(
+    interrupted_paused_job: RecoveryTarget, change: str
 ) -> None:
-    target = interrupted_paused_loop
+    target = interrupted_paused_job
     worktree = Path(target.worktree_path)
     if change == "untracked_code":
         (worktree / "unfinished.py").write_bytes(b"unfinished\n")
@@ -388,7 +412,7 @@ def test_loop_restart_still_rejects_code_staged_reports_and_head_movement(
 
     expected = WorktreeError if change == "moved_head" else DirtyRepositoryError
     with pytest.raises(expected):
-        prepare_recovery_workspace(DjangoExecutionStore(), target)
+        prepare_recovery_workspace(target)
 
     assert run_status(target.run_id) == "interrupted"
     assert (worktree / "REVIEW.md").read_bytes() == b"Ready: No\n"

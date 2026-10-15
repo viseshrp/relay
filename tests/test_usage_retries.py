@@ -1,24 +1,16 @@
-"""Provider resets resume only the original failed step, once and durably."""
+"""Provider-confirmed resets resume the same current Actions job once."""
 
-from __future__ import annotations
-
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-from django.db import connections
 import pytest
 
 from relay.agents.usage_limits import ProviderUsageLimit, claude_usage_limit
-from relay.errors import AgentUsageLimitError
-from relay.execution.control import ControlResult
-from relay.execution.reconcile import reconcile_once
-from relay.execution.recovery import prepare_recovery_workspace
-from relay.execution.resume import RecoveryTarget, rerun_failed_node
-from relay.execution.runner import ExecutionOutcome, OutcomeKind
-from relay.execution.scheduler import dispatch_ready_nodes
+from relay.execution.nodes import node_executors
+from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.web.models import NodeAttempt, Run, RunEvent, RunSnapshot, UsageRetry
-from relay.web.repositories import DjangoExecutionStore
-from tests.support import Clock, InlineEngine, RelayProject
+from relay.workflows.schema import AgentNode
+from tests.support import Clock, FakeAgents, InlineEngine, RelayProject
 
 
 @pytest.mark.parametrize("status", ["allowed", "allowed_warning", "unknown"])
@@ -46,143 +38,120 @@ def test_the_authoritative_reset_preserves_its_epoch() -> None:
     assert result == ProviderUsageLimit(reset, "five_hour")
 
 
-def limited_run(project: RelayProject, engine: InlineEngine, reset: datetime | None) -> str:
+@dataclass
+class QuotaDriver:
+    reset: datetime | None
+    calls: list[AttemptContext] = field(default_factory=list)
+
+    def execute(self, context: AttemptContext, node: AgentNode) -> ExecutionOutcome:
+        del node
+        self.calls.append(context)
+        if len(self.calls) == 1:
+            return ExecutionOutcome(
+                OutcomeKind.FAILED,
+                error_code="agent_usage_limit",
+                usage_limit=ProviderUsageLimit(self.reset, "session"),
+            )
+        return ExecutionOutcome(OutcomeKind.SUCCEEDED)
+
+
+def limited_run(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, reset: datetime | None
+) -> tuple[str, QuotaDriver]:
+    fake_agents.install("codex")
+    driver = QuotaDriver(reset)
+    engine.executors = node_executors(agent_driver=driver)
     project.write_workflow(
         "limited",
-        "version: 1\nname: Limited\nnodes:\n"
-        "  first: {type: command, run: [git, status]}\n"
-        "  limited: {type: command, needs: [first], run: [git, status], "
-        "writes: true, allow_no_commit: true}\n",
+        """jobs:
+  first:
+    steps: [{run: print('upstream'), shell: python}]
+  limited:
+    needs: first
+    steps:
+      - id: agent
+        uses: relay/agent@v1
+        with: {agent: codex, model: m1, prompt: Continue the exact captured task}
+""",
     )
     run_id = engine.launch(project, "limited")
-    engine.run_token(engine.tokens.popleft())
-    dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
-    claim = engine.store.claim_dispatch(engine.tokens.popleft(), "quota-worker").attempt
-    assert claim is not None
-    engine.store.finish_attempt(
-        claim.attempt_id,
-        ExecutionOutcome(
-            OutcomeKind.FAILED,
-            error_code=AgentUsageLimitError.error_code,
-            usage_limit=ProviderUsageLimit(reset, "five_hour"),
-        ),
-        claim.starting_head,
-    )
-    engine.store.release_attempt_lock(claim.attempt_id)
-    assert Run.objects.get(pk=run_id).status == "failed"
-    return run_id
+    engine.drain(run_id)
+    return run_id, driver
 
 
-def test_a_future_reset_does_not_start_an_attempt(
-    project: RelayProject, engine: InlineEngine, clock: Clock
+def test_future_reset_keeps_the_current_job_waiting(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, clock: Clock
 ) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    result = reconcile_once(engine.store, engine.tokens.append, orderly_shutdown=False)
-    assert result.usage_retries_resumed == 0
-    assert Run.objects.get(pk=run_id).status == "failed"
-    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 2
+    run_id, driver = limited_run(project, engine, fake_agents, clock.instant + timedelta(hours=1))
+    assert Run.objects.get(pk=run_id).status == "running"
+    assert engine.store.resume_usage_retries() == 0
+    assert len(driver.calls) == 1
+    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 4
+    assert UsageRetry.objects.get(run_id=run_id).state == "scheduled"
 
 
-def test_a_due_reset_survives_new_connections_and_preserves_completed_steps_and_snapshot(
-    project: RelayProject, engine: InlineEngine, clock: Clock
+def test_due_reset_wakes_once_and_preserves_completed_work(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, clock: Clock
 ) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    snapshot = RunSnapshot.objects.get(run_id=run_id).hashes
-    completed = NodeAttempt.objects.get(node_run__run_id=run_id, node_run__node_id="first").pk
-    head = Run.objects.get(pk=run_id).recorded_head
-    connections.close_all()
+    run_id, driver = limited_run(project, engine, fake_agents, clock.instant + timedelta(hours=1))
+    snapshot = RunSnapshot.objects.get(run_id=run_id)
+    original = (snapshot.hashes, snapshot.route_table, snapshot.resolved_prompts)
+    completed = NodeAttempt.objects.get(node_run__scope_path="root.first.step_1").pk
     clock.advance(3601)
-    store = DjangoExecutionStore()
-    assert store.resume_usage_retries() == 1
-    assert store.resume_usage_retries() == 0
-    dispatch_ready_nodes(store, run_id, engine.tokens.append)
+    assert engine.store.resume_usage_retries() == 1
+    assert engine.store.resume_usage_retries() == 0
     engine.drain(run_id)
     assert Run.objects.get(pk=run_id).status == "succeeded"
-    assert Run.objects.get(pk=run_id).recorded_head == head
-    assert RunSnapshot.objects.get(run_id=run_id).hashes == snapshot
+    assert len(driver.calls) == 2
+    assert driver.calls[0].attempt.route == driver.calls[1].attempt.route
     assert (
-        NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__node_id="first").get().pk
-        == completed
+        "Continue after the provider-confirmed usage reset."
+        in driver.calls[1].attempt.prompt_contents
     )
+    assert driver.calls[1].attempt.prompt_contents[-1] == "Continue the exact captured task"
+    assert NodeAttempt.objects.get(node_run__scope_path="root.first.step_1").pk == completed
+    assert NodeAttempt.objects.filter(node_run__scope_path="root.limited").count() == 1
     assert UsageRetry.objects.get(run_id=run_id).state == "resumed"
-    assert RunEvent.objects.filter(run_id=run_id, type="run.rerun").count() == 1
+    assert RunEvent.objects.filter(run_id=run_id, type="step.usage_ready").count() == 1
+    snapshot.refresh_from_db()
+    assert (snapshot.hashes, snapshot.route_table, snapshot.resolved_prompts) == original
 
 
-def test_owner_cancellation_removes_the_schedule_without_reopening_the_run(
-    project: RelayProject, engine: InlineEngine, clock: Clock
+def test_canceling_a_quota_wait_removes_its_schedule(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, clock: Clock
 ) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    assert (
-        engine.store.request_run_cancellation(run_id, "cancel-schedule") is ControlResult.ACCEPTED
-    )
+    run_id, driver = limited_run(project, engine, fake_agents, clock.instant + timedelta(hours=1))
+    engine.store.request_run_cancellation(run_id, "cancel-quota")
+    engine.drain(run_id)
     clock.advance(3601)
     assert engine.store.resume_usage_retries() == 0
     assert UsageRetry.objects.get(run_id=run_id).state == "canceled"
-    assert Run.objects.get(pk=run_id).status == "failed"
+    assert Run.objects.get(pk=run_id).status == "canceled"
+    assert len(driver.calls) == 1
 
 
-def test_an_unknown_reset_is_visible_and_never_retried(
-    project: RelayProject, engine: InlineEngine, clock: Clock
+def test_unknown_reset_never_uses_generic_recovery(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, clock: Clock
 ) -> None:
-    run_id = limited_run(project, engine, None)
+    run_id, driver = limited_run(project, engine, fake_agents, None)
     clock.advance(86400)
-    assert engine.store.resume_usage_retries() == 0
+    assert engine.store.resume_usage_retries() == engine.store.resume_automatic_retries() == 0
     assert UsageRetry.objects.get(run_id=run_id).state == "blocked"
-    assert RunEvent.objects.filter(run_id=run_id, type="run.retry_blocked").exists()
-
-
-def test_owner_retry_supersedes_the_schedule(
-    project: RelayProject, engine: InlineEngine, clock: Clock
-) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    assert (
-        rerun_failed_node(
-            engine.store,
-            run_id,
-            "root.limited",
-            "owner-retry",
-            lambda target: prepare_recovery_workspace(engine.store, target),
-        )
-        is ControlResult.ACCEPTED
-    )
-    clock.advance(3601)
-    assert engine.store.resume_usage_retries() == 0
-    assert UsageRetry.objects.get(run_id=run_id).state == "resumed"
-
-
-def test_cancellation_during_workspace_recovery_prevents_automatic_activation(
-    project: RelayProject, engine: InlineEngine, clock: Clock
-) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    retry = UsageRetry.objects.get(run_id=run_id)
-    clock.advance(3601)
-
-    def cancel_during_preparation(target: RecoveryTarget) -> None:
-        engine.store.request_run_cancellation(run_id, "cancel-during-recovery")
-        prepare_recovery_workspace(engine.store, target)
-
-    rerun_failed_node(
-        engine.store,
-        run_id,
-        "root.limited",
-        f"quota:{retry.attempt_id}",
-        cancel_during_preparation,
-        usage_reset=True,
-    )
     assert Run.objects.get(pk=run_id).status == "failed"
-    assert UsageRetry.objects.get(run_id=run_id).state == "canceled"
-    assert not RunEvent.objects.filter(run_id=run_id, type="run.rerun").exists()
+    assert len(driver.calls) == 1
 
 
-def test_workspace_failure_blocks_the_retry_instead_of_repeatedly_starting_the_provider(
-    project: RelayProject, engine: InlineEngine, clock: Clock
+def test_owner_pause_keeps_a_due_reset_held_until_resume(
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, clock: Clock
 ) -> None:
-    run_id = limited_run(project, engine, clock.instant + timedelta(hours=1))
-    checkout = Path(Run.objects.get(pk=run_id).worktree_path)
-    checkout.rename(checkout.with_name("missing-checkout"))
+    run_id, driver = limited_run(project, engine, fake_agents, clock.instant + timedelta(hours=1))
+    engine.store.configure_dispatch_pause(run_id, True, "hold-reset")
     clock.advance(3601)
     assert engine.store.resume_usage_retries() == 0
-    retry = UsageRetry.objects.get(run_id=run_id)
-    assert retry.state == "blocked" and retry.error_message is not None
-    assert engine.store.resume_usage_retries() == 0
-    assert NodeAttempt.objects.filter(node_run__run_id=run_id).count() == 2
+    engine.drain(run_id)
+    assert len(driver.calls) == 1
+    engine.store.configure_dispatch_pause(run_id, False, "resume-reset")
+    assert engine.store.resume_usage_retries() == 1
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    assert len(driver.calls) == 2

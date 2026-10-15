@@ -10,12 +10,11 @@ from django.test import Client
 import pytest
 
 from relay.agents.driver import RoutedAgentNodeDriver
-from relay.agents.usage_limits import ProviderUsageLimit
 from relay.constants import DEFAULT_RETRY_HANDOFF_PROMPT, RETRY_HANDOFF_MAX_BYTES
 from relay.execution.nodes import node_executors
-from relay.execution.runner import ExecutionOutcome, OutcomeKind
+from relay.execution.runner import OutcomeKind
 from relay.execution.scheduler import dispatch_ready_nodes
-from relay.web.models import DispatchClaim, NodeAttempt, NodeRun, Run, RunEvent, RunSnapshot
+from relay.web.models import NodeAttempt, NodeRun, Run, RunEvent, RunSnapshot
 from tests.support import Clock, FakeAgents, InlineEngine, RegistryNetwork, RelayProject, run_status
 
 
@@ -33,23 +32,36 @@ def failed_agent(
     monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
     project.write_workflow(
         "retry-effort",
-        "version: 1\nname: Retry effort\nmodel: m2\nagents: [codex]\nnodes:\n"
-        "  first: {type: command, run: [git, status]}\n"
-        "  review:\n    type: agent\n    needs: [first]\n    permission_profile: interactive\n"
-        "    agent_options:\n      codex: {effort: low, permission_mode: auto}\n",
+        (
+            "name: Retry effort\n"
+            "jobs:\n"
+            "  first:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+            "  review:\n"
+            "    needs:\n"
+            "    - first\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m2\n"
+            "        effort: low\n"
+        ),
     )
     run_id = engine.launch(project, "retry-effort")
     engine.run_token(engine.tokens.popleft())
     dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
-    claimed = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
-    if claimed is None:
-        pytest.fail("The agent step was not claimed")
-    engine.store.finish_attempt(
-        claimed.attempt_id,
-        ExecutionOutcome(OutcomeKind.FAILED, error_code="agent_auth_error"),
-        claimed.starting_head,
+    from tests.support import FakeAgentDriver
+
+    engine.executors = node_executors(
+        agent_driver=FakeAgentDriver(outcome_kind=OutcomeKind.FAILED, error_code="agent_auth_error")
     )
-    engine.store.release_attempt_lock(claimed.attempt_id)
+    engine.drain(run_id)
     client = Client()
     response = client.post(
         "/api/auth/onboard",
@@ -64,7 +76,7 @@ def failed_agent(
 def retry(client: Client, run_id: str, body: dict[str, object]) -> tuple[int, dict[str, object]]:
     response = client.post(
         f"/api/runs/{run_id}/rerun-node",
-        data=json.dumps({"scope_path": "root.review", "idempotency_key": "retry-1", **body}),
+        data=json.dumps({"scope_path": "root.review.work", "idempotency_key": "retry-1", **body}),
         content_type="application/json",
     )
     return response.status_code, response.json()
@@ -82,24 +94,33 @@ def test_every_failed_agent_has_its_own_retry_choices(
     monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
     project.write_workflow(
         "parallel-failures",
-        "version: 1\nname: Parallel failures\nmodel: m2\nagents: [codex]\nnodes:\n"
-        "  first: {type: agent, agent_options: {codex: {effort: low}}}\n"
-        "  second: {type: agent, agent_options: {codex: {permission_mode: ask}}}\n",
+        (
+            "name: Parallel failures\n"
+            "jobs:\n"
+            "  first:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m2\n"
+            "        effort: low\n"
+            "  second:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m2\n"
+        ),
     )
     run_id = engine.launch(project, "parallel-failures")
-    claims = [
-        engine.store.claim_dispatch(token, engine.worker_id).attempt
-        for token in tuple(engine.tokens)
-    ]
-    assert len(claims) == 2
-    for claim in claims:
-        assert claim is not None
-        engine.store.finish_attempt(
-            claim.attempt_id,
-            ExecutionOutcome(OutcomeKind.FAILED, error_code="agent_auth_error"),
-            claim.starting_head,
-        )
-        engine.store.release_attempt_lock(claim.attempt_id)
+    from tests.support import FakeAgentDriver
+
+    engine.executors = node_executors(
+        agent_driver=FakeAgentDriver(outcome_kind=OutcomeKind.FAILED, error_code="agent_auth_error")
+    )
+    engine.drain(run_id)
     client = Client()
     client.post(
         "/api/auth/onboard",
@@ -108,23 +129,29 @@ def test_every_failed_agent_has_its_own_retry_choices(
     )
     detail = client.get(f"/api/runs/{run_id}").json()["run"]
     assert detail["status"] == "failed"
-    assert detail["problem"]["scope_path"] == "root.first"
+    assert detail["problem"]["scope_path"] == "root.first.work"
     choices = {node["scope_path"]: node["retry_settings"] for node in detail["nodes"]}
-    assert (choices["root.first"]["effort"], choices["root.first"]["permission_mode"]) == (
+    assert (
+        choices["root.first.work"]["effort"],
+        choices["root.first.work"]["permission_mode"],
+    ) == (
         "low",
         None,
     )
-    assert (choices["root.second"]["effort"], choices["root.second"]["permission_mode"]) == (
+    assert (
+        choices["root.second.work"]["effort"],
+        choices["root.second.work"]["permission_mode"],
+    ) == (
         None,
-        "ask",
+        None,
     )
-    assert choices["root.second"]["default_handoff_prompt"] == DEFAULT_RETRY_HANDOFF_PROMPT
+    assert choices["root.second.work"]["default_handoff_prompt"] == DEFAULT_RETRY_HANDOFF_PROMPT
     # The second failure can be retried independently of the initiating notice.
-    assert retry(client, run_id, {"scope_path": "root.second", "effort": "medium"})[0] == 202
-    assert NodeRun.objects.get(run_id=run_id, scope_path="root.second").retry_options == {
+    assert retry(client, run_id, {"scope_path": "root.second.work", "effort": "medium"})[0] == 202
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.second.work").retry_options == {
         "effort": "medium"
     }
-    assert NodeRun.objects.get(run_id=run_id, scope_path="root.first").status == "failed"
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.first.work").status == "failed"
 
 
 @pytest.mark.parametrize(
@@ -156,8 +183,7 @@ def test_a_retry_applies_only_the_requested_effort_and_preserves_prior_evidence(
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
-    engine.run_token(token.claim_token)
+    engine.drain(run_id)
     assert run_status(run_id) == "succeeded"
     snapshot.refresh_from_db()
     assert (snapshot.route_table, snapshot.hashes) == (original_route, hashes)
@@ -178,7 +204,7 @@ def test_a_retry_applies_only_the_requested_effort_and_preserves_prior_evidence(
         if item.get("method") == "session/set_config_option"
     ]
     expected = [("model", "m2")]
-    permission_mode = body.get("permission_mode", "auto")
+    permission_mode = body.get("permission_mode")
     if permission_mode is not None:
         expected.append(("mode", permission_mode))
     effort = body.get("effort", "low")
@@ -198,7 +224,7 @@ def test_invalid_effort_does_not_reopen_or_modify_a_failed_step(
     status, _body = retry(client, run_id, {"effort": effort})
     assert status == expected_status
     assert run_status(run_id) == "failed"
-    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review").retry_options == {}
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review.work").retry_options == {}
     assert not RunEvent.objects.filter(run_id=run_id, type="run.rerun").exists()
 
 
@@ -207,29 +233,18 @@ def test_native_quota_recovery_preserves_the_owners_retry_effort(
 ) -> None:
     run_id, client = failed_agent
     assert retry(client, run_id, {"effort": "medium"})[0] == 202
-    engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
-    claimed = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
-    assert claimed is not None
-    engine.store.finish_attempt(
-        claimed.attempt_id,
-        ExecutionOutcome(
-            OutcomeKind.FAILED,
-            error_code="agent_usage_limit",
-            usage_limit=ProviderUsageLimit(clock.instant + timedelta(minutes=10), "session"),
-        ),
-        claimed.starting_head,
-    )
-    engine.store.release_attempt_lock(claimed.attempt_id)
+    from tests.test_usage_retries import QuotaDriver
+
+    driver = QuotaDriver(clock.instant + timedelta(minutes=10))
+    engine.executors = node_executors(agent_driver=driver)
+    engine.drain(run_id)
+    assert driver.calls[0].attempt.route["effort"] == "medium"
     clock.advance(601)
-    connections.close_all()
     assert engine.store.resume_usage_retries() == 1
-    token = engine.store.create_dispatch(str(claimed.node_run_id))
-    assert token is not None
-    recovered = engine.store.claim_dispatch(token, engine.worker_id).attempt
-    assert recovered is not None
-    assert recovered.route["effort"] == "medium"
-    assert RunSnapshot.objects.get(run_id=run_id).route_table["root.review"]["effort"] == "low"
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+    assert driver.calls[1].attempt.route["effort"] == "medium"
+    assert RunSnapshot.objects.get(run_id=run_id).route_table["root.review.work"]["effort"] == "low"
 
 
 def test_a_command_failure_rejects_an_effort_override(
@@ -238,8 +253,16 @@ def test_a_command_failure_rejects_an_effort_override(
     monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
     project.write_workflow(
         "command-failure",
-        "version: 1\nname: Command failure\nnodes:\n"
-        "  review: {type: command, run: [git, not-a-command]}\n",
+        (
+            "name: Command failure\n"
+            "jobs:\n"
+            "  review:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "not-a-command"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "command-failure")
     engine.drain(run_id)
@@ -252,7 +275,7 @@ def test_a_command_failure_rejects_an_effort_override(
     status, _body = retry(client, run_id, {"effort": "medium"})
     assert status == 400
     assert run_status(run_id) == "failed"
-    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review").retry_options == {}
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review.work").retry_options == {}
 
 
 @pytest.mark.parametrize(
@@ -278,9 +301,9 @@ def test_owner_handoff_executes_the_selected_provider_without_rewriting_complete
     fake_agents.install(body["agent_id"], mode="configuration")
     snapshot = RunSnapshot.objects.get(run_id=run_id)
     original = (snapshot.route_table, snapshot.hashes, snapshot.resolved_prompts)
-    upstream = NodeRun.objects.get(run_id=run_id, scope_path="root.first")
+    upstream = NodeRun.objects.get(run_id=run_id, scope_path="root.first.work")
     old_attempt = NodeAttempt.objects.get(
-        node_run__run_id=run_id, node_run__scope_path="root.review"
+        node_run__run_id=run_id, node_run__scope_path="root.review.work"
     )
     head = Run.objects.get(pk=run_id).recorded_head
     assert retry(client, run_id, body) == (202, {"result": "accepted"})
@@ -291,8 +314,7 @@ def test_owner_handoff_executes_the_selected_provider_without_rewriting_complete
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
-    engine.run_token(token.claim_token)
+    engine.drain(run_id)
     assert run_status(run_id) == "succeeded"
     new_attempt = NodeAttempt.objects.get(node_run=old_attempt.node_run, attempt_number=2)
     assert (new_attempt.agent_id, new_attempt.model_value) == (body["agent_id"], body["model"])
@@ -384,10 +406,10 @@ def test_invalid_handoff_keeps_the_failed_step_and_its_route_unchanged(
     fake_agents.install("antigravity", mode="configuration")
     assert retry(client, run_id, body)[0] == expected_status
     assert run_status(run_id) == "failed"
-    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review").retry_options == {}
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.review.work").retry_options == {}
     assert (
         NodeAttempt.objects.filter(
-            node_run__run_id=run_id, node_run__scope_path="root.review"
+            node_run__run_id=run_id, node_run__scope_path="root.review.work"
         ).count()
         == 1
     )
@@ -424,10 +446,9 @@ def test_custom_handoff_replaces_the_default_and_reaches_the_new_provider(
         == 202
     )
     engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
     connections.close_all()
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
-    engine.run_token(token.claim_token)
+    engine.drain(run_id)
     assert run_status(run_id) == "succeeded"
     prompt = next(
         item["input"]["message"]["content"] for item in fake_agents.messages() if "input" in item
@@ -454,51 +475,15 @@ def test_quota_recovery_and_later_effort_changes_keep_the_replacement_provider(
         retry(client, run_id, {"agent_id": "claude", "model": "m1", "permission_mode": "auto"})[0]
         == 202
     )
-    engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
-    claimed = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
-    assert claimed is not None
-    engine.store.finish_attempt(
-        claimed.attempt_id,
-        ExecutionOutcome(
-            OutcomeKind.FAILED,
-            error_code="agent_usage_limit",
-            usage_limit=ProviderUsageLimit(clock.instant + timedelta(minutes=10), "session"),
-        ),
-        claimed.starting_head,
-    )
-    engine.store.release_attempt_lock(claimed.attempt_id)
+    from tests.test_usage_retries import QuotaDriver
+
+    driver = QuotaDriver(clock.instant + timedelta(minutes=10))
+    engine.executors = node_executors(agent_driver=driver)
+    engine.drain(run_id)
+    assert driver.calls[0].attempt.route["selected_agent"] == "claude"
     clock.advance(601)
-    connections.close_all()
     assert engine.store.resume_usage_retries() == 1
-    token = engine.store.create_dispatch(str(claimed.node_run_id))
-    assert token is not None
-    recovered = engine.store.claim_dispatch(token, engine.worker_id).attempt
-    assert recovered is not None
-    assert (recovered.route["selected_agent"], recovered.route["model_value"]) == ("claude", "m1")
-    assert recovered.prompt_contents[-1] == DEFAULT_RETRY_HANDOFF_PROMPT
-    engine.store.finish_attempt(
-        recovered.attempt_id,
-        ExecutionOutcome(OutcomeKind.FAILED, error_code="agent_auth_error"),
-        recovered.starting_head,
-    )
-    engine.store.release_attempt_lock(recovered.attempt_id)
-    assert (
-        retry(
-            client,
-            run_id,
-            {"idempotency_key": "retry-2", "effort": "high", "permission_mode": "ask"},
-        )[0]
-        == 202
-    )
-    engine.advance(run_id)
-    token = DispatchClaim.objects.get(node_run__scope_path="root.review", state="dispatched")
-    final = engine.store.claim_dispatch(token.claim_token, engine.worker_id).attempt
-    assert final is not None
-    assert (final.route["selected_agent"], final.route["model_value"], final.route["effort"]) == (
-        "claude",
-        "m1",
-        "high",
-    )
-    assert final.route["permission_mode"] == "ask"
-    assert final.prompt_contents[-1] == DEFAULT_RETRY_HANDOFF_PROMPT
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+    assert driver.calls[1].attempt.route["selected_agent"] == "claude"
+    assert driver.calls[1].attempt.route["model_value"] == "m1"

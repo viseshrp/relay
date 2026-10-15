@@ -328,13 +328,27 @@ def test_launch_snapshots_and_executes_saved_overrides_end_to_end(
     fake_agents.install("codex", mode="configuration")
     project.write_workflow(
         "configured",
-        "version: 1\nname: Configured\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work:\n    type: agent\n    agent_options:\n"
-        "      codex: {effort: low, permission_mode: auto}\n",
+        (
+            "name: Configured\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            "        effort: low\n"
+        ),
+    )
+    from relay.workflows.defaults import validate_defaults
+
+    engine.workflow_defaults = validate_defaults(
+        {"providers": {"codex": {"model": "m1", "permission_mode": "auto"}}}
     )
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     run_id = engine.launch(project, "configured")
-    route = RunSnapshot.objects.get(run_id=run_id).route_table["root.work"]
+    route = RunSnapshot.objects.get(run_id=run_id).route_table["root.work.work"]
     assert (route["effort"], route["permission_mode"]) == ("low", "auto")
     engine.drain(run_id)
     assert run_status(run_id) == "succeeded"
@@ -353,8 +367,18 @@ def test_an_invalid_override_prevents_run_creation(
     fake_agents.install("codex", mode="configuration")
     project.write_workflow(
         "invalid",
-        "version: 1\nname: Invalid\nmodel: m2\nagents: [codex]\nnodes:\n"
-        "  work:\n    type: agent\n    agent_options:\n      codex: {effort: high}\n",
+        (
+            "name: Invalid\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m2\n"
+            "        effort: high\n"
+        ),
     )
     with pytest.raises(AgentConfigurationError):
         engine.launch(project, "invalid")

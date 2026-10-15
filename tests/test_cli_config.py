@@ -463,7 +463,17 @@ def terminal_project(
     project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
 ) -> RelayProject:
     project.write_workflow(
-        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "done",
+        (
+            "name: Done\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     engine.drain(engine.launch(project, "done"))
     monkeypatch.chdir(project.repository)
