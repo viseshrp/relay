@@ -89,6 +89,7 @@ must resolve inside the run workspace.
 
 The built-in `python` shell uses Relay's interpreter with `-X utf8`, so
 redirected output and default text-file encoding support Unicode on Windows.
+An inherited `PYTHONIOENCODING` still overrides its standard-stream encoding.
 Custom interpreter commands and explicit command argument vectors retain
 their requested arguments.
 

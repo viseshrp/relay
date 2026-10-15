@@ -40,6 +40,11 @@ AppData directory after this guard was installed. With the traversal bound,
 all 15 probe/reporting tests passed with two concurrent workers, and all four
 native tox variants passed in the final complete run.
 
+Correction, 2026-10-15: the collection guard above belongs only to the native
+tox probe, `test_native_tox_runs_both_lanes_and_preserves_failure`. It is not a
+global pytest plugin. Both nested probes set `--rootdir` and `--confcutdir`;
+see [CI execution and test completeness](../docs/ci-testing.md).
+
 Git checkout identity still comes from the source checkout. Native inventory
 verification, both execution lanes, intentional serial failure propagation,
 and coverage-enabled probe variants retain their assertions.
