@@ -86,7 +86,7 @@ class ScopeNodeRecord:
 class AttemptRuntime(DispatchStore, Protocol):
     """Durable callbacks an executor may use without knowing Django or Huey."""
 
-    def append_agent_event(self, attempt_id: str, event: AgentEvent) -> None: ...
+    def prepare_agent_events(self, event: AgentEvent) -> tuple[AgentEvent, ...]: ...
 
     def append_attempt_event(
         self,

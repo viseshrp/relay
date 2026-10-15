@@ -3228,15 +3228,8 @@ class DjangoExecutionStore(DjangoAgentStore):
         ):
             self._complete_merged_run(str(run_id))
 
-    def append_agent_event(self, attempt_id: str, event: AgentEvent) -> None:
-        for part in bounded_agent_events(event):
-            self.append_attempt_event(
-                attempt_id,
-                part.event_type,
-                EventSource.AGENT,
-                part.payload,
-                sensitivity=part.sensitivity,
-            )
+    def prepare_agent_events(self, event: AgentEvent) -> tuple[AgentEvent, ...]:
+        return bounded_agent_events(event)
 
     def append_attempt_event(
         self,

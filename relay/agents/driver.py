@@ -29,7 +29,7 @@ from relay.errors import (
 )
 from relay.execution.control import cancel_stop_reason
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
-from relay.execution.state import AttemptStopReason, ControlKind
+from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.routing import RouteEntry, RouteRequirement
 from relay.workflows.schema import AgentNode
 
@@ -517,11 +517,15 @@ class RoutedAgentNodeDriver:
         context: AgentExecutionContext,
     ) -> ExecutionOutcome:
         async for event in driver.start_attempt(context):
-            await asyncio.to_thread(
-                context.attempt.runtime.append_agent_event,
-                context.attempt.attempt.attempt_id,
-                event,
-            )
+            for part in context.attempt.runtime.prepare_agent_events(event):
+                await asyncio.to_thread(
+                    context.attempt.runtime.append_attempt_event,
+                    context.attempt.attempt.attempt_id,
+                    part.event_type,
+                    EventSource.AGENT,
+                    part.payload,
+                    sensitivity=part.sensitivity,
+                )
         result = await driver.finalize()
         return ExecutionOutcome(
             OutcomeKind.SUCCEEDED if result.succeeded else OutcomeKind.FAILED,
