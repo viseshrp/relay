@@ -174,6 +174,30 @@ test("the checklist can close before a run and reopen from settings with keyboar
   ).toHaveCount(0);
 });
 
+for (const method of ["Escape", "backdrop"] as const) {
+  test(`closing the checklist with ${method} returns focus to the account menu`, async ({
+    page,
+  }) => {
+    await page.goto("/?view=workflows");
+    await page
+      .getByRole("button", { name: "Get started", exact: true })
+      .click();
+    const setup = page.getByRole("dialog", {
+      name: "Get started",
+      exact: true,
+    });
+    await expect(setup).toBeVisible();
+
+    if (method === "Escape") await setup.press("Escape");
+    else await page.mouse.click(5, 5);
+
+    await expect(setup).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Account menu for owner", exact: true }),
+    ).toBeFocused();
+  });
+}
+
 test("a failed connection check never traps the owner in setup", async ({
   page,
 }) => {

@@ -45,6 +45,8 @@ export function GetStartedView({ state }: { state: GetStartedState }) {
   return (
     <Dialog
       open
+      // App returns focus to the help or account menu when this closes.
+      disableRestoreFocus
       onClose={onClose}
       fullWidth
       maxWidth="lg"
