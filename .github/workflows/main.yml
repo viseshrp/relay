@@ -391,7 +391,7 @@ jobs:
         run: |
           npm --prefix frontend run build
           cd frontend
-          npx playwright test --config playwright.visual.config.ts --update-snapshots --grep 'visual .* at'
+          npx playwright test --config playwright.visual.config.ts --update-snapshots=all --grep 'visual .* at'
 
       - name: Retain generated Linux visual baselines
         uses: actions/upload-artifact@v7.0.2
