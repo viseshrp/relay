@@ -132,9 +132,7 @@ test("inventory refresh failure preserves save success and the next save base", 
     .fill("Saved despite inventory failure");
   await page.getByRole("button", { name: "Done", exact: true }).click();
   const inventory = /\/api\/workflows(?:\?.*)?$/;
-  let refreshes = 0;
   await page.route(inventory, (route) => {
-    refreshes += 1;
     return route.fulfill({
       status: 503,
       json: {
@@ -148,7 +146,10 @@ test("inventory refresh failure preserves save success and the next save base", 
   await expect(
     page.getByText("Workflow and instructions saved and validated."),
   ).toBeVisible();
-  expect(refreshes).toBe(1);
+  const warning = page
+    .getByRole("alert")
+    .filter({ hasText: "The workflow list could not refresh." });
+  await expect(warning).toBeVisible();
   await expect(page.getByText(/Unsaved changes:/)).toHaveCount(0);
   const saved = await (
     await page.request.get("/api/workflows/workflow.yaml")
@@ -176,6 +177,7 @@ test("inventory refresh failure preserves save success and the next save base", 
   await expect(
     page.getByRole("combobox", { name: "Workflow", exact: true }),
   ).toHaveText("Inventory recovered");
+  await expect(warning).toHaveCount(0);
 });
 
 test("drawing changes rewrite YAML and can be undone, redone, and formatted", async ({
