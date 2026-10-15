@@ -28,6 +28,12 @@ function record(
     : null;
 }
 
+function exitCodeText(value: JsonValue | undefined): string {
+  return typeof value === "number" && Number.isInteger(value)
+    ? `Exit code: ${value}`
+    : "";
+}
+
 function readableOutput(
   event: RunEvent,
   toolNames: Map<string, string>,
@@ -88,10 +94,9 @@ function readableOutput(
     const native = record(summary?.tool_info);
     const output =
       summary?.output_delta ?? native?.output ?? summary?.raw_output;
-    const exit =
-      typeof summary?.exit_code === "number"
-        ? `Exit code: ${summary.exit_code}`
-        : "";
+    const exit = exitCodeText(
+      summary?.exit_code ?? record(summary?.raw_output)?.exit_code,
+    );
     // Output "denied\n" plus exit 3 becomes "denied\n\nExit code: 3".
     const visible = [text || (typeof output === "string" ? output : ""), exit]
       .filter(Boolean)
@@ -113,7 +118,9 @@ function readableOutput(
       .join("\n");
   }
   if (event.type === "command.exit")
-    return `Command finished${typeof event.payload.exit_code === "number" ? ` with exit code ${event.payload.exit_code}` : ""}.`;
+    return ["Command finished.", exitCodeText(event.payload.exit_code)]
+      .filter(Boolean)
+      .join("\n");
   if (event.type === "agent.cleanup_warning")
     return typeof event.payload.message === "string"
       ? event.payload.message

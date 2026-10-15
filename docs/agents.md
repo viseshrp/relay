@@ -173,6 +173,9 @@ Relay advertises terminal-output deltas and retains the adapter's
 ACP metadata. Only these known public fields are copied; private updates and
 unrelated metadata are omitted. The browser appends each output delta once,
 including repeated fragments, and shows the exit code in tool details.
+For commands without terminal metadata, the browser also reads integer exit
+codes from `raw_output.exit_code`. Terminal metadata takes precedence. Tools
+and command steps display the same `Exit code: N` wording.
 Metadata-only updates with no retained fields produce no empty tool event.
 Terminal deltas and exit codes were verified on Windows with Codex ACP 2.2.2
 in the [Windows retest](../certification/2026-10-14-windows-relay-fixes.md).

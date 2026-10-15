@@ -57,6 +57,60 @@ test("terminal output deltas preserve repeated fragments and failure details", (
   });
 });
 
+for (const code of [0, 3, -1])
+  test(`raw tool output displays exit code ${code}`, () => {
+    const rows = activityRows([
+      event(1, "agent.tool_result", {
+        tool: "Execute",
+        tool_call_id: "cmd",
+        summary: JSON.stringify({
+          status: "completed",
+          raw_output: { exit_code: code },
+        }),
+      }),
+    ]);
+    expect(rows[0].tool?.output).toBe(`Exit code: ${code}`);
+  });
+
+for (const { code, name } of [
+  { code: true, name: "boolean" },
+  { code: "3", name: "string" },
+  { code: 1.5, name: "fraction" },
+  { code: null, name: "null" },
+])
+  test(`raw tool output ignores a ${name} exit code`, () => {
+    const rows = activityRows([
+      event(1, "agent.tool_result", {
+        tool: "Execute",
+        tool_call_id: "cmd",
+        summary: JSON.stringify({
+          status: "completed",
+          raw_output: { exit_code: code },
+        }),
+      }),
+    ]);
+    expect(rows[0].tool?.output).toBe("");
+  });
+
+test("terminal metadata takes precedence and command exits use the same wording", () => {
+  const rows = activityRows([
+    event(1, "agent.tool_result", {
+      tool: "Execute",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({
+        status: "completed",
+        exit_code: 0,
+        raw_output: { exit_code: 3 },
+      }),
+    }),
+    event(2, "command.exit", { exit_code: 0 }),
+    event(3, "command.exit", { exit_code: null }),
+  ]);
+  expect(rows[0].tool?.output).toBe("Exit code: 0");
+  expect(rows[1].text).toBe("Command finished.\nExit code: 0");
+  expect(rows[2].text).toBe("Command finished.");
+});
+
 test("matched tools merge across messages without crossing attempts, jobs, or turns", () => {
   const rows = activityRows([
     event(1, "agent.tool_call", {
@@ -254,6 +308,31 @@ async function append(
   });
   expect(response.ok(), await response.text()).toBeTruthy();
 }
+
+test("a command without terminal metadata shows its raw exit code in tool details", async ({
+  page,
+}) => {
+  const { id } = await setup(page, "raw-command-exit");
+  await append(page, id, "agent.tool_result", {
+    tool: "Execute",
+    tool_call_id: "command-1",
+    summary: JSON.stringify({
+      status: "failed",
+      raw_input: { command: "check" },
+      raw_output: { exit_code: 3 },
+      content: [{ text: "Access denied\n" }],
+    }),
+  });
+  await page.goto(`/?view=runs&run=${id}`);
+  const tool = page
+    .getByRole("region", { name: "Activity feed", exact: true })
+    .locator("details.activity-tool")
+    .filter({ hasText: "Ran check" });
+  await expect(tool.locator("summary")).toContainText("Failed");
+  await tool.locator("summary").click();
+  await expect(tool).toContainText("Access denied");
+  await expect(tool).toContainText("Exit code: 3");
+});
 
 test("Markdown formatting renders while HTML, images, and unsafe URLs stay inert", async ({
   page,
