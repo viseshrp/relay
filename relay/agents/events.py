@@ -113,7 +113,7 @@ def _visible_content(content: object) -> Mapping[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str:
+def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> dict[str, object]:
     summary = {}
     if update.kind is not None:
         summary["kind"] = update.kind
@@ -166,7 +166,7 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
             if isinstance(code, int) and not isinstance(code, bool):
                 # {terminal_id: "c1", exit_code: 3} becomes summary.exit_code = 3.
                 summary["exit_code"] = code
-    return json.dumps(summary, separators=(",", ":"), ensure_ascii=False)
+    return summary
 
 
 def _plan_payload(update: schema.AgentPlanUpdate | schema.AgentPlanContentUpdate) -> object:
@@ -221,7 +221,9 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
                 {
                     "tool": update.title,
                     "tool_call_id": update.tool_call_id,
-                    "summary": _tool_summary(update),
+                    "summary": json.dumps(
+                        _tool_summary(update), separators=(",", ":"), ensure_ascii=False
+                    ),
                 },
             ),
         )
@@ -230,7 +232,7 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
             return ()
         terminal = update.status in {"completed", "failed"}
         summary = _tool_summary(update)
-        if summary == "{}" and not update.title:
+        if not summary and not update.title:
             # No visible fields or title remain, so there is nothing to render.
             return ()
         return (
@@ -239,7 +241,7 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
                 {
                     "tool": update.title or update.tool_call_id,
                     "tool_call_id": update.tool_call_id,
-                    "summary": summary,
+                    "summary": json.dumps(summary, separators=(",", ":"), ensure_ascii=False),
                 },
             ),
         )
