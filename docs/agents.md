@@ -30,7 +30,7 @@ session repeats the selection proof. If a later `config_option_update` reports
 a different value, Relay cancels and fails that attempt.
 
 Current workflow YAML has no permission field. Owner provider settings select
-permission modes; retained legacy snapshots can contain `permission_profile`.
+permission modes for the exact model.
 Relay reports permission and route failures together before running a step.
 Registry installation metadata is advisory; a registry fetch failure does not
 prevent installed agents from proving their routes.
@@ -40,15 +40,14 @@ prevent installed agents from proving their routes.
 The editor loads each tool's supported choices after selecting the exact model.
 ACP effort comes from its `thought_level` selector, with known option IDs as a
 fallback for adapters that omit categories. Permission modes use the `mode`
-selector or the legacy session-mode menu when no corresponding selector is
-available. Provider labels, exact values, descriptions, and ordering are
-preserved. Model selection can change the effort menu, as described by the
-[ACP configuration contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
+selector or the session-mode menu when no corresponding selector is available.
+Provider labels, exact values, descriptions, and ordering are preserved. Model
+selection can change the effort menu, as described by the [ACP configuration
+contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
 
 Both controls initially show **Provider default**. Reading the choices does
 not write an override. The workflow editor stores an explicit effort as the
 agent action's `with.effort`; permissions remain in owner provider settings.
-Retained legacy snapshots keep their `agent_options.<agent-id>` overrides.
 Returning to Provider default removes the corresponding override. A tool that
 advertises no separate selector shows only Provider default. Changing a step's
 model resets its effort; saved owner permissions require fresh validation.
@@ -59,16 +58,15 @@ through every change. Unsupported choices fail before a run is created. A
 configuration update that changes an explicit override cancels the attempt.
 Defaults never cause an effort or mode setter call.
 
-Antigravity offers `respect_settings`, `accept-edits`, `plan`, and `auto_approve`.
-The middle two pass the exact value with `--mode`; only `auto_approve` adds
-`--dangerously-skip-permissions`. An explicit native mode takes precedence over
-the legacy `permission_profile`. Its advertised
-model slugs include effort, so Relay offers the effort already identified by
-that exact slug. Explicitly choosing it passes `--effort`; selecting a different
-effort requires a different exact model. Relay rejects an effort override that
-would silently switch the model. The
-[native headless interface](https://antigravity.google/docs/cli/headless/)
-documents the effort flag and permission policy.
+Antigravity offers `respect_settings`, `accept-edits`, `plan`, and
+`auto_approve`. The middle two pass the exact value with `--mode`; only
+`auto_approve` adds `--dangerously-skip-permissions`. Its advertised model slugs
+include effort, so Relay offers the effort already identified by that exact
+slug. Explicitly choosing it passes `--effort`; selecting a different effort
+requires a different exact model. Relay rejects an effort override that would
+silently switch the model. The [native headless
+interface](https://antigravity.google/docs/cli/headless/) documents the effort
+flag and permission policy.
 
 ACP authentication failures use the protocol's `auth_required` code. An
 adapter disconnect or early exit is a protocol failure; words such as `auth`
@@ -103,10 +101,11 @@ prompt bytes `Review this file.\n` remain unchanged in their block, while input
 `{"target":"api"}` appears in a separate block headed `Relay inputs (JSON)`.
 Relay never appends an earlier conversation transcript.
 
-Claude ACP usage-limit failures use the adapter's structured `errorKind`
-and `_claude/rateLimit` metadata. Relay retains the rejected reset as an
+Claude ACP usage-limit failures use the adapter's structured `errorKind` and
+`_claude/rateLimit` metadata. Relay retains the rejected reset as an
 `agent.usage_limit` event and schedules recovery only with a confirmed future
-UTC timestamp. This follows the [adapter source](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
+UTC timestamp. This follows the [adapter
+source](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
 Other adapters and native Antigravity do not currently expose a supported reset
 contract to Relay; their public limit messages remain visible for manual
 recovery. Relay never switches providers or reduces effort to bypass a limit.
@@ -158,8 +157,8 @@ sends the feedback as another documented `session/prompt` in the same live
 session, retaining its exact model, options, cancellation mailbox, heartbeat,
 and original deadline. A declined permission stays declined; feedback can ask
 the agent for an alternative after that turn ends. Canceling the attempt never
-starts a feedback turn. Static prompt files are unchanged.
-This follows the [ACP prompt-turn contract](https://agentclientprotocol.com/protocol/v1/prompt-turn).
+starts a feedback turn. Static prompt files are unchanged. This follows the [ACP
+prompt-turn contract](https://agentclientprotocol.com/protocol/v1/prompt-turn).
 Restart recovery still creates a new attempt and session.
 
 Text updates retain an optional ACP message ID and Relay turn number. Native
@@ -172,31 +171,29 @@ Relay advertises terminal-output deltas and retains the adapter's
 `terminal_output_delta` or `terminal_output` text and terminal exit code from
 ACP metadata. Only these known public fields are copied; private updates and
 unrelated metadata are omitted. The browser appends each output delta once,
-including repeated fragments, and shows the exit code in tool details.
-For commands without terminal metadata, the browser also reads integer exit
-codes from `raw_output.exit_code` or Cursor's `raw_output.exitCode`. Structured
-raw output also displays its string `stdout` and `stderr` fields. Terminal
-metadata takes precedence. Tools and command steps display the same
-`Exit code: N` wording.
-Metadata-only updates with no retained fields produce no empty tool event.
-Actions also hold possible secret suffixes in cumulative tool `content` and
-`raw_output` snapshots. Each text field has its own stream identity. A new
-snapshot replaces its previous pending suffix; it does not append that suffix
-to the new value. Tool completion or step shutdown flushes any remaining safe
+including repeated fragments, and shows the exit code in tool details. For
+commands without terminal metadata, the browser also reads integer exit codes
+from `raw_output.exit_code` or Cursor's `raw_output.exitCode`. Structured raw
+output also displays its string `stdout` and `stderr` fields. Terminal metadata
+takes precedence. Tools and command steps display the same `Exit code: N`
+wording. Metadata-only updates with no retained fields produce no empty tool
+event. Actions also hold possible secret suffixes in cumulative tool `content`
+and `raw_output` snapshots. Each text field has its own stream identity. A new
+snapshot replaces its previous pending suffix; it does not append that suffix to
+the new value. Tool completion or step shutdown flushes any remaining safe
 suffix once. This prevents a partial snapshot from retaining a prefix of a
-secret that a later snapshot masks in full.
-Terminal deltas and exit codes were verified on Windows with Codex ACP 2.2.2
-in the [Windows retest](../certification/2026-10-14-windows-relay-fixes.md).
-The [2026-10-15 Windows ACP record](../certification/2026-10-15-windows-acp.json)
-also verifies Claude deltas, Cursor structured raw output, and Copilot
-cumulative snapshots through live Actions workflows and browser checks.
-Copilot returns its exit code in public text rather than a structured integer;
-Relay displays that footer without inferring an exit field.
-Actions steps decode these summaries before masking and event-size splitting.
-They mask output deltas as one stream per attempt and tool call, hold possible
-secret prefixes, and flush before a terminal result or exit is persisted.
-Step shutdown also flushes unfinished tool streams. Numbered parts and tool
-IDs remain attached to the masked output.
+secret that a later snapshot masks in full. Terminal deltas and exit codes were
+verified on Windows with Codex ACP 2.2.2 in the [Windows
+retest](../certification/2026-10-14-windows-relay-fixes.md). The [2026-10-15
+Windows ACP record](../certification/2026-10-15-windows-acp.json) also verifies
+Claude deltas, Cursor structured raw output, and Copilot cumulative snapshots
+through live Actions workflows and browser checks. Copilot returns its exit code
+in public text rather than a structured integer; Relay displays that footer
+without inferring an exit field. Actions steps decode these summaries before
+masking and event-size splitting. They mask output deltas as one stream per
+attempt and tool call, hold possible secret prefixes, and flush before a
+terminal result or exit is persisted. Step shutdown also flushes unfinished tool
+streams. Numbered parts and tool IDs remain attached to the masked output.
 
 Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
@@ -273,8 +270,8 @@ output. Agent prose does not register workflow commands or masks.
 Actions terminal-delta masking decodes JSON escapes before matching secrets.
 For example, `TOKEN-12345` followed by `67890\n` becomes `***\n` when the
 declared secret is `TOKEN-1234567890`; a declared `a"b\c` also becomes `***`.
-Retained v1 agent execution does not use this
-Actions streaming proxy and remains outside that split-delta guarantee.
+Every supported agent workflow runs through this streaming proxy. The removed
+v1 executor has no replay path.
 Arbitrary inherited variables, Git diffs, and retained files are not
 automatically redacted and can contain sensitive data until the owner deletes
 the run.
@@ -300,8 +297,8 @@ Relay sends one UTF-8 JSON line to stdin and closes the pipe:
 
 The content contains the ordered prompt files followed by the three Relay JSON
 sections. JSON escaping preserves newlines, quotes and Unicode without passing
-the prompt through a Windows batch command line. The
-[headless stdin contract](https://antigravity.google/docs/cli/headless/#stream-prompts-from-stdin)
+the prompt through a Windows batch command line. The [headless stdin
+contract](https://antigravity.google/docs/cli/headless/#stream-prompts-from-stdin)
 allows EOF immediately after the final prompt; Antigravity completes that turn,
 emits its result and exits. Relay drains stdout and stderr while writing stdin
 so startup diagnostics cannot block prompt delivery.
@@ -345,17 +342,18 @@ through stdin. An oversized command reports the same code with guidance to
 shorten its arguments or model value.
 
 Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
-using a bounded queue that applies pipe backpressure. JSON parsing holds at
-most one 1 MiB line; a larger line is retained as raw output and then fails the
+using a bounded queue that applies pipe backpressure. JSON parsing holds at most
+one 1 MiB line; a larger line is retained as raw output and then fails the
 attempt as a protocol error. Cancellation and timeout drain bytes already read
 before the attempt settles. Relay detects soft denies only in complete stderr
 tool notices, as described by the headless documentation. The exact notice
 format remains unverified until live certification. A target such as
 `write_file(src/report.md)` becomes worktree-relative `src/report.md`; a path
-outside the worktree is ignored by the write-target rule. A writing attempt
-fails with `soft_denied` when a denied target covers a required artifact, or
-when at least one worktree-targeting write was denied and the attempt produced
-no commit. A read-only node records but ignores these denies.
+outside the worktree is ignored by the write-target rule. An agent step fails
+with `soft_denied` when a complete, verified stderr notice denies a
+worktree-targeting write. Current agent steps share their job's workspace and
+Relay commits at job success, so denial detection does not rely on a per-node
+writer flag or a provider-created commit.
 
 ## Certification evidence
 

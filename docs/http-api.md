@@ -26,7 +26,8 @@ authentication actions are:
 Onboarding accepts no default password and fails with `409` after an owner
 exists. Every project, workflow, agent, run, control, artifact, and cleanup
 route requires an authenticated owner session while login is enabled. An
-unauthenticated request gets `401 authentication_required` instead of a redirect.
+unauthenticated request gets `401 authentication_required` instead of a
+redirect.
 
 `GET /api/auth` also returns `login_required`, which is `true` by default.
 It includes `password_rules`, an ordered list of plain text rules from the
@@ -76,10 +77,10 @@ accept the Actions jobs/steps dialect. Historical snapshots remain readable.
 
 Request scopes are `installation`, `project`, or `environment`; environment
 writes also provide `environment: <name>`. Saved scope identifiers include the
-project identity. Kinds are `variable` and `secret`. Variables are
-returned; secret values are write-only. Secret sources are explicit
-`environment` or `credential-store`; missing native storage has no plaintext fallback.
-Scopes allow 100 bindings of each kind. Names are bounded; values allow 48 KiB.
+project identity. Kinds are `variable` and `secret`. Variables are returned;
+secret values are write-only. Secret sources are explicit `environment` or
+`credential-store`; missing native storage has no plaintext fallback. Scopes
+allow 100 bindings of each kind. Names are bounded; values allow 48 KiB.
 Environment policies allow 100 names per project, 100 branch patterns each,
 waits from 0 to 43200 minutes, and optional HTTP(S) URLs.
 
@@ -173,14 +174,14 @@ commit. Reading it does not modify the repository. These fields are additive;
 `project` keeps its existing payload. Launch performs its own source capture
 and preflight rather than relying on this preview.
 
-Workflow preflight validates the saved workflow, its subworkflows, and local
-instructions, then applies the same Git cleanliness rule as launch. It neither
-probes agents nor creates a run. Invalid sources return their existing Relay
-error envelopes. Each `files` entry has porcelain `status`, root-relative
-`path`, optional rename/copy `original_path`, `allowed`, and `reasons`.
-Blocking files appear first, with reasons such as `staged`, `modified`, or
-`untracked`. Allowed entries explain the exact report, captured source, or
-unchanged setup-file exemption. No file contents are returned.
+Workflow preflight validates the saved workflow, its reusable workflows, and
+local instructions, then applies the same Git cleanliness rule as launch. It
+neither probes agents nor creates a run. Invalid sources return their existing
+Relay error envelopes. Each `files` entry has porcelain `status`, root-relative
+`path`, optional rename/copy `original_path`, `allowed`, and `reasons`. Blocking
+files appear first, with reasons such as `staged`, `modified`, or `untracked`.
+Allowed entries explain the exact report, captured source, or unchanged
+setup-file exemption. No file contents are returned.
 
 Counts cover every changed file. The preview returns at most 200 entries and
 512 KiB of serialized file metadata; `truncated` indicates omitted entries.
@@ -192,7 +193,7 @@ Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
 resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.
 Empty segments, backslashes, `.`, and `..` are rejected. Draft autosave
 preserves invalid YAML and labels it `invalid`. Save validates the complete
-workflow and its referenced prompts and subworkflows before an atomic file
+workflow and its referenced prompts and reusable workflows before an atomic file
 replacement. Draft and Save reject a missing, expired, or differently held
 editor lease.
 
@@ -201,7 +202,7 @@ accept `?project={id}` to bind the request to a registered project. Omitting it
 preserves the served repository as the default. Selecting a project never
 changes another browser's project. `POST /api/projects/open` also accepts
 `"initialize":true` to create the blank `.relay` surface in a Git repository.
-Creation without `yaml` writes a blank version 1 workflow. Its bytes remain
+Creation without `yaml` writes a blank jobs/steps workflow. Its bytes remain
 uncommitted until the owner commits them.
 With `template_id`, creation copies the named starter's workflow and prompts
 byte-for-byte. It rejects a supplied `yaml`, an unknown template, an existing
@@ -213,22 +214,15 @@ New workflow and instruction paths reject Windows device names, reserved
 characters, and trailing spaces or dots on every operating system. For example,
 `NUL.yaml` and `draft:notes.md` are rejected; `nested/review.yaml` is accepted.
 
-Workflow document responses include their `project` and a `warnings` array for
-`exists` outputs. These warnings explain boolean-only handoffs; they do not
-rewrite the workflow or grant permission to pass a human gate.
-Warnings from transitive child workflows include their source `workflow_key`.
-Repeated references to the same child do not duplicate its warnings.
-
-Workflow reads also include `repair_defaults`, containing `max_rounds`,
-`max_allowed_rounds`, `fix_instruction`, and `verify_instruction`. The editor
-uses these defaults when adding a stage policy; saved custom values remain
-part of the workflow. See [Stage repair rules](workflows.md#stage-repair-rules).
+Workflow document responses include their selected `project`. Current report
+and bounded loop actions are defined in the workflow source; removed node
+handoff warnings and implicit repair defaults are not part of this response.
 
 `base_hash` is the SHA-256 of the exact saved UTF-8 bytes. For example, loading
-bytes `version: 1\nname: A\nnodes: {}\n` returns their hash; Save with that hash
-succeeds only while those bytes remain on disk. A stale hash returns `409` and
-does not overwrite the newer file. A lease lasts 60 seconds. The same holder
-renews it; another holder gets `409` until expiry.
+bytes `jobs: {check: {steps: [{run: echo Ready}]}}\n` returns their hash; Save
+with that hash succeeds only while those bytes remain on disk. A stale hash
+returns `409` and does not overwrite the newer file. A lease lasts 60 seconds.
+The same holder renews it; another holder gets `409` until expiry.
 
 ## Agents and runs
 
@@ -267,12 +261,12 @@ a sign-in failure. Other failures keep their distinct codes. Checks do not
 send prompts or authenticate. Cached observations remain advisory; launch
 and execution still require fresh proof for the selected model and settings.
 
-Configuration discovery requires owner access and CSRF protection. Owner
-access is a session when login is enabled, or direct local access when disabled.
-It probes only the named installed tool, proves the exact model, and returns
-`agent_id`, `model_value`, `effort`, and `permission_mode`. Each selector contains
-`config_id`, `name`, `current_value`, ordered `choices` with `value`, `name`, and
-`description`, and a `transport`. An unavailable selector is `null`.
+Configuration discovery requires owner access and CSRF protection. Owner access
+is a session when login is enabled, or direct local access when disabled. It
+probes only the named installed tool, proves the exact model, and returns
+`agent_id`, `model_value`, `effort`, and `permission_mode`. Each selector
+contains `config_id`, `name`, `current_value`, ordered `choices` with `value`,
+`name`, and `description`, and a `transport`. An unavailable selector is `null`.
 The response is advisory; reading it creates no run and sets no effort or mode.
 Unsupported explicit values produce `agent_configuration_error` with HTTP 422
 during launch preflight. Existing model and authentication errors keep their
@@ -344,20 +338,20 @@ payloads and replay ordering are unchanged; clients merge them by event ID.
 
 Run history accepts `project`, `status`, `since`, and `limit`, plus optional
 `workflow`, `branch`, and `query` filters. Workflow and source branch filters
-match exactly, with the existing `review` / `review.yaml` workflow alias.
-Stored keys remain unchanged. The query matches the captured title, workflow
-key, or source commit prefix. Filters accept at most 1024 characters.
-`since` is the opaque run cursor returned as `next`; `limit` is clamped to 200.
-Event `since` is the last numeric event ID already consumed. Event pages are
-ordered by ID and contain at most 200 events and 1 MiB. Use each returned
-`next` value to replay them without gaps. Numeric event cursors must fit Relay's
-nonnegative database integer range. The live SSE route emits the same event
-shape and uses each event ID as its replay cursor. The initial connection may use
-`GET /api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
+match exactly, with the existing `review` / `review.yaml` workflow alias. Stored
+keys remain unchanged. The query matches the captured title, workflow key, or
+source commit prefix. Filters accept at most 1024 characters. `since` is the
+opaque run cursor returned as `next`; `limit` is clamped to 200. Event `since`
+is the last numeric event ID already consumed. Event pages are ordered by ID and
+contain at most 200 events and 1 MiB. Use each returned `next` value to replay
+them without gaps. Numeric event cursors must fit Relay's nonnegative database
+integer range. The live SSE route emits the same event shape and uses each event
+ID as its replay cursor. The initial connection may use `GET
+/api/runs/{id}/stream?since=17` to start after event 17. On reconnect,
 `Last-Event-ID` takes precedence over `since`; omitting both starts at zero.
-Both cursors must fit the same nonnegative database integer range.
-Before closing a finished run's stream, Relay drains events committed between
-its last event read and the terminal-status read.
+Both cursors must fit the same nonnegative database integer range. Before
+closing a finished run's stream, Relay drains events committed between its last
+event read and the terminal-status read.
 
 Run history and detail add `number`, `title`, `source_branch`, and `created_at`.
 Numbers increase within each project and remain reserved after deletion. The
@@ -488,16 +482,12 @@ The browser retains older replayed output but applies state changes only after
 this lower bound, including events fetched during initial loading. Before
 closing a terminal stream, it confirms the current run state. An old terminal
 event cannot close a stream for a run that was later retried.
-Run metadata includes the registered `project`. Each node includes captured
-`dependencies` (scope paths), `controls` (`target` and `label`), and
-`parent_scope`. These fields come from that run's frozen node definitions,
-including concrete loop and child scopes, rather than today's editable YAML.
-Each node also includes `repair_for`, either its source stage's scope or null.
-A repair coordinator includes `repair_settings` with its captured round
-budget, acceptance output and value, role configuration, and instructions.
-Other nodes return null. Native policies set `legacy:false`; explicitly grouped
-older loops set `legacy:true`. Node pages retain all repair coordinators and
-child attempts so clients can inspect the full execution history.
+Run metadata includes the registered `project`. Current job and step records
+include captured `dependencies`, `parent_scope`, job/step identity, display
+names, and matrix data. These values come from the immutable captured plan,
+rather than today's editable YAML. Legacy branch selections, iteration-summary
+columns, control edges, and repair presentation fields have been removed.
+
 Failed agent nodes also include `retry_settings`, containing their own
 `scope_path`, effective `agent_id`, `model_value`, `effort`, `permission_mode`,
 `default_handoff_prompt`, and `handoff_prompt_max_bytes`. Other nodes return
@@ -598,10 +588,11 @@ original events and downloaded command output keep their recorded bytes.
 Run cancel and rerun keys are stored in an indexed event column; duplicate
 requests do not scan event payloads. Canceling a run still preparing its
 worktree (`pending`) or awaiting restart reconciliation (`interrupted`) returns
-`stale` (409). Retry with a new key after preparation or reconciliation finishes.
-For a failed run with a scheduled usage retry, `cancel` returns `accepted` and
-cancels that schedule without rewriting the failed attempt. A repeated request
-returns `already_applied`. Manual `rerun-node` supersedes a pending schedule.
+`stale` (409). Retry with a new key after preparation or reconciliation
+finishes. For a failed run with a scheduled usage retry, `cancel` returns
+`accepted` and cancels that schedule without rewriting the failed attempt. A
+repeated request returns `already_applied`. Manual `rerun-node` supersedes a
+pending schedule.
 
 | Method and path | JSON body |
 | --- | --- |
@@ -639,20 +630,9 @@ supersede queued error recovery through the existing recovery lock.
 
 ### Repair presentation
 
-`POST /api/runs/{id}/repairs` records display groups for an existing captured
-loop. The body contains `groups`, a mapping from concrete loop scopes to their
-sibling source stages, and an `idempotency_key`. For example,
-`{"groups":{"root.repairs":"root.review"},"idempotency_key":"display-1"}`
-groups that loop and its scoped children under review. An empty mapping clears
-legacy groups. Native policies already carry their own source association.
-
-The run must have `dispatch_paused:true`; otherwise it returns `409 stale`.
-Invalid associations return `422 invalid`. Each source has at most one grouped
-loop. Replaying a successful key returns `already_applied`.
-Success returns `accepted` and emits `run.repairs_changed`. The action saves
-only presentation metadata. It does not rewrite snapshots, routes, prompts,
-node statuses, attempts, or outputs. Owner and CSRF checks apply in both login
-modes.
+The `/api/runs/{id}/repairs` endpoint and `run.repairs_changed` event have been
+removed. Current bounded loops and reusable jobs remain ordinary job and step
+records. Their captured source defines their execution and report contracts.
 
 ### Pause and unstarted-step settings
 
@@ -696,13 +676,13 @@ the current choice. Relay probes the selected model's configuration before
 preparing the workspace; unsupported values return `agent_configuration_error`
 with HTTP `422`, without reopening the step. Non-agent recovery targets reject
 this field. A failed parent scope resolves to its deepest failed child, as with
-an ordinary rerun.
-The choice is saved outside the original snapshot, survives restart, and appears
-in `run.rerun.payload.retry_options`. Later quota retries retain it. Repeating
-the same idempotency key returns the first outcome and cannot change the choice.
-The run's `problem.effort` and `problem.permission_mode` report its failed step's
-current choices, with `null` for provider default. A permission-only change
-uses `{"scope_path":"root.review","idempotency_key":"r-3","permission_mode":"ask"}`;
+an ordinary rerun. The choice is saved outside the original snapshot, survives
+restart, and appears in `run.rerun.payload.retry_options`. Later quota retries
+retain it. Repeating the same idempotency key returns the first outcome and
+cannot change the choice. The run's `problem.effort` and
+`problem.permission_mode` report its failed step's current choices, with `null`
+for provider default. A permission-only change uses
+`{"scope_path":"root.review","idempotency_key":"r-3","permission_mode":"ask"}`;
 an explicit null restores the current tool's default. Omitted fields keep their
 current values. Non-agent recovery targets reject these options.
 
@@ -759,21 +739,20 @@ permission returns the first outcome; it cannot answer a later attempt. Keys
 must contain 1 through 200 characters; longer values return `invalid` before
 Relay changes run or attempt state. A permission decision must name an offered
 option, and an accepted ACP elicitation value must be a JSON object; mismatches
-return `invalid` without reaching the live agent session.
-All answer bodies may include a positive `interaction_id`. It must match the
-exact pending interaction of this attempt. Permission and elicitation answers
-may also include a nonempty `feedback` string. The answer resolves that request;
-after the current ACP turn ends, feedback is submitted in another prompt to
-the same session with the same model, options, and deadline. It never grants
-permission or changes static prompt files. A declined permission stays declined;
-feedback can request an alternative. Canceling the attempt prevents another turn.
-Cancellation fans out to every active attempt. Failed-node rerun preserves any
-remaining evidence, resets only to the recorded safe head, and creates a new
-attempt; a nested selection also reopens only its failed structural parents.
-Successful nodes stay complete.
-Concurrent rerun submissions for the same run cannot both mutate the retained
-worktree. While one request prepares recovery, another receives `409 stale` and
-can retry after the active request finishes.
+return `invalid` without reaching the live agent session. All answer bodies may
+include a positive `interaction_id`. It must match the exact pending interaction
+of this attempt. Permission and elicitation answers may also include a nonempty
+`feedback` string. The answer resolves that request; after the current ACP turn
+ends, feedback is submitted in another prompt to the same session with the same
+model, options, and deadline. It never grants permission or changes static
+prompt files. A declined permission stays declined; feedback can request an
+alternative. Canceling the attempt prevents another turn. Cancellation fans out
+to every active attempt. Failed-node rerun preserves any remaining evidence,
+resets only to the recorded safe head, and creates a new attempt; a nested
+selection also reopens only its failed structural parents. Successful nodes stay
+complete. Concurrent rerun submissions for the same run cannot both mutate the
+retained worktree. While one request prepares recovery, another receives `409
+stale` and can retry after the active request finishes.
 
 ## Cleanup
 
@@ -872,12 +851,7 @@ without rewriting the file. New saves above one return `422 config_error`.
   "auto_retry": true,
   "commands": {},
   "env": {},
-  "recovery": {"enabled": false, "max_retries": 2},
-  "repairs": {
-    "max_rounds": 4,
-    "fix_instruction": "Instructions for a newly added fixer role.",
-    "verify_instruction": "Instructions for a newly added verifier role."
-  }
+  "recovery": {"enabled": false, "max_retries": 2}
 }
 ```
 
@@ -910,16 +884,13 @@ unchanged until restart, including when the saved setting differs.
 
 `GET /api/agents` additively includes `defaults`, the selected project's
 resolved `workflow_defaults`; `preferences` now reflects project overrides.
-Workflow reads keep their existing `repair_defaults` shape, using saved
-project/global values when the editor creates a new repair rule.
 An omitted launch `cleanup_policy` uses the project's resolved setting.
-Existing explicit launch fields and all control/event payloads are unchanged.
-Workflow schema version 1 additionally accepts workflow `env` and `inherit_env`,
-command-job `inherit_env`, and `run: {command: name}`. Launch resolves shared
-commands and environment layers through Python services and freezes them in
-node definitions and child snapshots. An unresolved name returns
-`422 workflow_validation_error` without creating a run. Original YAML bytes
-remain unchanged, and existing `run` arrays and old snapshots remain valid.
+Current `relay/command@v1` steps select a saved command through `with.command`
+or supply a JSON argument vector through `with.argv`. Workflow, job, and step
+`env` mappings follow Actions precedence. Launch freezes command maps and
+source bytes. An unresolved command name returns `422 workflow_validation_error`
+without creating a run. Old `nodes`, `inherit_env`, and repair defaults are not
+accepted settings or workflow syntax.
 
 Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 `attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,

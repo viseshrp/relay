@@ -16,7 +16,10 @@ limits, and the implementation map.
 Saved workflow sources and new launches require `jobs` and ordered `steps`.
 The previous `version: 1` / `nodes` authoring format is unsupported. Replace old
 files with current sources; Relay does not provide a conversion-preview flow.
-Captured run snapshots remain available in run history.
+The old parser, executors, forms, and replay paths have been removed. Database
+migration retains old source and execution metadata as opaque evidence;
+unsupported snapshots cannot launch, resume, or retry. Current snapshots keep
+their captured jobs, steps, sources, and routes.
 
 ## Jobs and ordered steps
 
@@ -284,9 +287,9 @@ two repair rounds and commits after verification. For a reusable repair body,
 through 100, `until-output`, and `equals`. Every iteration is a durable serial
 scope. Exhausting the budget fails the loop.
 
-Historical `repairs`, embedded loop bodies, switch nodes, and entrypoint graphs
-remain readable in legacy captured runs. They are not public Actions keys and
-are not silently converted to a different repair contract.
+Implicit `repairs` rules, embedded node graphs, switch nodes, and timeout
+routing are unsupported. Repair work uses explicit current steps and reusable
+workflows; no compatibility interpreter converts an older rule.
 
 ## Human waits
 

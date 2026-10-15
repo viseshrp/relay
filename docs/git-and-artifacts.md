@@ -41,16 +41,15 @@ workflow and referenced prompt paths. Root reports,
 unused prompt files, and unrelated code are excluded. This action does not
 change any launch or writer cleanliness exemption.
 
-These report exemptions apply to writing-node cleanliness too, so a report
+These report exemptions apply at job acceptance too, so a report
 can be preserved and passed to the next stage without a documentation commit.
 Autonomous workflows can also leave `E2E_VERIFICATION.md`,
 `PLAN_CHECKPOINT.json`, `REVIEW_CHECKPOINT.json`, `AUDIT_CHECKPOINT.json`, and
 `E2E_CHECKPOINT.json` unstaged in the repository root. These exact names are
 reserved for run reports and machine-readable verdicts. Nested files and other
 JSON files remain subject to the normal Git checks.
-Read-only nodes still fail for any worktree modification. Unrelated code
-changes remain errors. A clean dashboard or unchanged `HEAD` does not replace
-the Git checks.
+Unrelated files must be included in the accepted job commit or removed by the
+workflow. A clean dashboard or unchanged `HEAD` does not replace Git checks.
 
 ## Run branch and primary worktree
 
@@ -94,56 +93,16 @@ Matrix and reusable jobs use the same serial admission. Tolerating a failure
 changes dependency conclusions without accepting rejected code. Optional
 named artifact expiry and cache eviction never delete required evidence.
 
-## Historical reader and writer admission
+## Job admission and commits
 
-The following admission contract applies to captured legacy `nodes` runs.
-Current source uses [jobs and ordered steps](workflows.md).
+One durable installation-wide job lease admits a physical job and its nested
+steps. Every step shares the run's primary worktree. Steps retain evidence;
+Relay commits changed code once when the job succeeds. A clean no-op is valid.
+There are no per-node writer flags, reader worktrees, or no-commit overrides.
 
-A writing attempt holds the run's exclusive database lock while it uses the
-primary worktree. No reader or second writer can start until that lock is
-released after commit validation and evidence preservation.
-
-Read-only attempts may run together. Each receives a detached worktree at the
-run's recorded committed `HEAD`:
-
-```text
-<data>/worktrees/abc-123/r-12
-<data>/worktrees/abc-123/r-13
-```
-
-Git reports these nested reader directories as transient untracked paths from
-the primary checkout. Admission therefore prevents any writer or primary
-cleanliness boundary while readers exist. Each reader is checked in its own
-worktree, removed before its lock is released, and leaves the primary clean
-again. This ordering prevents a reader directory from being mistaken for
-agent work.
-
-A reader fails if it changes a file or moves detached `HEAD`. Relay preserves
-that reader's diff before removing the worktree. Mark a node `writes: true` if
-it is intended to change the repository.
-
-## Writing-node commits
-
-Agents and writing commands commit their own work. After a writing node ends,
-Relay requires all of these conditions:
-
-1. The primary worktree has no staged or code changes; unstaged root workflow
-   documents are retained as described above.
-2. Ending `HEAD` descends from the attempt's recorded starting `HEAD`.
-3. At least one commit exists in that range.
-
-The third condition may be waived only by declaring `allow_no_commit: true`
-on a writing node whose valid result can be a no-op. Relay accepts one or more
-commits and records the ending `HEAD` as the next protected head.
-
-An ancestry check is the equivalent of:
-
-```bash
-git merge-base --is-ancestor STARTING_HEAD ENDING_HEAD
-```
-
-Status `0` proves ancestry; status `1` rejects it. Relay does not infer success
-from a commit message or file count.
+The accepted head must descend from the job's starting head. Staged report
+files, staged captured sources, unresolved conflicts, and unrelated history
+block acceptance. Commit messages do not prove success.
 
 ## Attempt evidence
 
@@ -182,49 +141,33 @@ the final attempt directory. The retained ref is created first, so partial
 commits survive even if a later file copy fails. A preservation failure blocks
 reset and cleanup.
 
-## Rerun and resume reset
+## Rerun and resume
 
-Interrupted loops and subworkflows check the primary checkout against the
-latest protected head without resetting it. Unstaged root report handoffs keep
-the same exact exemptions as completed writers. Code changes, staged reports,
-nested report files, and an unrecorded head still stop recovery. Restart keeps
-an owner's dispatch pause, so recovery does not start held child steps.
+An owner retry verifies the failed attempt's manifest, retained ref, file sizes,
+and SHA-256 hashes before reopening it. It also checks the primary worktree
+against the protected head. Root report handoffs retain the same exact
+exemptions used at job acceptance. Code changes, staged reports, nested report
+files, and an unrecorded head require an owner decision. Retry does not reset
+an individual step or restore an old reader checkout.
 
-Manual rerun, automatic recovery, and interrupted resume use this order:
+Inline bounded agent recovery stays inside the current job. It retains rejected
+reports and partial work, checks preserved evidence, and continues the failed
+step without repeating completed steps. Failed runs keep their private job
+state for an owner retry. Successful completion or explicit confirmed resource
+cleanup removes that state.
 
-1. Stop the attempt process.
-2. Preserve its ref, commits, diff, untracked files, and declared artifacts.
-3. Verify the complete manifest, each recorded file's byte count and SHA-256,
-   and the retained ref's commit. Missing, changed, or escaping evidence blocks
-   recovery while the current worktree remains intact.
-4. Prove the reset target descends from the latest successful writer's
-   protected head.
-5. Reset the primary worktree to the attempt's recorded starting head.
-6. Remove remaining untracked files from that isolated worktree.
+Orderly restart verifies retained workspaces before resuming current job and
+step scopes. It preserves an owner's dispatch pause. A failed job's workspace
+is preserved before an unrelated job continues at the last accepted head, as
+described under [Actions job boundaries](#actions-job-boundaries).
 
-The protection check prevents a failed later attempt from erasing a successful
-upstream writer. Evidence remains available when the reset itself fails.
-
-Output extraction can reject a report without discarding its bytes. Existing
-files behind `label`, `json_path`, and `yaml_path` selectors are retained even
-when required labels or values are invalid. Missing files remain validation
-errors; escaping paths block recovery. Commit validation failures also retain
-the attempt's partial work before a retry can reset it.
-
-Recovery restores verified root report handoffs into the primary writer
-worktree from successful steps and the selected failed attempt. Detached
-readers use retained evidence without adding files to their checkout.
-Only names already exempted in
-`WORKFLOW_DOCUMENT_NAMES` are restored. Other source files remain evidence
-rather than untracked inputs. Relay checks each retained report's hash before
-reset and before restoration. Different existing bytes and symlinks block
-restoration instead of being overwritten. Older failed attempts may gain a
-`recovery-reports` supplement; their original retained ref, manifest, and file
-bytes remain unchanged.
+Existing files required by report selectors are retained even when validation
+fails. Missing or escaping paths remain errors; a successful agent turn alone
+does not establish that its report passed.
 
 ## Completion cleanup
 
-`clean_on_success` removes primary and reader worktrees only after preservation
+`clean_on_success` removes run worktrees only after preservation
 succeeds. `retain` keeps them for inspection. Failure retains the workspace by
 default. Every run branch and attempt ref remains until an explicit confirmed
 data-clean operation.
@@ -236,8 +179,8 @@ keeps its evidence and refs; Relay does not fall back to deleting an uncertain
 directory tree.
 
 The execution store refuses completion cleanup if any artifact record has not
-been preserved. Confirmed data cleanup removes known worktrees deepest first,
-so reader paths precede the primary.
+been preserved. Confirmed data cleanup removes retained failed-job workspaces
+before the current primary worktree.
 
 The [cleanup API](http-api.md#cleanup) can select a single run with `run_id`.
 Use `scope: "worktrees"` to discard its checkout while retaining history,
@@ -292,5 +235,5 @@ data directory and are retained until confirmed deletion. Relay does not mask
 their contents or send telemetry.
 
 See [Projects and storage](projects-and-storage.md) for platform paths and
-retention boundaries. See [Workflows](workflows.md) for `writes`,
-`allow_no_commit`, and artifact selectors.
+retention boundaries. See [Workflows](workflows.md) for job boundaries and
+report selectors.

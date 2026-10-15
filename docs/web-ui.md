@@ -340,7 +340,7 @@ the editing lease or rewriting the workflow file. A newer draft from another
 tab causes a conflict. The editor shows the saved source beside the draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
-Save validates the complete workflow, prompts, and subworkflows, then publishes
+Save validates the complete workflow, prompts, and reusable workflows, then publishes
 YAML and local prompt edits as one recoverable bundle. A portable source lock
 protects readers and launch capture; an interrupted publication rolls back
 before the next source operation. Save sends the SHA-256 hashes loaded by the
@@ -406,7 +406,7 @@ including configured newline conversion, before committing the reviewed index.
 The panel repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
-successful run**. Historical workflows can also expose **Start from job**.
+successful run**. **Start from job** lists declared entry points.
 Cached models are suggestions; Relay
 sends the exact entered value. Working copies can be deleted on success or
 kept; saved reports and commits remain available. Start points list only jobs
@@ -457,23 +457,11 @@ automatic error recovery and quota retries; deadlines continue to apply.
 Choose **Resume** explicitly when ready.
 
 While paused, the header says: "Paused. Running jobs will finish; nothing new
-will start until you resume." Upcoming agent jobs have an **Edit** icon in the
-job list, available from both Summary and job logs. Relay prefetches their
-provider choices, shares probes for identical agent/model routes, and limits
-the number of routes loading at once. The icon becomes available when the
-dialog can open populated. A failed probe shows **Check again** beside the job.
-Switching runs or resuming discards pending probes and edit controls.
-
-Choose **Edit** to select an advertised tool, model, effort, or permission mode.
-The dialog uses provider labels for current effort and permission choices;
-defaults remain the provider defaults. Cancel or Escape returns focus to the
-job's edit control. A changed tool/model reveals editable **Handoff
-instructions** for the unstarted job;
-effort and permission changes alone keep that editor hidden. **Save settings**
-keeps the run paused. The server validates changed choices afresh before
-saving. Completed work, captured instructions, saved outputs, and other jobs
-stay unchanged. Settings for active or completed attempts
-cannot be changed through this control.
+will start until you resume." The server supports validated settings changes
+for a materialized agent step that has never started. Unexpanded future jobs
+do not expose the removed v1 stage-edit controls. Completed attempts and
+captured prompts remain immutable. See
+[Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 The Runs tab lists history for the selected project. A selected run shows
 its title, number, state, source, duration, and controls. Pending requests appear
@@ -685,7 +673,7 @@ Confirmation creates one durable, idempotent control request and fans it out
 to live attempts. A stale or duplicate answer cannot reach a later attempt. Manual
 rerun is available only for a failed run and failed node; Relay preserves
 evidence and creates a new attempt. A nested failed node also reopens its failed
-loop or subworkflow parents, while successful siblings remain complete. An
+loop or reusable-workflow parents, while successful siblings remain complete. An
 interrupted run resumes automatically when `relay up` restarts, also as a new
 attempt. Restart recovery never resumes an old provider session; feedback
 during a live permission or elicitation pause continues that existing session.
@@ -815,27 +803,13 @@ remain evidence. Changing a model through **Retry with settings** still uses
 its separate handoff editor. Provider quota resets retain their own notice and
 confirmed schedule. Automatic recovery never answers a declared human wait.
 
-## Stage repairs
+## Bounded fix-and-check loops
 
-Current workflows express bounded repair work with `relay/loop@v1` and a local
-reusable workflow. Agent recovery settings live in the agent action's inputs.
-Retained legacy runs expose their captured repair rounds and policies. See
-[Stage repair rules](workflows.md#stage-repair-rules) for the current action
-contract and historical compatibility.
-
-The run map and stage list show the main stages. **Repairing** and **Repairs
-stopped** identify a source stage whose repair work is active or failed. Open
-the **Repairs** panel to inspect its round, budget, roles, instructions, and
-child attempt statuses. Reports and activity remain available. Run settings
-are captured; **Edit repairs for future runs** opens the editable workflow.
-The panel shows saved settings for an unstarted or failed role, including
-owner-selected model, effort, and permission overrides. Other role settings
-are labeled as workflow defaults. A held repair shows **Repairs paused**.
-
-An existing captured loop can be grouped through the
-[repair presentation API](http-api.md#repair-presentation) while dispatch is
-paused. This changes its display without changing prompts, attempts, outputs,
-or execution order. Ordinary loops stay visible unless explicitly grouped.
+Use `relay/loop@v1` with a local reusable workflow for repeated fix-and-check
+work. Its iteration limit, stop condition, reports, and child attempts are
+explicit workflow choices. Open the loop step and its child jobs to inspect
+retained results. There is no implicit repair policy, Repairs panel, or repair
+presentation API. See [Stage repair rules](workflows.md#stage-repair-rules).
 
 ## Supervisor and shutdown
 
@@ -857,8 +831,8 @@ canceled; other in-flight attempts are recorded as interrupted. Attempts that
 finish successfully keep their outputs and protected commits, and failed
 attempts keep their failure details.
 
-An orderly restart preserves attempt evidence before resetting a writer or
-removing a disposable reader worktree. It reopens each interrupted run and
+An orderly restart verifies the protected shared workspace before reopening
+each interrupted current run and
 creates a new attempt; it never resumes an old agent session. Failed attempts
 remain failed unless the owner retries them or a confirmed provider-reset
 schedule becomes due. A worker process that dies without the shutdown
@@ -870,7 +844,7 @@ Startup holds a lifetime kernel lock and checks the old supervisor's recorded
 creation identity before recovering its abandoned web and worker children.
 It signals only matching creation identities and leaves reused PIDs alone.
 Verified attempt processes must exit before workspace recovery. Unknown
-legacy identities remain untouched and can block recovery. See
+creation identities remain untouched and can block recovery. See
 [Restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
 
 Relay removes the supervisor lease and shutdown marker only after a clean stop.
@@ -889,7 +863,7 @@ recovery draft. The run sidebar's workflow filter is stored in the
 `workflow` URL parameter and survives reloads.
 
 **Add a stage** offers agent work, commands, human reviews, conditions,
-loops, and subworkflows. New conditions include an editable continuation
+loops, and reusable workflows. New conditions include an editable continuation
 job; new loops include a command body and an exhaustion job. Condition
 result branches and loop stop/exhaustion settings edit the YAML document.
 Subworkflow creation requires selecting another existing workflow. Detailed
@@ -928,7 +902,7 @@ with job, attempt, readable size, authenticated downloads, and expandable
 file hashes. Each download has a distinct accessible name. **Workflow file**
 opens the immutable captured YAML in a read-only dialog. **Edit current
 workflow** opens the saved source editor separately. Annotations link to
-failed jobs. Agent messages, approvals, repairs, and code review stay in the
+failed jobs. Agent messages, approvals, loop results, and code review stay in the
 same run.
 
 Unstarted jobs show a waiting explanation without a log-history error.

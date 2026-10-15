@@ -27,12 +27,13 @@ The comparison used three passes through GitHub's own documentation:
    addition to implementation and validation.
 
 The original grammar and expression fixture source is GitHub's MIT-licensed
-[actions/languageservices revision](https://github.com/actions/languageservices/tree/4043eda158e16579cc5fb1b0b07a4bce2a76f0b5).
-Its license and provenance accompany `relay/workflows/actions/schema.json`
-and `tests/fixtures/actions/expressions`. The browser parser uses the matching
-exact `@actions/expressions` package version, `0.3.61`. The Python interpreter
-and browser oracle consume the upstream expression fixtures independently.
-Local additions such as `case`, `cache-mode`, time zones, queue policy, and
+[actions/languageservices
+revision](https://github.com/actions/languageservices/tree/4043eda158e16579cc5fb1b0b07a4bce2a76f0b5).
+Its license and provenance accompany `relay/workflows/actions/schema.json` and
+`tests/fixtures/actions/expressions`. The browser parser uses the matching exact
+`@actions/expressions` package version, `0.3.61`. The Python interpreter and
+browser oracle consume the upstream expression fixtures independently. Local
+additions such as `case`, `cache-mode`, time zones, queue policy, and
 completion-conclusion filters have separate contracts and regression checks.
 
 Relay's curated `schema.json` is authoritative for validation and the support
@@ -92,9 +93,10 @@ cannot select another host.
 The 2026-10-09 review repeated the inventory, runtime-consumer trace, and
 authoring/API checks against the curated schema. `runs-on` was already absent
 from validation and the live support manifest. The additional removals above
-eliminate restrictions copied from GitHub's
-[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
-and [event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
+eliminate restrictions copied from GitHub's [workflow
+syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+and [event
+reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
 Local schedule reconciliation now selects the latest due occurrence without
 allocating a missed minutely backlog. Dispatch validates the complete payload
 before matching active triggers. No alias or conversion path is introduced.
@@ -170,9 +172,10 @@ save/launch contract and durable execution.
 ## Product decisions
 
 The public schema is replaced without a version opt-in because Relay is
-unreleased. Historical launch snapshots retain a legacy semantics revision and
-frozen definition. Old editable sources and drafts may be replaced or
-discarded. The browser does not offer a legacy conversion flow.
+unreleased. The `version: 1` / `nodes` parser, executors, and controls are
+removed. Old launch snapshots retain their raw source and opaque metadata as
+unsupported evidence. They cannot resume or retry. Old editable sources and
+drafts need replacement; the browser does not offer a conversion flow.
 
 Jobs and all nested/matrix work run serially. Agent edits and tests share the
 primary worktree. Code changes require a clean descendant commit at job end;
