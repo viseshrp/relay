@@ -138,7 +138,9 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
             dispatch_paused_seconds=3600 if index == 1 else 0,
             failure_code="command_failed" if index == 1 else None,
             actions_state={
-                "display_names": {f"root.{key}": value["name"] for key, value in jobs.items()}
+                "display_names": {"root.approval": "Approval"}
+                if waiting
+                else {f"root.{key}": value["name"] for key, value in jobs.items()}
             },
         )
         RunSnapshot.objects.create(
@@ -149,7 +151,7 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
             resolved_definition=captured_frozen,
         )
         if waiting:
-            NodeRun.objects.create(
+            approval_scope = NodeRun.objects.create(
                 run=run,
                 node_id="approval",
                 scope_path="root.approval",
@@ -158,6 +160,14 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
                 frozen_def=ActionsJobNode(
                     job_id="approval", job=approval_job, workflow=captured_workflow
                 ).model_dump(mode="json"),
+            )
+            NodeAttempt.objects.create(
+                node_run=approval_scope,
+                attempt_number=1,
+                status="waiting",
+                worker_id="test-fixture",
+                starting_head=head,
+                started_at=WHEN,
             )
             node = NodeRun.objects.create(
                 run=run,

@@ -82,6 +82,11 @@ async function open(page: Page, fixture: Fixture, screen: Screen) {
     await expect(page.getByRole("region", { name: "Step log" })).toBeVisible();
   }
   if (screen === "approval") {
+    await expect(
+      page
+        .getByRole("navigation", { name: "Jobs" })
+        .getByRole("link", { name: /approval/i }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Respond", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Approve", exact: true }),
