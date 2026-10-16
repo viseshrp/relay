@@ -51,13 +51,12 @@ non-roaming Windows storage. Default roots are:
 | Windows | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay\Logs` |
 
 Relay creates these directories only when needed. POSIX directories use mode
-`0700`. Windows retains the directory's existing ACL and adds an inheritable
-grant for its original owner. This keeps files created by a provider's sandbox
-account readable by Relay, even when the child file has a different owner.
-Existing ACL entries and inheritance protection stay intact. Relay adds no
-permissions for provider sandbox accounts. A provider that cannot access its
-assigned workspace reports its own failure; incomplete preservation keeps the
-workspace available for inspection.
+`0700`. Windows directories inherit the account's profile permissions; the
+default `%LOCALAPPDATA%` location is limited to that account. Relay changes no
+Windows permissions. Providers own their sandbox's file permissions. If a
+sandbox creates a file Relay's account cannot read, the job commit or evidence
+preservation fails with that error and the worktree is retained. Fix access in
+the provider's sandbox settings.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and

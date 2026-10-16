@@ -4,18 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack
-import ctypes
-import errno
 import json
 import logging
 import os
 from pathlib import Path
-import re
-import shutil
 import subprocess
 import sys
-from unittest.mock import Mock
-from uuid import uuid4
 
 import pytest
 
@@ -30,13 +24,10 @@ from relay.execution.cancellation import (
     terminate_async_process_tree,
     terminate_process_tree,
 )
-from relay.execution.resources import allocate_attempt_resources
 from relay.media import media_type_for
 from relay.web.logging import ContextFormatter, OwnedRotatingFileHandler
-from relay.windows_security import ensure_private_directory_acl
 
 OWNED = f"{APPLICATION_LOG_OWNERSHIP_LINE}\n".encode()
-ACCESS_DENIED = 5
 
 
 @pytest.mark.parametrize(
@@ -53,164 +44,6 @@ def test_storage_directories_are_created_private_on_demand(directory: str) -> No
 def test_private_directory_creation_includes_missing_parents(tmp_path: Path) -> None:
     created = paths.ensure_private_dir(tmp_path / "private/nested")
     assert created.is_dir()
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows directory ACLs require Windows.")
-@pytest.mark.parametrize(
-    ("operation", "result", "allocations"),
-    [
-        ("GetNamedSecurityInfoW", ACCESS_DENIED, 0),
-        ("GetAclInformation", 0, 1),
-        ("GetAce", 0, 1),
-        ("SetEntriesInAclW", ACCESS_DENIED, 1),
-        ("SetNamedSecurityInfoW", ACCESS_DENIED, 2),
-    ],
-)
-def test_windows_acl_errors_preserve_the_directory_and_release_allocations(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    operation: str,
-    result: int,
-    allocations: int,
-) -> None:
-    assert sys.platform == "win32"
-    directory = tmp_path / "private"
-    directory.mkdir(mode=0o700)
-    security = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    free = kernel.LocalFree
-    free.argtypes = (ctypes.c_void_p,)
-    free.restype = ctypes.c_void_p
-    released = Mock(wraps=free)
-    monkeypatch.setattr(kernel, "LocalFree", released)
-    # Reach the grant APIs even when the host already inherits sufficient access.
-    monkeypatch.setattr(security, "EqualSid", Mock(return_value=False))
-    setter = Mock()
-    monkeypatch.setattr(security, "SetNamedSecurityInfoW", setter)
-
-    def fail(*_arguments: object) -> int:
-        ctypes.set_last_error(ACCESS_DENIED)
-        return result
-
-    failure = Mock(side_effect=fail)
-    monkeypatch.setattr(security, operation, failure)
-
-    def library(name: str, *, use_last_error: bool) -> ctypes.CDLL:
-        assert use_last_error
-        return {"advapi32": security, "kernel32": kernel}[name]
-
-    monkeypatch.setattr(ctypes, "WinDLL", library)
-    with pytest.raises(OSError) as caught:
-        ensure_private_directory_acl(directory)
-    assert caught.value.errno == errno.EACCES
-    failure.assert_called_once()
-    if operation != "SetNamedSecurityInfoW":
-        setter.assert_not_called()
-    assert directory.is_dir()
-    addresses = [call.args[0].value for call in released.call_args_list]
-    assert len(addresses) == len(set(addresses)) == allocations
-    assert all(addresses)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows directory ACLs require Windows.")
-@pytest.mark.parametrize("allocation", ["directory", "attempt"])
-def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
-    tmp_path: Path, allocation: str
-) -> None:
-    if allocation == "attempt":
-        directory = allocate_attempt_resources(str(uuid4()), "attempt-1").directory
-    else:
-        directory = tmp_path / "private"
-        directory.mkdir(mode=0o700)
-    script = tmp_path / "security.ps1"
-    script.write_text(
-        "param([string] $Target)\n"
-        "$ErrorActionPreference = 'Stop'\n"
-        '$env:PSModulePath = "$PSHOME\\Modules"\n'
-        "$sections = [System.Security.AccessControl.AccessControlSections]'Owner, Access'\n"
-        "$acl = if ([System.IO.Directory]::Exists($Target)) { "
-        "[System.Security.AccessControl.DirectorySecurity]::new($Target, $sections) "
-        "} else { [System.Security.AccessControl.FileSecurity]::new($Target, $sections) }\n"
-        "$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])\n"
-        "$owner.Value\n"
-        "$acl.GetSecurityDescriptorSddlForm('Owner, Access')\n"
-        "[int][System.Security.AccessControl.FileSystemRights]::ReadAttributes\n"
-        "$rules = @($acl.GetAccessRules($true, $true, "
-        "[System.Security.Principal.SecurityIdentifier]) | "
-        "Where-Object { $_.IdentityReference.Value -eq 'S-1-5-11' } | "
-        "ForEach-Object { @{ rights = [int]$_.FileSystemRights; "
-        "inheritance = $_.InheritanceFlags.ToString(); "
-        "propagation = $_.PropagationFlags.ToString(); inherited = $_.IsInherited } })\n"
-        "ConvertTo-Json -InputObject $rules -Compress\n"
-        "$ownerRules = @($acl.GetAccessRules($true, $true, "
-        "[System.Security.Principal.SecurityIdentifier]) | "
-        "Where-Object { $_.IdentityReference.Value -eq $owner.Value })\n"
-        "$full = [System.Security.AccessControl.FileSystemRights]::FullControl\n"
-        "$inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit "
-        "-bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit\n"
-        "[bool](@($ownerRules | Where-Object { "
-        "($_.FileSystemRights -band $full) -eq $full }).Count)\n"
-        "[bool](@($ownerRules | Where-Object { "
-        "($_.FileSystemRights -band $full) -eq $full -and "
-        "($_.InheritanceFlags -band $inherit) -eq $inherit }).Count)\n",
-        encoding="utf-8",
-    )
-
-    def security(
-        target: Path = directory,
-    ) -> tuple[str, str, int, list[dict[str, object]], bool, bool]:
-        powershell = Path(
-            shutil.which("pwsh")
-            or Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        )
-        result = subprocess.run(  # noqa: S603 - inspect the owned fixture with Windows' ACL reader
-            [
-                str(powershell),
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(script),
-                str(target),
-            ],
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=15,
-        )
-        assert result.returncode == 0, result.stderr
-        lines = result.stdout.strip().splitlines()
-        assert len(lines) == 6, result.stderr
-        return (
-            lines[0],
-            lines[1],
-            int(lines[2]),
-            json.loads(lines[3]),
-            lines[4] == "True",
-            lines[5] == "True",
-        )
-
-    owner, before, attributes, before_rules, _, _ = security()
-    if allocation == "directory":
-        paths.ensure_private_dir(directory)
-    owner_after, after, _, after_rules, owner_full, owner_inherits = security()
-    paths.ensure_private_dir(directory)
-
-    assert owner_after == owner
-    assert owner_full and owner_inherits
-    assert set(re.findall(r"\([^()]+\)", before)) <= set(re.findall(r"\([^()]+\)", after))
-    before_flags = before.split("D:", 1)[1].split("(", 1)[0]
-    after_flags = after.split("D:", 1)[1].split("(", 1)[0]
-    assert ("P" in before_flags) == ("P" in after_flags)
-    assert after_rules == before_rules
-    assert security() == (owner, after, attributes, after_rules, True, True)
-    child = directory / "child.txt"
-    child.write_text("retained bytes", encoding="utf-8")
-    _, _, _, child_rules, child_owner_full, _ = security(child)
-    assert child_owner_full
-    assert all(rule in before_rules for rule in child_rules if not rule["inherited"])
 
 
 def test_safe_resolve_keeps_contained_paths(tmp_path: Path) -> None:

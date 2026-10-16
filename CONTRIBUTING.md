@@ -70,7 +70,7 @@ CI uses native tox commands, isolated pytest-xdist workers, and four
 separate Playwright browser shards. Inventories verify that every test
 finishes exactly once.
 Linux and Windows on Python 3.14 collect branch coverage, including native
-Windows ACL and process code; the other 13 environments run
+Windows process code; the other 13 environments run
 every test without suite-wide coverage instrumentation. Local tox runs keep
 coverage enabled by default. Set `RELAY_TEST_COVERAGE=false` to run without
 coverage while preserving complete execution and outcome verification.

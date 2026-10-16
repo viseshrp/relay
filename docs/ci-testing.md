@@ -29,7 +29,7 @@ copy. Real Git and deterministic provider subprocesses remain enabled.
 
 Linux and Windows on Python 3.14 record branch coverage from both lanes and
 upload their XML to Codecov. The combined reports include native Windows
-ACL and process behavior. The other 13 jobs run every test without
+process behavior. The other 13 jobs run every test without
 suite-wide coverage instrumentation. Sources, exclusions, and thresholds
 remain unchanged. Local tox runs collect coverage by default.
 
