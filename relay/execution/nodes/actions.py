@@ -27,6 +27,7 @@ from relay.execution.action_files import (
     shell_script,
     step_files,
 )
+from relay.execution.action_reports import parse_report
 from relay.execution.dispatch import dispatch_node
 from relay.execution.masking import redactor
 from relay.execution.runner import (
@@ -49,7 +50,6 @@ from relay.workflows.actions.language import (
     source_bytes,
 )
 from relay.workflows.actions.metadata import load_action
-from relay.workflows.outputs import extract_outputs
 from relay.workflows.schema import ActionsJobNode, ActionsStepNode, CommandNode
 from relay.workflows.scope import node_scope
 
@@ -948,23 +948,28 @@ class ActionsStepExecutor:
             resources = (
                 replace(context.resources, overrides=environment) if context.resources else None
             )
+            report_contract = parse_report(inputs) if "report" in inputs else None
+            agent = node.bound_agent
+            if report_contract is not None:
+                safe_resolve(context.worktree, report_contract.artifact)
+                agent = agent.model_copy(update={"outputs": {"value": report_contract.selector}})
             outcome = self.driver.execute(
-                replace(context, attempt=attempt, resources=resources), node.bound_agent
+                replace(context, attempt=attempt, resources=resources), agent
             )
             if outcome.kind is not OutcomeKind.SUCCEEDED:
                 return outcome
-            if "report" in inputs:
+            if report_contract is not None:
                 try:
-                    output, artifacts = self.report(context, inputs)
+                    output, artifacts = report_contract.read(context.worktree)
                 except RelayError as error:
-                    report = safe_resolve(context.worktree, str(inputs["report"]))
+                    report = safe_resolve(context.worktree, report_contract.artifact)
                     return replace(
                         outcome,
                         kind=OutcomeKind.FAILED,
                         error_code=error.error_code,
                         error_message=error.message,
                         stop_reason=AttemptStopReason.OUTPUT_INVALID,
-                        declared_artifacts={"report": str(inputs["report"])}
+                        declared_artifacts={"report": report_contract.artifact}
                         if report.is_file()
                         else {},
                     )
@@ -973,7 +978,7 @@ class ActionsStepExecutor:
                 )
             return outcome
         if reference == "relay/validate-report@v1":
-            outputs, artifacts = self.report(context, inputs)
+            outputs, artifacts = parse_report(inputs).read(context.worktree)
             return ExecutionOutcome(
                 OutcomeKind.SUCCEEDED, outputs=outputs, declared_artifacts=artifacts
             )
@@ -1011,45 +1016,6 @@ class ActionsStepExecutor:
         from relay.execution.action_products import execute_product
 
         return execute_product(context, reference, inputs, values, node)
-
-    def report(
-        self, context: AttemptContext, inputs: Mapping[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, str]]:
-        from pydantic import TypeAdapter, ValidationError
-
-        from relay.workflows.schema import OutputSelector
-
-        artifact = str(inputs.get("report", inputs.get("path", "")))
-        if "selector" in inputs:
-            try:
-                raw = json.loads(str(inputs["selector"]))
-            except ValueError:
-                message = "The report selector must be valid JSON."
-                raise NodeExecutionError(message) from None
-        else:
-            format_name = inputs.get("format", "label")
-            if format_name == "exists":
-                return {
-                    "value": (
-                        "true" if safe_resolve(context.worktree, artifact).is_file() else "false"
-                    )
-                }, {}
-            raw = (
-                {"label": {"artifact": artifact, "label": str(inputs.get("label", "Ready"))}}
-                if format_name == "label"
-                else {
-                    f"{format_name}_path": {
-                        "artifact": artifact,
-                        "path": str(inputs.get("field", "value")),
-                    }
-                }
-            )
-        try:
-            selector = TypeAdapter(OutputSelector).validate_python(raw)
-        except ValidationError:
-            message = "The report selector is invalid."
-            raise NodeExecutionError(message) from None
-        return extract_outputs(context.worktree, {"value": selector}), {"report": artifact}
 
     def loop(
         self,

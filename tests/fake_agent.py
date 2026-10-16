@@ -52,6 +52,27 @@ def selector(value: str = "m1") -> dict[str, object]:
 AI_HANDOFF = 'Generated instructions: café\r\nKeep ${literal} and quotes: "yes".\r\n'
 
 
+def fulfill_report_contract(cwd: Path, prompt: str) -> None:
+    """Act on the report contract delivered through the actual provider prompt."""
+    if "Relay declared outputs (JSON):" not in prompt:
+        return
+    outputs = json.loads(prompt.rsplit("\n", 1)[-1])
+    for selector in outputs.values():
+        if "exists" in selector:
+            continue
+        kind, details = next(iter(selector.items()))
+        target = cwd / details["artifact"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "label":
+            content = details["label"] + ": Yes\n"
+        else:
+            value: object = "Yes"
+            for key in reversed(details["path"].split(".")):
+                value = {key: value}
+            content = json.dumps(value)
+        target.write_text(content, encoding="utf-8")
+
+
 def ai_starter_artifacts(cwd: Path, prompt: str) -> None:
     """Supply phase artifacts while exercising the real starter runner offline."""
 
@@ -275,6 +296,11 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "report-contract":
+                blocks = params["prompt"]
+                fulfill_report_contract(
+                    Path(self.cwd), "\n".join(block["text"] for block in blocks)
+                )
             if self.mode == "configuration-ai-starter":
                 blocks = params.get("prompt", [])
                 if isinstance(blocks, list):
@@ -550,6 +576,13 @@ def agy_main(arguments: list[str]) -> None:
         raise SystemExit(2)
     trace({"input_closed": True})
     emit({"event": "init", "init": {"model": "other" if mode == "drift" else model}})
+    if mode == "report-contract":
+        fulfill_report_contract(Path.cwd(), message["message"]["content"])
+    if mode in {"hold", "success-hold"}:
+        if mode == "success-hold":
+            emit({"event": "result", "result": {"status": "SUCCESS"}})
+        while True:
+            time.sleep(0.1)
     if mode == "malformed":
         write_line("{")
         return

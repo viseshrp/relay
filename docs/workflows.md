@@ -360,6 +360,12 @@ It exports `value`. Required selectors retain exact bytes; `exists` returns a
 boolean string and does not require or retain a report. A successful agent
 turn alone does not establish a required report or verdict.
 
+An agent action with `with.report` receives the resolved selector as a separate
+JSON contract after its captured instructions. The same contract validates its
+result. A full `selector` determines the artifact path for both validation and
+retention; the shorthand path does not replace it. Relay adds workspace facts
+and declared requirements without adding report content or provenance rules.
+
 ## Artifacts and caches
 
 `relay/upload-artifact@v1` accepts newline-separated glob `path`, optional

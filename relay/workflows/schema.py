@@ -239,7 +239,6 @@ class CommandNode(NodeBase):
     """A shell-free argument-vector process."""
 
     type: Literal["command"]
-    outputs: dict[str, OutputSelector] = Field(default_factory=dict)
     run: Annotated[list[str], Field(min_length=1)]
     env: dict[str, str] = Field(default_factory=dict)
 

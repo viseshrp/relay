@@ -177,13 +177,8 @@ class AgentExecutionContext:
             "TMPDIR/TMP/TEMP directory, for downloaded skills, scratch scripts, "
             "and other transient files. Do not put them in the Git worktree. "
             "Keep required task reports at their prescribed artifact paths. "
-            "Ordered steps share this worktree. Follow the task's requested "
-            "edit scope and commit instructions; Relay commits changed code "
-            "when the job succeeds. Keep unrelated files out of the checkout. "
-            "Use Relay agent selection to identify the "
-            "executing tool and exact model in report provenance; source-prompt "
-            "role names do not change the selected agent. Do not infer provider "
-            "default effort or permission values from an unset override."
+            "Ordered steps share this worktree. Relay commits changed code "
+            "when the job succeeds."
         )
 
     def output_instructions(self) -> str:
@@ -199,12 +194,10 @@ class AgentExecutionContext:
         # even when the report has no findings to address.
         return (
             "Relay declared outputs (JSON):\n"
-            "These selectors are validated before this step can succeed. "
+            "These selectors are validated after the provider returns. "
             "Files referenced by label, json_path, or yaml_path selectors are required; "
-            "create them with the supplied task's required content "
-            "even when there are no findings. "
-            "An exists selector records a boolean and permits an absent file. "
-            "Keep phase boundaries and report only evidence-based outcomes.\n"
+            "each must contain the declared label or key path. "
+            "An exists selector records a boolean and permits an absent file.\n"
             + json.dumps(selectors, sort_keys=True, ensure_ascii=False)
         )
 
