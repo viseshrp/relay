@@ -63,16 +63,7 @@ a retained SuspendIt workflow on Windows. The
 [initial run](2026-10-14-windows-suspendit.md) found four Relay defects. The
 [fix retest](2026-10-14-windows-relay-fixes.md) verifies their fixes through
 live execution, browser checks, an owner wait, and retained tool diagnostics.
-The [full Python follow-up](2026-10-14-windows-python-suite.md) records the
-fixture fix, real junction coverage, and a verified complete Python 3.14
-Windows pass. That pass did not exercise Antigravity.
 
-The [2026-10-15 automated follow-up](2026-10-15-windows-end-to-end.md) records
-the complete Windows browser and Python passes, portable test fixtures,
-checklist focus restoration, and deep-path Git regression coverage.
-
-The [optional review follow-up](2026-10-15-windows-optional-review.md) closes
-S1 through S9 and records two further defects found during live testing.
 The [Windows ACP record](2026-10-15-windows-acp.json) certifies Claude Code,
 Copilot CLI, and Cursor CLI on the fixed Actions runtime. All three completed
 fresh exact-model selection, one-use permission exchanges, retained reports,
@@ -80,14 +71,11 @@ job commits, browser output checks, and verified worktree cleanup. Copilot
 returns its command exit code in public text; Claude and Cursor also return
 structured exit fields. The final supervisor stopped cooperatively.
 
-The [Windows workflow execution validation](2026-10-15-windows-actions-only.md)
-records complete native tests, reviewed Windows screenshots, additional
-runtime fixes, and a fresh live Claude run. Records identify their tested
-commits.
-
-The [Windows workflow validation](2026-10-16-windows-workflow-validation.md)
-records the complete native Python run, focused browser checks, fresh database
-validation, and tutorial captures for the current workspace and commit rules.
+The [fresh Windows Claude check](2026-10-15-windows-actions-only.md)
+records Claude Code 2.1.300 through ACP 0.91.0, exact `default` selection,
+masked Unicode output, a retained report, one job commit, and verified
+worktree and process cleanup. Its structured record contains only live
+provider evidence.
 
 The [Windows live controls](2026-10-16-windows-live-controls.md) and their
 [structured record](2026-10-16-windows-live-controls.json) verify fresh Codex
@@ -97,13 +85,13 @@ denials. They record fixes found during those runs and authenticated Linux
 Copilot execution in a disposable WSL2 container. Linux Claude, Cursor, and
 Antigravity still need sign-in; Linux Codex is deferred at the owner's request.
 
-The [orchestration ownership audit](2026-10-16-orchestration-ownership.md) and
-its [per-file record](2026-10-16-orchestration-ownership.json) cover every path
-in PR #23 and the provider ownership follow-up. They record native Windows
-Python validation, focused browser checks, a fresh successful Codex pipeline,
-and Antigravity's `SUCCESS` result without its required report. Relay rejects
-that missing report without inferring an outcome from provider tool messages or
-changing provider permissions.
+The [Windows provider checks](2026-10-16-orchestration-ownership.md)
+record a fresh successful Codex pipeline and Antigravity's `SUCCESS` result
+without its required report.
+Relay rejects that missing report without inferring an outcome from
+provider tool messages or changing provider permissions. The record
+identifies its tested implementation, exact versions and model values,
+artifact hashes, and cleanup results.
 
 ## Certification bar
 

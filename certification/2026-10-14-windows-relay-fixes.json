@@ -299,7 +299,7 @@
     "2026-10-14-windows-relay-fixed.png": "f8045b2f63de34cd5321982d31f2a779a9fb4f7a42f3ece7a86e3c5dc07f18c5",
     "2026-10-14-windows-relay-resumed.png": "25cb5b0f3a8e3a4959da45a2b2c42c8185cacfcce51f6a96d3f6fa625c9d579a"
   },
-  "full_python_followup": "2026-10-14-windows-python-suite.json",
+  "full_python_followup": "https://github.com/viseshrp/relay/pull/23",
   "relay_source_files": [
     {
       "path": "certification/README.md",

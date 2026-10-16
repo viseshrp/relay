@@ -7,7 +7,7 @@ agent work, owner waits, command execution, Git isolation, and monitoring.
 The [initial report](2026-10-14-windows-suspendit.md) preserves the four defects
 and their original evidence.
 
-The subsequent [full Python follow-up](2026-10-14-windows-python-suite.md)
+The subsequent [full Python follow-up](https://github.com/viseshrp/relay/pull/23)
 passes the Windows Python 3.14 gate and records its capability/platform skips.
 
 ## Fixes and live results
@@ -69,7 +69,7 @@ That run's remaining failure was
 Windows symlinks (`WinError 1314`). Its focused script check excluded that
 already-recorded failure.
 
-The [full Python follow-up](2026-10-14-windows-python-suite.md) fixes the
+The [full Python follow-up](https://github.com/viseshrp/relay/pull/23) fixes the
 fixture, adds real Windows junction coverage, and fixes the nested pytest
 collection race. One fresh complete run passed 2,916 tests and recorded 38
 capability/platform skips; all 2,954 cases were verified exactly once. The
