@@ -40,7 +40,22 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
     .getByRole("navigation", { name: "Workflow job navigation" })
     .getByRole("button", { name: "Work", exact: true })
     .click();
+  // Finish the drawer's entrance before selecting a tab inside it.
+  await page.getByRole("dialog").evaluate(async (dialog) => {
+    await Promise.all(
+      dialog
+        .getAnimations({ subtree: true })
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity,
+        )
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
   await page.getByRole("tab", { name: "Steps", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "Steps", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
   await page
     .getByRole("textbox", { name: "New prompt file", exact: true })
     .fill(promptFile);
