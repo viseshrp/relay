@@ -27,8 +27,9 @@ Each worker owns its database template, Huey queue, environment, provider
 transcripts, and temporary repositories. Every test gets a fresh database
 copy. Real Git and deterministic provider subprocesses remain enabled.
 
-Linux/Python 3.14 records branch coverage from both lanes and uploads the
-canonical XML to Codecov. The other 14 jobs run every test without
+Linux and Windows on Python 3.14 record branch coverage from both lanes and
+upload their XML to Codecov. The combined reports include native Windows
+ACL and process behavior. The other 13 jobs run every test without
 suite-wide coverage instrumentation. Sources, exclusions, and thresholds
 remain unchanged. Local tox runs collect coverage by default.
 
