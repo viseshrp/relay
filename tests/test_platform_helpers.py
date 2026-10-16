@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from uuid import uuid4
 
 import pytest
 
@@ -25,6 +26,7 @@ from relay.execution.cancellation import (
     terminate_async_process_tree,
     terminate_process_tree,
 )
+from relay.execution.resources import allocate_attempt_resources
 from relay.media import media_type_for
 from relay.web.logging import ContextFormatter, OwnedRotatingFileHandler
 
@@ -48,20 +50,34 @@ def test_private_directory_creation_includes_missing_parents(tmp_path: Path) -> 
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory ACLs require Windows.")
-def test_private_directory_preserves_acl_and_inherits_original_owner_grant(tmp_path: Path) -> None:
-    directory = tmp_path / "private"
-    directory.mkdir(mode=0o700)
+@pytest.mark.parametrize("allocation", ["directory", "attempt"])
+def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
+    tmp_path: Path, allocation: str
+) -> None:
+    if allocation == "attempt":
+        directory = allocate_attempt_resources(str(uuid4()), "attempt-1").directory
+    else:
+        directory = tmp_path / "private"
+        directory.mkdir(mode=0o700)
     script = tmp_path / "security.ps1"
     script.write_text(
         "param([string] $Target)\n"
         "$ErrorActionPreference = 'Stop'\n"
         "$acl = Get-Acl -LiteralPath $Target\n"
         "$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value\n"
-        "$acl.GetSecurityDescriptorSddlForm('Owner, Access')\n",
+        "$acl.GetSecurityDescriptorSddlForm('Owner, Access')\n"
+        "[int][System.Security.AccessControl.FileSystemRights]::ReadAttributes\n"
+        "$rules = @($acl.GetAccessRules($true, $true, "
+        "[System.Security.Principal.SecurityIdentifier]) | "
+        "Where-Object { $_.IdentityReference.Value -eq 'S-1-5-11' } | "
+        "ForEach-Object { @{ rights = [int]$_.FileSystemRights; "
+        "inheritance = $_.InheritanceFlags.ToString(); "
+        "propagation = $_.PropagationFlags.ToString(); inherited = $_.IsInherited } })\n"
+        "ConvertTo-Json -InputObject $rules -Compress\n",
         encoding="utf-8",
     )
 
-    def security(target: Path = directory) -> tuple[str, str]:
+    def security(target: Path = directory) -> tuple[str, str, int, list[dict[str, object]]]:
         powershell = (
             Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         )
@@ -83,12 +99,13 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(tmp_p
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        assert len(lines) == 2, result.stderr
-        return lines[0], lines[1]
+        assert len(lines) == 4, result.stderr
+        return lines[0], lines[1], int(lines[2]), json.loads(lines[3])
 
-    owner, before = security()
-    paths.ensure_private_dir(directory)
-    owner_after, after = security()
+    owner, before, attributes, before_rules = security()
+    if allocation == "directory":
+        paths.ensure_private_dir(directory)
+    owner_after, after, _, after_rules = security()
     paths.ensure_private_dir(directory)
 
     assert owner_after == owner
@@ -98,11 +115,24 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(tmp_p
     before_flags = before.split("D:", 1)[1].split("(", 1)[0]
     after_flags = after.split("D:", 1)[1].split("(", 1)[0]
     assert ("P" in before_flags) == ("P" in after_flags)
-    assert security() == (owner, after)
+    added_rules = [rule for rule in after_rules if rule not in before_rules]
+    assert all(
+        rule
+        == {
+            "rights": attributes,
+            "inheritance": "None",
+            "propagation": "None",
+            "inherited": False,
+        }
+        for rule in added_rules
+    )
+    assert after_rules
+    assert security() == (owner, after, attributes, after_rules)
     child = directory / "child.txt"
     child.write_text("retained bytes", encoding="utf-8")
-    _, child_acl = security(child)
+    _, child_acl, _, child_rules = security(child)
     assert re.search(rf"\(A;[^;]*ID[^;]*;FA;;;{re.escape(owner)}\)", child_acl)
+    assert all(rule not in child_rules for rule in added_rules)
 
 
 def test_safe_resolve_keeps_contained_paths(tmp_path: Path) -> None:

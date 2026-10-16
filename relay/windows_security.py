@@ -1,4 +1,4 @@
-"""Keep a private directory's owner able to read delegated child files."""
+"""Preserve private Windows storage access across sandbox account boundaries."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ _OWNER_SECURITY_INFORMATION = 1
 _DACL_SECURITY_INFORMATION = 4
 _SE_FILE_OBJECT = 1
 _FILE_ALL_ACCESS = 0x1F01FF
+_FILE_READ_ATTRIBUTES = 0x80
 _INHERIT_CHILDREN = 3
+_INHERIT_ONLY = 8
+_AUTHENTICATED_USERS_SID = "S-1-5-11"
 
 
 class _Trustee(ctypes.Structure):
@@ -58,8 +61,17 @@ class _AllowedAce(ctypes.Structure):
     ]
 
 
-def ensure_owner_inheritance(path: Path) -> None:
-    """Retain the original owner grant when a sandbox owns a newly written file."""
+def _grant(sid: int, permissions: int, inheritance: int) -> _ExplicitAccess:
+    entry = _ExplicitAccess()
+    entry.permissions = permissions
+    entry.mode = 1  # GRANT_ACCESS merges grants without replacing other trustees.
+    entry.inheritance = inheritance
+    entry.trustee.sid = sid
+    return entry
+
+
+def ensure_private_directory_acl(path: Path) -> None:
+    """Retain owner access and the directory attributes needed to resolve sandbox paths."""
     from ctypes import WinDLL, WinError, get_last_error, wintypes
 
     security = WinDLL("advapi32", use_last_error=True)
@@ -83,6 +95,8 @@ def ensure_owner_inheritance(path: Path) -> None:
     security.GetAce.restype = wintypes.BOOL
     security.EqualSid.argtypes = (pointer, pointer)
     security.EqualSid.restype = wintypes.BOOL
+    security.ConvertStringSidToSidW.argtypes = (wintypes.LPCWSTR, output_pointer)
+    security.ConvertStringSidToSidW.restype = wintypes.BOOL
     security.SetEntriesInAclW.argtypes = (
         wintypes.ULONG,
         ctypes.POINTER(_ExplicitAccess),
@@ -106,6 +120,7 @@ def ensure_owner_inheritance(path: Path) -> None:
     dacl = pointer()
     descriptor = pointer()
     updated = pointer()
+    authenticated = pointer()
     try:
         error = security.GetNamedSecurityInfoW(
             str(path),
@@ -122,9 +137,18 @@ def ensure_owner_inheritance(path: Path) -> None:
         if not owner.value or not dacl.value:
             message = "Relay requires an owned Windows directory with an access-control list."
             raise OSError(message)
+        if not security.ConvertStringSidToSidW(
+            _AUTHENTICATED_USERS_SID, ctypes.byref(authenticated)
+        ):
+            raise WinError(get_last_error())
+        if not authenticated.value:
+            message = "Windows returned an empty authenticated-account identity."
+            raise OSError(message)
         size = _AclSize()
         if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
             raise WinError(get_last_error())
+        owner_inherits = False
+        attributes_readable = False
         for index in range(size.count):
             address = pointer()
             if not security.GetAce(dacl, index, ctypes.byref(address)):
@@ -133,19 +157,30 @@ def ensure_owner_inheritance(path: Path) -> None:
                 message = "Windows returned an empty directory access-control entry."
                 raise OSError(message)
             ace = _AllowedAce.from_address(address.value)
-            if (
-                ace.kind == 0
-                and ace.flags & _INHERIT_CHILDREN == _INHERIT_CHILDREN
-                and ace.permissions & _FILE_ALL_ACCESS == _FILE_ALL_ACCESS
-                and security.EqualSid(owner, pointer(address.value + ctypes.sizeof(_AllowedAce)))
-            ):
-                return
-        entry = _ExplicitAccess()
-        entry.permissions = _FILE_ALL_ACCESS
-        entry.mode = 1  # GRANT_ACCESS merges with existing grants without replacing other trustees.
-        entry.inheritance = _INHERIT_CHILDREN
-        entry.trustee.sid = owner.value
-        error = security.SetEntriesInAclW(1, ctypes.byref(entry), dacl, ctypes.byref(updated))
+            if ace.kind != 0:
+                continue
+            sid = pointer(address.value + ctypes.sizeof(_AllowedAce))
+            if security.EqualSid(owner, sid):
+                owner_inherits |= (
+                    ace.flags & _INHERIT_CHILDREN == _INHERIT_CHILDREN
+                    and ace.permissions & _FILE_ALL_ACCESS == _FILE_ALL_ACCESS
+                )
+            if security.EqualSid(authenticated, sid):
+                attributes_readable |= (
+                    not ace.flags & _INHERIT_ONLY
+                    and ace.permissions & _FILE_READ_ATTRIBUTES == _FILE_READ_ATTRIBUTES
+                )
+        entries = []
+        if not owner_inherits:
+            entries.append(_grant(owner.value, _FILE_ALL_ACCESS, _INHERIT_CHILDREN))
+        if not attributes_readable:
+            # Node and PowerShell inspect parent directory attributes when resolving
+            # a workspace. This directory-only grant permits no listing or file reads.
+            entries.append(_grant(authenticated.value, _FILE_READ_ATTRIBUTES, 0))
+        if not entries:
+            return
+        array = (_ExplicitAccess * len(entries))(*entries)
+        error = security.SetEntriesInAclW(len(entries), array, dacl, ctypes.byref(updated))
         if error:
             raise WinError(error)
         error = security.SetNamedSecurityInfoW(
@@ -160,9 +195,9 @@ def ensure_owner_inheritance(path: Path) -> None:
         if error:
             raise WinError(error)
     finally:
-        for allocation in (updated, descriptor):
+        for allocation in (updated, descriptor, authenticated):
             if allocation:
                 kernel.LocalFree(allocation)
 
 
-__all__ = ["ensure_owner_inheritance"]
+__all__ = ["ensure_private_directory_acl"]
