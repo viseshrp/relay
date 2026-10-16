@@ -310,8 +310,19 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @owner_required
     @require_POST
     def elicitation_provider(request: HttpRequest) -> JsonResponse:
-        del request
-        providers.install("codex", mode="elicitation")
+        body = json_body(request)
+        choice_format = body.get("choices")
+        modes = {
+            "oneOf": "elicitation-choices",
+            "enum": "elicitation-enum",
+            "empty": "elicitation-empty-choice",
+        }
+        mode = (
+            modes.get(choice_format, "elicitation")
+            if isinstance(choice_format, str)
+            else "elicitation"
+        )
+        providers.install("codex", mode=mode)
         return JsonResponse({"ok": True})
 
     @owner_required

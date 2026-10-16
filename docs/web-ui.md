@@ -658,8 +658,10 @@ under Advanced diagnostics for a full large diff. Relay does not guess or
 submit the approval response.
 
 Tool permission requests require an explicit offered decision. Simple agent
-forms have typed fields; complex forms retain a JSON fallback. Optional
-feedback is sent into the same live ACP session after its current turn ends.
+forms have typed fields; complex forms retain a JSON fallback. Choice menus
+preserve the provider's labels, descriptions, ordering, and exact values.
+Optional feedback is sent into the same live ACP session after its current
+turn ends.
 This does not restart the worker or edit static instructions.
 
 **Link to run** and **Link to request** include the project, run, and interaction.

@@ -182,6 +182,20 @@ class WireAgent:
         params = params if isinstance(params, dict) else {}
         trace(message)
         if request_id in {"owner-permission", "owner-question"} and "result" in message:
+            if request_id == "owner-question" and self.mode in {
+                "elicitation-choices",
+                "elicitation-enum",
+                "elicitation-empty-choice",
+            }:
+                self.update(
+                    {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": "Owner answer: " + json.dumps(message["result"]),
+                        },
+                    }
+                )
             self.reply(self.pending_prompt, {"stopReason": "end_turn"})
             self.pending_prompt = None
             return
@@ -321,7 +335,39 @@ class WireAgent:
                     request_id, RequestError.internal_error(data={"errorKind": "rate_limit"})
                 )
                 return
-            if self.mode == "elicitation" and self.prompt_count == 1:
+            if (
+                self.mode
+                in {
+                    "elicitation",
+                    "elicitation-choices",
+                    "elicitation-enum",
+                    "elicitation-empty-choice",
+                }
+                and self.prompt_count == 1
+            ):
+                component: dict[str, object] = {"type": "string", "title": "Component"}
+                if self.mode != "elicitation":
+                    component["description"] = "Choose the component to inspect."
+                if self.mode == "elicitation-choices":
+                    component["oneOf"] = [
+                        {
+                            "const": "STAGING_exact_v2",
+                            "title": "Staging",
+                            "description": "Use the staging environment.",
+                        },
+                        {"const": "production", "title": "Production"},
+                    ]
+                elif self.mode == "elicitation-enum":
+                    component["enum"] = ["alpha", "ALPHA"]
+                elif self.mode == "elicitation-empty-choice":
+                    component["oneOf"] = [
+                        {
+                            "const": "",
+                            "title": "Skip",
+                            "description": "Leave the component unspecified.",
+                        },
+                        {"const": "Editor", "title": "Editor"},
+                    ]
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
                 emit(
                     {
@@ -334,9 +380,7 @@ class WireAgent:
                             "mode": "form",
                             "requestedSchema": {
                                 "type": "object",
-                                "properties": {
-                                    "component": {"type": "string", "title": "Component"}
-                                },
+                                "properties": {"component": component},
                                 "required": ["component"],
                             },
                         },

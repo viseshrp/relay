@@ -6,7 +6,9 @@ import {
   Checkbox,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   InputLabel,
+  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -19,7 +21,7 @@ import { jobDuration } from "../job";
 
 import { stageLabel } from "../navigation";
 
-import { object } from "./RunReviewShared";
+import { elicitationChoices, object } from "./RunReviewShared";
 import type { ReviewRequestState } from "./useReviewRequest";
 export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
   const {
@@ -147,7 +149,55 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
               {Object.entries(fields ?? {}).map(([name, raw]) => {
                 const field = object(raw) ?? {};
                 const label = String(field.title ?? stageLabel(name));
-                return field.type === "boolean" ? (
+                const choices = elicitationChoices(field);
+                const chosen =
+                  choices?.findIndex((choice) => choice.value === form[name]) ??
+                  -1;
+                return choices ? (
+                  <FormControl key={name}>
+                    <InputLabel id={`${labelId}-${name}`} shrink>
+                      {label}
+                    </InputLabel>
+                    <Select
+                      displayEmpty
+                      renderValue={(selection) =>
+                        selection === ""
+                          ? "Choose a value"
+                          : choices[Number(selection)]?.label
+                      }
+                      labelId={`${labelId}-${name}`}
+                      label={label}
+                      aria-describedby={
+                        typeof field.description === "string"
+                          ? `${labelId}-${name}-help`
+                          : undefined
+                      }
+                      value={chosen < 0 ? "" : String(chosen)}
+                      onChange={(event) => {
+                        const choice = choices[Number(event.target.value)];
+                        if (choice)
+                          setForm((current) => ({
+                            ...current,
+                            [name]: choice.value,
+                          }));
+                      }}
+                    >
+                      {choices.map((choice, index) => (
+                        <MenuItem key={index} value={String(index)}>
+                          <ListItemText
+                            primary={choice.label}
+                            secondary={choice.description}
+                          />
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    {typeof field.description === "string" && (
+                      <FormHelperText id={`${labelId}-${name}-help`}>
+                        {field.description}
+                      </FormHelperText>
+                    )}
+                  </FormControl>
+                ) : field.type === "boolean" ? (
                   <FormControlLabel
                     key={name}
                     label={label}
@@ -163,40 +213,6 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
                       />
                     }
                   />
-                ) : Array.isArray(field.enum) ? (
-                  <FormControl key={name}>
-                    <InputLabel id={`${labelId}-${name}`} shrink>
-                      {label}
-                    </InputLabel>
-                    <Select
-                      displayEmpty
-                      renderValue={
-                        form[name] === undefined
-                          ? () => "Choose a value"
-                          : undefined
-                      }
-                      labelId={`${labelId}-${name}`}
-                      label={label}
-                      value={String(form[name] ?? "")}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          [name]:
-                            (Array.isArray(field.enum)
-                              ? field.enum.find(
-                                  (item) => String(item) === event.target.value,
-                                )
-                              : undefined) ?? event.target.value,
-                        }))
-                      }
-                    >
-                      {field.enum.map((item) => (
-                        <MenuItem key={String(item)} value={String(item)}>
-                          {String(item)}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
                 ) : (
                   <TextField
                     key={name}

@@ -3,7 +3,7 @@ import { api, errorMessage } from "../api";
 
 import type { ArtifactRecord, JsonValue, RunInteraction } from "../types";
 
-import { object } from "./RunReviewShared";
+import { elicitationChoices, object } from "./RunReviewShared";
 export function useReviewRequest({
   interaction,
   runId,
@@ -35,7 +35,11 @@ export function useReviewRequest({
   const simpleForm =
     fields !== null &&
     Object.values(fields).every((field) => {
-      const type = object(field)?.type;
+      const property = object(field);
+      if (!property) return false;
+      if (Array.isArray(property.enum) || Array.isArray(property.oneOf))
+        return elicitationChoices(property) !== null;
+      const type = property.type;
       return (
         type === "string" ||
         type === "boolean" ||
@@ -96,12 +100,14 @@ export function useReviewRequest({
   const ready = interaction.request.environment
     ? true
     : interaction.kind === "elicitation" && simpleForm
-      ? required.every(
-          (name) =>
-            typeof name === "string" &&
-            form[name] !== undefined &&
-            form[name] !== "",
-        )
+      ? required.every((name) => {
+          if (typeof name !== "string" || form[name] === undefined)
+            return false;
+          const choices = elicitationChoices(object(fields?.[name]) ?? {});
+          return choices
+            ? choices.some((choice) => choice.value === form[name])
+            : form[name] !== "";
+        })
       : value !== "";
 
   return {
