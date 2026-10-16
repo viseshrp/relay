@@ -72,10 +72,10 @@ def _grant(sid: int, permissions: int, inheritance: int) -> _ExplicitAccess:
 
 def ensure_private_directory_acl(path: Path) -> None:
     """Retain owner access and the directory attributes needed to resolve sandbox paths."""
-    from ctypes import WinDLL, WinError, get_last_error, wintypes
+    import ctypes.wintypes as wintypes
 
-    security = WinDLL("advapi32", use_last_error=True)
-    kernel = WinDLL("kernel32", use_last_error=True)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     pointer = ctypes.c_void_p
     output_pointer = ctypes.POINTER(pointer)
     security.GetNamedSecurityInfoW.argtypes = (
@@ -133,26 +133,26 @@ def ensure_private_directory_acl(path: Path) -> None:
             ctypes.byref(descriptor),
         )
         if error:
-            raise WinError(error)
+            raise ctypes.WinError(error)
         if not owner.value or not dacl.value:
             message = "Relay requires an owned Windows directory with an access-control list."
             raise OSError(message)
         if not security.ConvertStringSidToSidW(
             _AUTHENTICATED_USERS_SID, ctypes.byref(authenticated)
         ):
-            raise WinError(get_last_error())
+            raise ctypes.WinError(ctypes.get_last_error())
         if not authenticated.value:
             message = "Windows returned an empty authenticated-account identity."
             raise OSError(message)
         size = _AclSize()
         if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
-            raise WinError(get_last_error())
+            raise ctypes.WinError(ctypes.get_last_error())
         owner_inherits = False
         attributes_readable = False
         for index in range(size.count):
             address = pointer()
             if not security.GetAce(dacl, index, ctypes.byref(address)):
-                raise WinError(get_last_error())
+                raise ctypes.WinError(ctypes.get_last_error())
             if address.value is None:
                 message = "Windows returned an empty directory access-control entry."
                 raise OSError(message)
@@ -182,7 +182,7 @@ def ensure_private_directory_acl(path: Path) -> None:
         array = (_ExplicitAccess * len(entries))(*entries)
         error = security.SetEntriesInAclW(len(entries), array, dacl, ctypes.byref(updated))
         if error:
-            raise WinError(error)
+            raise ctypes.WinError(error)
         error = security.SetNamedSecurityInfoW(
             str(path),
             _SE_FILE_OBJECT,
@@ -193,7 +193,7 @@ def ensure_private_directory_acl(path: Path) -> None:
             None,
         )
         if error:
-            raise WinError(error)
+            raise ctypes.WinError(error)
     finally:
         for allocation in (updated, descriptor, authenticated):
             if allocation:
