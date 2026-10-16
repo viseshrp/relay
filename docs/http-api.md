@@ -742,8 +742,8 @@ session, model, options, and deadline. It never grants permission or changes
 static prompt files. A declined permission stays declined. Feedback can request
 an alternative. Canceling the attempt prevents another turn. Cancellation fans
 out to every active attempt. Failed-node rerun refuses a missing worktree,
-code or staged changes, a worktree outside its protected head, or invalid
-retained evidence. It preserves missing required evidence before verification
+code or staged changes, a worktree that moved away from its protected head,
+or invalid retained evidence. It preserves missing required evidence before verification
 under the [rerun and resume rules](git-and-artifacts.md#rerun-and-resume), then
 creates a new attempt. A nested selection also reopens only its failed
 structural parents. Successful nodes stay
