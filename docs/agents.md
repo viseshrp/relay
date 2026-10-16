@@ -391,9 +391,15 @@ verified Codex ACP 2.2.2 with exact model `gpt-6.1-sol`, including terminal
 deltas and exit codes. The
 [Windows ACP follow-up](../certification/2026-10-15-windows-acp.json) verifies
 Claude Code, Copilot CLI, and Cursor CLI on the reviewed Actions runtime.
-Antigravity on Windows and live Linux provider behavior remain unverified.
-Live agent cancellation, model drift, elicitation, timeouts, and Antigravity
-soft denies also remain unverified.
+The [Windows live-control follow-up][windows-controls] verifies fresh Codex
+and Antigravity execution, cancellation, elicitation,
+controlled model drift, ACP and native timeouts, and native permission
+denials. It also records authenticated Linux Copilot execution in a
+disposable WSL2 container. Linux Claude, Cursor, and Antigravity still require
+sign-in. Linux Codex is deferred at the owner's request.
+
+[windows-controls]: ../certification/2026-10-16-windows-live-controls.md
+
 The sanitized results, completed sign-in screenshots, and fresh validated
 registry fixture are under
 [`certification/`](../certification/README.md).

@@ -36,10 +36,10 @@ All five agents meet the certification bar below on this macOS arm64 host.
 Claude and Cursor completed native CLI account sign-in before their successful
 runs. The sanitized [Claude](2026-10-03-claude-sign-in.jpg) and
 [Cursor](2026-10-03-cursor-sign-in.jpg) screenshots show the completed browser
-handoffs. Live agent execution on Linux, live cancellation, model
-drift, elicitation, provider timeout paths, and Antigravity's `respect_settings`
-soft-deny notice remain unverified. Passing offline CI on those operating
-systems does not certify a live provider.
+handoffs. That macOS pass did not exercise Linux providers, live cancellation,
+model drift, elicitation, timeouts, or native permission denials. The Windows
+live-control record below covers those scenarios and Linux Copilot. Passing
+offline CI on an operating system does not certify a live provider there.
 
 The current registry fixture is
 [`fixtures/registry-2026-10-03.json`](fixtures/registry-2026-10-03.json). Relay
@@ -65,7 +65,7 @@ a retained SuspendIt workflow on Windows. The
 live execution, browser checks, an owner wait, and retained tool diagnostics.
 The [full Python follow-up](2026-10-14-windows-python-suite.md) records the
 fixture fix, real junction coverage, and a verified complete Python 3.14
-Windows pass. Antigravity remains unverified on Windows.
+Windows pass. That pass did not exercise Antigravity.
 
 The [2026-10-15 automated follow-up](2026-10-15-windows-end-to-end.md) records
 the complete Windows browser and Python passes, portable test fixtures,
@@ -84,6 +84,14 @@ The [Actions-only Windows validation](2026-10-15-windows-actions-only.md)
 records removal of the old workflow format, complete native tests, reviewed
 Windows screenshots, additional runtime fixes, and a fresh live Claude run.
 Earlier records retain their original commit and format context.
+
+The [Windows live controls](2026-10-16-windows-live-controls.md) and their
+[structured record](2026-10-16-windows-live-controls.json) verify fresh Codex
+and Antigravity execution, owner cancellation, structured elicitation,
+controlled model drift, ACP and native timeouts, and native permission
+denials. They record fixes found during those runs and authenticated Linux
+Copilot execution in a disposable WSL2 container. Linux Claude, Cursor, and
+Antigravity still need sign-in; Linux Codex is deferred at the owner's request.
 
 ## Certification bar
 
