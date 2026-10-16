@@ -42,7 +42,7 @@ def prepare_recovery_workspace(target: RecoveryTarget, store: EvidenceStore) -> 
     """Keep partial job bytes; refuse missing, dirty, or moved workspaces."""
     worktree = Path(target.worktree_path)
     if not worktree.exists():
-        message = "The interrupted run's primary worktree is missing."
+        message = "The run's primary worktree is missing, so Relay cannot retry or resume it."
         raise WorktreeError(
             message,
             context={"project": target.project_path},
@@ -52,14 +52,19 @@ def prepare_recovery_workspace(target: RecoveryTarget, store: EvidenceStore) -> 
     # Code changes and staged reports require an owner decision before recovery.
     changes = execution_changes(worktree)
     if changes:
-        message = "The Git worktree is not clean at interrupted run recovery."
+        message = (
+            "The run's Git worktree has uncommitted changes, so Relay cannot retry or resume it."
+        )
         raise DirtyRepositoryError(
             message,
             context={"project": str(worktree), "changes": "\n".join(changes)},
             next_action="Commit or set aside the listed code changes before continuing.",
         )
     if current_head(worktree) != target.protected_head:
-        message = "The interrupted run worktree moved away from its protected commit."
+        message = (
+            "The run's worktree moved away from its protected commit, "
+            "so Relay cannot retry or resume it."
+        )
         raise WorktreeError(message, context={"project": target.project_path})
     if target.attempt_id is not None and not target.interrupted and target.evidence_required:
         preserve_missing_attempt_evidence(
