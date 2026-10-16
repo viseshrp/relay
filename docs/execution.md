@@ -381,8 +381,12 @@ shutdown. Evidence preservation precedes workspace removal and admission
 release.
 
 An owner may retry a failed current step or job after evidence and protected
-workspace checks. Relay reopens the failed leaf and its current enclosing
-coordinators, retaining completed steps, their outputs, and accepted commits.
+workspace checks. Job and step attempts require retained evidence, except
+human-wait steps. Relay preserves missing attempt evidence from the current
+workspace before a retry or confirmed cleanup, then verifies it; damaged
+evidence still blocks either operation. Relay reopens the failed leaf and its
+current enclosing coordinators, retaining completed steps, their outputs, and
+accepted commits.
 Fail-fast-only canceled work has eligibility recomputed. An independent
 remaining failure still prevents the run from succeeding. The retry creates a
 fresh attempt using the retained job state.

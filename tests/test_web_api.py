@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -657,6 +657,28 @@ def waiting_run(served: RelayProject, engine: InlineEngine) -> tuple[str, int]:
     run_id = engine.launch(served, "approval")
     engine.drain(run_id)
     return run_id, HumanInteraction.objects.get(run_id=run_id).attempt_id
+
+
+def test_owner_retry_accepts_an_expired_human_wait_without_evidence(
+    owner: Client, waiting_run: tuple[str, int], engine: InlineEngine
+) -> None:
+    run_id, attempt_id = waiting_run
+    HumanInteraction.objects.filter(run_id=run_id).update(
+        deadline=datetime.now(timezone.utc) - timedelta(seconds=1)
+    )
+    assert engine.store.expire_human_waits() == 1
+    engine.drain(run_id)
+    assert run_status(run_id) == "failed"
+    assert not Artifact.objects.filter(attempt_id=attempt_id).exists()
+
+    response = post(
+        owner,
+        f"/api/runs/{run_id}/rerun-node",
+        {"scope_path": "root.approve", "idempotency_key": "retry-expired-wait"},
+    )
+
+    assert (response.status_code, response.json()) == (202, {"result": "accepted"})
+    assert not Artifact.objects.filter(attempt_id=attempt_id).exists()
 
 
 def test_auth_state_before_onboarding_issues_a_csrf_cookie(client: Client) -> None:

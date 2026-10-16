@@ -333,10 +333,11 @@ def interrupted_writer(project: RelayProject, engine: InlineEngine) -> RecoveryT
 
 def test_a_missing_primary_worktree_cannot_be_silently_recovered(
     interrupted_writer: RecoveryTarget,
+    engine: InlineEngine,
 ) -> None:
     shutil.rmtree(interrupted_writer.worktree_path)
     with pytest.raises(WorktreeError):
-        prepare_recovery_workspace(interrupted_writer)
+        prepare_recovery_workspace(interrupted_writer, engine.store)
 
 
 @pytest.fixture
@@ -375,7 +376,9 @@ def test_paused_reusable_job_restart_keeps_reports_snapshots_and_unstarted_child
     frozen = (snapshot.workflow_yaml, snapshot.resolved_prompts, snapshot.hashes)
     attempt_ids = list(NodeAttempt.objects.values_list("id", flat=True))
 
-    resumed = resume_interrupted(engine.store, prepare_recovery_workspace)
+    resumed = resume_interrupted(
+        engine.store, lambda target: prepare_recovery_workspace(target, engine.store)
+    )
     dispatch_ready_nodes(engine.store, target.run_id, engine.tokens.append)
     engine.drain(target.run_id)
 
@@ -394,7 +397,7 @@ def test_paused_reusable_job_restart_keeps_reports_snapshots_and_unstarted_child
     "change", ["untracked_code", "modified_code", "staged_report", "nested_report", "moved_head"]
 )
 def test_job_restart_still_rejects_code_staged_reports_and_head_movement(
-    interrupted_paused_job: RecoveryTarget, change: str
+    interrupted_paused_job: RecoveryTarget, change: str, engine: InlineEngine
 ) -> None:
     target = interrupted_paused_job
     worktree = Path(target.worktree_path)
@@ -412,7 +415,7 @@ def test_job_restart_still_rejects_code_staged_reports_and_head_movement(
 
     expected = WorktreeError if change == "moved_head" else DirtyRepositoryError
     with pytest.raises(expected):
-        prepare_recovery_workspace(target)
+        prepare_recovery_workspace(target, engine.store)
 
     assert run_status(target.run_id) == "interrupted"
     assert (worktree / "REVIEW.md").read_bytes() == b"Ready: No\n"

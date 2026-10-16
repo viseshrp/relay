@@ -121,6 +121,7 @@ class RecoveryTarget:
     starting_head: str
     protected_head: str
     interrupted: bool
+    evidence_required: bool
     agent_id: str | None = None
     model_value: str | None = None
 

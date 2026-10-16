@@ -10,16 +10,17 @@ from pathlib import Path
 from huey.api import TaskWrapper
 import pytest
 
-from relay.errors import ConfigError, PersistenceError
-from relay.execution import huey_app
+from relay.errors import ArtifactPreservationError, ConfigError, PathSafetyError, PersistenceError
+from relay.execution import huey_app, runner
 from relay.execution.control import ControlResult
 from relay.execution.reconcile import reconcile_once
 from relay.execution.recovery import prepare_recovery_workspace
+from relay.execution.resources import AttemptResources
 from relay.execution.resume import RecoveryTarget, rerun_failed_node, resume_interrupted
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.execution.scheduler import dispatch_ready_nodes
 from relay.execution.state import AttemptStopReason
-from relay.paths import shutdown_marker_path
+from relay.paths import artifacts_dir, shutdown_marker_path
 from relay.web.models import Instance, NodeAttempt, NodeRun, Run
 from relay.web.repositories import DjangoExecutionStore
 from tests.support import PYTHON, Clock, InlineEngine, RelayProject, node_statuses, run_status
@@ -161,7 +162,9 @@ def test_a_failed_node_can_be_rerun_as_a_new_attempt(
     engine.drain(run_id)
     store = engine.store
 
-    result = rerun_failed_node(store, run_id, "root.retry", "r1", prepare_recovery_workspace)
+    result = rerun_failed_node(
+        store, run_id, "root.retry", "r1", lambda target: prepare_recovery_workspace(target, store)
+    )
     dispatch_ready_nodes(store, run_id, engine.tokens.append)
     engine.drain(run_id)
 
@@ -170,6 +173,104 @@ def test_a_failed_node_can_be_rerun_as_a_new_attempt(
     assert (
         NodeAttempt.objects.filter(node_run__run_id=run_id, node_run__node_id="retry").count() == 2
     )
+
+
+@pytest.fixture(params=["worker_loss", "job_allocation", "step_allocation"])
+def failed_without_evidence(
+    project: RelayProject,
+    engine: InlineEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> tuple[str, str]:
+    project.write_workflow("missing-evidence", CHAIN)
+    run_id = engine.launch(project, "missing-evidence")
+    if request.param == "worker_loss":
+        claim = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id)
+        assert claim.attempt is not None
+        attempt_id = claim.attempt.attempt_id
+        assert engine.store.fail_worker_attempts() == 1
+        engine.drain(run_id)
+    else:
+        allocate = runner.allocate_attempt_resources
+        allocations = 0
+        fail_at = 0 if request.param == "job_allocation" else 1
+
+        def fail_once(run_id: str, attempt_id: str) -> AttemptResources:
+            nonlocal allocations
+            current = allocations
+            allocations += 1
+            if current == fail_at:
+                message = "Temporary allocation unavailable."
+                raise PathSafetyError(message)
+            return allocate(run_id, attempt_id)
+
+        monkeypatch.setattr(runner, "allocate_attempt_resources", fail_once)
+        engine.drain(run_id)
+        attempt_id = str(NodeAttempt.objects.get(error_code="path_safety_error").pk)
+    assert run_status(run_id) == "failed"
+    assert not (artifacts_dir() / run_id / attempt_id).exists()
+    return run_id, attempt_id
+
+
+def test_owner_retry_preserves_attempts_that_failed_without_evidence(
+    project: RelayProject, engine: InlineEngine, failed_without_evidence: tuple[str, str]
+) -> None:
+    run_id, attempt_id = failed_without_evidence
+    store = engine.store
+    result = rerun_failed_node(
+        store,
+        run_id,
+        "root.first",
+        "retry-missing",
+        lambda target: prepare_recovery_workspace(target, store),
+    )
+    assert result is ControlResult.ACCEPTED
+    assert (artifacts_dir() / run_id / attempt_id / "manifest.json").is_file()
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+
+
+def test_confirmed_cleanup_preserves_attempts_that_failed_without_evidence(
+    project: RelayProject, engine: InlineEngine, failed_without_evidence: tuple[str, str]
+) -> None:
+    run_id, attempt_id = failed_without_evidence
+    worktree = Path(Run.objects.get(pk=run_id).worktree_path)
+    result = engine.store.clean_project_data(project.project_id, "worktrees", run_id=run_id)
+    assert result["worktrees"] == 1
+    assert not worktree.exists()
+    assert (artifacts_dir() / run_id / attempt_id / "manifest.json").is_file()
+
+
+@pytest.mark.parametrize("operation", ["retry", "cleanup"])
+def test_damaged_retained_manifest_still_refuses_retry_and_cleanup(
+    project: RelayProject, engine: InlineEngine, operation: str
+) -> None:
+    project.write_workflow(
+        "damaged-evidence", "jobs: {first: {steps: [{id: work, run: exit(1), shell: python}]}}\n"
+    )
+    run_id = engine.launch(project, "damaged-evidence")
+    engine.drain(run_id)
+    attempt = NodeAttempt.objects.get(
+        node_run__run_id=run_id, node_run__scope_path="root.first.work"
+    )
+    manifest = artifacts_dir() / run_id / str(attempt.pk) / "manifest.json"
+    manifest.write_bytes(b"{}\n")
+    store = engine.store
+    expected = ArtifactPreservationError if operation == "retry" else PersistenceError
+    with pytest.raises(expected):
+        if operation == "retry":
+            rerun_failed_node(
+                store,
+                run_id,
+                "root.first",
+                "damaged",
+                lambda target: prepare_recovery_workspace(target, store),
+            )
+        else:
+            store.clean_project_data(project.project_id, "worktrees", run_id=run_id)
+    assert manifest.read_bytes() == b"{}\n"
+    assert Path(Run.objects.get(pk=run_id).worktree_path).exists()
+    assert run_status(run_id) == "failed"
 
 
 def test_a_rerun_in_preparation_rejects_a_concurrent_request(
@@ -200,10 +301,10 @@ def test_a_rerun_in_preparation_rejects_a_concurrent_request(
                 run_id,
                 "root.a",
                 "other",
-                prepare_recovery_workspace,
+                lambda target: prepare_recovery_workspace(target, store),
             )
         )
-        prepare_recovery_workspace(target)
+        prepare_recovery_workspace(target, store)
 
     rerun_failed_node(store, run_id, "root.a", "first", prepare)
 
@@ -223,7 +324,7 @@ def test_orderly_shutdown_interrupts_attempts_and_restart_resumes_them(
     store.interrupt_active_attempts()
     store.release_instance(instance)
 
-    resumed = resume_interrupted(store, prepare_recovery_workspace)
+    resumed = resume_interrupted(store, lambda target: prepare_recovery_workspace(target, store))
     dispatch_ready_nodes(store, run_id, engine.tokens.append)
     engine.drain(run_id)
 

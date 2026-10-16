@@ -741,9 +741,12 @@ the current ACP turn ends, feedback is submitted in another prompt to the same
 session, model, options, and deadline. It never grants permission or changes
 static prompt files. A declined permission stays declined. Feedback can request
 an alternative. Canceling the attempt prevents another turn. Cancellation fans
-out to every active attempt. Failed-node rerun preserves any remaining evidence,
-resets only to the recorded safe head, and creates a new attempt; a nested
-selection also reopens only its failed structural parents. Successful nodes stay
+out to every active attempt. Failed-node rerun refuses a missing worktree,
+code or staged changes, a worktree outside its protected head, or invalid
+retained evidence. It preserves missing required evidence before verification
+under the [rerun and resume rules](git-and-artifacts.md#rerun-and-resume), then
+creates a new attempt. A nested selection also reopens only its failed
+structural parents. Successful nodes stay
 complete. Concurrent rerun submissions for the same run cannot both mutate the
 retained worktree. While one request prepares recovery, another receives `409
 stale` and can retry after the active request finishes.

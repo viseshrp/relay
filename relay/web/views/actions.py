@@ -763,7 +763,7 @@ def rerun_node(request: HttpRequest, run_id: str) -> HttpResponse:
                 effort_choice,
                 mode_choice,
             )
-        prepare_recovery_workspace(target)
+        prepare_recovery_workspace(target, store)
 
     result = rerun_failed_node(
         store,

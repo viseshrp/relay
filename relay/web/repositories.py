@@ -80,6 +80,7 @@ from relay.execution.machine import (
     transition_run,
 )
 from relay.execution.process_identity import ProcessIdentity, process_identity
+from relay.execution.recovery import preserve_missing_attempt_evidence
 from relay.execution.relaunch import PreviousRunInputs
 from relay.execution.resources import cleanup_run_resources
 from relay.execution.resume import (
@@ -563,6 +564,16 @@ def _run_worktree_paths(run: Run) -> tuple[Path, ...]:
         for path in cast(list[str], _mapping(run, "actions_state").get("continuations", []))
     )
     return (*continued, primary)
+
+
+def _attempt_requires_evidence(node: NodeRun) -> bool:
+    """Human waits persist answers; their enclosing job retains workspace bytes."""
+    step = _mapping(node, "frozen_def").get("step")
+    return not (
+        _string(node, "node_type") == NodeType.ACTIONS_STEP.value
+        and isinstance(step, Mapping)
+        and step.get("uses") == "relay/human-wait@v1"
+    )
 
 
 def _derived_control_key(namespace: str, *parts: str) -> str:
@@ -2821,7 +2832,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                 for run in runs:
                     if any(path.exists() for path in _run_worktree_paths(run)):
                         try:
-                            self.require_completion_evidence(_identifier(run))
+                            self.require_completion_evidence(
+                                _identifier(run), preserve_missing=True
+                            )
                         except ArtifactPreservationError:
                             _reject_incomplete_cleanup_evidence(_identifier(run))
                 for run in runs:
@@ -3054,7 +3067,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             run.merged_commit if isinstance(run.merged_commit, str) else None,
         )
 
-    def require_completion_evidence(self, run_id: str) -> None:
+    def require_completion_evidence(self, run_id: str, *, preserve_missing: bool = False) -> None:
         if (
             Artifact.objects.filter(attempt__node_run__run_id=run_id)
             .exclude(preservation_state=PreservationState.PRESERVED.value)
@@ -3069,12 +3082,17 @@ class DjangoExecutionStore(DjangoAgentStore):
             node_run__run=run,
             node_run__node_type__in=(NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value),
         ):
-            frozen = _mapping(_related(attempt, "node_run", NodeRun), "frozen_def")
-            step = frozen.get("step")
-            if isinstance(step, Mapping) and step.get("uses") == "relay/human-wait@v1":
-                # Human waits only persist an owner answer; their enclosing job
-                # retains the shared worktree before integration.
+            if not _attempt_requires_evidence(_related(attempt, "node_run", NodeRun)):
                 continue
+            if preserve_missing:
+                preserve_missing_attempt_evidence(
+                    self,
+                    repository,
+                    safe_resolve(worktrees_dir(), _string(run, "worktree_path")),
+                    run_id,
+                    _identifier(attempt),
+                    _string(attempt, "starting_head"),
+                )
             validate_attempt_evidence(
                 repository, run_id, _identifier(attempt), _string(attempt, "starting_head")
             )
@@ -5293,6 +5311,7 @@ class DjangoExecutionStore(DjangoAgentStore):
             ),
             protected_head=_string(run, "recorded_head"),
             interrupted=interrupted,
+            evidence_required=_attempt_requires_evidence(node),
             agent_id=agent_id if isinstance(agent_id, str) else None,
             model_value=model_value if isinstance(model_value, str) else None,
         )
@@ -5645,7 +5664,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     run_id,
                     _string(node, "scope_path"),
                     f"automatic:{_identifier(attempt)}",
-                    lambda target: prepare_recovery_workspace(target),
+                    lambda target: prepare_recovery_workspace(target, self),
                     automatic_retry=True,
                 )
                 resumed += int(result is ControlResult.ACCEPTED)
@@ -5792,7 +5811,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                     run_id,
                     scope,
                     f"quota:{_identifier(attempt)}",
-                    lambda target: prepare_recovery_workspace(target),
+                    lambda target: prepare_recovery_workspace(target, self),
                     usage_reset=True,
                 )
                 if result is ControlResult.ACCEPTED:

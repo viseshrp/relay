@@ -105,6 +105,12 @@ block acceptance. Commit messages do not prove success.
 
 ## Attempt evidence
 
+Job and step attempts retain evidence, except `relay/human-wait@v1` steps.
+Human waits persist owner answers; their enclosing job retains the shared
+worktree. If another attempt ends before preservation, Relay preserves its
+missing evidence from the current workspace before a retry or confirmed
+worktree cleanup, then verifies it. Existing evidence is never replaced.
+
 Before any reset or worktree removal, Relay creates an immutable directory at:
 
 ```text
@@ -143,8 +149,10 @@ reset and cleanup.
 ## Rerun and resume
 
 An owner retry verifies the failed attempt's manifest, retained ref, file sizes,
-and SHA-256 hashes before reopening it. It also checks the primary worktree
-against the protected head. Root report handoffs retain the same exact
+and SHA-256 hashes before reopening it, preserving missing evidence first for
+attempts that require it. Human-wait steps require no evidence. It also checks
+the primary worktree against the protected head. Root report handoffs retain
+the same exact
 exemptions used at job acceptance. Code changes, staged reports, nested report
 files, and an unrecorded head require an owner decision.
 
