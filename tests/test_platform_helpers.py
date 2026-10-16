@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack
+import ctypes
+import errno
 import json
 import logging
 import os
@@ -12,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -30,8 +33,10 @@ from relay.execution.cancellation import (
 from relay.execution.resources import allocate_attempt_resources
 from relay.media import media_type_for
 from relay.web.logging import ContextFormatter, OwnedRotatingFileHandler
+from relay.windows_security import ensure_private_directory_acl
 
 OWNED = f"{APPLICATION_LOG_OWNERSHIP_LINE}\n".encode()
+ACCESS_DENIED = 5
 
 
 @pytest.mark.parametrize(
@@ -48,6 +53,64 @@ def test_storage_directories_are_created_private_on_demand(directory: str) -> No
 def test_private_directory_creation_includes_missing_parents(tmp_path: Path) -> None:
     created = paths.ensure_private_dir(tmp_path / "private/nested")
     assert created.is_dir()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows directory ACLs require Windows.")
+@pytest.mark.parametrize(
+    ("operation", "result", "allocations"),
+    [
+        ("GetNamedSecurityInfoW", ACCESS_DENIED, 0),
+        ("ConvertStringSidToSidW", 0, 1),
+        ("GetAclInformation", 0, 2),
+        ("GetAce", 0, 2),
+        ("SetEntriesInAclW", ACCESS_DENIED, 2),
+        ("SetNamedSecurityInfoW", ACCESS_DENIED, 3),
+    ],
+)
+def test_windows_acl_errors_preserve_the_directory_and_release_allocations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    result: int,
+    allocations: int,
+) -> None:
+    assert sys.platform == "win32"
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    free = kernel.LocalFree
+    free.argtypes = (ctypes.c_void_p,)
+    free.restype = ctypes.c_void_p
+    released = Mock(wraps=free)
+    monkeypatch.setattr(kernel, "LocalFree", released)
+    # Reach the grant APIs even when the host already inherits sufficient access.
+    monkeypatch.setattr(security, "EqualSid", Mock(return_value=False))
+    setter = Mock()
+    monkeypatch.setattr(security, "SetNamedSecurityInfoW", setter)
+
+    def fail(*_arguments: object) -> int:
+        ctypes.set_last_error(ACCESS_DENIED)
+        return result
+
+    failure = Mock(side_effect=fail)
+    monkeypatch.setattr(security, operation, failure)
+
+    def library(name: str, *, use_last_error: bool) -> ctypes.CDLL:
+        assert use_last_error
+        return {"advapi32": security, "kernel32": kernel}[name]
+
+    monkeypatch.setattr(ctypes, "WinDLL", library)
+    with pytest.raises(OSError) as caught:
+        ensure_private_directory_acl(directory)
+    assert caught.value.errno == errno.EACCES
+    failure.assert_called_once()
+    if operation != "SetNamedSecurityInfoW":
+        setter.assert_not_called()
+    assert directory.is_dir()
+    addresses = [call.args[0].value for call in released.call_args_list]
+    assert len(addresses) == len(set(addresses)) == allocations
+    assert all(addresses)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory ACLs require Windows.")
