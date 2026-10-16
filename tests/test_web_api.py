@@ -1437,6 +1437,32 @@ def test_selected_worktree_cleanup_waits_for_evidence_preservation(
     assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
 
 
+@pytest.mark.parametrize("scope", ["worktrees", "all"])
+@pytest.mark.parametrize("selected", [False, True], ids=["project", "selected-run"])
+def test_cleanup_retains_bytes_when_preservation_produced_no_records(
+    owner: Client, finished_run: str, scope: str, selected: bool
+) -> None:
+    run = Run.objects.get(pk=finished_run)
+    checkout = Path(run.worktree_path)
+    artifact = Artifact.objects.filter(attempt__node_run__run=run, declared_name="commits").last()
+    assert artifact is not None
+    manifest = Path(artifact.retained_path).parent / "manifest.json"
+    manifest.unlink()
+    Artifact.objects.filter(attempt_id=artifact.attempt_id).delete()
+    evidence = checkout / "unpreserved.txt"
+    evidence.write_bytes(b"Bytes whose preservation failed.\n")
+    body: dict[str, object] = {"scope": scope, "confirm": True}
+    if selected:
+        body["run_id"] = finished_run
+
+    response = post(owner, "/api/data/clean", body)
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert evidence.read_bytes() == b"Bytes whose preservation failed.\n"
+    assert Run.objects.get(pk=finished_run).worktree_state == "created"
+    assert not RunEvent.objects.filter(run_id=finished_run, type="run.cleanup_succeeded").exists()
+
+
 def test_selected_cleanup_cannot_remove_a_workspace_during_recovery(
     owner: Client, finished_run: str
 ) -> None:

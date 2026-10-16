@@ -791,8 +791,11 @@ UUID returns `404`. None of these failures broadens the selection. The active
 project-run check still applies. Selected cleanup shares the run's recovery
 lock; an overlapping recovery returns `503` without removing the workspace.
 
-Selected `worktrees` cleanup requires preserved artifact records and keeps
-the run's history, artifacts, branch, and attempt refs. It records
+All checkout removal verifies attempt manifests, retained refs, and artifact
+hashes, including attempts whose preservation created no artifact rows.
+Incomplete evidence returns `503` before any checkout in the request is
+removed. Selected `worktrees` cleanup keeps the run's history, artifacts,
+branch, and attempt refs. It records
 `run.cleanup_succeeded` after removal. Selected `branches` or `runs` cleanup
 retains the ordering requirements above. Selected `all` removes only that
 run's resources and keeps process logs, which may contain other runs' output.

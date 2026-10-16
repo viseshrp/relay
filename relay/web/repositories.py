@@ -43,6 +43,7 @@ from relay.constants import (
     RUN_PROBLEM_TEXT_MAX_CHARS,
 )
 from relay.errors import (
+    ArtifactPreservationError,
     ConfigError,
     PermissionFlowError,
     PersistenceError,
@@ -2803,12 +2804,6 @@ class DjangoExecutionStore(DjangoAgentStore):
                 runs = [_require_run(candidates.filter(pk=run_id).first(), run_id)]
             else:
                 runs = list(candidates.order_by("started_at", "pk"))
-            if run_id is not None and scope == "worktrees":
-                pending_evidence = Artifact.objects.filter(attempt__node_run__run=runs[0]).exclude(
-                    preservation_state=PreservationState.PRESERVED.value
-                )
-                if pending_evidence.exists():
-                    _reject_incomplete_cleanup_evidence(run_id)
             repository = Path(_string(project, "git_root"))
             deleted = {
                 "runs": 0,
@@ -2819,6 +2814,14 @@ class DjangoExecutionStore(DjangoAgentStore):
                 "logs": 0,
             }
             if scope in {"worktrees", "all"}:
+                # Preservation may fail before creating artifact rows. Validate
+                # every archive before removing any checkout in a bulk request.
+                for run in runs:
+                    if any(path.exists() for path in _run_worktree_paths(run)):
+                        try:
+                            self.require_completion_evidence(_identifier(run))
+                        except ArtifactPreservationError:
+                            _reject_incomplete_cleanup_evidence(_identifier(run))
                 for run in runs:
                     for path in _run_worktree_paths(run):
                         if path.exists():
@@ -2989,14 +2992,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 or _string(run, "worktree_state") != WorktreeState.CREATED.value
             ):
                 return
-            pending_evidence = Artifact.objects.filter(attempt__node_run__run=run).exclude(
-                preservation_state=PreservationState.PRESERVED.value
-            )
-            if pending_evidence.exists():
-                message = (
-                    "Relay retained the run worktree because evidence preservation is incomplete."
-                )
-                raise PersistenceError(message, context={"run": run_id})
+            self.require_completion_evidence(run_id)
             project = _related(run, "project", Project)
             repository = Path(_string(project, "git_root"))
             worktree = safe_resolve(worktrees_dir(), _string(run, "worktree_path"))

@@ -178,15 +178,17 @@ Linux and macOS make one attempt. An unrecoverable removal reports the path and
 keeps its evidence and refs; Relay does not fall back to deleting an uncertain
 directory tree.
 
-The execution store refuses completion cleanup if any artifact record has not
-been preserved. Confirmed data cleanup removes retained failed-job workspaces
-before the current primary worktree.
+Before removing a checkout, automatic and confirmed cleanup verify its attempt
+manifests, retained refs, and artifact hashes. Missing artifact rows cannot prove
+preservation succeeded. Incomplete evidence blocks cleanup before any checkout
+in a bulk request is removed. Confirmed data cleanup removes retained failed-job
+workspaces before the current primary worktree.
 
 The [cleanup API](http-api.md#cleanup) can select a single run with `run_id`.
 Use `scope: "worktrees"` to discard its checkout while retaining history,
 artifact bytes, the protected run branch, and attempt refs. Other runs remain
-unchanged. This selection requires preserved artifact records and holds the
-same workspace lock as recovery, so a retry cannot reopen the checkout during
+unchanged. This selection verifies retained evidence and holds the same
+workspace lock as recovery, so a retry cannot reopen the checkout during
 removal. The project must have no active runs. Deleting a selected run with
 `scope: "all"` leaves shared process logs in place.
 
