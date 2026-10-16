@@ -628,12 +628,6 @@ message. A failed run's stream stays open while error recovery is pending,
 as it does for a pending quota reset. Run cancellation and manual retry
 supersede queued error recovery through the existing recovery lock.
 
-### Repair presentation
-
-The `/api/runs/{id}/repairs` endpoint and `run.repairs_changed` event have been
-removed. Current bounded loops and reusable jobs remain ordinary job and step
-records. Their captured source defines their execution and report contracts.
-
 ### Pause and unstarted-step settings
 
 `pause` saves `dispatch_paused` without interrupting active attempts. The flag

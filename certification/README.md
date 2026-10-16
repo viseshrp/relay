@@ -97,6 +97,14 @@ denials. They record fixes found during those runs and authenticated Linux
 Copilot execution in a disposable WSL2 container. Linux Claude, Cursor, and
 Antigravity still need sign-in; Linux Codex is deferred at the owner's request.
 
+The [orchestration ownership audit](2026-10-16-orchestration-ownership.md) and
+its [per-file record](2026-10-16-orchestration-ownership.json) cover every path
+in PR #23 and the provider ownership follow-up. They record native Windows
+Python validation, focused browser checks, a fresh successful Codex pipeline,
+and Antigravity's `SUCCESS` result without its required report. Relay rejects
+that missing report without inferring an outcome from provider tool messages or
+changing provider permissions.
+
 ## Certification bar
 
 A complete agent record must contain:

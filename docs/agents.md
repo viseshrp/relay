@@ -13,12 +13,12 @@ their internal tools, permission enforcement, authentication, available models,
 and execution outcomes. Relay reports unsupported provider features without
 implementing substitutes or changing the requested settings.
 
-A valid provider failure returns `agent_execution_error`. Malformed exchanges
-return `agent_protocol_error`. Neither authorizes automatic repair. The exact
-provider stop reason is diagnostic data; only Relay controls can report its
-owner cancellation, orderly shutdown, or configured deadline expiry. Explicit
-workflow loops, owner retries, and confirmed usage-reset schedules retain their
-own rules.
+Provider-declared execution failures return `agent_execution_error`. Malformed
+exchanges return `agent_protocol_error`. Neither authorizes automatic repair.
+The exact provider stop reason is diagnostic data; only Relay controls can
+report its owner cancellation, orderly shutdown, or configured deadline expiry.
+Explicit workflow loops, owner retries, and confirmed usage-reset schedules
+retain their own rules.
 
 ## Exact-model routing
 

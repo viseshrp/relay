@@ -1,0 +1,2742 @@
+{
+  "date": "2026-10-16",
+  "pull_request": "https://github.com/viseshrp/relay/pull/23",
+  "audit_base": "391ca00cee606e78ce874d9fbd3d2e464d4677fd",
+  "audit_initial_head": "39c736faee6b1848b4e2a7fa4ba98fd68ba79551",
+  "tested_implementation_head": "dd752c651f183e20584ccba2a3b514e72a971991",
+  "scope": "Every path in the initial PR plus the implementation follow-up; runtime changes traced through transport, execution, persistence, API, and browser boundaries.",
+  "initial_path_count": 290,
+  "initial_category_counts": {
+    "backend": 67,
+    "browser_tests": 39,
+    "build_and_ci": 5,
+    "certification": 16,
+    "documentation": 17,
+    "frontend_runtime": 46,
+    "python_tests": 56,
+    "visual_evidence": 44
+  },
+  "initial_paths": [
+    {
+      "path": ".github/workflows/main.yml",
+      "change": "M",
+      "category": "build_and_ci",
+      "disposition": "retain",
+      "ownership_reason": "Keep portable supported-platform/runtime validation and frontend quality gates; no installed provider or account requirement."
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "change": "M",
+      "category": "build_and_ci",
+      "disposition": "retain",
+      "ownership_reason": "Keep portable supported-platform/runtime validation and frontend quality gates; no installed provider or account requirement."
+    },
+    {
+      "path": "AGENTS.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "README.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "certification/2026-10-14-windows-python-suite.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-python-suite.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-relay-diagnostic.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "certification/2026-10-14-windows-relay-fixed.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "certification/2026-10-14-windows-relay-fixes.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-relay-fixes.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-relay-resumed.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "certification/2026-10-14-windows-suspendit.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-suspendit.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-14-windows-suspendit.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "certification/2026-10-14-windows-wait-state.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "certification/2026-10-15-windows-acp.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-15-windows-actions-only.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-15-windows-actions-only.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-15-windows-end-to-end.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-15-windows-optional-review.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-16-windows-live-controls.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-16-windows-live-controls.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-16-windows-workflow-validation.json",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/2026-10-16-windows-workflow-validation.md",
+      "change": "A",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "certification/README.md",
+      "change": "M",
+      "category": "certification",
+      "disposition": "retain",
+      "ownership_reason": "Keep dated factual test/provider evidence; the package content gate excludes certification from distributions."
+    },
+    {
+      "path": "docs/agents.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/backlog-implementation.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/ci-testing.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/execution.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/git-and-artifacts.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/http-api.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/projects-and-storage.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/serial-reliability-validation.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/serial-reliability.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/timing-regression-audit.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/todo.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/web-ui.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/workflow-language-compatibility.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/workflows.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "frontend/captures/welcome.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/actions-layout.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/activity-feed.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/agent-configuration.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/automatic-recovery.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/approval-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/approval-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/approval-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/home-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/home-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/home-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/runs-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/runs-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/runs-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/settings-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/settings-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/settings-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/summary-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/summary-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/summary-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/workflows-1440.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/workflows-375.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/linux/workflows-768.png",
+      "change": "M",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/approval-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/approval-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/approval-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/home-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/home-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/home-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/job-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/job-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/job-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/runs-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/runs-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/runs-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/settings-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/settings-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/settings-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/summary-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/summary-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/summary-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/workflows-1440.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/workflows-375.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/baselines/win32/workflows-768.png",
+      "change": "A",
+      "category": "visual_evidence",
+      "disposition": "retain",
+      "ownership_reason": "Keep reviewed platform-specific UI evidence; image bytes have no product runtime behavior."
+    },
+    {
+      "path": "frontend/e2e/command-defaults.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/control-layout.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/dashboard.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/diff-viewer.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/dispatch-pause.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/display-name-events.spec.ts",
+      "change": "A",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/elicitation-choices.spec.ts",
+      "change": "A",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/get-started.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/guided-workflow.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/help-layout.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/job-history.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/launch-panel.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/native-denial.spec.ts",
+      "change": "A",
+      "category": "browser_tests",
+      "disposition": "remove",
+      "ownership_reason": "Replace denial-text inference assertions with provider-terminal and declared-report contract assertions in native-outcomes.spec.ts."
+    },
+    {
+      "path": "frontend/e2e/onboarding.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/project-setup.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/repair-rules.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-actions.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-graph.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-merge.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-presentation.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-problems.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/run-update-races.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/serial-monitor.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/settings.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/setup-helpers.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/singular-labels.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/storage.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/theme.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/ui-audit.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/visual-regression.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/waiting-requests.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/workflow-authoring.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/workflow-management.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/e2e/workflow-navigation.spec.ts",
+      "change": "M",
+      "category": "browser_tests",
+      "disposition": "retain",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/eslint.config.mjs",
+      "change": "M",
+      "category": "build_and_ci",
+      "disposition": "retain",
+      "ownership_reason": "Keep portable supported-platform/runtime validation and frontend quality gates; no installed provider or account requirement."
+    },
+    {
+      "path": "frontend/package.json",
+      "change": "M",
+      "category": "build_and_ci",
+      "disposition": "retain",
+      "ownership_reason": "Keep portable supported-platform/runtime validation and frontend quality gates; no installed provider or account requirement."
+    },
+    {
+      "path": "frontend/src/actions-workflow.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Parse and edit the current Actions source without adding provider execution policy."
+    },
+    {
+      "path": "frontend/src/activity.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present persisted public activity and ordered message boundaries."
+    },
+    {
+      "path": "frontend/src/components/ActionsWorkflowWorkspaceView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/ActivityFeed.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/CommandFields.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/ControlJobFields.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/DefaultSettingsFormShared.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/DefaultSettingsFormView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/GetStartedView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/GuidedTour.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/JobHeader.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/JobList.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/JobWorkspaceView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/LaunchPanelShared.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/RepairReportSelector.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/RepairRoleDetails.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/RepairRoleEditor.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/RepairSettings.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/RepairSettingsView.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/ReviewRequestView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Collect exact current-attempt permission and elicitation answers for the durable mailbox."
+    },
+    {
+      "path": "frontend/src/components/RunJobSidebar.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/RunMain.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/RunProblemNotice.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Display backend-selected structured failures and explicit owner controls."
+    },
+    {
+      "path": "frontend/src/components/RunRepairDetails.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/RunReviewShared.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Render current permission and elicitation options without changing provider choices."
+    },
+    {
+      "path": "frontend/src/components/RunWorkspaceShared.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/RunWorkspaceView.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/StepLogEmbedded.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Display ordered public attempt output without interpreting provider success or tool errors."
+    },
+    {
+      "path": "frontend/src/components/WorkflowEditorHeader.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/useActionsWorkflowWorkspace.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Refresh saved workflow inventory with a non-blocking warning and stale-document guard."
+    },
+    {
+      "path": "frontend/src/components/useDefaultSettingsForm.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/components/useRepairSettings.tsx",
+      "change": "D",
+      "category": "frontend_runtime",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "frontend/src/components/useReviewRequest.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Submit bounded exact-request answers; reject stale attempt state."
+    },
+    {
+      "path": "frontend/src/components/useRunWorkspace.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Refresh coherent backend snapshots on current live events, including display-name changes."
+    },
+    {
+      "path": "frontend/src/components/useSettingsPage.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Present or edit current Actions jobs, steps, owner defaults, and coherent monitor snapshots; delegate workflow and provider outcome decisions to Python."
+    },
+    {
+      "path": "frontend/src/failure.ts",
+      "change": "A",
+      "category": "frontend_runtime",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Present structured error codes and typed Relay stop reasons; do not infer outcomes from provider prose."
+    },
+    {
+      "path": "frontend/src/graph.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Render the current workflow authoring graph."
+    },
+    {
+      "path": "frontend/src/help.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Describe the current local authoring and monitoring controls."
+    },
+    {
+      "path": "frontend/src/job-list.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Derive job and step navigation from coherent backend snapshots."
+    },
+    {
+      "path": "frontend/src/navigation.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Navigate current authoring, monitoring, and settings surfaces."
+    },
+    {
+      "path": "frontend/src/run-graph.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Render current run dependencies and ordinary loop/reusable-job scopes."
+    },
+    {
+      "path": "frontend/src/settings-validation.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Validate explicit owner settings without synthesizing provider capabilities."
+    },
+    {
+      "path": "frontend/src/status.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Display backend-owned lifecycle and attention states."
+    },
+    {
+      "path": "frontend/src/types.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Match backend payloads, including nullable raw provider terminal reasons."
+    },
+    {
+      "path": "frontend/src/useApp.tsx",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Coordinate current workflow selection, settings, and coherent run refreshes."
+    },
+    {
+      "path": "frontend/src/workflow.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "retain",
+      "ownership_reason": "Use current Actions editor contracts and remove unused workflow-shape handling."
+    },
+    {
+      "path": "pyproject.toml",
+      "change": "M",
+      "category": "build_and_ci",
+      "disposition": "retain",
+      "ownership_reason": "Keep portable supported-platform/runtime validation and frontend quality gates; no installed provider or account requirement."
+    },
+    {
+      "path": "relay/agents/acp_driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Adapt ACP messages and exact configuration; preserve typed Relay controls separately from provider terminal reasons."
+    },
+    {
+      "path": "relay/agents/antigravity_driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Adapt native NDJSON and stdin; own bounded process lifecycle. Remove denial-text inference and copied provider timeout defaults."
+    },
+    {
+      "path": "relay/agents/configuration.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Validate advertised model-specific effort and permission values without changing unsupported requests."
+    },
+    {
+      "path": "relay/agents/driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Select a freshly proved route and forward typed results; classify provider failures without automatic repair."
+    },
+    {
+      "path": "relay/agents/events.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Normalize public protocol events and split bounded output while dropping provider-private fields."
+    },
+    {
+      "path": "relay/agents/models.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Carry transport context and exact declared report selectors; remove unsolicited report provenance and phase advice."
+    },
+    {
+      "path": "relay/cli.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Administer local setup, diagnostics, startup, and confirmed cleanup using the current workflow model."
+    },
+    {
+      "path": "relay/config.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Resolve current local owner settings and portable defaults without retaining a second execution model."
+    },
+    {
+      "path": "relay/constants.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Keep Relay process and resource bounds; remove the duplicated native provider print timeout."
+    },
+    {
+      "path": "relay/errors.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Expose bounded structured Relay envelopes, including a distinct provider execution failure code."
+    },
+    {
+      "path": "relay/execution/action_commands.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Forward Actions file commands, decoded tool streams, masks, and outputs in attempt order before persistence."
+    },
+    {
+      "path": "relay/execution/action_files.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Allocate and close the current step's bounded file-command channels."
+    },
+    {
+      "path": "relay/execution/dispatch.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Create durable dispatch intents for current executable job and step records."
+    },
+    {
+      "path": "relay/execution/launch.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Freeze validated Actions sources, inputs, prompts, routes, and launch workspace facts."
+    },
+    {
+      "path": "relay/execution/locks.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/execution/masking.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Prevent registered secrets crossing durable/public output boundaries, including chunk-spanning prefixes."
+    },
+    {
+      "path": "relay/execution/nodes/__init__.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Register the current Actions executors and their internal command/agent collaborators."
+    },
+    {
+      "path": "relay/execution/nodes/actions.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Execute declared job and step contracts, evaluate owner expressions, share the workspace, and commit at the job boundary."
+    },
+    {
+      "path": "relay/execution/nodes/agent.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Invoke the selected provider with immutable step facts and declared outputs; validate the resulting contract."
+    },
+    {
+      "path": "relay/execution/nodes/base.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Carry typed execution outcomes and declared artifacts through the engine boundary."
+    },
+    {
+      "path": "relay/execution/nodes/command.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Run Relay-owned command steps with argument vectors, UTF-8 Python behavior, and owned process cleanup."
+    },
+    {
+      "path": "relay/execution/nodes/condition.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/execution/nodes/human_wait.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/execution/nodes/loop.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/execution/nodes/subworkflow.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/execution/preflight.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Prove the declared workflow, paths, route, model, and overrides before admission."
+    },
+    {
+      "path": "relay/execution/reconcile.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Repair unstarted durable delivery without creating a provider repair attempt."
+    },
+    {
+      "path": "relay/execution/recovery.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Preserve attempt evidence before applying owner-authorized workspace recovery."
+    },
+    {
+      "path": "relay/execution/resources.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Allocate and clean only marked attempt scratch resources outside portable workflow sources."
+    },
+    {
+      "path": "relay/execution/resume.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Resume current orchestration records after owner controls or eligible confirmed usage-reset decisions."
+    },
+    {
+      "path": "relay/execution/runner.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Settle typed outcomes and diagnostic provider reasons atomically with attempt events."
+    },
+    {
+      "path": "relay/execution/scheduler.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Schedule current Actions dependencies, fail-fast decisions, and ordered steps."
+    },
+    {
+      "path": "relay/execution/state.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Define Relay lifecycle states; remove the inferred provider soft-denial lifecycle value."
+    },
+    {
+      "path": "relay/owner_settings.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Persist owner defaults and explicit route settings; remove unused execution-model settings."
+    },
+    {
+      "path": "relay/paths.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Enforce platform-aware containment for workflow sources, storage, and declared artifacts."
+    },
+    {
+      "path": "relay/vcs/artifacts.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Preserve exact changed, untracked, and declared bytes with hashes before cleanup or reset."
+    },
+    {
+      "path": "relay/vcs/cleanliness.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Apply exact report/source exemptions at launch and job boundaries without hiding unrelated changes."
+    },
+    {
+      "path": "relay/vcs/commits.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Create portable bounded job commit subjects and preserve argument boundaries."
+    },
+    {
+      "path": "relay/vcs/worktree.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Own isolated run worktrees, protected heads, verified cleanup, and explicit integration policy."
+    },
+    {
+      "path": "relay/web/actions_repository.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Persist coherent current Actions state through the Django adapter."
+    },
+    {
+      "path": "relay/web/migrations/0009_run_repair_groups.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Keep the existing schema migration runnable while removing its dependency on deleted runtime classes."
+    },
+    {
+      "path": "relay/web/migrations/0017_remove_legacy_workflows.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Drop unused persistence fields while preserving migration ordering and owner rows."
+    },
+    {
+      "path": "relay/web/migrations/0018_remove_runsnapshot_semantics_revision.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Remove the unused snapshot semantics column without rewriting frozen workflow bytes."
+    },
+    {
+      "path": "relay/web/models.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Store current job/step attempts, leases, snapshots, and bounded diagnostics."
+    },
+    {
+      "path": "relay/web/repositories.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Implement transactions, coherent monitor snapshots, typed diagnostic serialization, and eligible recovery admission."
+    },
+    {
+      "path": "relay/web/supervisor.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Own creation-identity checks, worker process lifecycle, and confirmed shutdown/recovery."
+    },
+    {
+      "path": "relay/web/urls.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Expose current orchestration, authoring, settings, and cleanup HTTP routes."
+    },
+    {
+      "path": "relay/web/views/actions.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Adapt validated owner HTTP commands to Python orchestration services."
+    },
+    {
+      "path": "relay/web/views/pages.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Read coherent workflow, run, job, and launch configuration state for browser clients."
+    },
+    {
+      "path": "relay/windows_security.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Preserve the directory owner's inherited access only; do not add provider sandbox or broad account grants."
+    },
+    {
+      "path": "relay/workflows/actions/compiler.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Compile the single current Actions language into executable jobs and ordered steps."
+    },
+    {
+      "path": "relay/workflows/actions/expressions.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Evaluate bounded declared expressions and current workflow contexts."
+    },
+    {
+      "path": "relay/workflows/actions/language.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Describe the supported local language and reject unavailable explicit workflow features."
+    },
+    {
+      "path": "relay/workflows/actions/patterns.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Validate explicit bounded loops and reusable-job wiring as ordinary workflow orchestration."
+    },
+    {
+      "path": "relay/workflows/defaults.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Apply current workflow defaults without reviving an alternative executor."
+    },
+    {
+      "path": "relay/workflows/editor.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Round-trip the current workflow schema and editor graph without changing owner source intent."
+    },
+    {
+      "path": "relay/workflows/expressions.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/workflows/graph.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Build current job/step dependency and presentation graphs."
+    },
+    {
+      "path": "relay/workflows/loader.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Load contained Actions sources and validate them before launch."
+    },
+    {
+      "path": "relay/workflows/prompts.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Resolve ordered prompt files without rewriting their bytes or adding task policy."
+    },
+    {
+      "path": "relay/workflows/records.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Represent the current executable job and step record types with bounded immutable facts."
+    },
+    {
+      "path": "relay/workflows/repairs.py",
+      "change": "D",
+      "category": "backend",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "relay/workflows/routing.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Freeze declared model routes and preserve exact provider values."
+    },
+    {
+      "path": "relay/workflows/schema.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Validate current workflow and internal agent/command contracts; remove unused command outputs."
+    },
+    {
+      "path": "relay/workflows/scope.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Address current reusable jobs, nested scopes, and ordered steps."
+    },
+    {
+      "path": "relay/workflows/snapshot.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Freeze the current Actions definition, sources, prompts, routes, and hashes."
+    },
+    {
+      "path": "relay/workflows/validation.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "retain",
+      "ownership_reason": "Reject invalid declared workflow contracts before execution."
+    },
+    {
+      "path": "tests/conftest.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic conftest coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/e2e_server.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Deterministic e2e server coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/fake_agent.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Deterministic fake agent coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/support.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic support coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_actions_execution_contracts.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic actions execution contracts coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_actions_files_products.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic actions files products coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_actions_language_boundaries.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic actions language boundaries coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_actions_runtime.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic actions runtime coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_configuration.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic agent configuration coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_controls.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic agent controls coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_domain.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Deterministic agent domain coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_drivers.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Deterministic agent drivers coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_attempt_evidence.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic attempt evidence coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_automatic_recovery.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic automatic recovery coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_ci_python.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic ci python coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic ci workflows coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_cli_config.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic cli config coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_command_defaults.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic command defaults coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_dashboard.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic dashboard coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_dispatch_pause.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic dispatch pause coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_engine_failures.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic engine failures coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_engine_lifecycle.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic engine lifecycle coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_engine_runs.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic engine runs coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_engine_scenarios.py",
+      "change": "D",
+      "category": "python_tests",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "tests/test_execution_core.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic execution core coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_execution_plan.py",
+      "change": "A",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic execution plan coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_interaction_events.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic interaction events coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_launch_preflight.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic launch preflight coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_launch_recovery.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic launch recovery coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_owner_settings.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic owner settings coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_persistence_failures.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic persistence failures coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_platform_helpers.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain_with_followup",
+      "ownership_reason": "Deterministic platform helpers coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_repair_rules.py",
+      "change": "D",
+      "category": "python_tests",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "tests/test_retry_effort.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic retry effort coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_run_identity.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic run identity coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_run_merge.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic run merge coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_run_monitor.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic run monitor coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_run_resources.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic run resources coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_source_line_endings.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic source line endings coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_supervisor_lifecycle.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic supervisor lifecycle coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_supervisor_recovery.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic supervisor recovery coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_ui_fixtures.py",
+      "change": "A",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic ui fixtures coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_usage_retries.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic usage retries coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_vcs_projects.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic vcs projects coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_web_api.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic web api coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_web_stream_static.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic web stream static coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_worker_handoff.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic worker handoff coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_worker_heartbeats.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic worker heartbeats coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_worker_scheduling.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic worker scheduling coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_workflow_expressions.py",
+      "change": "D",
+      "category": "python_tests",
+      "disposition": "remove",
+      "ownership_reason": "Retain deletion of unused runtime/UI or tests for the removed executor; current Actions job/step contracts have deterministic coverage."
+    },
+    {
+      "path": "tests/test_workflow_graph_loader.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic workflow graph loader coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_workflow_outputs_editor.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic workflow outputs editor coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_workflow_schema.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic workflow schema coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_workflow_scope.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic workflow scope coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_workflow_validation.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic workflow validation coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/ui_fixtures.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "retain",
+      "ownership_reason": "Deterministic ui fixtures coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    }
+  ],
+  "implementation_followup_paths": [
+    {
+      "path": "AGENTS.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/agents.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/execution.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/http-api.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/projects-and-storage.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/web-ui.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "docs/workflows.md",
+      "change": "M",
+      "category": "documentation",
+      "disposition": "updated",
+      "ownership_reason": "Document current orchestration, workspace, provider, UI, or verification contracts; remove obsolete compatibility promises."
+    },
+    {
+      "path": "frontend/e2e/native-denial.spec.ts",
+      "change": "D",
+      "category": "browser_tests",
+      "disposition": "remove",
+      "ownership_reason": "Remove assertions that promoted provider denial text to a Relay lifecycle reason; native-outcomes.spec.ts tests the current boundary."
+    },
+    {
+      "path": "frontend/e2e/native-outcomes.spec.ts",
+      "change": "A",
+      "category": "browser_tests",
+      "disposition": "updated",
+      "ownership_reason": "Validate current browser authoring, monitoring, owner controls, or captures against isolated deterministic server state."
+    },
+    {
+      "path": "frontend/src/failure.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "updated",
+      "ownership_reason": "Present structured error codes and typed Relay stop reasons; do not infer outcomes from provider prose."
+    },
+    {
+      "path": "frontend/src/types.ts",
+      "change": "M",
+      "category": "frontend_runtime",
+      "disposition": "updated",
+      "ownership_reason": "Match backend payloads, including nullable raw provider terminal reasons."
+    },
+    {
+      "path": "relay/agents/acp_driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Adapt ACP messages and exact configuration; preserve typed Relay controls separately from provider terminal reasons."
+    },
+    {
+      "path": "relay/agents/antigravity_driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Adapt native NDJSON and stdin; own bounded process lifecycle. Remove denial-text inference and copied provider timeout defaults."
+    },
+    {
+      "path": "relay/agents/driver.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Select a freshly proved route and forward typed results; classify provider failures without automatic repair."
+    },
+    {
+      "path": "relay/agents/mapping.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Map valid provider execution errors separately from authentication and transport failures; retain original diagnostics privately."
+    },
+    {
+      "path": "relay/agents/models.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Carry transport context and exact declared report selectors; remove unsolicited report provenance and phase advice."
+    },
+    {
+      "path": "relay/constants.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Keep Relay process and resource bounds; remove the duplicated native provider print timeout."
+    },
+    {
+      "path": "relay/errors.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Expose bounded structured Relay envelopes, including a distinct provider execution failure code."
+    },
+    {
+      "path": "relay/execution/action_reports.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Resolve one typed Actions selector for provider instructions, validation, and rejected-report preservation."
+    },
+    {
+      "path": "relay/execution/automatic.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Apply explicitly enabled recovery only to Relay-owned validation or deadline failures; exclude provider failures."
+    },
+    {
+      "path": "relay/execution/nodes/actions.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Execute declared job and step contracts, evaluate owner expressions, share the workspace, and commit at the job boundary."
+    },
+    {
+      "path": "relay/execution/runner.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Settle typed outcomes and diagnostic provider reasons atomically with attempt events."
+    },
+    {
+      "path": "relay/execution/state.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Define Relay lifecycle states; remove the inferred provider soft-denial lifecycle value."
+    },
+    {
+      "path": "relay/web/migrations/0019_alter_nodeattempt_stop_reason.py",
+      "change": "A",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Align persisted choices with current Relay lifecycle reasons; preserve existing migration history and rows."
+    },
+    {
+      "path": "relay/web/repositories.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Implement transactions, coherent monitor snapshots, typed diagnostic serialization, and eligible recovery admission."
+    },
+    {
+      "path": "relay/windows_security.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Preserve the directory owner's inherited access only; do not add provider sandbox or broad account grants."
+    },
+    {
+      "path": "relay/workflows/schema.py",
+      "change": "M",
+      "category": "backend",
+      "disposition": "updated",
+      "ownership_reason": "Validate current workflow and internal agent/command contracts; remove unused command outputs."
+    },
+    {
+      "path": "tests/e2e_server.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic e2e server coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/fake_agent.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic fake agent coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_domain.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic agent domain coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_agent_drivers.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic agent drivers coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_platform_helpers.py",
+      "change": "M",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic platform helpers coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_provider_outcomes.py",
+      "change": "A",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic provider outcomes coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    },
+    {
+      "path": "tests/test_report_handoffs.py",
+      "change": "A",
+      "category": "python_tests",
+      "disposition": "updated",
+      "ownership_reason": "Deterministic report handoffs coverage/fixtures for orchestration contracts; no owner provider account dependency."
+    }
+  ],
+  "documentation_followup_paths": [
+    "docs/agents.md",
+    "docs/http-api.md",
+    "certification/README.md",
+    "certification/2026-10-16-orchestration-ownership.md",
+    "certification/2026-10-16-orchestration-ownership.json"
+  ],
+  "current_runtime_sha256": {
+    "frontend/src/actions-workflow.ts": "ef2158a0c8b6077bb4ad2933e8165fd5e1361692c07bf3bfeca9a244790b2c92",
+    "frontend/src/activity.ts": "6e2a6380e7d12719ced03493db0080bdbeea30e462370f2824042f90b8acf1d6",
+    "frontend/src/components/ActionsWorkflowWorkspaceView.tsx": "71d907dc13431a879ff6e1cbd9ae3d58d692792edb3cd26fa99639205822eff8",
+    "frontend/src/components/ActivityFeed.tsx": "97062c8552a7fdfbc50a1921b687a28af58f448df8ed878e4a7f5cff4c54ce2c",
+    "frontend/src/components/DefaultSettingsFormShared.tsx": "eb8146926284cb5d5790d44b88d399d7b7062eb1da204e005342ff576a3e82af",
+    "frontend/src/components/DefaultSettingsFormView.tsx": "d9a1998e0f5cbbedadc61d47439e841d5296c3ace85b46eefae812763e714d90",
+    "frontend/src/components/GetStartedView.tsx": "99e177b5e7be453cc5b8704e9dd4dac82c752cd59e3445ea9b043fe7988f77b6",
+    "frontend/src/components/GuidedTour.tsx": "9cd66507bee420f4cb521fd6429c24fe6c91f5fcf6e29c27758b0be00e1a13d3",
+    "frontend/src/components/JobHeader.tsx": "a139f62047d48a4962876e82a35b66e8885561a66e88e22faa3d52edb02f67c9",
+    "frontend/src/components/JobList.tsx": "0402d6f8c66a900a0369c045528402e3fe3be22d5383de20ef64d1ca5e9ec609",
+    "frontend/src/components/JobWorkspaceView.tsx": "08fd3c5af4c4828e3873d3111eab8a64d10c6c9ec92b94b06e9405c6ab2b8e18",
+    "frontend/src/components/LaunchPanelShared.tsx": "ff1e8313629ee19fbd4b2e916f635213f1b8edfc3c166155111b073d9277a3af",
+    "frontend/src/components/ReviewRequestView.tsx": "e9ceb24a87e1cfa7f67f59291f24e7d6d6a9c45033054a1b021ba9cd94c43767",
+    "frontend/src/components/RunJobSidebar.tsx": "8e3fdf5eb32309f3e60f06c52c6130f44152289ba27d1d2b56ac2b284c53a777",
+    "frontend/src/components/RunMain.tsx": "ea938ab85c4ef2af860f77a0615e8db60f1d50bd1547ddc3df3d9bec58556ca0",
+    "frontend/src/components/RunProblemNotice.tsx": "cb8ace330326b1b6cbf474ae610bdd77c0df3c34585c78dedb9bdf03ce86d5ca",
+    "frontend/src/components/RunReviewShared.tsx": "966f44d6c6c39e990550a1f3509f3cb6045c22fdf88ea1c7bcc754ae871a48b9",
+    "frontend/src/components/RunWorkspaceShared.tsx": "c74b80e4c91d37c2950bcbf98ed8aee9adccc80da22817880f3de9fbb783c451",
+    "frontend/src/components/RunWorkspaceView.tsx": "db8ff62f7f5c6bde1480fcf4705a7cdef7165dfd733d2d4db1aac9a33f8dd11a",
+    "frontend/src/components/StepLogEmbedded.tsx": "51c6fd9822a29391d2192d691df850c5c5f2723c40ca6a88fea1288b0207c440",
+    "frontend/src/components/WorkflowEditorHeader.tsx": "fb79c004262c41b9c512854f1b44de77c838b03a533d3587fba894adc62d6a5b",
+    "frontend/src/components/useActionsWorkflowWorkspace.tsx": "aab87a711b9b9a6adfaddb3cbce6e6ebe9503a0a0412567f8165301dc91a685d",
+    "frontend/src/components/useDefaultSettingsForm.tsx": "d02f01c62a06cd2ddb418b2e38c99a8a25e68f40cc084058f409581e2c345592",
+    "frontend/src/components/useReviewRequest.tsx": "2e5a6a858deb1e9a563bc891f7868400b37d1777c58c23abe64935403bc70ed6",
+    "frontend/src/components/useRunWorkspace.tsx": "78ef1b91843294cf5c87a57e1af5e93f1f17b998f273c164930e06c2b3c75642",
+    "frontend/src/components/useSettingsPage.tsx": "485a9850fd921bc684cf8648f48dc481f51107f99e8c788295d55a7bb333c490",
+    "frontend/src/failure.ts": "d7968448ea33e5746fefaaee8ccda8a9c24e1ce69b5106edf4b335aabd233682",
+    "frontend/src/graph.ts": "e73a441150b32ae014883379f6e89fdaa0bc4f129360cd09cf16bc6ed5287866",
+    "frontend/src/help.ts": "b88a2a57d123580d1e2c09f0cac67a2b82968c4da8e74096f5b2dac9c7fd6e57",
+    "frontend/src/job-list.ts": "735b60997267a8277786ed0ab543d6820d7ee8bd44348f727f868a226dfc3644",
+    "frontend/src/navigation.ts": "7df3f4fe5a8f711271d895f0f5e9592a4f31f62ef7306ee200bcaad784b75bf9",
+    "frontend/src/run-graph.ts": "e10d75b2e99f439218b2dd3784cce8f24abd604a9bbde9918f0e9e98c61b8e55",
+    "frontend/src/settings-validation.ts": "885c2bdbf12ebf9785a26283362eea146618b8c73958ff016cca8b6b68367b8f",
+    "frontend/src/status.ts": "7221895103a56b04c2b9c78691cd5149f622ce3a85ae9b3c75bd14728d095816",
+    "frontend/src/types.ts": "c426f20d0f5b2d05901c0531d7a2eeb828de428df19acc6bc0302560a9b04474",
+    "frontend/src/useApp.tsx": "834fa99704ff39b11468a2f225d8764329dc8c44ac664d436e5530a8f2e7182c",
+    "frontend/src/workflow.ts": "079d400919e52fb1bf41f94f1fa5e25b75c191dbcfb84664c5302054bd4bb04b",
+    "relay/agents/acp_driver.py": "d81bbb2c89db82ccf1deae777f60a337852a5489465372ea62524519b021b7b5",
+    "relay/agents/antigravity_driver.py": "58420e9327d555c8ccf18abb8beb04d2762de1f7e8e60463c7ef429e6410c86e",
+    "relay/agents/configuration.py": "47616ce0ea80ef3ee6b2bfef17e91f50e6ec1050ce65486febd3e3b13038d294",
+    "relay/agents/driver.py": "9e08c226f5bb702392b02b5cf699a72920dedf3c6541110a7393e92b63af0e38",
+    "relay/agents/events.py": "bcdddcdba1b5c79536556e5f441417cc745ccffefe47b2b713e6057b61a6baea",
+    "relay/agents/mapping.py": "69f977411dc410a1620b5fef54b57baedbbb5336c70f3a19821609e5cf508ab5",
+    "relay/agents/models.py": "15856a86f293e2343d2225b431b5595fbb176df00e23eaa13ab3450f8e2c2069",
+    "relay/cli.py": "18b49e039709ee82df2e6d1062404bc9be55f7ccc112182e3b4f725dee06f16d",
+    "relay/config.py": "1ddf81b65f362b488e60f1413f85cab24b9641a61d3e9cfa35e9b509071762b8",
+    "relay/constants.py": "d8f862317459efeb6e5b1a0fe3c8da86e439aab30af3af5a7760567daaa61ed5",
+    "relay/errors.py": "2caccac31a0e4de732824fe066089ee891f33ba887a8b25005054b65413dab68",
+    "relay/execution/action_commands.py": "2de225dc47918061b2e0aa2140c3e8cc1bf286fbb4a9cbc2f7417c9a2e914789",
+    "relay/execution/action_files.py": "57e193e59c08059db0e09a11bd1127ed45cab6322fb81007e9d4e7eb86b18b97",
+    "relay/execution/action_reports.py": "028d5a9eff33c86971e23c26e42a49047fb0a0dd4945864f1b7f15837717ed96",
+    "relay/execution/automatic.py": "c5a0ca83a63532d8e5f1e1db434f4b84b6648d289072ec2b22e2acf5152bffc3",
+    "relay/execution/dispatch.py": "1865d2ede002fee26691d4bbf6f239e631d08b3027c48c25c6c75076eec50b5f",
+    "relay/execution/launch.py": "3fe7e23654b6cd4379fe946d8bf8208ca264f2cf4e9d5216a00a4afed6846356",
+    "relay/execution/masking.py": "c1765913e719c25e038f6eed9cba6ae27e50c7f22662022cdc7cb007d924d5c4",
+    "relay/execution/nodes/__init__.py": "479d144321950d8e6e3184e1c3655e92fee355f4eb310a98bb309ff0b8fc0400",
+    "relay/execution/nodes/actions.py": "9df62da261d0e0a37db59fdb10dffa20fe382c743dc8138168f6759146539863",
+    "relay/execution/nodes/agent.py": "cf2cd0b981b29778a3b9d8c528aefd213478935323003993ba5c842a9977741c",
+    "relay/execution/nodes/base.py": "5839680d4c14c6280d05c7afab254ce7855f25e276bc44f497815c842d096af1",
+    "relay/execution/nodes/command.py": "6b0feba91e3e2affea16856068a2a6229ebddea8dc0e97179ccc914596629495",
+    "relay/execution/preflight.py": "4a8dadb7d052ef69440145ecac04ff44f7029a1a35e56f834e67666d6f78e2d4",
+    "relay/execution/reconcile.py": "a7d0c70abbd0c8c1f9033fda5b6643a5aa50c7851ed8da6a93d236c4cf2af499",
+    "relay/execution/recovery.py": "fdd868bc31a5df4adc2f7dea511f62611bbc2e76c953428aeb08b43b44f4068c",
+    "relay/execution/resources.py": "4aef053b7039830f0947c2b3d8b5a8c3ce97b0afb5ebe603c0ccb7753b9e780a",
+    "relay/execution/resume.py": "594d14b572e28d07eaf12c54c48bc26db48688bd5e34d516e2b2e38e785fec33",
+    "relay/execution/runner.py": "06803c6e0a82c19ece14feabf794953f60fdd2b82a5048764ed484964e848334",
+    "relay/execution/scheduler.py": "225d3238e46df011babc7413293e3e8c008edb924c92a1b85decdc67eef18398",
+    "relay/execution/state.py": "e4762816d8b186eb5ffc0b44690bcac9f4d7e3d309ba18b5a1630d5cee1075d9",
+    "relay/owner_settings.py": "3daa4052d3b2ec9b71dd51c20a744e0978138c933a7ebb357d8afabfc47dea24",
+    "relay/paths.py": "4812b0cc334ddac90fe49d7c93e0b4cd7ef73688948c392bed00379e15394032",
+    "relay/vcs/artifacts.py": "18757e5c9c52a5f10d2b4bf56b66c83239a3d74d3650020e37b27b26cc207807",
+    "relay/vcs/cleanliness.py": "15a2ab096cba7be8d0e29e4f059c62224128d797bdd7673ebb1585cc7d6ea6a5",
+    "relay/vcs/commits.py": "05ce8108a455b5f2165f8d86b02d034422a997374aab9d3617b2e0f034660668",
+    "relay/vcs/worktree.py": "c84f456ab586a580dcad7aa5d26f7975db42a04e059163954bbc09a7951d92c6",
+    "relay/web/actions_repository.py": "a8d877fe4da95717dddd27fd359894f7fa44d9921b6cefa8dd47fe0b1c048cd4",
+    "relay/web/migrations/0009_run_repair_groups.py": "2302282def24d17c6734c7278e31007577ba40072d71845c5e5b9934697c7170",
+    "relay/web/migrations/0017_remove_legacy_workflows.py": "558d3ddd3a3d6b988bb26ba99eaf17260df41502947c402ea5b6771200edf0d4",
+    "relay/web/migrations/0018_remove_runsnapshot_semantics_revision.py": "887b27e1a153cd93380f467c78f92abc6ed31d620b899369860b227474eeb251",
+    "relay/web/migrations/0019_alter_nodeattempt_stop_reason.py": "274f348f138c0df8e361b2ef21cb79c5892c8830efe91bcd098def398cc7c7ac",
+    "relay/web/models.py": "bbf7132925e833a55a561d620419f39c9b201c5670ec3382e26c79a9bebd605b",
+    "relay/web/repositories.py": "1f707a5a343f17bb52911c3edfec28e5ba1eca9fb383e84445fb6eec3aa61d4e",
+    "relay/web/supervisor.py": "ca73b73bc002f5644eec755d39ef8c776b15f647a3012857624ad4678a151940",
+    "relay/web/urls.py": "70546a07c461ca2a25cbed148d581c866f8fa8cdc0b639e4c8ad94f0ee1701fa",
+    "relay/web/views/actions.py": "f2df9f3449bf393a566eb1041c75940f2e1f85a554d9f51698c531f8ea910711",
+    "relay/web/views/pages.py": "5f28459b1f3cd97058712c202532b59eecafb3089e078896d13dad05a592ae1f",
+    "relay/windows_security.py": "933de962f0715763ff46c85d636091b69b2187ea34b3adcbdae23b64cf27c2f6",
+    "relay/workflows/actions/compiler.py": "b070fd274994e799db73e7f3f6b9d0245b64c392cc124db84f9cdfd45c2a6bd3",
+    "relay/workflows/actions/expressions.py": "5ad3c30e8466ea923e683f80308a246207c5800da54f4545c9f4b647ab97d783",
+    "relay/workflows/actions/language.py": "ea64ffa375f45e9fe3b77c77bd0acaa06a36ec799c0034035c38e6906d1e6f05",
+    "relay/workflows/actions/patterns.py": "e685181012d3ca70df4c49bd93914ffb3f4fdc7f872797c95a50a1f69dce4a65",
+    "relay/workflows/defaults.py": "2c349c438404cd9b8a33fafe3949ad8f0e2bed309d2031b64ecbb801e5e714fc",
+    "relay/workflows/editor.py": "11ed1ee25a2297bcf17523a7501c9643b10091bf5bb3c0e73020baedef7a7410",
+    "relay/workflows/graph.py": "f7cc6c831d15c48e1e619d11214bbcaa3d970a205939261542da648f2cb939a6",
+    "relay/workflows/loader.py": "6f6591a8d198f5687864e85b33a153d113b530a29f046a8135c4277e63abf681",
+    "relay/workflows/prompts.py": "30331531c3c98e39ebc9397e0f8dc8dc02a57c9d6c109e3d3a1693a8e0e8af98",
+    "relay/workflows/records.py": "f35681ae9cbc5fb81e36d69fba07a96d35986edced15558dbaa03f65250f6cb1",
+    "relay/workflows/routing.py": "e7fadc31dd7d9c762fe70341916520ea8e140fa70303b465874f598a94545cfd",
+    "relay/workflows/schema.py": "8fa24959fbedabe4c345f3de777b3ecf66c75ab4b10fcd365359b940f07c9397",
+    "relay/workflows/scope.py": "916903494a339c5d47121c3b8729179e455753dda033d48dc16050ad25a26af3",
+    "relay/workflows/snapshot.py": "3955032e49b8110ded956ab110abc2519396bc894b17bf886445580fb7b0f81f",
+    "relay/workflows/validation.py": "c0b9a9f7476455bf8b4bbc2c984e208840f74254bd1da4ee59a2785c9335ae13"
+  },
+  "validation": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "python": "3.14.7",
+    "native_windows_python": {
+      "command": "uv run tox -e py314",
+      "workers": 3,
+      "inventory_count": 2850,
+      "inventory_sha256": "fee29edd6569ab53f232c0c1073b76b271494bcde3220bec5a6ef691ea649f57",
+      "completeness_verified": true,
+      "lanes": {
+        "serial": {
+          "cases": 51,
+          "passed": 49,
+          "skipped": [
+            {
+              "test": "test_linked_ownership_is_rejected_without_modifying_its_target",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\s\\\\test_linked_ownership_is_rejec0\\\\unrelated.json' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\s\\\\test_linked_ownership_is_rejec0\\\\relay\\\\local\\\\relay\\\\supervisor-processes.json'"
+            },
+            {
+              "test": "test_unverified_surviving_child_blocks_recovery_after_its_leader_exits",
+              "reason": "Windows Job Object kills children on launcher exit"
+            }
+          ],
+          "failures": 0,
+          "sha256": "014c73bdecfb36a1f3d02bf6e34d1d6c2ffdaae97b5a927364ce5cc3fd71477a"
+        },
+        "parallel": {
+          "cases": 2799,
+          "passed": 2769,
+          "skipped": [
+            {
+              "test": "test_linked_and_oversized_private_state_is_rejected",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_linked_and_oversized_priv0\\\\target' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_linked_and_oversized_priv0\\\\link'"
+            },
+            {
+              "test": "test_subject_and_product_links_are_rejected",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_subject_and_product_links0\\\\target' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_subject_and_product_links0\\\\link'"
+            },
+            {
+              "test": "test_symlink_report_is_a_blocker",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_symlink_report_is_a_block0\\\\outside.md' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_symlink_report_is_a_block0\\\\repo\\\\REVIEW.md'"
+            },
+            {
+              "test": "test_storage_scan_skips_symlinks_and_reports_bounded_lower_size",
+              "reason": "Directory symlinks are unavailable for this test account"
+            },
+            {
+              "test": "test_directory_junctions_do_not_include_another_projects_files[True]",
+              "reason": "Directory symlinks are unavailable for this test account"
+            },
+            {
+              "test": "test_directory_junctions_do_not_include_another_projects_files[False]",
+              "reason": "Directory symlinks are unavailable for this test account"
+            },
+            {
+              "test": "test_signaling_a_reaped_process_group_is_harmless",
+              "reason": "POSIX process-group signaling"
+            },
+            {
+              "test": "test_group_observation_rechecks_creation_after_the_process_listing",
+              "reason": "POSIX process-group observation"
+            },
+            {
+              "test": "test_failed_group_observation_never_proves_exit[malformed]",
+              "reason": "POSIX process-group observation"
+            },
+            {
+              "test": "test_failed_group_observation_never_proves_exit[unavailable]",
+              "reason": "POSIX process-group observation"
+            },
+            {
+              "test": "test_failed_group_observation_never_proves_exit[timeout]",
+              "reason": "POSIX process-group observation"
+            },
+            {
+              "test": "test_folder_symlinks_cannot_escape_home",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_folder_symlinks_cannot_es0\\\\outside' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_folder_symlinks_cannot_es0\\\\home\\\\escape'"
+            },
+            {
+              "test": "test_non_files_are_not_retained_as_report_bytes[symlink]",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_non_files_are_not_retaine0\\\\workspace\\\\other-report.md' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_non_files_are_not_retaine0\\\\workspace\\\\PLAN_CRITIQUE.md'"
+            },
+            {
+              "test": "test_a_report_link_cannot_retain_bytes_outside_the_worktree",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_a_report_link_cannot_reta0\\\\owner-report.md' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_a_report_link_cannot_reta0\\\\workspace\\\\PLAN_CRITIQUE.md'"
+            },
+            {
+              "test": "test_restoration_never_writes_through_a_report_symlink",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_restoration_never_writes_0\\\\workspace\\\\owner.txt' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_restoration_never_writes_0\\\\workspace\\\\PLAN_CRITIQUE.md'"
+            },
+            {
+              "test": "test_a_subworkflow_link_outside_the_workflow_root_is_rejected",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_subworkflow_link_outsid0\\\\outside.yaml' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_subworkflow_link_outsid0\\\\workflows\\\\link.yaml'"
+            },
+            {
+              "test": "test_a_yaml_key_that_resolves_to_another_suffix_is_rejected",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_yaml_key_that_resolves_0\\\\workflows\\\\notes.txt' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_yaml_key_that_resolves_0\\\\workflows\\\\alias.yaml'"
+            },
+            {
+              "test": "test_a_key_cannot_follow_a_link_outside_the_workflow_root",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_key_cannot_follow_a_lin0\\\\outside.yaml' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_a_key_cannot_follow_a_lin0\\\\.relay\\\\workflows\\\\linked.yaml'"
+            },
+            {
+              "test": "test_starter_rejects_symlink_escape",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_starter_rejects_symlink_e0\\\\outside.md' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw0\\\\test_starter_rejects_symlink_e0\\\\repo\\\\.relay\\\\prompts\\\\ask-agent.md'"
+            },
+            {
+              "test": "test_a_retained_file_symlink_is_rejected_even_when_its_target_matches[False]",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_a_retained_file_symlink_i0\\\\relay\\\\local\\\\relay\\\\artifacts\\\\evidence-run\\\\failed-attempt\\\\untracked\\\\unchanged-copy.txt' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_a_retained_file_symlink_i0\\\\relay\\\\local\\\\relay\\\\artifacts\\\\evidence-run\\\\failed-attempt\\\\untracked\\\\unfinished.txt'"
+            },
+            {
+              "test": "test_a_retained_file_symlink_is_rejected_even_when_its_target_matches[True]",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_a_retained_file_symlink_i1\\\\relay\\\\local\\\\relay\\\\artifacts\\\\evidence-run\\\\failed-attempt\\\\untracked\\\\unchanged-copy.txt' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw1\\\\test_a_retained_file_symlink_i1\\\\relay\\\\local\\\\relay\\\\artifacts\\\\evidence-run\\\\failed-attempt\\\\untracked\\\\unfinished.txt'"
+            },
+            {
+              "test": "test_cleanup_unlinks_an_inner_profile_link_without_touching_its_target",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_cleanup_unlinks_an_inner_0\\\\personal-browser' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_cleanup_unlinks_an_inner_0\\\\relay\\\\local\\\\relay\\\\resources\\\\1196673c-557b-4709-a4a2-83f880b50a46\\\\attempt-ttmedj8r\\\\browser-profiles\\\\personal'"
+            },
+            {
+              "test": "test_cleanup_refuses_a_replaced_run_directory",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_cleanup_refuses_a_replace0\\\\foreign' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_cleanup_refuses_a_replace0\\\\relay\\\\local\\\\relay\\\\resources\\\\df58f7c9-a082-4c73-8ffd-d0d2928817b4'"
+            },
+            {
+              "test": "test_rebuilt_assets_are_served_without_restarting",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_rebuilt_assets_are_served0\\\\private.js' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_rebuilt_assets_are_served0\\\\static\\\\assets\\\\current.js'"
+            },
+            {
+              "test": "test_native_browser_artifacts_preserve_bytes_and_reject_damage[none]",
+              "reason": "Browser artifact commands run on Linux CI"
+            },
+            {
+              "test": "test_native_browser_artifacts_preserve_bytes_and_reject_damage[archive]",
+              "reason": "Browser artifact commands run on Linux CI"
+            },
+            {
+              "test": "test_native_browser_artifacts_preserve_bytes_and_reject_damage[checkout]",
+              "reason": "Browser artifact commands run on Linux CI"
+            },
+            {
+              "test": "test_native_browser_artifacts_preserve_bytes_and_reject_damage[symlink]",
+              "reason": "Browser artifact commands run on Linux CI"
+            },
+            {
+              "test": "test_untracked_symlinks_preserve_the_link_target_text",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: \"C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_untracked_symlinks_preser0\\\\repo & quoted 'name'\\\\README.md\" -> \"C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_untracked_symlinks_preser0\\\\repo & quoted 'name'\\\\link.txt\""
+            },
+            {
+              "test": "test_a_prompt_link_outside_the_relay_root_is_rejected",
+              "reason": "symlinks are unavailable here: [WinError 1314] A required privilege is not held by the client: 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_a_prompt_link_outside_the0\\\\outside.md' -> 'C:\\\\Users\\\\vises\\\\AppData\\\\Local\\\\Temp\\\\relay-orchestration-20261016\\\\python-suite-final\\\\p\\\\popen-gw2\\\\test_a_prompt_link_outside_the0\\\\.relay\\\\prompts\\\\link.md'"
+            }
+          ],
+          "failures": 0,
+          "sha256": "07f2af95851aed9a3744c2e78e2b0fe88308cf7083d8069b22ed930eaa525eb6"
+        }
+      },
+      "javascript_runtimes": {
+        "node20": "v20.20.2",
+        "node24": "v24.12.0"
+      },
+      "shell_preflight": "Native Git Bash and PowerShell were resolved to absolute paths and executed before the run.",
+      "shell_versions": {
+        "git_version": "git version 2.49.0.windows.1",
+        "bash_version": "GNU bash, version 5.3.9(1)-release (x86_64-pc-cygwin)",
+        "powershell_version": "7.6.5"
+      }
+    },
+    "corrected_local_setup": {
+      "initial_full_run_failed": 20,
+      "cause": "Windows PATH selected the nonfunctional WSL Bash launcher instead of the installed Git Bash.",
+      "failed_cases_retested": {
+        "cases": 20,
+        "passed": 20,
+        "skipped": [],
+        "failures": 0,
+        "sha256": "18d3e91e6b38844ee79fd8ea65af754234867cd7b9c95d12dc093a245be9d996"
+      },
+      "product_code_changed_for_this_setup_issue": false
+    },
+    "focused_python": {
+      "changed_behavior": {
+        "cases": 54,
+        "passed": 54,
+        "skipped": [],
+        "failures": 0,
+        "sha256": "556adbf4e977b9a43e176106d62797b8db99e30e0cde7febe76469e07f07b77d"
+      },
+      "representative_transport_handoffs": {
+        "cases": 12,
+        "passed": 12,
+        "skipped": [],
+        "failures": 0,
+        "sha256": "98003c96dd98bf00f307fd8f951fe8cd87061759c875a6d8c1096b2ea0b352c1"
+      },
+      "native_acl": {
+        "passed": 8
+      },
+      "additional_terminal_and_invalid_selector": {
+        "passed": 3
+      }
+    },
+    "browser": {
+      "native_outcomes": {
+        "startTime": "2026-10-16T12:23:47.168Z",
+        "duration": 23758.782000000003,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "no_login": {
+        "startTime": "2026-10-16T12:44:32.465Z",
+        "duration": 36645.269,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "other_recovery_and_problem_cases_passed": 7,
+      "monitor_unit_tests_passed": 16,
+      "fresh_index_sha256": "cb9bc3d5c3f7bbdcb61d83aba0e53d7c52266140d8ed507c6c4165dcfbd9707b"
+    },
+    "frontend_build_tests": {
+      "passed": 1036,
+      "declared_skipped": 5
+    },
+    "quality": {
+      "lockfile": "uv lock --locked passed",
+      "all_tracked_file_hooks": "uv run pre-commit run --all-files passed",
+      "hook_log_sha256": "52e174796b29b2bdd74318ed365b15e2630e2e8fe946c7d7b708eb9740de4060",
+      "additional_passes": [
+        "ty check on Windows, Linux, and Darwin",
+        "frontend lint and Prettier",
+        "frontend typecheck and isolated build",
+        "documentation links",
+        "transition documentation",
+        "13 workflow guide examples and 7 starters",
+        "git diff --check"
+      ]
+    },
+    "live_windows": {
+      "source_head": "dd752c651f183e20584ccba2a3b514e72a971991",
+      "launch_checkout_unchanged": true,
+      "active_attempt_processes": 0,
+      "providers": [
+        {
+          "provider": "codex",
+          "version": "2.2.2",
+          "model": "gpt-6.1-sol",
+          "run_id": "3d3e8c95-0682-4847-9f8c-7d5f107d3396",
+          "status": "succeeded",
+          "agent_attempts": 1,
+          "automatic_retries": 0,
+          "usage_retries": 0,
+          "effort_override": null,
+          "permission_mode_override": null,
+          "stop_reason": "completed",
+          "provider_stop_reason": "end_turn",
+          "exit_code": 3221225786,
+          "error_code": null,
+          "report_sha256": "7911e42bdf5283b204d484841af9e7e560fd875592887353761297573d9a6329",
+          "following_step_verified_report_bytes": true,
+          "artifacts_downloaded_and_verified": 9,
+          "job_commits": [
+            "1ac8de5e5c268cdc988372d41361e8f66d1c29e2"
+          ],
+          "job_status": "succeeded",
+          "process_id_cleared": true
+        },
+        {
+          "provider": "antigravity",
+          "version": "",
+          "model": "gemini-3.8-flash-low",
+          "run_id": "85357125-1ec9-4896-80c8-5d816c7718dd",
+          "status": "failed",
+          "agent_attempts": 1,
+          "automatic_retries": 0,
+          "usage_retries": 0,
+          "effort_override": null,
+          "permission_mode_override": null,
+          "stop_reason": "output_invalid",
+          "provider_stop_reason": "SUCCESS",
+          "exit_code": 0,
+          "error_code": "output_validation_error",
+          "report_sha256": null,
+          "following_step_verified_report_bytes": false,
+          "artifacts_downloaded_and_verified": 4,
+          "job_commits": [],
+          "job_status": "failed",
+          "process_id_cleared": true
+        }
+      ],
+      "binary_versions": {
+        "antigravity": "1.3.6",
+        "codex_acp": "2.2.2"
+      },
+      "antigravity_binary_sha256": "b8155654c01e7dd45eb15232722f905872d62e4424307d4e0ded4ee2687d4249",
+      "worktree_cleanup": {
+        "codex": {
+          "deleted": {
+            "runs": 0,
+            "worktrees": 1,
+            "branches": 0,
+            "attempt_refs": 0,
+            "artifact_roots": 0,
+            "logs": 0
+          }
+        },
+        "antigravity": {
+          "deleted": {
+            "runs": 0,
+            "worktrees": 1,
+            "branches": 0,
+            "attempt_refs": 0,
+            "artifact_roots": 0,
+            "logs": 0
+          }
+        }
+      },
+      "shutdown": {
+        "stopped_pids": [
+          47508,
+          41332,
+          30396
+        ],
+        "creation_identities_checked": true,
+        "ownership_record_cleared": true
+      }
+    },
+    "limits": [
+      "Native Windows Python 3.14 and selected browser cases were run locally; the full OS/Python and complete browser matrix is verified by PR CI.",
+      "Antigravity returned SUCCESS without the declared report under provider defaults. This run verifies rejection of the missing contract, not successful native task completion.",
+      "Linux Codex sign-in remains deferred at the owner's request; no new Linux live-provider claim is made."
+    ]
+  },
+  "owner_documents_preserved": {
+    "REVIEW.md": "f95e5dc1cac1f9499e5a5a3480d00769cc13a9907bf964d44477c9f836d7fd16",
+    "REVIEW_FIX_PROMPT.md": "69adcacd04763cff8380009981e0588ab6f6a582bcc903e1aea106128d8190c2",
+    "WALKTHROUGH.md": "79e838b496ac4b1b49a9d85f334fcf51c1afd3d7a9a1438fed30dfcea38f58f0"
+  },
+  "private_evidence": "Raw provider logs, credentials, account state, and unredacted public API captures stay outside the repository.",
+  "merge": "Held for owner review; auto-merge disabled."
+}
