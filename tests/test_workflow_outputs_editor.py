@@ -148,7 +148,7 @@ def test_an_artifact_that_is_not_utf8_fails_output_validation(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     ("text", "state"),
-    [("nodes: [", DraftValidationState.INVALID), (ACTIONS, DraftValidationState.VALID)],
+    [("jobs: [", DraftValidationState.INVALID), (ACTIONS, DraftValidationState.VALID)],
 )
 def test_an_autosaved_draft_is_labeled_by_validity_and_read_back(
     relay_root: Path, text: str, state: DraftValidationState
@@ -163,7 +163,7 @@ def test_an_autosaved_draft_is_labeled_by_validity_and_read_back(
 
 def test_saving_replaces_the_file_and_discards_the_draft(relay_root: Path) -> None:
     store = _MemoryDrafts()
-    autosave_workflow_draft(store, relay_root, "p1", "main", "nodes: [", "h")
+    autosave_workflow_draft(store, relay_root, "p1", "main", "jobs: [", "h")
     base = read_workflow_document(store, relay_root, "p1", "main").base_hash
     updated = "name: Updated\njobs: {check: {steps: [{run: echo Ready}]}}\n"
 
@@ -189,7 +189,7 @@ def test_saving_invalid_text_is_refused(relay_root: Path) -> None:
     base = read_workflow_document(store, relay_root, "p1", "main").base_hash
 
     with pytest.raises(WorkflowValidationError):
-        save_workflow_document(store, relay_root, "p1", "main", "nodes: [", base)
+        save_workflow_document(store, relay_root, "p1", "main", "jobs: [", base)
 
 
 @pytest.mark.parametrize("key", ["missing", "nested/absent.yaml", "main.yaml/extra"])

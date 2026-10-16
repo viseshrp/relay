@@ -10,7 +10,6 @@ import platform
 
 from relay import __version__
 
-from .actions.language import DIALECT
 from .routing import RouteRequirement, serialize_route_table
 from .validation import ValidatedWorkflow
 
@@ -27,7 +26,6 @@ class SnapshotBundle:
     runtime_versions: dict[str, str]
     hashes: dict[str, str]
     launch_defaults: dict[str, object] = field(default_factory=dict)
-    semantics_revision: str = DIALECT
     resolved_definition: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -77,7 +75,6 @@ def build_snapshot(
         runtime_versions=runtime_versions,
         hashes=hashes,
         launch_defaults=dict(launch_defaults or {}),
-        semantics_revision=DIALECT,
         resolved_definition=(workflow.root.definition.model_dump(mode="json", by_alias=True)),
     )
 

@@ -162,13 +162,13 @@ def test_distinct_configurations_for_the_same_model_use_fresh_defaults(
     ]
 
 
-def test_legacy_modes_use_the_supported_session_mode_method(
+def test_advertised_session_modes_use_the_session_mode_method(
     fake_agents: FakeAgents,
     tmp_path: Path,
 ) -> None:
     requirement = ProbeRequirement("m1", effort="low", permission_mode="auto")
     result = asyncio.run(
-        configured_driver(fake_agents, "configuration-legacy").probe_models(
+        configured_driver(fake_agents, "configuration-session-modes").probe_models(
             (requirement,), tmp_path
         )
     )

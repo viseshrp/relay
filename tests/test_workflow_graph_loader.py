@@ -26,11 +26,11 @@ def _write(root: Path, name: str, text: str) -> Path:
 @pytest.mark.parametrize(
     ("text", "error"),
     [
-        ("version: [", WorkflowValidationError),
+        ("jobs: [", WorkflowValidationError),
         ("- a\n- b\n", WorkflowValidationError),
-        ("version: 2\nname: x\nnodes: {}\n", WorkflowValidationError),
-        ("version: 1\nnodes: {}\n", WorkflowValidationError),
-        ("version: 1\nname: a\nname: b\nnodes: {}\n", WorkflowValidationError),
+        ("jobs: {work: {steps: invalid}}\n", WorkflowValidationError),
+        ("name: Missing jobs\n", WorkflowValidationError),
+        ("name: a\nname: b\njobs: {}\n", WorkflowValidationError),
     ],
 )
 def test_an_invalid_document_is_rejected(text: str, error: type[Exception]) -> None:

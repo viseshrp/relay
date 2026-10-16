@@ -29,7 +29,7 @@ def validate_environment(value: dict[str, str]) -> dict[str, str]:
 
 
 class StrictModel(BaseModel):
-    """Base for versioned records that must reject unknown keys."""
+    """Base for records that must reject unknown keys."""
 
     model_config = ConfigDict(
         extra="forbid", validate_by_name=True, validate_by_alias=True, strict=True

@@ -58,10 +58,8 @@ jobs:
     )
     from relay.execution.reconcile import reconcile_once
 
-    assert (
-        reconcile_once(engine.store, lambda _: None, orderly_shutdown=False).attempts.worker_lost
-        == 0
-    )
+    reconcile_once(engine.store, lambda _: None, orderly_shutdown=False)
+    assert NodeAttempt.objects.get(pk=interaction.attempt_id).status == "waiting"
     assert answer_wait(engine, run_id) == "accepted"
     assert Run.objects.get(pk=run_id).status == "succeeded"
     assert (

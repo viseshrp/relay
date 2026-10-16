@@ -147,7 +147,7 @@ class WireAgent:
                 {"group": "efforts", "name": "Efforts", "options": effort["options"]}
             ]
         options.append(effort)
-        if self.mode != "configuration-legacy":
+        if self.mode != "configuration-session-modes":
             options.append(
                 {
                     "id": "mode",
@@ -224,7 +224,7 @@ class WireAgent:
                 self.selected, self.effort, self.permission_mode = "m1", "high", "ask"
                 options = [] if self.mode == "no-selector" else self.configuration()
                 result = {"sessionId": "scratch-session", "configOptions": options}
-                if self.mode == "configuration-legacy":
+                if self.mode == "configuration-session-modes":
                     result["modes"] = {
                         "currentModeId": "ask",
                         "availableModes": [

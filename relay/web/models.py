@@ -217,7 +217,6 @@ class RunSnapshot(RelayModel):
     runtime_versions: models.JSONField = models.JSONField(default=dict)
     hashes: models.JSONField = models.JSONField(default=dict)
     launch_defaults: models.JSONField = models.JSONField(default=dict)
-    semantics_revision: models.CharField = models.CharField(max_length=64, default="relay-local-1")
     resolved_definition: models.JSONField = models.JSONField(default=dict)
     created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 

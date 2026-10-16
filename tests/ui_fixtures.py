@@ -147,7 +147,6 @@ def seed_ui_fixture(root: Path, *, worst: bool) -> dict[str, object]:
             run=run,
             workflow_yaml=captured_text,
             relay_version="test-fixture",
-            semantics_revision="relay-local-1",
             resolved_definition=captured_frozen,
         )
         if waiting:

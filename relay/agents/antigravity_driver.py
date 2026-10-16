@@ -578,7 +578,7 @@ class AntigravityDriver:
                 denied.update(denied_tool_writes)
             # Actions agents edit the shared job workspace; Relay commits at
             # the job boundary. A verified denied write cannot be inferred from
-            # a provider-owned commit or an obsolete writer flag.
+            # a provider-owned commit.
             soft_denied = bool(denied)
             succeeded = (
                 requested_stop is None

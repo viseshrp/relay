@@ -140,7 +140,6 @@ from relay.vcs.worktree import (
 )
 from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
-from relay.workflows.actions.language import DIALECT
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
@@ -232,12 +231,8 @@ def _compiled_run_graph(run_id: str) -> CompiledGraph:
     """Compile each immutable snapshot once while its run stays in the cache."""
     snapshot = RunSnapshot.objects.get(run_id=run_id)
     resolved = _mapping(snapshot, "resolved_definition")
-    if (
-        _string(snapshot, "semantics_revision") != DIALECT
-        or not resolved
-        or not resolved.get("actions")
-    ):
-        message = "The run has no supported frozen jobs/steps execution plan."
+    if not resolved:
+        message = "The run has no frozen execution plan."
         raise PersistenceError(message, context={"run": run_id})
     try:
         definition = WorkflowDefinition.model_validate(resolved)
@@ -1696,7 +1691,7 @@ class DjangoReadStore:
         pending_only: bool = False,
         interaction_id: str | None = None,
     ) -> tuple[dict[str, object], int | None]:
-        """Preserve the original collection endpoint using read-only snapshots."""
+        """Read one paged run collection through a coherent database snapshot."""
         try:
             with read_snapshot():
                 run = self._monitor_run(run_id)
@@ -2759,7 +2754,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             values = (
                 Run.objects.filter(
                     status__in=(RunStatus.RUNNING.value, RunStatus.PAUSED_WAIT.value),
-                    snapshot__semantics_revision=DIALECT,
                 )
                 .order_by("started_at", "pk")
                 .values_list("pk", flat=True)
@@ -3378,9 +3372,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                 run = Run.objects.select_for_update().get(pk=related_run.pk)
                 project = _related(run, "project", Project)
                 snapshot = _related(run, "snapshot", RunSnapshot)
-                if _string(snapshot, "semantics_revision") != DIALECT or _string(
-                    node, "node_type"
-                ) not in {NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value}:
+                if _string(node, "node_type") not in {
+                    NodeType.ACTIONS_JOB.value,
+                    NodeType.ACTIONS_STEP.value,
+                }:
                     return ClaimResult(ClaimDisposition.IGNORED)
 
                 cleanup_resume = (
@@ -5621,7 +5616,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             .filter(
                 state__in=PENDING_RECOVERY_STATES,
                 attempt__node_run__run__status=RunStatus.FAILED.value,
-                attempt__node_run__run__snapshot__semantics_revision=DIALECT,
                 attempt__node_run__run__dispatch_paused=False,
             )
             .order_by("created_at", "pk")[:RECONCILE_MAX_ITEMS]
@@ -5709,7 +5703,6 @@ class DjangoExecutionStore(DjangoAgentStore):
             UsageRetry.objects.select_related("attempt__node_run")
             .filter(
                 state="scheduled",
-                run__snapshot__semantics_revision=DIALECT,
                 reset_at__lte=timezone.now(),
                 run__status__in=(
                     RunStatus.FAILED.value,
@@ -5843,9 +5836,7 @@ class DjangoExecutionStore(DjangoAgentStore):
     def interrupted_run_ids(self) -> tuple[str, ...]:
         try:
             values = list(
-                Run.objects.filter(
-                    status=RunStatus.INTERRUPTED.value, snapshot__semantics_revision=DIALECT
-                )
+                Run.objects.filter(status=RunStatus.INTERRUPTED.value)
                 .order_by("started_at", "pk")
                 .values_list("pk", flat=True)[: RECONCILE_MAX_ITEMS + 1]
             )

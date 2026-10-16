@@ -88,8 +88,6 @@ def _unknown_field(path: str) -> WorkflowValidationError:
         "services": "Start required services outside Relay before running this workflow.",
         "max-parallel": "Local matrix jobs run serially. Remove max-parallel.",
         "timeout": "Use timeout-minutes with a number, for example timeout-minutes: 10.",
-        "nodes": "Use jobs with ordered steps for a new workflow.",
-        "agents": "Select agent or agents in with on a relay/agent@v1 step.",
     }
     hint = hints.get(path.rsplit(".", 1)[-1])
     return _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
@@ -852,18 +850,19 @@ def capture_script(path: Path, project_root: Path, result: dict[str, str]) -> No
         message = "runs"
         raise _issue(message, "Action script is missing or too large.")
     try:
+        key = path.relative_to(project_root.resolve()).as_posix()
+        if key in result:
+            return
         raw = path.read_bytes()
         try:
             content = raw.decode("utf-8")
         except UnicodeError:
-            content = "\x00binary:" + base64.b64encode(raw).decode("ascii")
-        key = path.relative_to(project_root.resolve()).as_posix()
-        if key not in result and (content.startswith("\x00") or path.stat().st_mode & 0o111):
+            content = None
+        if content is None or content.startswith("\x00") or path.stat().st_mode & 0o111:
             content = f"\x00asset:{path.stat().st_mode & 0o777:03o}:" + base64.b64encode(
                 raw
             ).decode("ascii")
-        if key not in result:
-            result[key] = content
+        result[key] = content
     except OSError:
         message = "runs"
         raise _issue(message, "Action sources could not be read.") from None
@@ -874,8 +873,6 @@ def source_bytes(content: str) -> tuple[bytes, int]:
     if content.startswith("\x00asset:"):
         _, mode, value = content.split(":", 2)
         return base64.b64decode(value, validate=True), int(mode, 8) & 0o777
-    if content.startswith("\x00binary:"):
-        return base64.b64decode(content[8:], validate=True), 0o600
     return content.encode("utf-8"), 0o600
 
 

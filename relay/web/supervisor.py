@@ -288,9 +288,9 @@ def _stop_abandoned_attempts(store: SupervisorStore) -> None:
     verified = {identity.pid for _, identity in processes}
     for _, pid in store.active_attempt_processes():
         if pid not in verified and process_identity(pid) is not None:
-            message = "Relay cannot verify an older attempt's process before recovery."
+            message = "Relay cannot verify an attempt's process before recovery."
             raise PersistenceError(
-                message, next_action="Stop the older Relay worker normally before restarting."
+                message, next_action="Stop the Relay worker normally before restarting."
             )
     _force_attempt_processes(processes)
 

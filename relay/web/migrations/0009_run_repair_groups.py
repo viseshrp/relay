@@ -1,4 +1,4 @@
-"""Keep legacy repair presentation separate from immutable workflow snapshots."""
+"""Add run repair-group metadata."""
 
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation

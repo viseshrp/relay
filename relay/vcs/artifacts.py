@@ -455,7 +455,7 @@ def validate_attempt_evidence(
 def preserve_recovery_reports(
     worktree: Path, run_id: str, attempt_id: str, filenames: tuple[str, ...]
 ) -> tuple[PreservedArtifact, ...]:
-    """Supplement older evidence without replacing its ref or manifest."""
+    """Retain rejected reports without replacing the attempt's ref or manifest."""
     target = (
         artifacts_dir(create=True)
         / _component(run_id, "run id")

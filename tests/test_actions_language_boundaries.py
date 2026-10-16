@@ -164,7 +164,7 @@ def test_yaml_resource_bounds_and_syntax_diagnostics() -> None:
         ("#" * 1048577, "1 MiB"),
         ("jobs: [", "Invalid YAML"),
         ("{1: value}", "keys must be strings"),
-        ("version: 1\nnodes: {}", "jobs mapping"),
+        ("name: Missing jobs", "Required field is missing"),
         ("a: " + "[" * 52 + "value" + "]" * 52, "depth limit"),
         ("a: &a [value]\nb: [" + ", ".join(["*a"] * 101) + "]", "alias limit"),
         ("a: [" + ", ".join(["value"] * 10001) + "]", "node or depth"),
@@ -206,7 +206,6 @@ def test_frozen_local_references_require_callable_utf8_sources(project: RelayPro
 
 
 def test_frozen_asset_decoding_preserves_bytes_and_modes() -> None:
-    assert source_bytes("\0binary:/w==") == (b"\xff", 0o600)
     assert source_bytes("\0asset:755:/w==") == (b"\xff", 0o755)
     assert source_bytes("é\r\n") == ("é\r\n".encode(), 0o600)
 

@@ -115,7 +115,7 @@ def test_workflow_preflight_requires_login_and_returns_workflow_errors(
     client.logout()
     assert client.get("/api/workflows/workflow/preflight").status_code == 401
     client.force_login(User.objects.get(username="owner"))
-    served.write(".relay/workflows/invalid.yaml", "nodes: [\n")
+    served.write(".relay/workflows/invalid.yaml", "jobs: [\n")
     response = owner.get("/api/workflows/invalid/preflight")
     assert response.status_code == 422
     assert response.json()["code"] == "workflow_validation_error"
@@ -1046,10 +1046,10 @@ def test_invalid_drafts_are_retained_for_the_browser(owner: Client, workflow_bas
     response = post(
         owner,
         "/api/workflows/workflow/draft",
-        {"holder": "tab-1", "yaml": "nodes: [", "base_hash": workflow_base},
+        {"holder": "tab-1", "yaml": "jobs: [", "base_hash": workflow_base},
     )
     assert response.json()["draft"]["validation_state"] == "invalid"
-    assert owner.get("/api/workflows/workflow").json()["draft"]["yaml"] == "nodes: ["
+    assert owner.get("/api/workflows/workflow").json()["draft"]["yaml"] == "jobs: ["
 
 
 @pytest.mark.parametrize("field", ["base_hash", "yaml", "holder"])
@@ -1615,7 +1615,7 @@ def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
     ).read_bytes()
 
 
-@pytest.mark.parametrize("extra", [{"yaml": "nodes: {}"}, {"template_id": "unknown"}])
+@pytest.mark.parametrize("extra", [{"yaml": "jobs: {}"}, {"template_id": "unknown"}])
 def test_invalid_template_requests_write_no_sources(
     owner: Client,
     served: RelayProject,
@@ -2355,7 +2355,7 @@ def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
         )
 
 
-def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
+def test_workflow_validation_is_pure_and_invalid_launch_is_rejected(
     owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import subprocess
@@ -2368,11 +2368,11 @@ def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
     monkeypatch.setattr(subprocess, "Popen", unexpected_process)
     good = "jobs: {main: {steps: [{run: echo safe}]}}"
     assert post(owner, "/api/workflow-language/validate", {"yaml": good}).json()["valid"]
-    legacy = "version: 1\nname: Old\nnodes: {}\n"
-    served.write(".relay/workflows/old.yaml", legacy)
-    response = post(owner, "/api/workflow-language/validate", {"yaml": legacy})
+    invalid = "jobs: []\n"
+    served.write(".relay/workflows/invalid.yaml", invalid)
+    response = post(owner, "/api/workflow-language/validate", {"yaml": invalid})
     assert response.status_code == 200 and not response.json()["valid"]
-    assert post(owner, "/api/runs", {"workflow_key": "old", "inputs": {}}).status_code == 422
+    assert post(owner, "/api/runs", {"workflow_key": "invalid", "inputs": {}}).status_code == 422
     assert not Run.objects.exists()
 
 

@@ -23,7 +23,7 @@ def load_workflow(path: Path) -> LoadedWorkflow:
 
 
 def load_workflow_text(text: str, *, source: Path | None = None) -> LoadedWorkflow:
-    """Compile the single supported workflow language without format fallbacks."""
+    """Compile workflow jobs and steps into a frozen execution definition."""
     from .actions.compiler import definition
     from .actions.language import load
 

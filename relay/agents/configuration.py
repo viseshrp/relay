@@ -51,7 +51,7 @@ def acp_configuration(
     options: Sequence[ConfigOption],
     modes: schema.SessionModeState | None,
 ) -> AgentConfiguration:
-    """Read effort after model selection; prefer config options over legacy modes."""
+    """Read effort after model selection; use advertised config options or session modes."""
     effort = _selector(options, "thought_level", ("reasoning_effort", "effort", "thought_level"))
     mode = _selector(options, "mode", ("mode", "permission_mode", "approval_mode"))
     if mode is None and modes is not None:

@@ -13,14 +13,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class AttemptRecovery:
-    """Compatibility counters; periodic repair cannot recover worker attempts."""
-
-    interrupted: int
-    worker_lost: int
-
-
-@dataclass(frozen=True, slots=True)
 class ReconcileResult:
     """One bounded pass, suitable for diagnostics and startup evidence."""
 
@@ -29,7 +21,6 @@ class ReconcileResult:
     human_controls_applied: int
     human_waits_expired: int
     controls: ControlRecovery
-    attempts: AttemptRecovery
     usage_retries_resumed: int = 0
     automatic_retries_resumed: int = 0
 
@@ -77,7 +68,6 @@ def reconcile_once(
     controls = store.recover_control_claims()
     # Sleep, a clock jump, or lock contention can age a live worker's heartbeat.
     # Only the supervisor may release admission after proving process exit.
-    attempts = AttemptRecovery(0, 0)
     usage_retries = 0 if orderly_shutdown else store.resume_usage_retries()
     automatic_retries = 0 if orderly_shutdown else store.resume_automatic_retries()
     if not orderly_shutdown:
@@ -88,14 +78,12 @@ def reconcile_once(
         human_controls,
         expired_waits,
         controls,
-        attempts,
         usage_retries,
         automatic_retries,
     )
 
 
 __all__ = [
-    "AttemptRecovery",
     "ReconcileResult",
     "ReconcileStore",
     "reconcile_once",
