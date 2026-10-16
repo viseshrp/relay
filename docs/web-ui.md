@@ -1132,14 +1132,15 @@ connects the remaining findings to their implementation and regression tests.
 Visual tests use a separate disposable server and database on port 4176,
 so functional test runs cannot appear on the Home dashboard. Baselines live
 under `frontend/e2e/baselines/{platform}`. Linux CI is the reference for CI
-screenshots; macOS baselines support local checks. Relative times and private
-paths are masked rather than relaxing the pixel-difference threshold.
+screenshots; macOS and Windows baselines support local checks. Relative times
+and private paths are masked rather than relaxing the pixel-difference threshold.
 
 To refresh Linux baselines, dispatch the Main workflow on the working branch
 with **Generate Linux visual baselines for review** enabled. Review the
 `linux-visual-baselines` artifact before committing its PNG files. Generate
-macOS baselines only from an isolated checkout with the visual Playwright
-configuration and `--update-snapshots`.
+macOS and Windows baselines only from an isolated checkout with the visual
+Playwright configuration and `--update-snapshots`. Review every changed image
+before committing.
 
 Every normal and worst-case fixture screen receives an axe audit with WCAG
 2.0, 2.1, and 2.2 tags, failing on serious or critical violations. The previous
