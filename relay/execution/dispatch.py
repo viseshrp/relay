@@ -41,7 +41,7 @@ def notify_dispatch(token: str) -> None:
 
 
 def release_admission(run_id: str) -> None:
-    """Wake only claims deferred by this run's readers/writer gate."""
+    """Wake claims deferred until this run releases admission."""
     with _ADMISSION_GUARD:
         tokens = _DEFERRED.pop(run_id, ())
     for token in tokens:

@@ -197,16 +197,16 @@ test("matched tools merge across messages without crossing attempts, jobs, or tu
     expect(toolStatus(status).text).toBe(text);
 });
 
-test("relative paths strip only recorded roots and reader folders on each platform", () => {
+test("relative paths preserve subdirectories on each platform", () => {
   expect(
     relativeActivityText(
       "Read /work/run/r-42/docs/guide.md and /work/run-extra/file",
       "/work/run/",
     ),
-  ).toBe("Read docs/guide.md and /work/run-extra/file");
+  ).toBe("Read r-42/docs/guide.md and /work/run-extra/file");
   expect(
     relativeActivityText("C:\\Relay\\Run\\r-2\\README.md", "c:\\relay\\run"),
-  ).toBe("README.md");
+  ).toBe("r-2\\README.md");
   expect(relativeActivityText("/work/Run/file", "/work/run")).toBe(
     "/work/Run/file",
   );
@@ -429,7 +429,7 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     tool_call_id: "read-1",
     summary: JSON.stringify({
       status: "in_progress",
-      raw_input: { file_path: `${folder}/r-2/REVIEW.md` },
+      raw_input: { file_path: `${folder}/REVIEW.md` },
     }),
   });
   await append(page, id, "agent.thought", {
@@ -522,7 +522,7 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
       (event) =>
         typeof event.payload.summary === "string" &&
         JSON.parse(event.payload.summary).raw_input?.file_path ===
-          `${folder}/r-2/REVIEW.md`,
+          `${folder}/REVIEW.md`,
     ),
   ).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);

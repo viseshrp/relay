@@ -298,13 +298,9 @@ export function relativeActivityText(
     .split(/[\\/]/)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("[\\\\/]");
-  // Only the recorded run root and its reader prefix become relative. Other
-  // absolute paths and command escapes retain their original meaning.
+  // Strip the recorded run root; keep subdirectory names and command escapes.
   return text.replace(
-    new RegExp(
-      `${pattern}[\\\\/](?:r-\\d+[\\\\/])?`,
-      /^[A-Za-z]:/.test(root) ? "gi" : "g",
-    ),
+    new RegExp(`${pattern}[\\\\/]`, /^[A-Za-z]:/.test(root) ? "gi" : "g"),
     "",
   );
 }

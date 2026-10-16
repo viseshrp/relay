@@ -1,4 +1,4 @@
-"""Run branch and isolated primary/reader worktree lifecycle."""
+"""Run branch and isolated primary worktree lifecycle."""
 
 from __future__ import annotations
 
