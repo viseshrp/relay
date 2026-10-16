@@ -740,14 +740,14 @@ must contain 1 through 200 characters; longer values return `invalid` before
 Relay changes run or attempt state. A permission decision must name an offered
 option, and an accepted ACP elicitation value must be a JSON object; mismatches
 return `invalid` without reaching the live agent session. All answer bodies may
-include a positive `interaction_id`. It must match the exact pending interaction
-of this attempt. Permission and elicitation answers may also include a nonempty
-`feedback` string. The answer resolves that request; after the current ACP turn
-ends, feedback is submitted in another prompt to the same session with the same
-model, options, and deadline. It never grants permission or changes static
-prompt files. A declined permission stays declined; feedback can request an
-alternative. Canceling the attempt prevents another turn. Cancellation fans out
-to every active attempt. Failed-node rerun preserves any remaining evidence,
+include a nonempty string `interaction_id`. It must match the exact pending
+interaction of this attempt. Permission and elicitation answers may also
+include a nonempty `feedback` string. The answer resolves that request. After
+the current ACP turn ends, feedback is submitted in another prompt to the same
+session, model, options, and deadline. It never grants permission or changes
+static prompt files. A declined permission stays declined. Feedback can request
+an alternative. Canceling the attempt prevents another turn. Cancellation fans
+out to every active attempt. Failed-node rerun preserves any remaining evidence,
 resets only to the recorded safe head, and creates a new attempt; a nested
 selection also reopens only its failed structural parents. Successful nodes stay
 complete. Concurrent rerun submissions for the same run cannot both mutate the
