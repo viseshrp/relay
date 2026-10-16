@@ -8,6 +8,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 from django.db import connections
@@ -35,6 +36,7 @@ from relay.errors import (
 from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
 from relay.execution.runner import OutcomeKind
+from relay.execution.state import AttemptStopReason
 from relay.web.actions_bindings import put_binding
 from relay.web.models import NodeAttempt, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore
@@ -338,13 +340,19 @@ def test_acp_attempts_can_use_the_advertised_agent_authentication_method(
     assert any(message.get("method") == "authenticate" for message in fake_agents.messages())
 
 
-def test_acp_refusal_is_a_failed_provider_result(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("agent_context", ["codex", "claude", "copilot", "cursor"], indirect=True)
+@pytest.mark.parametrize("reason", ["refusal", "max_tokens", "max_turn_requests", "cancelled"])
+def test_acp_terminal_failures_keep_the_provider_reason(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
-    monkeypatch.setenv("FAKE_ACP_MODE", "refusal")
-    _events, result = execute(AcpDriver(PROFILES["codex"], agent_context.command), agent_context)
+    monkeypatch.setenv("FAKE_ACP_MODE", f"stop-{reason}")
+    _events, result = execute(
+        AcpDriver(PROFILES[agent_context.agent_id], agent_context.command), agent_context
+    )
     assert not result.succeeded
-    assert (result.stop_reason, result.error_code) == ("refusal", "agent_protocol_error")
+    assert result.stop_reason is AttemptStopReason.FAILED
+    assert result.provider_stop_reason == reason
+    assert result.error_code == "agent_execution_error"
 
 
 def test_acp_owner_cancel_stops_the_live_provider_process(
@@ -407,7 +415,7 @@ def test_provider_finishing_during_a_control_poll_keeps_its_completed_result(
             async def finalize(self) -> AgentResult:
                 # Run this callback after the execution task returns its result.
                 loop.call_soon(completed.set)
-                return AgentResult(True, "end_turn", 0)
+                return AgentResult(True, AttemptStopReason.COMPLETED, 0)
 
         def poll(attempt_id: str, worker_id: str, kinds: tuple[str, ...] | None = None) -> None:
             del attempt_id, worker_id, kinds
@@ -491,7 +499,7 @@ def test_antigravity_attempts_use_the_documented_headless_arguments(
     assert arguments[arguments.index("--model") + 1] == "m1"
     assert arguments[arguments.index("--output-format") + 1] == "stream-json"
     assert arguments[arguments.index("--input-format") + 1] == "stream-json"
-    assert arguments[arguments.index("--print-timeout") + 1] == "5m"
+    assert "--print-timeout" not in arguments
     assert "--dangerously-skip-permissions" in arguments
     assert "-p" not in arguments
     inputs = [message["input"] for message in fake_agents.messages() if "input" in message]
@@ -528,15 +536,15 @@ def test_antigravity_stdin_preserves_prompt_text_while_draining_startup_output(
 @pytest.mark.parametrize(
     ("mode", "reason", "code"),
     [
-        ("timeout", "timeout", "node_timeout"),
-        ("error-text", "failed", "agent_protocol_error"),
-        ("boolean-duration", "failed", "agent_protocol_error"),
-        ("canceled", "canceled", "canceled"),
-        ("interrupted", "interrupted", "agent_protocol_error"),
+        ("timeout", "failed", "agent_execution_error"),
+        ("error-text", "failed", "agent_execution_error"),
+        ("boolean-duration", "failed", "agent_execution_error"),
+        ("canceled", "failed", "agent_execution_error"),
+        ("interrupted", "failed", "agent_execution_error"),
         ("missing-result", "failed", "agent_protocol_error"),
     ],
 )
-def test_antigravity_terminal_failures_use_structured_status_and_duration(
+def test_antigravity_terminal_failures_ignore_duration_and_error_prose(
     agent_context: AgentExecutionContext,
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
@@ -549,6 +557,39 @@ def test_antigravity_terminal_failures_use_structured_status_and_duration(
     )
     assert not result.succeeded
     assert (result.stop_reason, result.error_code) == (reason, code)
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+@pytest.mark.parametrize("mode", ["hold", "success-hold"])
+def test_native_deadline_bounds_the_process_even_after_a_success_result(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    monkeypatch.setenv("FAKE_AGY_MODE", mode)
+    context = replace(agent_context, node=agent_context.node.model_copy(update={"timeout": "2s"}))
+    driver = AntigravityDriver(PROFILES["antigravity"], context.command)
+    _events, result = execute(driver, context)
+    assert not result.succeeded
+    assert result.stop_reason is AttemptStopReason.TIMEOUT
+    assert result.error_code == "node_timeout"
+    assert driver.process is not None and driver.process.returncode is not None
+    if mode == "success-hold":
+        assert result.provider_stop_reason == "SUCCESS"
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+def test_native_timeout_argument_uses_the_effective_remaining_deadline(
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents
+) -> None:
+    context = replace(
+        agent_context,
+        node=agent_context.node.model_copy(update={"timeout": "15m"}),
+        attempt=replace(agent_context.attempt, deadline_at=time.monotonic() + 9),
+    )
+    _events, result = execute(AntigravityDriver(PROFILES["antigravity"], context.command), context)
+    assert result.succeeded
+    arguments = next(row["argv"] for row in fake_agents.messages() if "argv" in row)
+    timeout = arguments[arguments.index("--print-timeout") + 1]
+    assert timeout.endswith("s") and 1 <= int(timeout[:-1]) <= 9
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
@@ -576,50 +617,33 @@ def test_antigravity_invalid_streams_raise_relay_errors(
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
 @pytest.mark.parametrize(
-    ("mode", "denied"),
+    "mode",
     [
-        ("stderr-denied", True),
-        ("stdout-denied", False),
-        ("stderr-outside", False),
-        ("stderr-fragments", False),
+        "stderr-denied",
+        "stdout-denied",
+        "stderr-outside",
+        "stderr-fragments",
+        "headless-help-only",
+        "headless-denied-write",
+        "headless-denied-outside",
+        "headless-denied-stdout-only",
+        "headless-command-denied",
+        "headless-write-error",
+        "headless-denied-before-tool",
     ],
 )
-def test_antigravity_soft_denies_require_a_complete_in_worktree_stderr_notice(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str, denied: bool
+def test_antigravity_tool_failures_and_notices_do_not_override_success(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     monkeypatch.setenv("FAKE_AGY_MODE", mode)
-    _events, result = execute(
+    events, result = execute(
         AntigravityDriver(PROFILES["antigravity"], agent_context.command), agent_context
     )
-    assert result.succeeded is not denied
-    assert result.denied_write_targets == (("report.txt",) if denied else ())
-    assert result.error_code == ("antigravity_soft_denied" if denied else None)
-
-
-@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
-@pytest.mark.parametrize(
-    ("mode", "denied"),
-    [
-        ("headless-help-only", False),
-        ("headless-denied-write", True),
-        ("headless-denied-outside", False),
-        ("headless-denied-stdout-only", False),
-        ("headless-command-denied", False),
-        ("headless-write-error", False),
-        ("headless-denied-before-tool", True),
-    ],
-)
-def test_antigravity_native_denial_notice_requires_matching_write_target(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str, denied: bool
-) -> None:
-    monkeypatch.setenv("FAKE_AGY_MODE", mode)
-    _events, result = execute(
-        AntigravityDriver(PROFILES["antigravity"], agent_context.command), agent_context
-    )
-    assert result.succeeded is not denied
-    assert result.denied_write_targets == (("report.txt",) if denied else ())
-    assert result.error_code == ("antigravity_soft_denied" if denied else None)
-    assert result.stop_reason == ("soft_denied" if denied else "completed")
+    assert result.succeeded
+    assert result.stop_reason is AttemptStopReason.COMPLETED
+    assert result.provider_stop_reason == "SUCCESS"
+    assert result.error_code is None
+    assert any(event.event_type in {"agent.stderr", "agent.message"} for event in events)
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
@@ -733,7 +757,7 @@ def test_routed_execution_preserves_oversized_visible_events(
             yield AgentEvent("agent.message", {"text": text, "message_id": "message-1", "turn": 1})
 
         async def finalize(self) -> AgentResult:
-            return AgentResult(True, "end_turn", 0)
+            return AgentResult(True, AttemptStopReason.COMPLETED, 0)
 
     monkeypatch.setattr("relay.agents.driver._driver", LargeMessageDriver)
     outcome = RoutedAgentNodeDriver().execute(agent_context.attempt, agent_context.node)
@@ -801,7 +825,7 @@ def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
             )
 
         async def finalize(self) -> AgentResult:
-            return AgentResult(True, "end_turn", 0)
+            return AgentResult(True, AttemptStopReason.COMPLETED, 0)
 
     fake_agents.install("codex")
     monkeypatch.setattr("relay.agents.driver._driver", TerminalDeltaDriver)

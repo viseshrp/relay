@@ -456,8 +456,7 @@ Choose **Resume** explicitly when ready.
 
 While paused, the header says: "Paused. Running jobs will finish; nothing new
 will start until you resume." The server supports validated settings changes
-for a materialized agent step that has never started. Unexpanded future jobs
-do not expose the removed v1 stage-edit controls. Completed attempts and
+for a materialized agent step that has never started. Completed attempts and
 captured prompts remain immutable. See
 [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
@@ -491,9 +490,9 @@ each loaded job appears once, including iteration markers. **Load more jobs**
 extends the same list. The Summary has one graph without a duplicate chip
 block. Select **Summary** for the run graph, approvals, and overall status.
 Failure notices in Summary, job logs, and embedded step logs share the same
-recorded reason. Permission denials and timeouts take precedence over a
-provider's exit code, including exit code zero. An explicit public error
-message remains the first explanation.
+recorded reason. A provider failure status can accompany exit code zero.
+Configured Relay deadlines remain distinct from provider failures. An explicit
+public error message remains the first explanation.
 
 Selecting a job in the list, graph, or failure notice opens its log in the
 right column. The URL records

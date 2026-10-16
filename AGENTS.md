@@ -172,6 +172,10 @@ applicable; do not silently change adjacent behavior.
   change providers, or enable auto-approval to bypass a failure. Relay discovers
   existing agent installations; provider installation and authentication remain
   owner responsibilities.
+- Preserve provider terminal outcomes as diagnostic data. Internal tool errors
+  and prose cannot override success. Provider failures require an owner decision;
+  they cannot enter automatic repair or Relay's orderly-shutdown path. Enforce
+  configured Relay deadlines and leave provider defaults to the provider.
 - Preserve bounded initialization, prompt execution, feedback, cancellation,
   and shutdown. Keep permission answers attached to their exact request and
   session. Drop provider-private content from public events and retain ordered

@@ -19,6 +19,7 @@ from relay.constants import (
 from relay.errors import (
     AgentAuthError,
     AgentConfigurationError,
+    AgentExecutionError,
     AgentLaunchError,
     AgentProtocolError,
     ModelSelectionRejectedError,
@@ -143,6 +144,8 @@ def _aggregate_error(reasons: Mapping[str, ProbeFailure]) -> RelayError:
         error_type = ModelSelectionRejectedError
     elif prefixes == {AgentProtocolError.error_code}:
         error_type = AgentProtocolError
+    elif prefixes == {AgentExecutionError.error_code}:
+        error_type = AgentExecutionError
     elif prefixes == {AgentConfigurationError.error_code}:
         error_type = AgentConfigurationError
     else:
@@ -364,20 +367,6 @@ def probe_installed_agents(
     return rows
 
 
-def _stop_reason(result: AgentResult) -> AttemptStopReason:
-    return {
-        "completed": AttemptStopReason.COMPLETED,
-        "end_turn": AttemptStopReason.COMPLETED,
-        "canceled": AttemptStopReason.CANCELED,
-        "timeout": AttemptStopReason.TIMEOUT,
-        "interrupted": AttemptStopReason.INTERRUPTED,
-        "soft_denied": AttemptStopReason.SOFT_DENIED,
-        "max_tokens": AttemptStopReason.FAILED,
-        "max_turn_requests": AttemptStopReason.FAILED,
-        "refusal": AttemptStopReason.FAILED,
-    }.get(result.stop_reason, AttemptStopReason.FAILED)
-
-
 class RoutedAgentNodeDriver:
     """Execute the captured route or an explicitly authorized retry replacement."""
 
@@ -529,15 +518,17 @@ class RoutedAgentNodeDriver:
         result = await driver.finalize()
         return ExecutionOutcome(
             OutcomeKind.SUCCEEDED if result.succeeded else OutcomeKind.FAILED,
-            stop_reason=_stop_reason(result),
+            stop_reason=result.stop_reason,
             exit_code=result.exit_code,
             error_code=result.error_code,
-            error_message=(
+            error_message=result.error_message
+            or (
                 "The provider's usage limit stopped this step."
                 if result.usage_limit is not None
                 else None
             ),
             usage_limit=result.usage_limit,
+            provider_stop_reason=result.provider_stop_reason,
         )
 
 

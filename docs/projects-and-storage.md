@@ -359,8 +359,9 @@ Dependency order, conditions, input defaults, report contracts, instructions,
 approval questions and deadlines, loop bounds, reusable workflow mappings,
 verification outputs, and entry-point evidence remain explicit workflow choices.
 They define the task or its safety boundary and are not injected into every
-project. Provider login, credentials, installation, resource bounds, and process
-ownership stay with their existing adapters. `--no-browser` remains a
+project. Provider login, credentials, and installation belong to the provider
+and owner. Relay's adapters own run-resource bounds and process ownership.
+`--no-browser` remains a
 startup-only CLI choice.
 
 **Settings › Storage** replaces project-wide cleanup on run pages. It counts

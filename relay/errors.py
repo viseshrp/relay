@@ -154,6 +154,14 @@ class AgentProtocolError(RelayError):
     http_status: ClassVar[int] = constants.HTTP_BAD_GATEWAY
 
 
+class AgentExecutionError(RelayError):
+    """The provider returned a failure through a valid protocol response."""
+
+    error_code: ClassVar[str] = "agent_execution_error"
+    cli_exit_code: ClassVar[int] = constants.EXIT_AGENT_ERROR
+    http_status: ClassVar[int] = constants.HTTP_BAD_GATEWAY
+
+
 class AgentUsageLimitError(RelayError):
     """The provider rejected a request because its usage window is full."""
 
@@ -237,6 +245,7 @@ def log_persistence_failure(logger: logging.Logger, error: BaseException, **cont
 __all__ = [
     "AgentAuthError",
     "AgentDiscoveryError",
+    "AgentExecutionError",
     "AgentLaunchError",
     "AgentProtocolError",
     "AgentUsageLimitError",

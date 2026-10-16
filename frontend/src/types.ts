@@ -247,6 +247,7 @@ export interface JobAttempt {
   started_at: string | null;
   ended_at: string | null;
   stop_reason: string | null;
+  provider_stop_reason: string | null;
   exit_code: number | null;
   error_code: string | null;
   error_message: string | null;
@@ -351,6 +352,7 @@ export interface RunProblem extends RetryConfiguration {
   attempt_number: number;
   error_code: string | null;
   stop_reason: string | null;
+  provider_stop_reason: string | null;
   exit_code: number | null;
   message: string | null;
   provider_message: string | null;

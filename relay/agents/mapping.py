@@ -8,6 +8,7 @@ from acp import RequestError
 
 from relay.errors import (
     AgentAuthError,
+    AgentExecutionError,
     AgentLaunchError,
     AgentProtocolError,
     RelayError,
@@ -27,6 +28,11 @@ def map_agent_exception(error: BaseException, *, agent_id: str) -> RelayError:
             f"Agent {agent_id!r} requires authentication.",
             context=context,
             next_action="Authenticate with the agent directly, then retry the probe.",
+        )
+    if isinstance(error, RequestError):
+        return AgentExecutionError(
+            f"Agent {agent_id!r} rejected the request (provider code {error.code}).",
+            context={**context, "provider_error_code": str(error.code)},
         )
     if isinstance(error, OSError) and not isinstance(error, (ConnectionError, BrokenPipeError)):
         return AgentLaunchError(

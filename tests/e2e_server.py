@@ -332,11 +332,17 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         providers.install("codex", mode="configuration-recovery")
         return JsonResponse({"ok": True})
 
+    @api_errors
     @owner_required
     @require_POST
-    def native_denial_provider(request: HttpRequest) -> JsonResponse:
-        del request
-        providers.install("antigravity", mode="headless-denied-write")
+    def native_result_provider(request: HttpRequest) -> JsonResponse:
+        body = json_body(request)
+        modes = {"failure": "interrupted", "success-with-denied-tool": "headless-denied-write"}
+        mode = body.get("mode")
+        if not isinstance(mode, str) or mode not in modes:
+            message = "Choose a supported native provider result fixture."
+            raise ConfigError(message)
+        providers.install("antigravity", mode=modes[mode])
         return JsonResponse({"ok": True})
 
     @api_errors
@@ -406,7 +412,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
-    urlpatterns.insert(0, path("__test__/native-denial-provider", native_denial_provider))
+    urlpatterns.insert(0, path("__test__/native-result-provider", native_result_provider))
     urlpatterns.insert(0, path("__test__/activity", activity))
 
     # Close each SDK callback's database connection in its owning thread.

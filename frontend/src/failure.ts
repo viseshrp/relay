@@ -8,6 +8,8 @@ type FailureDetails = {
 
 const reasons: Record<string, string> = {
   agent_protocol_error: "The agent stopped before completing its request.",
+  agent_execution_error:
+    "The provider reported that this step did not complete.",
   agent_usage_limit: "The provider's usage limit stopped this step.",
   agent_auth_error: "The agent needs a working sign-in before it can continue.",
   agent_launch_error: "Relay could not start the selected agent.",
@@ -20,7 +22,6 @@ const reasons: Record<string, string> = {
     "The loop reached its iteration limit without satisfying its stop condition. Open the step to inspect the retained results.",
   node_timeout: "The step reached its time limit.",
   worker_lost: "The worker stopped before finishing this step.",
-  soft_denied: "The tool did not have permission to complete its work.",
   git_error: "A Git operation could not complete.",
   worktree_error: "Relay could not prepare or clean up the working folder.",
 };

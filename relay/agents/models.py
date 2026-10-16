@@ -11,6 +11,7 @@ from typing import Literal
 
 from relay.errors import RelayError
 from relay.execution.runner import AttemptContext
+from relay.execution.state import AttemptStopReason
 from relay.workflows.schema import AgentNode
 
 from .usage_limits import ProviderUsageLimit
@@ -207,11 +208,12 @@ class AgentResult:
     """Provider-independent terminal result after one fresh session."""
 
     succeeded: bool
-    stop_reason: str
+    stop_reason: AttemptStopReason
     exit_code: int | None = None
     error_code: str | None = None
-    denied_write_targets: tuple[str, ...] = ()
     usage_limit: ProviderUsageLimit | None = None
+    provider_stop_reason: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

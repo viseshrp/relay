@@ -167,6 +167,7 @@ class ExecutionOutcome:
     usage_limit: ProviderUsageLimit | None = None
     raw_outcome: str | None = None
     conclusion: str | None = None
+    provider_stop_reason: str | None = None
 
 
 class AttemptExecutor(Protocol):

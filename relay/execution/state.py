@@ -81,7 +81,6 @@ class AttemptStopReason(ChoiceEnum):
     FAILED = "failed", "Failed"
     OUTPUT_INVALID = "output_invalid", "Output invalid"
     TIMEOUT = "timeout", "Timeout"
-    SOFT_DENIED = "soft_denied", "Soft denied"
     CANCELED = "canceled", "Canceled"
     WORKER_LOST = "worker_lost", "Worker lost"
     INTERRUPTED = "interrupted", "Interrupted"

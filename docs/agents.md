@@ -5,6 +5,21 @@ CLI, and Cursor CLI through ACP; Antigravity through its native headless
 interface. Relay discovers existing commands. It does not install an agent,
 create a vendor account, or store provider credentials.
 
+## Execution ownership
+
+Relay schedules declared jobs and steps, passes captured inputs and output
+contracts, isolates their workspaces, and preserves their results. Providers own
+their internal tools, permission enforcement, authentication, available models,
+and execution outcomes. Relay reports unsupported provider features without
+implementing substitutes or changing the requested settings.
+
+A valid provider failure returns `agent_execution_error`. Malformed exchanges
+return `agent_protocol_error`. Neither authorizes automatic repair. The exact
+provider stop reason is diagnostic data; only Relay controls can report its
+owner cancellation, orderly shutdown, or configured deadline expiry. Explicit
+workflow loops, owner retries, and confirmed usage-reset schedules retain their
+own rules.
+
 ## Exact-model routing
 
 An agent action's `with.model` is an exact, case-sensitive value advertised by
@@ -122,9 +137,9 @@ Output validation still rejects missing files and unresolved labels or paths.
 Both transports also provide the selected tool, exact model, permission profile,
 and requested effort and permission overrides. For example, `opus` appears as
 `"model_value": "opus"`; an unset effort appears as `"effort_override": null`,
-which does not claim a particular provider default. Agents receive instructions
-to use that selection for report provenance, regardless of role names in static
-source prompts. Retained attempt metadata and provider startup events remain
+which does not claim a particular provider default. The workflow's own
+instructions define report content and provenance. Retained attempt metadata
+and provider startup events remain
 the evidence for which tool and model ran.
 
 ACP message, thought, tool-call, tool-result, and plan updates become Relay
@@ -200,8 +215,8 @@ ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to
 stop. On Windows it uses a console break followed by `taskkill /T /F` when
 needed; on Linux it signals the process group with `SIGTERM` then `SIGKILL`.
-The final exit wait is bounded. Live Windows agent cancellation remains
-unverified.
+The final exit wait is bounded. The dated live-control records below identify
+the Windows cancellation checks actually performed.
 
 The Phase 1 profiles advertise no client-mediated file or terminal methods:
 
@@ -234,10 +249,9 @@ manager.
 | Antigravity | [Antigravity CLI installation](https://antigravity.google/docs/cli/install/) | Authenticate once in `agy` or configure its supported API key. |
 
 Adapter commands remain argument vectors. Registry package text such as
-`@agentclientprotocol/codex-acp@1.12.0` is displayed verbatim; Relay does not
-split, shell-expand, or execute it until a later explicit browser installation
-confirmation. A stale validated registry cache may support discovery when a
-refresh fails, but Relay displays its age and warning.
+`@agentclientprotocol/codex-acp@1.12.0` is displayed verbatim. Installation stays
+with the owner and provider. A stale validated registry cache may support
+discovery when a refresh fails, but Relay displays its age and warning.
 Concurrent refreshes publish complete cache files independently. A cache write
 failure leaves the previous validated cache available and reports a Relay
 discovery error when no usable cache remains.
@@ -270,8 +284,7 @@ output. Agent prose does not register workflow commands or masks.
 Actions terminal-delta masking decodes JSON escapes before matching secrets.
 For example, `TOKEN-12345` followed by `67890\n` becomes `***\n` when the
 declared secret is `TOKEN-1234567890`; a declared `a"b\c` also becomes `***`.
-Every supported agent workflow runs through this streaming proxy. The removed
-v1 executor has no replay path.
+Every supported agent workflow runs through this streaming proxy.
 Arbitrary inherited variables, Git diffs, and retained files are not
 automatically redacted and can contain sensitive data until the owner deletes
 the run.
@@ -308,19 +321,13 @@ The `auto_approve` permission profile adds
 allows every Antigravity tool and should be used only with a trusted prompt.
 Headless mode cannot pause for mid-run permission or elicitation input.
 
-Antigravity always has a print timeout. A node timeout such as `15m` becomes
-`--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
-five-minute default and passes `--print-timeout 5m` explicitly.
-Relay also enforces that ceiling with a monotonic deadline from process
-startup, including when the node has no declared timeout. Expiry reports
-`node_timeout` with stop reason `timeout`. A received `SUCCESS` result is
-not reclassified as a print timeout while buffered output drains. Relay does
-not infer timeout from the free-text `error` field. An `ERROR` result whose
-documented numeric `duration_seconds` reaches the print ceiling also reports
-a timeout. The headless documentation provides no separate timeout code.
-The Windows live check exercised a one-minute deadline while a real native
-command and its child were running. Both exited, and Relay retained
-`node_timeout` with stop reason `timeout`.
+Relay enforces the effective configured job, step, or owner timeout across the
+native process lifecycle. When configured, the remaining deadline is passed as
+`--print-timeout`; the local monotonic deadline remains authoritative. Without a
+configured limit, Relay leaves the provider's timeout default unset. An `ERROR`
+result remains a provider failure regardless of its elapsed duration or error
+text. The Windows live check exercised a configured one-minute deadline while
+a real native command and its child were running; both exited.
 
 The disposable `agy models` probe has a 15-second response limit and runs in
 its own process group. Relay stops that group before reporting a model-list
@@ -343,24 +350,17 @@ only to the executable, adapter arguments, model and flags; the prompt travels
 through stdin. An oversized command reports the same code with guidance to
 shorten its arguments or model value.
 
-Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
-using a bounded queue that applies pipe backpressure. JSON parsing holds at most
-one 1 MiB line; a larger line is retained as raw output and then fails the
-attempt as a protocol error. Cancellation and timeout drain bytes already read
-before the attempt settles. Relay detects soft denies in complete stderr tool
-notices, as described by the headless documentation. A concrete target such
-as `write_file(src/report.md)` becomes worktree-relative `src/report.md`.
-Outside paths and command examples do not identify denied workspace writes.
+Relay retains stdout and stderr in UTF-8-safe chunks using a bounded queue that
+applies pipe backpressure. Only stdout is parsed as NDJSON, holding at most one
+1 MiB line. An oversized or malformed line fails the protocol exchange after
+its raw output is retained. Stderr remains opaque diagnostic text.
+Cancellation and timeout drain bytes already read before the attempt settles.
 
-Native CLI 1.3.6 emits a generic stderr notice whose advice includes the
-example `write_file(<target>)`. Relay ignores that placeholder. For this
-notice, it also requires a failed `write_to_file` step whose structured
-`TargetFile` agrees with the permission-denial error. The stderr notice and
-tool failure may arrive in either order. Neither stdout alone nor a generic
-notice without that matching failure proves a denied write. A verified
-workspace write denial fails the step with `soft_denied`. Current agent steps
-share their job's workspace and Relay commits at job success, so this check
-does not depend on a provider-created commit.
+Native success requires the provider's terminal `SUCCESS` and exit code zero.
+Internal failed tools and permission notices do not override that result.
+Declared workflow reports are validated separately. Native `ERROR`, `CANCELED`,
+and `INTERRUPTED` results stop the step as provider failures; they never enter
+Relay's owner-cancel or restart-recovery paths.
 
 ## Certification evidence
 

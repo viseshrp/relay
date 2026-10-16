@@ -26,6 +26,7 @@ from relay.constants import EVENT_MAX_PAYLOAD_BYTES, REGISTRY_CACHE_TTL_SECONDS
 from relay.errors import (
     AgentAuthError,
     AgentDiscoveryError,
+    AgentExecutionError,
     AgentLaunchError,
     AgentProtocolError,
     RelayError,
@@ -47,8 +48,9 @@ def test_probe_failure_keeps_error_identity_separate_from_prose() -> None:
     ("error", "expected"),
     [
         (RequestError.auth_required(), AgentAuthError),
-        (RequestError.invalid_params(), AgentProtocolError),
-        (RequestError(-1, "Authentication required"), AgentProtocolError),
+        (RequestError.invalid_params(), AgentExecutionError),
+        (RequestError.method_not_found("unsupported"), AgentExecutionError),
+        (RequestError(-1, "Authentication required"), AgentExecutionError),
         (FileNotFoundError("binary"), AgentLaunchError),
         (ConnectionResetError("closed"), AgentProtocolError),
         (BrokenPipeError("closed"), AgentProtocolError),
@@ -60,7 +62,11 @@ def test_agent_exception_mapping_uses_types_and_codes_not_text(
 ) -> None:
     mapped = map_agent_exception(error, agent_id="codex")
     assert isinstance(mapped, expected)
-    assert mapped.context == {"agent": "codex"}
+    assert mapped.context == (
+        {"agent": "codex", "provider_error_code": str(error.code)}
+        if isinstance(error, RequestError) and expected is AgentExecutionError
+        else {"agent": "codex"}
+    )
 
 
 def test_an_existing_relay_error_is_preserved() -> None:

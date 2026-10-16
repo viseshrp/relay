@@ -167,8 +167,8 @@ also authorizes bounded retries for eligible agent failures.
 Fix-and-check work is an explicit `relay/loop@v1` step calling a captured local
 reusable workflow. Each iteration retains its attempts and outputs. The loop
 stops when its declared condition passes or fails with `loop_exhausted` when
-its iteration limit is spent. Implicit repair policies, injected fixer and
-verifier nodes, and output substitution are removed. See
+its iteration limit is spent. Its source defines the agents, commands, and
+acceptance outputs for each iteration. See
 [Stage repair rules](workflows.md#stage-repair-rules).
 
 ### Automatic step recovery
@@ -180,8 +180,10 @@ modifying the captured workflow. The agent action input `auto-retry: false` opts
 a step out.
 
 Eligible error codes are `output_validation_error`, `commit_validation_error`,
-`dirty_repository_error`, `node_timeout`, and `agent_protocol_error`.
-Cancellation, interruption, permission refusal, unavailable models, unsafe
+`dirty_repository_error`, and `node_timeout`.
+Provider execution and protocol failures require an owner decision and create no
+automatic repair instruction or schedule. Cancellation, interruption,
+permission refusal, unavailable models, unsafe
 paths, storage failures, preservation failures, and Git recovery failures never
 launch an automatic attempt. A failed command does not receive an automatic
 agent retry. Explicit step conditions and loops retain their declared failure

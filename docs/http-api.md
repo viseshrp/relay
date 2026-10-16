@@ -445,7 +445,8 @@ preview is limited to 256 KiB. It reads the launch snapshot, never current
 prompt files.
 
 Attempts contain `id`, `number`, `status`, `agent_id`, exact `model_value`,
-`started_at`, `ended_at`, `stop_reason`, `exit_code`, `error_code`,
+`started_at`, `ended_at`, `stop_reason`, `provider_stop_reason`, `exit_code`,
+`error_code`,
 `error_message`, public `provider_message`, `provider_message_truncated`,
 `starting_head`, and `ending_head`. Worker IDs, process IDs, live session
 identifiers, and private provider content are omitted. `latest_attempt` is
@@ -491,8 +492,12 @@ Failed agent nodes also include `retry_settings`, containing their own
 several agents fail, independently of the initiating problem notice.
 Run detail includes `problem`, either `null` or the initiating failed attempt's
 `scope_path`, `attempt_number`, `agent_id`, `model_value`, `error_code`,
-`stop_reason`, `exit_code`, `message`, `provider_message`, and
-`provider_message_truncated`. This metadata does not depend on the node or
+`stop_reason`, `provider_stop_reason`, `exit_code`, `message`, `provider_message`,
+and
+`provider_message_truncated`. `provider_stop_reason` is nullable diagnostic
+data from the provider; it cannot select a Relay state transition. Valid
+provider failures use `agent_execution_error` and do not schedule automatic
+repair. This metadata does not depend on the node or
 event page cursor. It selects only the latest attempt of a currently failed
 node, so a retried attempt's old error cannot become the current problem.
 The provider text comes from that attempt's last normal, public `agent.message`,

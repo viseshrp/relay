@@ -530,7 +530,13 @@ class WireAgent:
                     gate = Path(self.mode.removeprefix("quiet-until:"))
                     while not gate.exists():
                         time.sleep(0.01)
-                reason = "refusal" if self.mode == "refusal" else "end_turn"
+                reason = (
+                    self.mode.removeprefix("stop-")
+                    if self.mode.startswith("stop-")
+                    else "refusal"
+                    if self.mode == "refusal"
+                    else "end_turn"
+                )
                 self.reply(request_id, {"stopReason": reason})
         elif method == "session/cancel":
             if self.pending_prompt is not None:

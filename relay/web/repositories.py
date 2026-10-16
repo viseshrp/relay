@@ -978,6 +978,7 @@ def _run_problem(run: Run) -> dict[str, object] | None:
         return None
     ended = RunEvent.objects.filter(attempt=attempt, type="attempt.ended").order_by("-id").first()
     message = _mapping(ended, "payload").get("error_message") if ended else None
+    provider_stop_reason = _mapping(ended, "payload").get("provider_stop_reason") if ended else None
     provider_message, truncated = _provider_failure_message(attempt)
     retry = UsageRetry.objects.filter(run=run, attempt=attempt).first()
     node = _related(attempt, "node_run", NodeRun)
@@ -990,6 +991,9 @@ def _run_problem(run: Run) -> dict[str, object] | None:
         "stop_reason": attempt.stop_reason,
         "exit_code": attempt.exit_code,
         "message": message if isinstance(message, str) else None,
+        "provider_stop_reason": provider_stop_reason
+        if isinstance(provider_stop_reason, str)
+        else None,
         "provider_message": provider_message,
         "provider_message_truncated": truncated,
         "retry": (
@@ -1169,6 +1173,7 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
         .first()
     )
     error = _mapping(ended, "payload").get("error_message") if ended else None
+    provider_stop_reason = _mapping(ended, "payload").get("provider_stop_reason") if ended else None
     provider_message, truncated = _provider_failure_message(attempt)
     return {
         "id": _identifier(attempt),
@@ -1183,6 +1188,9 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
         "error_code": attempt.error_code,
         "error_message": _truncate_utf8(error, RUN_PROBLEM_TEXT_MAX_CHARS)
         if isinstance(error, str)
+        else None,
+        "provider_stop_reason": provider_stop_reason
+        if isinstance(provider_stop_reason, str)
         else None,
         "provider_message": provider_message,
         "provider_message_truncated": truncated,
@@ -4136,7 +4144,7 @@ class DjangoExecutionStore(DjangoAgentStore):
         error_code = (
             stored_code if isinstance(stored_code, str) else _string(attempt, "stop_reason")
         )
-        if error_code == "agent_usage_limit":
+        if error_code not in RECOVERABLE_ERRORS:
             return
         used = AutomaticRetry.objects.filter(attempt__node_run=node, state="resumed").count()
         state = "scheduled"
@@ -4149,10 +4157,9 @@ class DjangoExecutionStore(DjangoAgentStore):
             else frozen.get("auto_retry", True)
         ) is False:
             state, reason = "blocked", "Automatic recovery is disabled for this agent step."
-        elif error_code not in RECOVERABLE_ERRORS or _string(attempt, "stop_reason") in {
+        elif _string(attempt, "stop_reason") in {
             AttemptStopReason.CANCELED.value,
             AttemptStopReason.INTERRUPTED.value,
-            AttemptStopReason.SOFT_DENIED.value,
         }:
             state, reason = "blocked", "This failure requires an owner decision or safe recovery."
         elif used >= retry_limit:
@@ -4377,10 +4384,17 @@ class DjangoExecutionStore(DjangoAgentStore):
                     if outcome.error_message is not None
                     else None
                 )
-                if actions_node and failure_message:
+                provider_stop_reason = outcome.provider_stop_reason
+                if actions_node:
                     from relay.execution.masking import redactor
 
-                    failure_message = redactor(_identifier(run)).text(failure_message)
+                    masks = redactor(_identifier(run))
+                    if failure_message:
+                        failure_message = masks.text(failure_message)
+                    if provider_stop_reason:
+                        provider_stop_reason = masks.text(provider_stop_reason)[
+                            :RUN_PROBLEM_TEXT_MAX_CHARS
+                        ]
                 now = timezone.now()
                 _set_model_field(attempt, "status", AttemptStatus.TERMINAL.value)
                 _set_model_field(attempt, "ending_head", ending_head)
@@ -4458,6 +4472,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "exit_code": outcome.exit_code,
                         "error_code": outcome.error_code,
                         "error_message": failure_message,
+                        "provider_stop_reason": provider_stop_reason,
                     },
                     node=node,
                     attempt=attempt,
