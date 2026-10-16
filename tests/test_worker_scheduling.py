@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from django.conf import settings
-from django.test import Client
 import pytest
 
-from relay.config import validate_config
 from relay.execution import huey_app
 from relay.execution.dispatch import set_dispatch_notifier
 from relay.execution.launch import LaunchRequest, launch_workflow
@@ -78,28 +74,6 @@ def test_idle_worker_scheduling_takes_no_write_lock() -> None:
         for _ in range(10):
             huey_app._advance_changed_runs(DjangoExecutionStore())
     assert probe.transactions == probe.autocommit_writes == 0
-
-
-def test_legacy_worker_count_warns_and_uses_one(caplog: pytest.LogCaptureFixture) -> None:
-    assert validate_config({"workers": 8}).workers == 1
-    assert "one worker" in caplog.text
-    warning = next(record for record in caplog.records if record.name == "relay.config")
-    assert warning.args == ()
-    assert warning.getMessage() == ("Relay uses one worker; the legacy workers setting is ignored.")
-
-
-def test_settings_api_rejects_new_parallel_worker_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "RELAY_LOGIN_REQUIRED", False)
-    client = Client()
-    current = client.get("/api/settings").json()
-    response = client.post(
-        "/api/settings",
-        data=json.dumps({"settings": {"workers": 2}, "revision": current["revision"]}),
-        content_type="application/json",
-    )
-    assert response.status_code == 422
-    assert response.json()["code"] == "config_error"
-    assert client.get("/api/settings").json()["settings"]["workers"] == 1
 
 
 def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(

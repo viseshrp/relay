@@ -288,7 +288,7 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
 ) -> None:
     boundary = supervisor_boundary
     supervisor.run_supervisor(
-        RelayConfig(port=9001, workers=3, login_required=login_required),
+        RelayConfig(port=9001, login_required=login_required),
         open_browser=False,
         on_ready=boundary.stop_when_ready,
     )
@@ -611,7 +611,7 @@ def test_orphan_recovery_preserves_workspaces_when_a_live_attempt_is_unverified(
     run_id = engine.launch(project, "unverified")
     claim = engine.store.claim_dispatch(engine.tokens.popleft(), "older-worker").attempt
     assert claim is not None
-    # A migrated attempt has a PID but no historical creation time to trust.
+    # A PID alone does not prove the process's creation identity.
     NodeAttempt.objects.filter(pk=claim.attempt_id).update(
         process_pid=os.getpid(), process_started=None
     )

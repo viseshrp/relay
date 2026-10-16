@@ -4,16 +4,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
-import logging
 from pathlib import Path
 
-from .constants import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_WORKERS, LOOPBACK_HOSTS
+from .constants import DEFAULT_HOST, DEFAULT_PORT, LOOPBACK_HOSTS
 from .errors import ConfigError
 from .execution.state import CleanupPolicy
 from .paths import settings_path
 from .workflows.defaults import WorkflowDefaults, validate_defaults
-
-LOGGER = logging.getLogger(__name__)
 
 _ALLOWED_KEYS: set[str] = {
     "agent_preferences",
@@ -21,7 +18,6 @@ _ALLOWED_KEYS: set[str] = {
     "host",
     "login_required",
     "port",
-    "workers",
     "workflow_defaults",
 }
 
@@ -34,7 +30,6 @@ class RelayConfig:
     cleanup_policy: str = "clean_on_success"
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
-    workers: int = DEFAULT_WORKERS
     login_required: bool = True
     workflow_defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults)
 
@@ -77,16 +72,9 @@ def validate_config(raw: object) -> RelayConfig:
         message = "Relay may bind only to a loopback address."
         raise ConfigError(message)
     port = raw.get("port", DEFAULT_PORT)
-    workers = raw.get("workers", DEFAULT_WORKERS)
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65_535:
         message = "port must be an integer from 1 through 65535."
         raise ConfigError(message)
-    if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
-        message = "workers must be a positive integer."
-        raise ConfigError(message)
-    if workers != 1:
-        LOGGER.warning("Relay uses one worker; the legacy workers setting is ignored.")
-        workers = 1
     login_required = raw.get("login_required", True)
     if not isinstance(login_required, bool):
         message = "login_required must be true or false."
@@ -96,7 +84,6 @@ def validate_config(raw: object) -> RelayConfig:
         cleanup_policy,
         host,
         port,
-        workers,
         login_required,
         validate_defaults(raw.get("workflow_defaults", {})),
     )

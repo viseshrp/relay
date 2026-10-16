@@ -411,7 +411,6 @@ export interface OwnerSettings {
   cleanup_policy: "clean_on_success" | "retain" | "merge_on_success";
   host: string;
   port: number;
-  workers: number;
   login_required: boolean;
   workflow_defaults: WorkflowDefaults;
 }
