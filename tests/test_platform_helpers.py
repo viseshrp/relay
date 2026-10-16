@@ -60,11 +60,10 @@ def test_private_directory_creation_includes_missing_parents(tmp_path: Path) -> 
     ("operation", "result", "allocations"),
     [
         ("GetNamedSecurityInfoW", ACCESS_DENIED, 0),
-        ("ConvertStringSidToSidW", 0, 1),
-        ("GetAclInformation", 0, 2),
-        ("GetAce", 0, 2),
-        ("SetEntriesInAclW", ACCESS_DENIED, 2),
-        ("SetNamedSecurityInfoW", ACCESS_DENIED, 3),
+        ("GetAclInformation", 0, 1),
+        ("GetAce", 0, 1),
+        ("SetEntriesInAclW", ACCESS_DENIED, 1),
+        ("SetNamedSecurityInfoW", ACCESS_DENIED, 2),
     ],
 )
 def test_windows_acl_errors_preserve_the_directory_and_release_allocations(
@@ -205,24 +204,13 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
     before_flags = before.split("D:", 1)[1].split("(", 1)[0]
     after_flags = after.split("D:", 1)[1].split("(", 1)[0]
     assert ("P" in before_flags) == ("P" in after_flags)
-    added_rules = [rule for rule in after_rules if rule not in before_rules]
-    assert all(
-        rule
-        == {
-            "rights": attributes,
-            "inheritance": "None",
-            "propagation": "None",
-            "inherited": False,
-        }
-        for rule in added_rules
-    )
-    assert after_rules
+    assert after_rules == before_rules
     assert security() == (owner, after, attributes, after_rules, True, True)
     child = directory / "child.txt"
     child.write_text("retained bytes", encoding="utf-8")
     _, _, _, child_rules, child_owner_full, _ = security(child)
     assert child_owner_full
-    assert all(rule not in child_rules for rule in added_rules)
+    assert all(rule in before_rules for rule in child_rules if not rule["inherited"])
 
 
 def test_safe_resolve_keeps_contained_paths(tmp_path: Path) -> None:

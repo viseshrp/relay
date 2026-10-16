@@ -54,11 +54,10 @@ Relay creates these directories only when needed. POSIX directories use mode
 `0700`. Windows retains the directory's existing ACL and adds an inheritable
 grant for its original owner. This keeps files created by a provider's sandbox
 account readable by Relay, even when the child file has a different owner.
-Relay also lets authenticated accounts read attributes of the directory itself,
-which sandboxed Node and PowerShell need to resolve workspace paths. That grant
-does not permit directory listings, file contents, or inheritance by child
-files. Existing ACL entries and inheritance protection stay intact. Review the
-existing ACL if other local accounts can access the profile.
+Existing ACL entries and inheritance protection stay intact. Relay adds no
+permissions for provider sandbox accounts. A provider that cannot access its
+assigned workspace reports its own failure; incomplete preservation keeps the
+workspace available for inspection.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and
