@@ -80,11 +80,11 @@ check or no ready agent returns exit code 6.
 
 Administration commands show readable text by default. Use `relay doctor
 --json`, `relay project list --json`, `relay project relink OLD_PATH NEW_PATH
---json`, or `relay data clean --json` to keep their previous sorted JSON
-output. `relay --json COMMAND` also selects that output for a nested command.
+--json`, or `relay data clean --json` for sorted JSON output.
+`relay --json COMMAND` also selects that output for a nested command.
 Relay errors show `Error: <message>` and, when available,
-`Next: <next_action>`; `--json` keeps the previous error envelope and exit
-codes. Initialization and startup keep their previous text in `--json` mode.
+`Next: <next_action>`. The `--json` option returns a structured error envelope.
+Initialization and startup use text in `--json` mode.
 
 `relay doctor` uses the launch cleanliness checker for untouched starter files
 and root reports. It lists allowed changes as a warning. Unrelated edits and

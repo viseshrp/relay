@@ -79,7 +79,7 @@ visual baselines were not exercised.
 
 ## Additional Windows findings
 
-- R5, fixed: the built-in Python shell inherited the legacy Windows output
+- R5, fixed: the built-in Python shell inherited the Windows output
   encoding. Printing Unicode crashed with `UnicodeEncodeError`. Its argument
   vector now includes `-X utf8`; preview and execution share that planner.
   A new subprocess test failed before the fix and passed afterwards. The

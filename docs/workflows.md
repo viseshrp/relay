@@ -13,13 +13,7 @@ sources without starting processes or retrieving credentials. See
 [local language audit](workflow-language-compatibility.md) for provenance,
 limits, and the implementation map.
 
-Saved workflow sources and new launches require `jobs` and ordered `steps`.
-The previous `version: 1` / `nodes` authoring format is unsupported. Replace old
-files with current sources; Relay does not provide a conversion-preview flow.
-The old parser, executors, forms, and replay paths have been removed. Database
-migration retains old source and execution metadata as opaque evidence;
-unsupported snapshots cannot launch, resume, or retry. Current snapshots keep
-their captured jobs, steps, sources, and routes.
+Launch snapshots capture jobs, steps, sources, and routes.
 
 ## Jobs and ordered steps
 
@@ -56,8 +50,7 @@ The root accepts `name`, `description`, `run-name`, `on`, `env`, `defaults`,
 `strategy`, `env`, `defaults`, `outputs`, `environment`, `concurrency`,
 `cache-mode`, `timeout-minutes`, `continue-on-error`, and `steps`; a reusable
 job uses `uses`, `with`, and `secrets` instead of steps. Every job runs on this
-computer. There is no runner selection or parallelism field. Removed fields
-are rejected, including `runs-on`, `max-parallel`, and environment `deployment`.
+computer. Runner selection, parallelism, and deployments are unsupported.
 
 Steps accept `id`, `name`, `if`, `env`, `timeout-minutes`,
 `continue-on-error`, and either `run` with `shell` and `working-directory`,
@@ -286,10 +279,6 @@ two repair rounds and commits after verification. For a reusable repair body,
 `relay/loop@v1` accepts `workflow`, JSON `inputs`, `max-iterations` from 1
 through 100, `until-output`, and `equals`. Every iteration is a durable serial
 scope. Exhausting the budget fails the loop.
-
-Implicit `repairs` rules, embedded node graphs, switch nodes, and timeout
-routing are unsupported. Repair work uses explicit current steps and reusable
-workflows; no compatibility interpreter converts an older rule.
 
 ## Human waits
 

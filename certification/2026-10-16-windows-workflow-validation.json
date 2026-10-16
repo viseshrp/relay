@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-16",
+  "implementation_checkpoint": "de3a85a6f4cc500c4174d0c93e3c9673fbba78f3",
+  "python": "3.14.7",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "native_python": {
+    "checkpoint": "cf923916a1cccc55983067d033635e0e33957fab",
+    "collected": 2811,
+    "passed": 2779,
+    "skipped": 32,
+    "lanes": {
+      "serial": {
+        "collected": 51,
+        "passed": 49,
+        "skipped": 2
+      },
+      "parallel": {
+        "collected": 2760,
+        "passed": 2730,
+        "skipped": 30
+      }
+    }
+  },
+  "focused_python": {
+    "focused-python.xml": {
+      "collected": 201,
+      "passed": 195,
+      "skipped": 6
+    },
+    "language-boundaries-python.xml": {
+      "collected": 55,
+      "passed": 55,
+      "skipped": 0
+    },
+    "workspace-python.xml": {
+      "collected": 4,
+      "passed": 4,
+      "skipped": 0
+    }
+  },
+  "browser": {
+    "initial_scope_passed": 37,
+    "activity_scope_passed": 27,
+    "unique_passed": 58,
+    "failed": 0,
+    "skipped": 0,
+    "retried": 0
+  },
+  "capture": {
+    "passed": 1,
+    "screens": [
+      "project",
+      "workflow",
+      "run",
+      "settings"
+    ],
+    "highlights_within_images": true
+  },
+  "source_trees": {
+    "relay": "4f87c8cf8e7f53f80d39d6b05b0088ab77e22ddf",
+    "frontend": "bc0cea2255f7da01bcfdec1a435102be90f5c2f7",
+    "tests": "9d7e75dee661cf5e3417752b9e8c6a3a08f4d61c"
+  },
+  "evidence_sha256": {
+    "tox/reports/inventory.json": "4b0695a31a3bdfcb1c5f46fe7226e9538eb126b3952514f908bec9acf1dba962",
+    "tox/reports/junit-serial.xml": "b57d363d0b2588977e7c1d31ec91ba9d44ec14df272d9c9bfea9e210b9cd2c4a",
+    "tox/reports/junit-parallel.xml": "4822ff4bf85a62b93180d8a7534933dcdde6654df3ddbd26d50d7aee62e5dd40",
+    "focused-python.xml": "3c2eb4470ad1a4d2ca12758e556a9a450f739875f36d4c49417947f7fce983c9",
+    "language-boundaries-python.xml": "ecd82354695f3b3a6f796e66283e4d5f949f0810c44a9183df50307b6d767b9d",
+    "workspace-python.xml": "55c39215d8c3f03361526ab9d5bcfc8b6abfe32156d2c05c2de19d9564da1307",
+    "browser.json": "5c0ca571b9864cdcacc11ca9982117ba6b1fde3614231241270d80b4c470579d",
+    "activity-browser-final.json": "b1a432ae8c7f3104548821f7dce1d2f98691d59508072c3d5b6b6decb52de941",
+    "capture-final.log": "9131f2debcb53b5e397347dc6e0892d738e00e8c7a5b9bd0c691ff03efc80462"
+  },
+  "capture_sha256": {
+    "project.png": "8d3987c5e1cec7395da5ce1804d14619932d008822b597163c5273e506484d54",
+    "run.png": "70a5e062f8dba23784b3a8f4456f4177c1dcdf63c673814fe747fd3a2e3235e4",
+    "settings.png": "46c7697292cd3c724976e6870e0100d37b3a09f3b48ad87a7b552caea595c579",
+    "workflow.png": "4febad795c52fca24b1659bcc951cb6a0d1d6b1122333fe73927d874cfd97897"
+  }
+}

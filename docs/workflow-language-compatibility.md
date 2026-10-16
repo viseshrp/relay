@@ -74,9 +74,6 @@ The local-language review made three separate passes:
 | 25 manual inputs, ten dispatch payload properties, 100-character dispatch event names | Source/node and complete payload size bounds already control local resource use. |
 | Ignoring `paths`/`paths-ignore` for tag changes | Local Git supplies changed files for tags as well as branches; declared filters must apply. |
 
-No conversion or backwards compatibility layer is added. Old editable sources
-and drafts can be rewritten. Run history and captured source bytes are retained.
-
 Retained fields have local uses: names/descriptions explain work; inputs,
 expressions, environment variables and outputs pass data; `needs` and conditions
 control order; matrices repeat local work; shell/workdir defaults and timeouts
@@ -170,12 +167,6 @@ live in `frontend/e2e/` and `frontend/scripts/`. Tests cover the current public
 save/launch contract and durable execution.
 
 ## Product decisions
-
-The public schema is replaced without a version opt-in because Relay is
-unreleased. The `version: 1` / `nodes` parser, executors, and controls are
-removed. Old launch snapshots retain their raw source and opaque metadata as
-unsupported evidence. They cannot resume or retry. Old editable sources and
-drafts need replacement; the browser does not offer a conversion flow.
 
 Jobs and all nested/matrix work run serially. Agent edits and tests share the
 primary worktree. Code changes require a clean descendant commit at job end;

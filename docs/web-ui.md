@@ -31,11 +31,10 @@ The command accepts these options:
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Loopback address: `127.0.0.1`, `localhost`, or `::1` |
 | `--port` | `7845` | TCP port from 1 through 65535 |
-| `--workers` | `1` | Hidden legacy flag; warns and uses one execution thread |
 | `--no-browser` | off | Start without opening the system browser |
 | `--login / --no-login` | login required | Require owner credentials, or open the local app directly |
 
-Command-line values override `host`, `port`, `workers`, and `login_required`
+Command-line values override `host`, `port`, and `login_required`
 in Relay's settings file. A second live supervisor or an occupied address fails
 before another pair of children starts. Configuration and bind failures exit
 with status 4. A child or supervision failure exits with status 5.
@@ -94,8 +93,7 @@ The Relay logo opens this Home dashboard. Workflow recovery drafts are saved
 before leaving an editor, including when returning through browser history.
 If Home remembers a project that no longer exists, it selects the served
 project or another registered project for the workspace controls.
-Existing workflow, run, job, interaction, and settings links remain valid;
-`view=author` still redirects to `view=workflows`.
+Workspace links select a workflow, run, job, interaction, or settings view.
 
 Home puts **Waiting for you** first, with **Open request** links to the exact
 request. It also shows active and paused runs, recent results with status and
@@ -152,6 +150,7 @@ They contain example data, never owner projects or provider output. Screenshots
 and explanations sit beside each other on desktop and stack below 800 pixels.
 Regenerate the images and measured highlights with
 `npm --prefix frontend run capture:welcome`, then rebuild the frontend.
+Set `RELAY_CAPTURE_OUTPUT` to save a validation capture outside the source tree.
 Use **Next**, **Back**, numbered slide buttons, or the arrow keys. **Skip
 introduction**, Escape, or clicking outside closes the introduction.
 
@@ -171,7 +170,7 @@ login, can replay either introduction.
 **Reset onboarding**, which makes both appear on the next opening or reload.
 When browser storage is blocked, dismissal lasts for the current app session;
 reset reports the storage limitation instead of claiming it was saved.
-Closing the welcome slides also hides the older setup welcome prompt; the
+Closing the welcome slides also hides the setup welcome prompt; the
 agent checklist remains available from **Help > Get started**.
 
 When the project inventory is empty, the workspace shows a **Start using
@@ -275,7 +274,6 @@ saved-file hash protect publication. A recovered draft can be inspected or
 replaced with the saved source. Saving validates and publishes that workflow
 and every pending local prompt edit together. Saved sources and drafts use
 the current jobs-and-steps format.
-Historical run snapshots remain inspectable.
 
 JSON-formatted current workflow sources appear as block YAML in the editor and
 captured workflow viewer. Unchanged form fields do not create recovery drafts.
@@ -575,7 +573,7 @@ blocks through React. Raw HTML and images stay inert; links accept only HTTP,
 HTTPS, email, or fragment targets. Tool calls and their results become one
 expandable row, matched by job, attempt, turn, and tool ID. Each row has a short
 title, a status symbol and text, and expandable input and output. Recorded run
-and reader-folder prefixes become relative paths in the display; other paths
+roots become relative paths in the display; other paths
 and original event bytes remain unchanged. Thoughts are collapsed by default.
 Agent messages, thoughts, and tool results use purple text on a light lavender
 background in Summary and job logs. Job and agent labels identify the source
@@ -708,8 +706,7 @@ history, or everything for the project. Nothing is selected initially;
 deletion requires a confirmation dialog. Everything also requires typing the
 project name. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
-never changes the launch branch. A disposable reader left by an interruption
-is removed before its primary run worktree. Run-record cleanup is rejected
+never changes the launch branch. Run-record cleanup is rejected
 until that run's worktree, retained branch, and attempt refs are gone; the
 `all` scope applies the safe worktree, Git-ref, then record order.
 
@@ -879,9 +876,8 @@ loop-body definitions remain editable in YAML.
 An empty project keeps the workspace sidebar and offers **New workflow**.
 Its editor and launch controls wait until a workflow is selected.
 
-`view=workflows` is the canonical editor URL; older `view=author` links open
-that view and update the URL. The Runs tab opens history. When a run needs a
-response, it returns to that run; visiting Workflows preserves the current
+`view=workflows` opens the editor. The Runs tab opens history. When a run needs
+a response, it returns to that run; visiting Workflows preserves the current
 waiting run so another request does not replace it. The history sidebar
 selects all workflows or one workflow.
 History rows show the captured title, permanent project run number, source
@@ -1044,7 +1040,7 @@ Current argv steps use `relay/command@v1` with `argv` or a saved command name
 in `with.command`. Scripts use `run`, `shell`, and `working-directory`. Workflow,
 job, and step `env` mappings follow Actions precedence over frozen owner defaults.
 Owner command changes affect future launches; existing runs retain resolved
-arguments. The removed v1 workflow format has no browser forms or replay path.
+arguments.
 
 An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested

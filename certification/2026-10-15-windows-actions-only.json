@@ -14,7 +14,7 @@
     "uv": "0.12.5",
     "playwright": "1.63.0"
   },
-  "format": "jobs-and-steps only; workflow version: 1/nodes has no execution or replay path",
+  "format": "jobs and ordered steps",
   "product_trees": {
     "relay": "f4334979186eb7a7f36d9407de51ce67bf0e289b",
     "frontend_src": "d23e85d6ce9e97850017054bfbb43f5cd7b8bc0a"

@@ -106,8 +106,6 @@ Setup observations, not defects:
 
 - The Codex CLI was installed but its ACP adapter was absent. A test-local
   adapter installation made discovery and the model probe pass.
-- SuspendIt's two saved workflows use the retired `version: 1` dialect.
-  Relay displays validation errors as documented. Both sources are preserved.
 - SuspendIt explicitly skips renderer-memory checks on Windows because its
   current measurement invokes POSIX `ps`. This is the improvement under test.
 

@@ -98,7 +98,6 @@ named artifact expiry and cache eviction never delete required evidence.
 One durable installation-wide job lease admits a physical job and its nested
 steps. Every step shares the run's primary worktree. Steps retain evidence;
 Relay commits changed code once when the job succeeds. A clean no-op is valid.
-There are no per-node writer flags, reader worktrees, or no-commit overrides.
 
 The accepted head must descend from the job's starting head. Staged report
 files, staged captured sources, unresolved conflicts, and unrelated history
@@ -147,8 +146,7 @@ An owner retry verifies the failed attempt's manifest, retained ref, file sizes,
 and SHA-256 hashes before reopening it. It also checks the primary worktree
 against the protected head. Root report handoffs retain the same exact
 exemptions used at job acceptance. Code changes, staged reports, nested report
-files, and an unrecorded head require an owner decision. Retry does not reset
-an individual step or restore an old reader checkout.
+files, and an unrecorded head require an owner decision.
 
 Inline bounded agent recovery stays inside the current job. It retains rejected
 reports and partial work, checks preserved evidence, and continues the failed
@@ -198,8 +196,7 @@ Select **Merge into the active branch, then delete working copies** in global
 defaults, project defaults, or Run workflow. The API and settings value is
 `cleanup_policy: "merge_on_success"`. Existing defaults stay unchanged.
 
-All writing jobs already commit onto one run branch. Read-only jobs have no
-changes to merge; their detached working copies are removed after each attempt.
+Jobs commit their changes onto one run branch.
 After every job succeeds or is skipped, Relay performs these steps:
 
 1. Record the run as `completing`, keeping the live event stream open.

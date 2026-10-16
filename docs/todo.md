@@ -188,10 +188,9 @@ the audit. Items marked **Contract change** alter a runtime rule in
 [AGENTS.md](../AGENTS.md) and need explicit owner approval before
 implementation.
 
-The original observations below include fields from the removed v1 workflow
-format. They are audit history; the current jobs-and-steps contract is in
-[Workflows](workflows.md) and the
-[implementation index](backlog-implementation.md).
+The jobs-and-steps contract is in [Workflows](workflows.md). The
+[implementation index](backlog-implementation.md) maps the findings to their
+implementations and proving tests.
 
 ### Product principles
 
@@ -266,8 +265,8 @@ unless an item below says otherwise.
 
 - [x] **BX-02. Ship starter workflow templates. Contract change.**
   - **What:** Ready-made workflows a user can pick instead of a blank file.
-  - **Problem:** `relay init` writes `name: Blank workflow` with `nodes: {}`
-    and an empty `prompt.md`. **New workflow** asks only for a name. A
+  - **Problem:** A blank workflow and empty prompt provide no example to
+    edit. **New workflow** asks only for a name. A
     beginner faces an empty canvas and a schema they have never seen.
     GitHub Actions solves this with "Choose a workflow" starter cards; Relay
     has none. [AGENTS.md](../AGENTS.md) forbids bundled templates "without an
@@ -298,8 +297,8 @@ unless an item below says otherwise.
 - [x] **BX-03. Reorganize navigation to match the GitHub Actions tab.**
   - **What:** The app's top-level layout.
   - **Problem:** The app has two tabs, **Workflows** (editor) and **Runs**
-    (history + monitor), but the URL calls the editor `view=author`. Runs are
-    not grouped by workflow, so a project with many workflows shows one flat
+    (history + monitor). Runs are not grouped by workflow, so a project with
+    many workflows shows one flat
     list of similar names ("Inspect site handoff bd8b921c" three times,
     "Selected tabs" twice). The workflow list is a dropdown inside the
     editor. There is no page that answers "what workflows do I have and how
@@ -311,13 +310,11 @@ unless an item below says otherwise.
       workflow** (BX-06), and **Edit**; below it the run list (BX-14).
     - Run page (BX-04) and editor (BX-07) open from there and have
       breadcrumbs: Project › Workflow › Run #12.
-    - Rename the `author` URL view to `workflows`, keep the old value as a
-      redirect.
+    - Use the `workflows` URL view.
   - **Outcome:** Users find workflows, runs, and the editor where GitHub
     Actions trained them to look.
   - **Done when:** A user can go from the workflow list to a run, to a job,
-    to its log, and back, using only the sidebar and breadcrumbs. Old links
-    with `view=author` and `run=` still open the right place.
+    to its log, and back, using only the sidebar and breadcrumbs.
 
 - [x] **BX-04. Give every job a log view, like a GitHub Actions job page.**
   - **What:** The run page's main reading surface.
@@ -424,36 +421,20 @@ unless an item below says otherwise.
 
 - [x] **BX-07. Make every YAML field editable in the browser.**
   - **What:** The stage (job) settings panel and workflow settings.
-  - **Problem:** This is the product's main selling point and it is
-    incomplete. Observed form coverage:
-    - Agent job: action, start after, allow file changes, automatic retries,
-      model, exact model override, agent tools, instructions, effort,
-      permission mode. **Missing:** `outputs`, `if`, `timeout`,
-      `on_timeout`, `allow_no_commit`, multiple prompt files and global
-      prompts, `env`.
-    - Command job: program, arguments, JSON argv. **Missing:** `env`,
-      `outputs`, `if`, `timeout`, `allow_no_commit`.
-    - Loop: only **Maximum iterations**. **Missing:** `until`, `exhausted`,
-      and the loop body: its child jobs are not drawn or editable at all.
-    - Condition, subworkflow, human wait: cannot be created from **Add
-      stage**, which offers only "Run a command", "Agent work", and "Ask for
-      human review". Condition `expr`/`branches`, subworkflow
-      `workflow`/`inputs`/`outputs`, and human-wait `deadline` have no
-      dedicated forms.
-    - Workflow level: no form for `name`, `inputs`, default `model`,
-      default `agents`, `recovery`, or `entrypoints`. Workflow inputs, which
-      drive the launch form, are YAML-only.
+  - **Problem:** Incomplete forms force users into YAML for outputs,
+    conditions, timeouts, prompts, environment values, workflow inputs,
+    reusable workflows, and loop bodies.
   - **Change:** Add form controls for every field in
     [Workflows](workflows.md), grouped in tabs in the job panel:
-    **General** (name, type, needs, if, timeout), **Runs on** (agents,
+    **General** (name, needs, if, timeout), **Agent** (agent,
     model, effort, permissions), **Steps** (prompts or command), **Outputs**
     (selector builder: file + label / JSON path / YAML path / exists, with a
     "retained report" explanation), **Environment** (key/value table),
     **When it fails** (BX-23). Add a **Workflow settings** dialog with an
     **Inputs** table editor (name, type, required, default, description,
-    constraints) and defaults. Add all six job types to **Add job**. Draw
-    loop bodies as an expandable group on the canvas, and subworkflows as a
-    linked card that opens the child file.
+    constraints) and defaults. Expose built-in actions through **Add step**.
+    Draw loop bodies as an expandable group on the canvas, and reusable
+    workflows as a linked card that opens the child file.
   - **Outcome:** A user never has to open YAML to express anything Relay
     supports.
   - **Done when:** For each field in the schema, a test edits it through the
@@ -477,7 +458,7 @@ unless an item below says otherwise.
       still with `shell=False` at the subprocess layer and the same
       process-group ownership. The default shell is `bash` on macOS and
       Linux and `pwsh` on Windows, as in GitHub Actions.
-    - Keep the list form unchanged for users who want exact argv.
+    - Use `relay/command@v1` for exact argument vectors.
     - The form offers **Script** (multi-line code editor with syntax
       highlighting for the chosen shell) or **Program and arguments**.
     - Preview shows the exact process arguments Relay will run.
@@ -504,8 +485,8 @@ unless an item below says otherwise.
     hint about what to do next.
   - **Change:**
     - Default to human output: a short checklist with ✓/✗, the reason, and
-      the exact fix command per failed check. Add `--json` to keep the
-      current machine output byte-compatible for scripts.
+      the exact fix command per failed check. Add `--json` for
+      machine-readable output.
     - Errors print `Error: <message>` plus `Next: <next_action>`; `--json`
       keeps the envelope.
     - `doctor` uses the same launch cleanliness rules as the server, and
@@ -875,7 +856,7 @@ unless an item below says otherwise.
   - **Done when:** Every page and panel has a non-blank empty state.
 
 - [x] **BX-30. Settings page.**
-  - **Problem:** Login, default agents, port, and workers live only in
+  - **Problem:** Login, default agents, and port live only in
     `settings.json` and CLI flags.
   - **Change:** A **Settings** page: account and login requirement (with the
     existing restart notice), default agent order, storage (BX-16), and
@@ -1025,7 +1006,7 @@ FE = frontend-ui-engineering.
 | F22 | Review material | Approval card; Summary | Reports and committed diff | QA |
 | F23 | Global defaults | Settings › Global defaults | Agents, models, commands, variables, timeouts, retries, cleanup, repairs | QA, DT |
 | F24 | Project defaults | Settings › Project defaults | Per-project overrides | QA |
-| F25 | Server and account | Settings › Server and account | Login, address, port, workers | QA |
+| F25 | Server and account | Settings › Server and account | Login, address, port | QA |
 | F26 | Notifications | Settings › Notifications; Help | Desktop notifications | QA |
 | F27 | Storage and cleanup | Settings › Storage | Sizes, confirmed cleanup, temporary resources | QA, BR |
 | F28 | Help and tooltips | Help menu; `?` buttons | Get started, slides, tour, notifications, field help | QA, DE |

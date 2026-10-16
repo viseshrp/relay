@@ -23,8 +23,7 @@ These explicit decisions replace its conflicting instructions:
 Django, SQLite, SSE, one execution thread, transactional web controls, and
 the browser redesign remain. No TanStack, Postgres, external service,
 run-control intent table, database reset, or migration-history rewrite is
-included. Legacy worker counts warn and use one; new API values above one
-are rejected and the UI field is removed.
+included. Execution concurrency is fixed at one worker.
 
 ## Phase and commit map
 
@@ -62,7 +61,7 @@ the final test locations; the diagnostic HTTP test initially lived in
 | `uv run pytest tests/test_sqlite_reliability.py -k ownership_checks -q` | In-loop ownership checking attempts a write and fails under the held writer. | The ownership check succeeds with zero transactions and autocommit writes. |
 | `uv run pytest tests/test_worker_heartbeats.py -k quiet_five_level -q` | Restoring per-loop heartbeat writes makes the real five-level ACP execution fail under a write lock held beyond five seconds. | All five attempts complete after the lock opens. |
 | `uv run pytest tests/test_launch_contention.py -k forty -q` | Disabling the selected launch-persistence retry causes the forced-lock, eight-thread burst to fail. | Both ordinary and forced-lock 40-launch bursts retain complete records and unique project numbering. |
-| `uv run pytest tests/test_worker_scheduling.py -q` | Four failures: web scheduling runs during launch; environment delivery is absent; legacy workers stay at eight; API accepts multiple workers. | All scheduling and worker-count contracts pass. The idle worker scheduling case already passed. |
+| `uv run pytest tests/test_worker_scheduling.py -q` | Web scheduling runs during launch; environment delivery is absent; configuration permits concurrent execution. | Scheduling and serial execution checks pass. The idle worker scheduling case already passed. |
 | `uv run pytest tests/test_worker_scheduling.py -k startup_enumerates -q` | Only 200 of 205 active runs are returned at startup. | All 205 are included. |
 | `uv run pytest tests/test_worker_handoff.py tests/test_supervisor_lifecycle.py -k 'clock_jump or unverified_surviving or until_worker_exit' -q` | Restoring the stale reaper and bypassing exit proof produces four failures: forward hour/week jumps, a surviving unverified child, and admission release before exit confirmation. | Ownership remains held while the old worker can finalize Git. A negative clock jump already passed and is retained coverage. |
 | `uv run pytest tests/test_interaction_events.py -q` | Eight failures cover missing expiry/discard/environment events and failure to roll back their status changes when event append fails. | All eight status/event atomicity cases pass. |
@@ -238,7 +237,7 @@ jobs and both Codecov checks. Patch coverage was 87.99%. Two jobs failed:
 - Windows 3.10 exited with native access violation `0xC0000005` during the
   launch burst. The crashing thread was garbage-collecting while parsing
   YAML under coverage instrumentation. The stack alone does not establish
-  the native cause. All 15 compatibility jobs continue to run the full
+  the native cause. All 15 platform jobs continue to run the full
   suite; only the main Ubuntu interpreter collects the coverage report it
   already uploaded. Other jobs run without a tracer. Coverage thresholds,
   the uploaded report, and supported versions remain unchanged. Local tox
@@ -266,8 +265,6 @@ head, rather than a claimed fix based on the Python stack alone.
 
 [review-runtime-ci]: https://github.com/viseshrp/relay/actions/runs/38343083652
 
-The worker-count compatibility warning now contains only a fixed message;
-its regression test checks that no configuration value enters log arguments.
 The other CodeQL comments identify six intentional Protocol signatures,
 three shared-state assignments read by later calls, and two cancellation
 awaits. Those statements remain: lifecycle, scheduling, and disconnect

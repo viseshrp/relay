@@ -12,8 +12,7 @@ admit explicit failure follow-ups; failed jobs do not cancel unrelated jobs.
 `continue-on-error` affects conclusions while retaining rejected evidence.
 Step conditions reconcile with recorded results, including failures before
 the executor starts. A timed-out step still honors `continue-on-error`.
-Only compiled jobs and steps execute. Captured `version: 1` / `nodes` runs
-remain unsupported evidence; they cannot be resumed or retried.
+Only compiled jobs and steps execute.
 
 Relay runs each workflow from durable state in `relay.db`. Huey carries only an
 opaque claim token. A queue item is never the record of whether work ran.
@@ -198,8 +197,7 @@ coordinators. Independent failed steps block recovery.
 Owner retries verify the evidence manifest, every retained file hash, and its
 Git reference. The primary workspace must still match its protected head with
 only the exact root-report exemptions. Missing evidence, dirty code, staged
-reports, or a changed head block recovery. Relay does not reset a failed step,
-restore old report files, or create a detached reader worktree. Failed jobs
+reports, or a changed head block recovery. Failed jobs
 retain their private continuation state for a safe retry; confirmed cleanup
 can remove it when the run is no longer needed.
 
@@ -490,8 +488,8 @@ children exit.
 
 Unrelated port occupants, missing or invalid ownership records, links, another
 host's record, and unverifiable process identities never authorize a stop.
-An older live attempt without a creation token blocks workspace recovery;
-stop that older worker normally first. Relay reports the reason and preserves
+A live attempt without a creation token blocks workspace recovery;
+stop that worker normally first. Relay reports the reason and preserves
 its worktree instead of guessing ownership.
 
 ## Scheduling and worktree admission
@@ -515,8 +513,7 @@ if the node already succeeded, it loads the committed outputs before considering
 successors. These checks do not add transitions to the tables above.
 
 One durable installation-wide job lease admits current jobs serially. All
-steps in that job share the primary run workspace. There are no per-node
-reader/writer locks or detached reader worktrees. A successful job commits its
+steps in that job share the primary run workspace. A successful job commits its
 changed code once; a clean no-op is valid. The lease remains held until Git
 validation, preservation, and the protected head are durable.
 
@@ -525,8 +522,7 @@ stale-dispatch reconciliation repairs enqueue loss or consumer restart.
 Nested waits yield the worker and retain their captured deadlines.
 
 One Huey consumer process uses exactly one execution thread on Linux, Windows,
-and macOS. Legacy positive `workers` settings and `--workers` flags warn and use
-one. The settings UI omits this field; new API values above one return `422`.
+and macOS. Execution concurrency is fixed and has no configuration field.
 The reconciler and heartbeat coordinator remain separate background threads.
 SQLite transactions stay short, use WAL with FULL durability, and have bounded
 busy waiting.

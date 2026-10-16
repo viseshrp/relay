@@ -1,17 +1,8 @@
-# Windows validation after removing workflow v1
+# Windows workflow execution validation
 
-Date: 2026-10-15. Relay now accepts the current `jobs` and `steps` workflow
-language only. The `version: 1` / `nodes` parser, executors, replay fallback,
-implicit repair rules, reader worktrees, and browser controls are removed.
-Current built-ins such as `relay/agent@v1` still version their action API;
-they do not enable the removed workflow language.
-
-Migration `0017_remove_legacy_workflows` removes obsolete execution fields
-and locks. It normalizes existing Actions plans without recompiling source.
-Unsupported captures retain source, prompts, hashes, and opaque metadata as
-evidence. They cannot launch, resume, retry, or recover through the worker.
-The migration tests use disposable databases. No owner database was migrated
-or reset during this validation.
+Date: 2026-10-15. This record verifies workflow execution through jobs and
+ordered steps. Tests use disposable databases and isolated storage. No owner
+database was migrated or reset during this validation.
 
 ## Windows checks
 

@@ -61,7 +61,7 @@ reopening a completed stream. Those cases were retained rather than duplicated.
 
 Execution tests use disposable Git repositories, temporary storage, and
 deterministic provider processes. They need no provider subscription or
-authenticated AI account. Historical workflow cases exercise retained runs;
+authenticated AI account. Workflow cases exercise captured plans;
 the Actions human-wait case exercises the same monitor with current workflows.
 
 ## Validation boundary

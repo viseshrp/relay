@@ -80,10 +80,14 @@ job commits, browser output checks, and verified worktree cleanup. Copilot
 returns its command exit code in public text; Claude and Cursor also return
 structured exit fields. The final supervisor stopped cooperatively.
 
-The [Actions-only Windows validation](2026-10-15-windows-actions-only.md)
-records removal of the old workflow format, complete native tests, reviewed
-Windows screenshots, additional runtime fixes, and a fresh live Claude run.
-Earlier records retain their original commit and format context.
+The [Windows workflow execution validation](2026-10-15-windows-actions-only.md)
+records complete native tests, reviewed Windows screenshots, additional
+runtime fixes, and a fresh live Claude run. Records identify their tested
+commits.
+
+The [Windows workflow validation](2026-10-16-windows-workflow-validation.md)
+records the complete native Python run, focused browser checks, fresh database
+validation, and tutorial captures for the current workspace and commit rules.
 
 The [Windows live controls](2026-10-16-windows-live-controls.md) and their
 [structured record](2026-10-16-windows-live-controls.json) verify fresh Codex

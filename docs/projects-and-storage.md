@@ -227,10 +227,8 @@ tables, independent of operating-system registries and MIME files.
 ## Retention and deletion
 
 Run history remains until the owner confirms deletion. Each project keeps a
-monotonic run counter. Deleting history never reuses a run number. Existing
-runs receive numbers in snapshot creation order during migration; subsequent
-runs keep their assigned number. Project rows are
-protected while runs reference them. Deleting a run may cascade only through
+monotonic run counter. Deleting history never reuses a run number. Project rows
+are protected while runs reference them. Deleting a run may cascade only through
 that run's owned snapshot, nodes, attempts, events, interactions, controls,
 and artifact metadata.
 
@@ -283,7 +281,6 @@ The complete settings inventory is:
 | Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |
 | Loopback address | Server and account | Explicit `relay up --host` | Restart required |
 | Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
-| Worker count | One execution worker | Legacy settings and flags warn and use one | New API values above one rejected |
 | Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
 | Welcome slides and guided tour | Welcome and guided tour provides replay and reset | This browser and installation address; no project override | Reset applies on next opening |
 | Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |
@@ -326,8 +323,7 @@ Turning the override off restores the current global map.
 Command variables resolve in this order, with later values winning: global
 or replacement project `env`, workflow `env`, job `env`, then step `env`.
 They are merged over the owned process environment. Reusable workflows use
-their captured variables and explicitly passed inputs. The removed
-`inherit_env` node field is unsupported.
+their captured variables and explicitly passed inputs.
 
 Launch snapshots capture workflow sources, resolved owner defaults, arguments,
 and variable definitions. Later settings edits affect future runs. Values are
@@ -335,11 +331,6 @@ stored in local settings and captured run data. Ordinary variables do not
 register output masks; use a declared secret binding for sensitive values.
 Names must be nonempty and contain neither `=` nor a NUL character. Values
 must be strings without NUL characters.
-
-The removed `workflow_defaults.repairs` setting is rejected in global files
-and new API writes. Remove that key from a pre-release global settings file
-before restarting this version. The database migration removes the obsolete
-project-default key while preserving the other project settings.
 
 For example, this global file sets Codex first, keeps successful working
 copies, and supplies a model and timeout for workflows that omit them:

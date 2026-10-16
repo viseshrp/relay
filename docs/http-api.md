@@ -60,7 +60,7 @@ workflow prompt read endpoint accepts `global:<file>` for read-only preview.
 
 These owner routes use the same login and CSRF rules. Select a project with the
 normal `project` query parameter. Public create, save, preflight, and launch
-accept the Actions jobs/steps dialect. Historical snapshots remain readable.
+accept workflow jobs and ordered steps.
 
 | Method and path | Purpose and body |
 | --- | --- |
@@ -214,9 +214,8 @@ New workflow and instruction paths reject Windows device names, reserved
 characters, and trailing spaces or dots on every operating system. For example,
 `NUL.yaml` and `draft:notes.md` are rejected; `nested/review.yaml` is accepted.
 
-Workflow document responses include their selected `project`. Current report
-and bounded loop actions are defined in the workflow source; removed node
-handoff warnings and implicit repair defaults are not part of this response.
+Workflow document responses include their selected `project`. Report and
+bounded loop actions are defined in the workflow source.
 
 `base_hash` is the SHA-256 of the exact saved UTF-8 bytes. For example, loading
 bytes `jobs: {check: {steps: [{run: echo Ready}]}}\n` returns their hash; Save
@@ -353,12 +352,10 @@ Both cursors must fit the same nonnegative database integer range. Before
 closing a finished run's stream, Relay drains events committed between its last
 event read and the terminal-status read.
 
-Run history and detail add `number`, `title`, `source_branch`, and `created_at`.
+Run history and detail include `number`, `title`, `source_branch`, and `created_at`.
 Numbers increase within each project and remain reserved after deletion. The
 title captures the workflow name at launch; the branch records its Git source
-when available. Older runs retain their UUID and snapshot bytes. Migration
-assigns their numbers in snapshot creation order and leaves their unknown
-source branch null. Existing response fields and run cursors stay unchanged.
+when available.
 
 Run history and detail include `waiting_count`, the number of pending owner
 requests attached to waiting attempts. Interaction records add `respondable`
@@ -440,7 +437,7 @@ bounded `attempts` page. Its `event_cursor` and `state_cursor` use the same
 snapshot and output exclusions as the monitor. `activity_type` identifies
 command, agent, and human
 review steps within the Actions execution nodes. `display_name` retains the
-resolved job or step name; historical views use their existing scope labels.
+resolved job or step name.
 Agent instructions include the frozen prompt files and captured inline prompt.
 Each instruction contains its local or global
 `reference`, captured `text`, and `truncated` flag. The combined instruction
@@ -485,8 +482,7 @@ event cannot close a stream for a run that was later retried.
 Run metadata includes the registered `project`. Current job and step records
 include captured `dependencies`, `parent_scope`, job/step identity, display
 names, and matrix data. These values come from the immutable captured plan,
-rather than today's editable YAML. Legacy branch selections, iteration-summary
-columns, control edges, and repair presentation fields have been removed.
+rather than today's editable YAML.
 
 Failed agent nodes also include `retry_settings`, containing their own
 `scope_path`, effective `agent_id`, `model_value`, `effort`, `permission_mode`,
@@ -518,8 +514,7 @@ record ID, so loading another page cannot duplicate an item.
 
 For interaction pages, `pending=true` filters before pagination. A positive
 `interaction={id}` selects that exact request within the run, including an
-answered request. It cannot expose another run's interaction. Older clients
-can continue reading the unfiltered collection.
+answered request. It cannot expose another run's interaction.
 
 Review previews read at most 256 KiB plus one byte for truncation detection.
 UTF-8 text is returned as inert JSON; binary, non-UTF-8, and NUL-containing
@@ -581,8 +576,8 @@ public configuration fields as the existing run-detail node record. It is
 job again so another client's configuration change is reflected.
 
 Run and job detail include `working_folder`, the recorded primary run folder.
-The browser uses it to shorten paths in visible activity, including nested
-`r-{attempt}` reader folders. This field does not read files or change paths;
+The browser uses it to shorten paths in visible activity. This field does not
+read files or change paths;
 original events and downloaded command output keep their recorded bytes.
 
 Run cancel and rerun keys are stored in an indexed event column; duplicate
@@ -767,9 +762,8 @@ cleanup automatically.
 `POST /api/data/clean` accepts
 `{"scope":"runs|worktrees|branches|all","confirm":true}`. A missing literal
 `true` returns `409`. Relay rejects cleanup while the current project has an
-active run. Reader worktrees are removed before their primary run worktree,
-and all worktrees are removed before branches. Run rows and their retained
-artifact directories and ended-attempt scratch allocations are removed only
+active run. All worktrees are removed before branches. Run rows, their retained
+artifact directories, and ended-attempt scratch allocations are removed only
 for `runs` or `all`. Unmarked scratch files remain. `all` also empties
 Relay process logs and rotations in place, keeping their `Relay process log`
 first line, so open append handlers can continue writing. Files without that
@@ -840,11 +834,8 @@ services. They never mutate an existing run's snapshot or provider session.
 | `POST /api/projects/defaults` | `overrides` object and `preview: true` | `200 {"effective":...}`; validates and resolves without saving |
 | `GET /api/data/usage` | optional `?project={id}` | `200`; project storage metadata and cleanup availability |
 
-`settings` contains the existing `agent_preferences`, `cleanup_policy`, `host`,
-`port`, `workers`, and `login_required`, plus `workflow_defaults`:
-
-`workers` is always one in responses. Legacy saved counts warn and use one
-without rewriting the file. New saves above one return `422 config_error`.
+`settings` contains `agent_preferences`, `cleanup_policy`, `host`, `port`,
+`login_required`, and `workflow_defaults`:
 
 ```json
 {
@@ -885,15 +876,14 @@ A stale revision returns `409 settings_conflict`; validation errors retain
 retain private traces only in diagnostic logs. The active login policy stays
 unchanged until restart, including when the saved setting differs.
 
-`GET /api/agents` additively includes `defaults`, the selected project's
-resolved `workflow_defaults`; `preferences` now reflects project overrides.
+`GET /api/agents` includes `defaults`, the selected project's resolved
+`workflow_defaults`; `preferences` reflects project overrides.
 An omitted launch `cleanup_policy` uses the project's resolved setting.
 Current `relay/command@v1` steps select a saved command through `with.command`
 or supply a JSON argument vector through `with.argv`. Workflow, job, and step
 `env` mappings follow Actions precedence. Launch freezes command maps and
 source bytes. An unresolved command name returns `422 workflow_validation_error`
-without creating a run. Old `nodes`, `inherit_env`, and repair defaults are not
-accepted settings or workflow syntax.
+without creating a run.
 
 Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 `attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,
