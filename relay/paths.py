@@ -29,7 +29,11 @@ _OWNERSHIP_LINE_MAX_BYTES: int = len(_OWNERSHIP_MARKER) + len(b"\r\n")
 def ensure_private_dir(path: Path) -> Path:
     """Create a central Relay directory with owner-only POSIX permissions."""
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name != "nt":
+    if os.name == "nt":
+        from .windows_security import ensure_owner_inheritance
+
+        ensure_owner_inheritance(path)
+    else:
         path.chmod(0o700)
     return path
 

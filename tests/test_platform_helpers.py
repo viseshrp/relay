@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -44,6 +45,64 @@ def test_storage_directories_are_created_private_on_demand(directory: str) -> No
 def test_private_directory_creation_includes_missing_parents(tmp_path: Path) -> None:
     created = paths.ensure_private_dir(tmp_path / "private/nested")
     assert created.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory ACLs require Windows.")
+def test_private_directory_preserves_acl_and_inherits_original_owner_grant(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    script = tmp_path / "security.ps1"
+    script.write_text(
+        "param([string] $Target)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$acl = Get-Acl -LiteralPath $Target\n"
+        "$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value\n"
+        "$acl.GetSecurityDescriptorSddlForm('Owner, Access')\n",
+        encoding="utf-8",
+    )
+
+    def security(target: Path = directory) -> tuple[str, str]:
+        powershell = (
+            Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        result = subprocess.run(  # noqa: S603 - inspect the owned fixture with Windows' ACL reader
+            [
+                str(powershell),
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                str(target),
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=15,
+            env={**os.environ, "PSModulePath": str(powershell.parent / "Modules")},
+        )
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2, result.stderr
+        return lines[0], lines[1]
+
+    owner, before = security()
+    paths.ensure_private_dir(directory)
+    owner_after, after = security()
+    paths.ensure_private_dir(directory)
+
+    assert owner_after == owner
+    owner_grants = re.findall(rf"\(A;([^;]*);FA;;;{re.escape(owner)}\)", after)
+    assert any("OI" in flags and "CI" in flags for flags in owner_grants)
+    assert set(re.findall(r"\([^()]+\)", before)) <= set(re.findall(r"\([^()]+\)", after))
+    before_flags = before.split("D:", 1)[1].split("(", 1)[0]
+    after_flags = after.split("D:", 1)[1].split("(", 1)[0]
+    assert ("P" in before_flags) == ("P" in after_flags)
+    assert security() == (owner, after)
+    child = directory / "child.txt"
+    child.write_text("retained bytes", encoding="utf-8")
+    _, child_acl = security(child)
+    assert re.search(rf"\(A;[^;]*ID[^;]*;FA;;;{re.escape(owner)}\)", child_acl)
 
 
 def test_safe_resolve_keeps_contained_paths(tmp_path: Path) -> None:

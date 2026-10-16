@@ -51,8 +51,11 @@ non-roaming Windows storage. Default roots are:
 | Windows | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay\Logs` |
 
 Relay creates these directories only when needed. POSIX directories use mode
-`0700`. Windows uses the account's inherited ACLs; review that directory's ACL
-if other local accounts can access the profile.
+`0700`. Windows retains the directory's existing ACL and adds an inheritable
+grant for its original owner. This keeps files created by a provider's sandbox
+account readable by Relay, even when the child file has a different owner.
+The grant adds no other account and preserves inheritance protection. Review
+the existing ACL if other local accounts can access the profile.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
 `relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and
