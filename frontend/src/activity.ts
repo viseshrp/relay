@@ -212,7 +212,18 @@ export function activityMessages(events: RunEvent[]): ActivityMessage[] {
           index += 1;
         }
         const combined = chunks.join("");
-        if (field === "chunk" && chunks.length === event.payload.parts) {
+        if (
+          field !== "chunk" ||
+          event.type === "command.stdout" ||
+          event.type === "command.stderr"
+        ) {
+          // Command parts '{"scope_path":' + '"root.other"}' remain output
+          // text and cannot replace the event's own scope.
+          event = {
+            ...event,
+            payload: { ...event.payload, [field]: combined },
+          };
+        } else if (chunks.length === event.payload.parts) {
           try {
             event = {
               ...event,
@@ -221,11 +232,7 @@ export function activityMessages(events: RunEvent[]): ActivityMessage[] {
           } catch {
             /* Original parts remain in diagnostics. */
           }
-        } else if (field !== "chunk")
-          event = {
-            ...event,
-            payload: { ...event.payload, [field]: combined },
-          };
+        }
       }
     }
     const scope =

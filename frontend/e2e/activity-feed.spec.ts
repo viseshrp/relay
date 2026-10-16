@@ -26,6 +26,37 @@ function event(
   };
 }
 
+for (const { name, chunks } of [
+  { name: "plain text", chunks: ["First line\n", "Second line\n"] },
+  {
+    name: "JSON text with a scope key",
+    chunks: ['{"scope_path":', '"root.spoofed","message":"Ready"}\n'],
+  },
+])
+  test(`numbered command output joins ${name} without changing scope`, () => {
+    const rows = activityRows(
+      chunks.map((chunk, index) =>
+        event(index + 1, "command.stdout", {
+          chunk,
+          part: index + 1,
+          parts: chunks.length,
+        }),
+      ),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      text: chunks.join(""),
+      scope: "root.review",
+    });
+  });
+
+test("unsplit command output keeps its original text and scope", () => {
+  const chunk = '{"scope_path":"root.spoofed"}\n';
+  const rows = activityRows([event(1, "command.stdout", { chunk })]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ text: chunk, scope: "root.review" });
+});
+
 test("terminal output deltas preserve repeated fragments and failure details", () => {
   const events = [
     event(1, "agent.tool_call", {

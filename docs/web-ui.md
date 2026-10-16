@@ -551,7 +551,9 @@ The monitor combines the SSE stream with paginated database reads:
 - Activity joins adjacent text fragments and command stream bytes into readable
   messages, with stage, tool, time, and attempt attribution. Turn, message,
   attempt, stage, and stdout/stderr boundaries stay separate. Split tool JSON
-  is assembled before readable summaries are shown. For example, `"Hello "` plus
+  is assembled before readable summaries are shown. Numbered command stdout
+  and stderr parts join as plain text, including JSON-shaped output, without
+  changing the event's scope or attempt. For example, `"Hello "` plus
   `"world\n"` becomes `"Hello world\n"` within one message;
   opaque tool IDs remain in diagnostics, and duplicate command titles appear
   once. For example, a `git status` title and command show one `git status`;
