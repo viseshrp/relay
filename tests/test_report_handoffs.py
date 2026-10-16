@@ -83,8 +83,9 @@ def test_action_report_contract_reaches_the_provider_and_validates_its_result(
     assert (snapshot.hashes, snapshot.resolved_definition, snapshot.resolved_prompts) == before
 
 
+@pytest.mark.parametrize("selector", ["{", "{}"])
 def test_invalid_report_contract_fails_before_the_agent_prompt(
-    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents
+    project: RelayProject, engine: InlineEngine, fake_agents: FakeAgents, selector: str
 ) -> None:
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     fake_agents.install("codex", mode="report-contract")
@@ -94,7 +95,11 @@ def test_invalid_report_contract_fails_before_the_agent_prompt(
         "  work:\n"
         "    steps:\n"
         "      - uses: relay/agent@v1\n"
-        "        with: {agent: codex, model: m1, report: REPORT.md, selector: '{}'}\n",
+        "        with:\n"
+        "          agent: codex\n"
+        "          model: m1\n"
+        "          report: REPORT.md\n"
+        f"          selector: {json.dumps(selector)}\n",
     )
     run_id = engine.launch(project, "invalid-report")
     engine.drain(run_id)

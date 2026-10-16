@@ -22,6 +22,7 @@ from tests.support import FakeAgents, InlineEngine, RelayProject
         ("antigravity", "error-text", "ERROR"),
         ("antigravity", "canceled", "CANCELED"),
         ("antigravity", "interrupted", "INTERRUPTED"),
+        ("antigravity", "nonzero-success", "SUCCESS"),
     ],
 )
 def test_provider_failures_stop_once_with_recovery_enabled(

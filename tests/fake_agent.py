@@ -683,6 +683,8 @@ def agy_main(arguments: list[str]) -> None:
     elif mode in {"canceled", "interrupted"}:
         result["status"] = mode.upper()
     emit({"event": "result", "result": result})
+    if mode == "nonzero-success":
+        raise SystemExit(3)
 
 
 def main() -> None:
