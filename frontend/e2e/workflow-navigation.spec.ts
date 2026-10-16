@@ -86,6 +86,28 @@ test.beforeEach(async ({ page }) => {
   ).toBeEnabled();
 });
 
+test("a workflow URL without a view opens the selected workflow editor", async ({
+  page,
+}) => {
+  await createWorkflow(page, "direct-workflow", "Direct workflow", {
+    verify: { steps: [{ run: "print(1)", shell: "python" }] },
+  });
+  const { project } = await (
+    await page.request.get("/api/projects/current")
+  ).json();
+  await page.goto(`/?project=${project.id}&workflow=direct-workflow.yaml`);
+
+  await expect(
+    page.getByRole("button", { name: "Add job", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toContainText("Direct workflow");
+  await expect(
+    page.locator('.react-flow__node[data-id="verify"]'),
+  ).toBeVisible();
+});
+
 test("switching workflows resets the canvas and shows the first stage at a readable scale", async ({
   page,
 }) => {

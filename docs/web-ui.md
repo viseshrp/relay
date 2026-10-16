@@ -877,7 +877,10 @@ loop-body definitions remain editable in YAML.
 An empty project keeps the workspace sidebar and offers **New workflow**.
 Its editor and launch controls wait until a workflow is selected.
 
-`view=workflows` opens the editor. The Runs tab opens history. When a run needs
+`view=workflows` opens the editor. A `workflow` parameter also opens its
+selected workflow without `view`, for example `?workflow=review.yaml`.
+An unknown `view` without a `workflow` or `run` parameter opens Home.
+The Runs tab opens history. When a run needs
 a response, it returns to that run; visiting Workflows preserves the current
 waiting run so another request does not replace it. The history sidebar
 selects all workflows or one workflow.
