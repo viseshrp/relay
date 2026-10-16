@@ -332,6 +332,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         providers.install("codex", mode="configuration-recovery")
         return JsonResponse({"ok": True})
 
+    @owner_required
+    @require_POST
+    def native_denial_provider(request: HttpRequest) -> JsonResponse:
+        del request
+        providers.install("antigravity", mode="headless-denied-write")
+        return JsonResponse({"ok": True})
+
     @api_errors
     @owner_required
     @require_POST
@@ -399,6 +406,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
+    urlpatterns.insert(0, path("__test__/native-denial-provider", native_denial_provider))
     urlpatterns.insert(0, path("__test__/activity", activity))
 
     # Close each SDK callback's database connection in its owning thread.

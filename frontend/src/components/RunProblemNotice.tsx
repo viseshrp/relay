@@ -2,38 +2,7 @@ import { Alert, Button, Stack, Typography } from "@mui/material";
 
 import { stageLabel } from "../navigation";
 import type { RunProblem } from "../types";
-
-function failureReason(problem: RunProblem): string {
-  if (problem.message) return problem.message;
-  if (problem.exit_code !== null && problem.exit_code !== 0) {
-    return `The tool exited with code ${problem.exit_code}. Open the step's activity for its output.`;
-  }
-  const reasons: Record<string, string> = {
-    agent_protocol_error: "The agent stopped before completing its request.",
-    agent_usage_limit: "The provider's usage limit stopped this step.",
-    agent_auth_error:
-      "The agent needs a working sign-in before it can continue.",
-    agent_launch_error: "Relay could not start the selected agent.",
-    model_unavailable_error:
-      "The selected model is unavailable from the configured tools.",
-    model_selection_rejected_error: "The agent rejected the selected model.",
-    agent_configuration_error:
-      "The agent rejected the requested configuration.",
-    output_validation_error: "The step did not produce its required output.",
-    loop_exhausted:
-      "The loop reached its iteration limit without satisfying its stop condition. Open the step to inspect the retained results.",
-    node_timeout: "The step reached its time limit.",
-    worker_lost: "The worker stopped before finishing this step.",
-    soft_denied: "The tool did not have permission to complete its work.",
-    git_error: "A Git operation could not complete.",
-    worktree_error: "Relay could not prepare or clean up the working folder.",
-  };
-  return (
-    reasons[problem.error_code ?? ""] ??
-    reasons[problem.stop_reason ?? ""] ??
-    "The step could not finish. Open its activity to inspect the cause."
-  );
-}
+import { failureReason } from "../failure";
 
 export function RunProblemNotice({
   problem,

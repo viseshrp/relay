@@ -492,6 +492,11 @@ Waiting and failed jobs move to the top with their parent and repair context;
 each loaded job appears once, including iteration markers. **Load more jobs**
 extends the same list. The Summary has one graph without a duplicate chip
 block. Select **Summary** for the run graph, approvals, and overall status.
+Failure notices in Summary, job logs, and embedded step logs share the same
+recorded reason. Permission denials and timeouts take precedence over a
+provider's exit code, including exit code zero. An explicit public error
+message remains the first explanation.
+
 Selecting a job in the list, graph, or failure notice opens its log in the
 right column. The URL records
 `job=<scope path>` so a reload or shared link opens the same job.
