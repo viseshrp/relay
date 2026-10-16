@@ -559,6 +559,63 @@ def agy_main(arguments: list[str]) -> None:
     if mode == "oversized":
         write_line("x" * 1_000_000)
         return
+    if mode.startswith("headless-"):
+        target = str(
+            Path.cwd() / ("../outside.txt" if mode == "headless-denied-outside" else "report.txt")
+        )
+        notice = (
+            'jetski: no output produced — a tool required the "write_file" permission '
+            "that headless mode cannot prompt for, so it was auto-denied. "
+            "Add an allow-rule under permissions.allow in settings.json "
+            "(e.g. write_file(<target>))."
+        )
+        command = mode == "headless-command-denied"
+        if command:
+            notice = notice.replace('"write_file"', '"command"').replace(
+                "write_file(<target>)", "command(<target>)"
+            )
+        if mode == "headless-denied-before-tool":
+            write_line(notice, stderr=True)
+        if mode != "headless-help-only":
+            tool = "run_command" if command else "write_to_file"
+            parameters = {"CommandLine": "echo hello"} if command else {"TargetFile": target}
+            error = (
+                "user denied permission for command(echo hello)"
+                if command
+                else f"permission check failed: user denied permission for write_file({target})"
+            )
+            if mode == "headless-write-error":
+                error = "Writing failed because the disk is full."
+            emit(
+                {
+                    "event": "step_update",
+                    "step_update": {
+                        "conversation_id": "native-denial-fixture",
+                        "step_index": 2,
+                        "state": "ERROR",
+                        "step_type": "tool",
+                        "tool_name": tool,
+                        "tool_info": {
+                            "name": tool,
+                            "parameters": parameters,
+                            "error": {"type": "TOOL_ERROR", "message": error},
+                        },
+                    },
+                }
+            )
+        if mode == "headless-denied-stdout-only":
+            emit(
+                {
+                    "event": "step_update",
+                    "step_update": {
+                        "step_type": "agent_response",
+                        "state": "DONE",
+                        "text_delta": notice,
+                    },
+                }
+            )
+        elif mode != "headless-denied-before-tool":
+            write_line(notice, stderr=True)
     if mode.startswith("stderr-"):
         if mode == "stderr-denied":
             write_line("denied write_file(report.txt)", stderr=True)

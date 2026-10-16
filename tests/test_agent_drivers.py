@@ -596,6 +596,32 @@ def test_antigravity_soft_denies_require_a_complete_in_worktree_stderr_notice(
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+@pytest.mark.parametrize(
+    ("mode", "denied"),
+    [
+        ("headless-help-only", False),
+        ("headless-denied-write", True),
+        ("headless-denied-outside", False),
+        ("headless-denied-stdout-only", False),
+        ("headless-command-denied", False),
+        ("headless-write-error", False),
+        ("headless-denied-before-tool", True),
+    ],
+)
+def test_antigravity_native_denial_notice_requires_matching_write_target(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str, denied: bool
+) -> None:
+    monkeypatch.setenv("FAKE_AGY_MODE", mode)
+    _events, result = execute(
+        AntigravityDriver(PROFILES["antigravity"], agent_context.command), agent_context
+    )
+    assert result.succeeded is not denied
+    assert result.denied_write_targets == (("report.txt",) if denied else ())
+    assert result.error_code == ("antigravity_soft_denied" if denied else None)
+    assert result.stop_reason == ("soft_denied" if denied else "completed")
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
 def test_oversized_antigravity_prompts_fail_before_starting_a_process(
     agent_context: AgentExecutionContext,
 ) -> None:

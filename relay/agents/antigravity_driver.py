@@ -59,7 +59,11 @@ _MODEL_LIST_TIMEOUT_SECONDS = 15.0
 _SOFT_DENY = re.compile(
     r"(?i)(?:\bdenied\b|soft[- ]?deny|requires approval|permission[^\n]*not granted)"
 )
-_ACTION_TARGET = re.compile(r"(?:write_file|delete_file|move_file|command)\(([^)]+)\)")
+_ACTION_TARGET = re.compile(r"(?:write_file|delete_file|move_file)\(([^)]+)\)")
+_HEADLESS_WRITE_DENY = re.compile(
+    r'a tool required the "write_file" permission that headless mode cannot prompt for, '
+    r"so it was auto-denied\."
+)
 
 
 def _prompt(context: AgentExecutionContext) -> str:
@@ -170,16 +174,47 @@ def _inside_worktree(target: str, worktree: Path) -> str | None:
 
 
 def _denied_targets(notice: str, worktree: Path) -> tuple[str, ...]:
-    """A stderr notice `denied write_file(src/a.py)` yields (`src/a.py`,)."""
+    """A complete message `denied write_file(src/a.py)` yields (`src/a.py`,)."""
     if not _SOFT_DENY.search(notice):
         return ()
-    # Only a complete stderr tool notice is eligible. Natural-language stdout
-    # and partial raw chunks must never become permission decisions.
+    # The caller checks the protocol source before treating these paths as a
+    # permission decision. A usage example supplies no concrete write target.
     candidates = _ACTION_TARGET.findall(notice)
     targets = {
-        target for item in candidates if (target := _inside_worktree(item, worktree)) is not None
+        target
+        for item in candidates
+        if item.strip() != "<target>" and (target := _inside_worktree(item, worktree)) is not None
     }
     return tuple(sorted(targets))
+
+
+def _denied_tool_write(raw: dict[str, object], worktree: Path) -> str | None:
+    """Match a failed `write_to_file` target with its permission-denial error."""
+    step = raw.get("step_update") if raw.get("event") == "step_update" else None
+    if (
+        not isinstance(step, dict)
+        or step.get("state") != "ERROR"
+        or step.get("step_type") != "tool"
+        or step.get("tool_name") != "write_to_file"
+    ):
+        return None
+    tool = step.get("tool_info")
+    if not isinstance(tool, dict) or tool.get("name") != "write_to_file":
+        return None
+    parameters = tool.get("parameters")
+    error = tool.get("error")
+    if not isinstance(parameters, dict) or not isinstance(error, dict):
+        return None
+    target = parameters.get("TargetFile")
+    message = error.get("message")
+    if (
+        error.get("type") != "TOOL_ERROR"
+        or not isinstance(target, str)
+        or not isinstance(message, str)
+    ):
+        return None
+    relative = _inside_worktree(target, worktree)
+    return relative if relative in _denied_targets(message, worktree) else None
 
 
 def _model_rows(output: str) -> tuple[tuple[str, str], ...]:
@@ -381,6 +416,8 @@ class AntigravityDriver:
             raise AgentProtocolError(message, context={"agent": self.profile.agent_id})
         queue = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
         denied = set()
+        denied_tool_writes = set()
+        write_deny_notice = False
         terminal_status = None
         terminal_timed_out = False
         requested_stop = None
@@ -432,6 +469,7 @@ class AntigravityDriver:
                     yield AgentEvent("agent.stderr", {"text": value})
                 elif kind == "stderr_line" and isinstance(value, str):
                     denied.update(_denied_targets(value, context.cwd))
+                    write_deny_notice |= bool(_HEADLESS_WRITE_DENY.search(value))
                 elif kind == "stderr_oversized":
                     message = "Antigravity emitted a stderr line above Relay's byte limit."
                     raise AgentProtocolError(  # noqa: TRY301
@@ -457,6 +495,8 @@ class AntigravityDriver:
                         raise AgentProtocolError(  # noqa: TRY301
                             message, context={"agent": self.profile.agent_id}
                         )
+                    if (target := _denied_tool_write(raw, context.cwd)) is not None:
+                        denied_tool_writes.add(target)
                     init = raw.get("init") if raw.get("event") == "init" else None
                     if isinstance(init, dict):
                         observed_model = init.get("model")
@@ -531,6 +571,11 @@ class AntigravityDriver:
             if requested_stop is None:
                 await sender
             await process.wait()
+            # Current native notices contain the example `write_file(<target>)`.
+            # Correlate that complete notice with the failed tool's actual path;
+            # stdout alone and help-text placeholders cannot prove a denied write.
+            if write_deny_notice:
+                denied.update(denied_tool_writes)
             # Actions agents edit the shared job workspace; Relay commits at
             # the job boundary. A verified denied write cannot be inferred from
             # a provider-owned commit or an obsolete writer flag.

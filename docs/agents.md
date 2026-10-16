@@ -318,7 +318,9 @@ not reclassified as a print timeout while buffered output drains. Relay does
 not infer timeout from the free-text `error` field. An `ERROR` result whose
 documented numeric `duration_seconds` reaches the print ceiling also reports
 a timeout. The headless documentation provides no separate timeout code.
-Live timeout behavior remains unverified.
+The Windows live check exercised a one-minute deadline while a real native
+command and its child were running. Both exited, and Relay retained
+`node_timeout` with stop reason `timeout`.
 
 The disposable `agy models` probe has a 15-second response limit and runs in
 its own process group. Relay stops that group before reporting a model-list
@@ -345,15 +347,20 @@ Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
 using a bounded queue that applies pipe backpressure. JSON parsing holds at most
 one 1 MiB line; a larger line is retained as raw output and then fails the
 attempt as a protocol error. Cancellation and timeout drain bytes already read
-before the attempt settles. Relay detects soft denies only in complete stderr
-tool notices, as described by the headless documentation. The exact notice
-format remains unverified until live certification. A target such as
-`write_file(src/report.md)` becomes worktree-relative `src/report.md`; a path
-outside the worktree is ignored by the write-target rule. An agent step fails
-with `soft_denied` when a complete, verified stderr notice denies a
-worktree-targeting write. Current agent steps share their job's workspace and
-Relay commits at job success, so denial detection does not rely on a per-node
-writer flag or a provider-created commit.
+before the attempt settles. Relay detects soft denies in complete stderr tool
+notices, as described by the headless documentation. A concrete target such
+as `write_file(src/report.md)` becomes worktree-relative `src/report.md`.
+Outside paths and command examples do not identify denied workspace writes.
+
+Native CLI 1.3.6 emits a generic stderr notice whose advice includes the
+example `write_file(<target>)`. Relay ignores that placeholder. For this
+notice, it also requires a failed `write_to_file` step whose structured
+`TargetFile` agrees with the permission-denial error. The stderr notice and
+tool failure may arrive in either order. Neither stdout alone nor a generic
+notice without that matching failure proves a denied write. A verified
+workspace write denial fails the step with `soft_denied`. Current agent steps
+share their job's workspace and Relay commits at job success, so this check
+does not depend on a provider-created commit.
 
 ## Certification evidence
 
