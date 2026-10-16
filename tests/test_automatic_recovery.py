@@ -3,17 +3,38 @@
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 
+from django.test import Client
 import pytest
 
-from relay.constants import DEFAULT_RECOVERY_PROMPT, RETRY_HANDOFF_MAX_BYTES
+from relay.constants import (
+    CONTROL_IDEMPOTENCY_KEY_MAX_CHARS,
+    DEFAULT_RECOVERY_PROMPT,
+    RETRY_HANDOFF_MAX_BYTES,
+)
+from relay.errors import PersistenceError
 from relay.execution.automatic import recovery_instruction
+from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
+from relay.execution.recovery import prepare_recovery_workspace
+from relay.execution.resume import RecoveryTarget, rerun_failed_node
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
-from relay.web.models import Artifact, AutomaticRetry, NodeAttempt, Run, RunSnapshot
+from relay.web.models import (
+    Artifact,
+    AutomaticRetry,
+    NodeAttempt,
+    NodeRun,
+    Run,
+    RunEvent,
+    RunSnapshot,
+)
 from relay.workflows.schema import AgentNode
 from tests.support import FakeAgents, InlineEngine, RelayProject
+from tests.test_web_api import client as client
+from tests.test_web_api import owner as owner
+from tests.test_web_api import post
 
 
 @dataclass
@@ -173,3 +194,205 @@ def test_large_multibyte_diagnostics_keep_the_instruction_within_its_byte_limit(
     assert note.startswith(DEFAULT_RECOVERY_PROMPT)
     assert len(note.encode("utf-8")) <= RETRY_HANDOFF_MAX_BYTES
     assert digest == sha256(note.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("body", [{"enabled": 1}, {"enabled": "true"}, {}])
+def test_recovery_route_requires_a_boolean_enabled_value(
+    owner: Client,
+    project: RelayProject,
+    tmp_path: Path,
+    fake_agents: FakeAgents,
+    body: dict[str, object],
+) -> None:
+    _engine, run_id = launch_report_run(project, tmp_path, fake_agents, ReportDriver())
+    response = post(owner, f"/api/runs/{run_id}/recovery", {**body, "idempotency_key": "policy"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "config_error"
+    assert response.json()["message"] == "enabled must be a boolean."
+
+
+def test_recovery_route_maps_accepted_duplicate_and_invalid_keys(
+    owner: Client, project: RelayProject, tmp_path: Path, fake_agents: FakeAgents
+) -> None:
+    _engine, run_id = launch_report_run(project, tmp_path, fake_agents, ReportDriver())
+    url = f"/api/runs/{run_id}/recovery"
+    body = {"enabled": True, "idempotency_key": "enable-recovery"}
+    accepted = post(owner, url, body)
+    duplicate = post(owner, url, body)
+    invalid = post(
+        owner,
+        url,
+        {
+            "enabled": True,
+            "idempotency_key": "x" * (CONTROL_IDEMPOTENCY_KEY_MAX_CHARS + 1),
+        },
+    )
+    assert (accepted.status_code, accepted.json()) == (202, {"result": "accepted"})
+    assert (duplicate.status_code, duplicate.json()) == (202, {"result": "already_applied"})
+    assert (invalid.status_code, invalid.json()) == (422, {"result": "invalid"})
+
+
+@pytest.mark.parametrize("status", ["succeeded", "canceled"])
+def test_recovery_route_refuses_a_finished_run(
+    owner: Client, project: RelayProject, engine: InlineEngine, status: str
+) -> None:
+    project.write_workflow("finished", "jobs: {main: {steps: [{run: print(1), shell: python}]}}\n")
+    run_id = engine.launch(project, "finished")
+    if status == "canceled":
+        engine.store.request_run_cancellation(run_id, "cancel")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == status
+    response = post(
+        owner,
+        f"/api/runs/{run_id}/recovery",
+        {
+            "enabled": True,
+            "idempotency_key": "finished-policy",
+        },
+    )
+    assert (response.status_code, response.json()) == (409, {"result": "stale"})
+
+
+@pytest.fixture
+def scheduled_recovery(
+    project: RelayProject, tmp_path: Path, fake_agents: FakeAgents
+) -> tuple[InlineEngine, str]:
+    engine, run_id = launch_report_run(project, tmp_path, fake_agents, ReportDriver())
+    assert (
+        engine.store.configure_recovery(run_id, True, "schedule-recovery") is ControlResult.ACCEPTED
+    )
+    assert AutomaticRetry.objects.get().state == "scheduled"
+    return engine, run_id
+
+
+def test_disabling_recovery_cancels_a_scheduled_retry(
+    scheduled_recovery: tuple[InlineEngine, str],
+) -> None:
+    engine, run_id = scheduled_recovery
+    assert engine.store.configure_recovery(run_id, False, "disable") is ControlResult.ACCEPTED
+    assert AutomaticRetry.objects.get().state == "canceled"
+    assert RunEvent.objects.filter(run_id=run_id, type="run.recovery_canceled").exists()
+    assert Run.objects.get(pk=run_id).status == "failed"
+
+
+@pytest.mark.parametrize("refusal", ["paused", "disabled", "not_failed", "no_pending_retry"])
+def test_automatic_rerun_target_requires_an_eligible_pending_failure(
+    scheduled_recovery: tuple[InlineEngine, str], refusal: str
+) -> None:
+    engine, run_id = scheduled_recovery
+    store = engine.store
+    if refusal == "paused":
+        store.configure_dispatch_pause(run_id, True, "pause")
+    elif refusal == "disabled":
+        store.configure_recovery(run_id, False, "disable")
+    elif refusal == "not_failed":
+        assert (
+            rerun_failed_node(
+                store,
+                run_id,
+                "root.critique.review",
+                "owner-retry",
+                lambda target: prepare_recovery_workspace(target, store),
+            )
+            is ControlResult.ACCEPTED
+        )
+        assert Run.objects.get(pk=run_id).status == "running"
+    else:
+        store.request_run_cancellation(run_id, "cancel-pending-retry")
+        assert Run.objects.get(pk=run_id).status == "failed"
+        assert AutomaticRetry.objects.get().state == "canceled"
+    assert store.automatic_rerun_target(run_id, "root.critique.review", "automatic") is None
+
+
+def test_automatic_rerun_target_refuses_an_unrelated_failed_step(
+    scheduled_recovery: tuple[InlineEngine, str],
+) -> None:
+    engine, run_id = scheduled_recovery
+    failed = NodeRun.objects.get(run_id=run_id, scope_path="root.critique.review")
+    NodeRun.objects.create(
+        run_id=run_id,
+        node_id="other",
+        scope_path="root.critique.other",
+        node_type=failed.node_type,
+        frozen_def=failed.frozen_def,
+        status="failed",
+    )
+    with pytest.raises(
+        PersistenceError,
+        match=r"Another failed step must be resolved before automatic recovery\.",
+    ):
+        engine.store.automatic_rerun_target(run_id, "root.critique.review", "automatic")
+    assert AutomaticRetry.objects.get().state == "scheduled"
+
+
+def test_automatic_retries_remain_pending_during_orderly_shutdown(
+    scheduled_recovery: tuple[InlineEngine, str],
+) -> None:
+    engine, run_id = scheduled_recovery
+    instance = engine.store.acquire_instance(os.getpid(), "test-host")
+    engine.store.request_orderly_shutdown(instance)
+    assert engine.store.resume_automatic_retries() == 0
+    assert AutomaticRetry.objects.get().state == "scheduled"
+    assert Run.objects.get(pk=run_id).status == "failed"
+
+
+@pytest.mark.parametrize("change", ["disabled", "paused", "shutdown", "newer_attempt"])
+def test_automatic_activation_rechecks_changes_during_workspace_preparation(
+    scheduled_recovery: tuple[InlineEngine, str], change: str
+) -> None:
+    engine, run_id = scheduled_recovery
+    store = engine.store
+    activations = []
+
+    def prepare(target: RecoveryTarget) -> None:
+        prepare_recovery_workspace(target, store)
+        if change == "disabled":
+            store.configure_recovery(run_id, False, "disable-during-preparation")
+        elif change == "paused":
+            store.configure_dispatch_pause(run_id, True, "pause-during-preparation")
+        elif change == "shutdown":
+            instance = store.acquire_instance(os.getpid(), "test-host")
+            store.request_orderly_shutdown(instance)
+        else:
+            failed = NodeAttempt.objects.get(pk=target.attempt_id)
+            NodeAttempt.objects.create(
+                node_run_id=target.node_run_id,
+                attempt_number=failed.attempt_number + 1,
+                worker_id=engine.worker_id,
+                starting_head=failed.starting_head,
+                status="failed",
+            )
+        activations.append(store.activate_automatic_recovery(target, "activation-probe"))
+
+    result = rerun_failed_node(
+        store,
+        run_id,
+        "root.critique.review",
+        "automatic",
+        prepare,
+        automatic_retry=True,
+    )
+    assert activations == [False]
+    assert result is ControlResult.ALREADY_APPLIED
+    assert Run.objects.get(pk=run_id).status == "failed"
+    assert AutomaticRetry.objects.get().state == (
+        "canceled" if change == "disabled" else "preparing"
+    )
+
+
+def test_owner_retry_cancels_a_scheduled_automatic_retry(
+    scheduled_recovery: tuple[InlineEngine, str],
+) -> None:
+    engine, run_id = scheduled_recovery
+    store = engine.store
+    result = rerun_failed_node(
+        store,
+        run_id,
+        "root.critique.review",
+        "owner-retry",
+        lambda target: prepare_recovery_workspace(target, store),
+    )
+    assert result is ControlResult.ACCEPTED
+    assert AutomaticRetry.objects.get().state == "canceled"
+    assert RunEvent.objects.filter(run_id=run_id, type="run.recovery_canceled").exists()
+    assert Run.objects.get(pk=run_id).status == "running"

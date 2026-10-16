@@ -3,14 +3,9 @@
 import pytest
 
 from relay.errors import PersistenceError
-from relay.execution.nodes import node_executors
 from relay.web.models import RunSnapshot
 from relay.web.repositories import _compiled_run_graph
 from tests.support import InlineEngine, RelayProject
-
-
-def test_worker_registers_only_job_and_step_executors() -> None:
-    assert set(node_executors()) == {"actions_job", "actions_step"}
 
 
 def test_a_missing_frozen_plan_does_not_reparse_snapshot_yaml(

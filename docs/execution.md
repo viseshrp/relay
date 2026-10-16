@@ -198,9 +198,10 @@ coordinators. Independent failed steps block recovery.
 
 Owner retries verify the evidence manifest, every retained file hash, and its
 Git reference. The primary workspace must still match its protected head with
-only the exact root-report exemptions. Missing evidence, dirty code, staged
-reports, or a changed head block recovery. Failed jobs
-retain their private continuation state for a safe retry; confirmed cleanup
+only the exact root-report exemptions. Relay preserves missing required
+evidence before verification; human-wait steps carry no evidence. Damaged
+evidence, dirty code, staged reports, or a changed head block recovery. Failed
+jobs retain their private continuation state for a safe retry; confirmed cleanup
 can remove it when the run is no longer needed.
 
 Relay appends the error and the following instruction as a separate prompt:
