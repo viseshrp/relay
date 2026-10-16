@@ -1133,7 +1133,8 @@ Visual tests use a separate disposable server and database on port 4176,
 so functional test runs cannot appear on the Home dashboard. Baselines live
 under `frontend/e2e/baselines/{platform}`. Linux CI is the reference for CI
 screenshots; macOS and Windows baselines support local checks. Relative times
-and private paths are masked rather than relaxing the pixel-difference threshold.
+and private paths are masked rather than relaxing the pixel-difference
+threshold.
 
 To refresh Linux baselines, dispatch the Main workflow on the working branch
 with **Generate Linux visual baselines for review** enabled. Review the

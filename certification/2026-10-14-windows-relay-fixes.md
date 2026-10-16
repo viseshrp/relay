@@ -7,7 +7,7 @@ agent work, owner waits, command execution, Git isolation, and monitoring.
 The [initial report](2026-10-14-windows-suspendit.md) preserves the four defects
 and their original evidence.
 
-The subsequent [full Python follow-up](https://github.com/viseshrp/relay/pull/23)
+The subsequent [Python follow-up](https://github.com/viseshrp/relay/pull/23)
 passes the Windows Python 3.14 gate and records its capability/platform skips.
 
 ## Fixes and live results
