@@ -346,7 +346,7 @@ test("permission requests send owner feedback through the same agent session", a
     }),
   });
   expect(created.ok()).toBeTruthy();
-  await page.goto("/?view=author&workflow=agent-feedback.yaml");
+  await page.goto("/?view=workflows&workflow=agent-feedback.yaml");
   await page
     .getByRole("region", { name: "Workflow header" })
     .getByRole("button", { name: "Run workflow", exact: true })

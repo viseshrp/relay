@@ -91,20 +91,26 @@ test("native Antigravity tools show the command and output without raw JSON", ()
   );
 });
 
-test("legacy tool summaries omit opaque IDs and duplicate command titles", () => {
+test("tool summaries omit opaque IDs and duplicate command titles", () => {
   const messages = activityMessages([
     event(1, "agent.tool_call", {
       tool: "git status",
       summary: '{"raw_input":{"command":"git status"}}',
     }),
-    event(2, "agent.tool_call", { tool: "toolu_01ABC", summary: "{}" }),
+    event(2, "agent.tool_call", {
+      tool: "call-a",
+      tool_call_id: "call-a",
+      summary: "{}",
+    }),
     event(3, "agent.tool_result", {
-      tool: "toolu_01ABC",
+      tool: "call-a",
+      tool_call_id: "call-a",
       summary:
         '{"kind":"execute","status":"completed","content":[{"text":"clean"}]}',
     }),
     event(4, "agent.tool_result", {
-      tool: "exec-12345678-1234-1234-1234-123456789abc",
+      tool: "call-b",
+      tool_call_id: "call-b",
       summary: '{"status":"completed"}',
     }),
   ]);

@@ -34,7 +34,13 @@ const components = {
 export default [
   { ignores: ["node_modules/**", "test-results/**", "playwright-report/**"] },
   {
-    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "unit/**/*.ts", "*.ts"],
+    files: [
+      "src/**/*.{ts,tsx}",
+      "e2e/**/*.ts",
+      "captures/**/*.ts",
+      "unit/**/*.ts",
+      "*.ts",
+    ],
     languageOptions: {
       parser: babelParser,
       parserOptions: {

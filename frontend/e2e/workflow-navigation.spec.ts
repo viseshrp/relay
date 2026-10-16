@@ -103,7 +103,7 @@ test("switching workflows resets the canvas and shows the first stage at a reada
     },
   });
   await createWorkflow(page, "canvas-long", "Canvas long", longWorkflow());
-  await page.goto("/?view=author&workflow=canvas-short.yaml");
+  await page.goto("/?view=workflows&workflow=canvas-short.yaml");
   await expectCenteredStage(page, "prepare");
   await page.getByRole("button", { name: "Zoom In" }).click();
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
@@ -129,7 +129,7 @@ test("search and keyboard selection restore an off-screen stage without changing
   page,
 }) => {
   await createWorkflow(page, "canvas-search", "Canvas search", longWorkflow());
-  await page.goto("/?view=author&workflow=canvas-search.yaml");
+  await page.goto("/?view=workflows&workflow=canvas-search.yaml");
   await expect(page.locator(".react-flow__node")).toHaveCount(23);
   const before = await (
     await page.request.get("/api/workflows/canvas-search.yaml")
@@ -189,7 +189,7 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
       ],
     },
   });
-  await page.goto("/?view=author&workflow=navigation-agent.yaml");
+  await page.goto("/?view=workflows&workflow=navigation-agent.yaml");
   await openJobSettings(page);
   await page
     .getByLabel("Agent prompt", { exact: true })

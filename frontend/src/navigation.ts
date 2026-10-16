@@ -29,7 +29,9 @@ export function readLocation(): LocationState {
           ? "settings"
           : parameters.get("view") === "runs" || parameters.has("run")
             ? "runs"
-            : "workflows",
+            : parameters.get("view") === "workflows"
+              ? "workflows"
+              : "home",
     project:
       parameters.get("project") ?? (!query ? remembered.get("project") : null),
     workflow: parameters.get("workflow"),

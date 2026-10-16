@@ -22,6 +22,12 @@ test.afterEach(async ({ page }) => {
   await post(page, "/__test__/reset");
 });
 
+test("an unknown workspace view opens Home", async ({ page }) => {
+  await page.goto("/?view=missing");
+  await expect(page.getByRole("main", { name: "Relay home" })).toBeVisible();
+  await expect(page).toHaveURL(/\?view=home&project=/);
+});
+
 test("Home recovers when its remembered project no longer exists", async ({
   page,
 }) => {

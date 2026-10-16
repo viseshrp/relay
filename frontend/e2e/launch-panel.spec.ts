@@ -74,7 +74,7 @@ async function create(
     }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
-  await page.goto(`/?view=author&workflow=${key}.yaml`);
+  await page.goto(`/?view=workflows&workflow=${key}.yaml`);
   await expect(
     page
       .getByRole("region", { name: "Workflow header" })
@@ -114,7 +114,7 @@ test.beforeEach(async ({ page }) => {
   expect(baseline.ok(), await baseline.text()).toBeTruthy();
   const { run_id: id } = await baseline.json();
   await expectRunStatus(page, id, "succeeded", 30_000);
-  await page.goto("/?view=author&workflow=workflow");
+  await page.goto("/?view=workflows&workflow=workflow");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
 });
 
