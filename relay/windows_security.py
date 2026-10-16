@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 from pathlib import Path
+import sys
 from typing import ClassVar
 
 _OWNER_SECURITY_INFORMATION = 1
@@ -72,6 +73,9 @@ def _grant(sid: int, permissions: int, inheritance: int) -> _ExplicitAccess:
 
 def ensure_private_directory_acl(path: Path) -> None:
     """Retain owner access and the directory attributes needed to resolve sandbox paths."""
+    if sys.platform != "win32":
+        message = "Windows directory ACLs require Windows."
+        raise OSError(message)
     import ctypes.wintypes as wintypes
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
