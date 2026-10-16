@@ -307,11 +307,8 @@ class ActionRuntime:
         elif isinstance(payload.get("chunk"), str) or isinstance(payload.get("text"), str):
             field = "chunk" if isinstance(payload.get("chunk"), str) else "text"
             key = f"{attempt_id}:{event_type}:{source.value}:{sensitivity.value}:{field}"
-            metadata = cast(
-                dict[str, object],
-                self.masks.payload(
-                    {name: value for name, value in payload.items() if name != field}
-                ),
+            metadata = self.masks.mapping(
+                {name: value for name, value in payload.items() if name != field}
             )
             self.log.streams[key] = (event_type, source, sensitivity, field, metadata)
             chunk = self.masks.stream(key, cast(str, payload[field]))
@@ -328,6 +325,6 @@ class ActionRuntime:
                 attempt_id,
                 event_type,
                 source,
-                cast(Mapping[str, object], self.masks.payload(payload)),
+                self.masks.mapping(payload),
                 sensitivity=sensitivity,
             )
