@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from uuid import uuid4
@@ -63,8 +64,13 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
     script.write_text(
         "param([string] $Target)\n"
         "$ErrorActionPreference = 'Stop'\n"
-        "$acl = Get-Acl -LiteralPath $Target\n"
-        "$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value\n"
+        '$env:PSModulePath = "$PSHOME\\Modules"\n'
+        "$sections = [System.Security.AccessControl.AccessControlSections]'Owner, Access'\n"
+        "$acl = if ([System.IO.Directory]::Exists($Target)) { "
+        "[System.Security.AccessControl.DirectorySecurity]::new($Target, $sections) "
+        "} else { [System.Security.AccessControl.FileSecurity]::new($Target, $sections) }\n"
+        "$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])\n"
+        "$owner.Value\n"
         "$acl.GetSecurityDescriptorSddlForm('Owner, Access')\n"
         "[int][System.Security.AccessControl.FileSystemRights]::ReadAttributes\n"
         "$rules = @($acl.GetAccessRules($true, $true, "
@@ -73,18 +79,34 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
         "ForEach-Object { @{ rights = [int]$_.FileSystemRights; "
         "inheritance = $_.InheritanceFlags.ToString(); "
         "propagation = $_.PropagationFlags.ToString(); inherited = $_.IsInherited } })\n"
-        "ConvertTo-Json -InputObject $rules -Compress\n",
+        "ConvertTo-Json -InputObject $rules -Compress\n"
+        "$ownerRules = @($acl.GetAccessRules($true, $true, "
+        "[System.Security.Principal.SecurityIdentifier]) | "
+        "Where-Object { $_.IdentityReference.Value -eq $owner.Value })\n"
+        "$full = [System.Security.AccessControl.FileSystemRights]::FullControl\n"
+        "$inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit "
+        "-bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit\n"
+        "[bool](@($ownerRules | Where-Object { "
+        "($_.FileSystemRights -band $full) -eq $full }).Count)\n"
+        "[bool](@($ownerRules | Where-Object { "
+        "($_.FileSystemRights -band $full) -eq $full -and "
+        "($_.InheritanceFlags -band $inherit) -eq $inherit }).Count)\n",
         encoding="utf-8",
     )
 
-    def security(target: Path = directory) -> tuple[str, str, int, list[dict[str, object]]]:
-        powershell = (
-            Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    def security(
+        target: Path = directory,
+    ) -> tuple[str, str, int, list[dict[str, object]], bool, bool]:
+        powershell = Path(
+            shutil.which("pwsh")
+            or Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         )
         result = subprocess.run(  # noqa: S603 - inspect the owned fixture with Windows' ACL reader
             [
                 str(powershell),
+                "-NoLogo",
                 "-NoProfile",
+                "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
@@ -95,22 +117,27 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
             check=False,
             text=True,
             timeout=15,
-            env={**os.environ, "PSModulePath": str(powershell.parent / "Modules")},
         )
         assert result.returncode == 0, result.stderr
         lines = result.stdout.strip().splitlines()
-        assert len(lines) == 4, result.stderr
-        return lines[0], lines[1], int(lines[2]), json.loads(lines[3])
+        assert len(lines) == 6, result.stderr
+        return (
+            lines[0],
+            lines[1],
+            int(lines[2]),
+            json.loads(lines[3]),
+            lines[4] == "True",
+            lines[5] == "True",
+        )
 
-    owner, before, attributes, before_rules = security()
+    owner, before, attributes, before_rules, _, _ = security()
     if allocation == "directory":
         paths.ensure_private_dir(directory)
-    owner_after, after, _, after_rules = security()
+    owner_after, after, _, after_rules, owner_full, owner_inherits = security()
     paths.ensure_private_dir(directory)
 
     assert owner_after == owner
-    owner_grants = re.findall(rf"\(A;([^;]*);FA;;;{re.escape(owner)}\)", after)
-    assert any("OI" in flags and "CI" in flags for flags in owner_grants)
+    assert owner_full and owner_inherits
     assert set(re.findall(r"\([^()]+\)", before)) <= set(re.findall(r"\([^()]+\)", after))
     before_flags = before.split("D:", 1)[1].split("(", 1)[0]
     after_flags = after.split("D:", 1)[1].split("(", 1)[0]
@@ -127,11 +154,11 @@ def test_private_directory_preserves_acl_and_inherits_original_owner_grant(
         for rule in added_rules
     )
     assert after_rules
-    assert security() == (owner, after, attributes, after_rules)
+    assert security() == (owner, after, attributes, after_rules, True, True)
     child = directory / "child.txt"
     child.write_text("retained bytes", encoding="utf-8")
-    _, child_acl, _, child_rules = security(child)
-    assert re.search(rf"\(A;[^;]*ID[^;]*;FA;;;{re.escape(owner)}\)", child_acl)
+    _, _, _, child_rules, child_owner_full, _ = security(child)
+    assert child_owner_full
     assert all(rule not in child_rules for rule in added_rules)
 
 
