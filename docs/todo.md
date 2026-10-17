@@ -2519,8 +2519,8 @@ where that familiarity stops, usually without saying so.
   - **Evidence:** A typical 15-line CI file (`push` and `pull_request`,
     `runs-on`, checkout, `setup-python`, two `run` steps) produced four
     errors. Removing those four things (six lines) made it valid; the `run`
-    steps needed no change. The `runs-on` message says "select an agent in the step",
-    which misleads for a job that only runs tests. Relay reads only
+    steps needed no change. The `runs-on` message says "select an agent in
+    the step", which misleads for a job that only runs tests. Relay reads only
     `.relay/workflows/`; nothing imports from `.github/workflows/`.
   - **Fix:** Offer **Import from GitHub Actions**: copy a chosen
     `.github/workflows` file, remove or translate the known fields, and show
