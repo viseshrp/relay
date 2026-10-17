@@ -1928,8 +1928,9 @@ visible but quiet.
 
 This audit ran on 2026-10-17 against `main` at `62ac59e`. It asks one
 question: can someone new to Relay build or change a workflow, in the visual
-editor or in YAML, without already knowing Relay's schema? Starting a starter
-is in good shape. Building and editing are not. Items are grouped by category
+editor or in YAML, without already knowing Relay's schema? A starter runs end
+to end, but its approvals and its results confuse a beginner, and building or
+editing a workflow is harder still. Items are grouped by category
 and carry a priority: **P0** strands or misleads a beginner, **P1** slows them
 down, **P2** is polish. Item numbers use the `WB` prefix.
 
@@ -1948,6 +1949,13 @@ How it was run:
   **Workflow settings**, the right-click menu, YAML completion, hover, the
   Tab key, and clearing the document. axe-core 4 ran on the editor and on
   the open job drawer.
+- **End-to-end journeys.** Two features were built through the browser
+  alone. The first followed the guided path: welcome slides, **Get started**,
+  the default **AI coding workflow**, three approvals, and the finished run
+  (`/__test__/starter-project` with `full_workflow`, whose fake agents write
+  `feature.py` and `test_feature.py`). The second built a two-job workflow
+  from a blank one with forms only, then saved, launched, and watched it.
+  Approval answers were read from the screen, not from test code.
 - **Source and docs.** The editor components, `support_manifest()`, the
   action contracts, `docs/getting-started.md`,
   `docs/coming-from-github-actions.md`, and the authoring sections of
@@ -2141,6 +2149,41 @@ at 375 pixels.
   - **Done when:** Opening any starter's agent step shows which agents it
     will try, in order, in one place.
 
+- [ ] **WB-31. Show job names, not only IDs, when connecting jobs.**
+  - **Priority:** P1.
+  - **Evidence:** In the second journey the blank workflow's job was renamed
+    **Review**, but **Start after** on the next job offered only `check`, its
+    ID. The added job stayed `job_1` in the YAML after being named **Test**.
+    The finished run's artifact table then listed `REVIEW.md` under the jobs
+    "Check" and "Job 1".
+  - **Fix:** Label **Start after** choices as "Review (`check`)". When a job
+    is created or first named, offer to derive its ID from the name. Use job
+    names in the artifact **Job** column.
+  - **Done when:** A user who only types job names never sees a generated ID
+    in the editor or the run's artifact table.
+
+- [ ] **WB-32. Mark agents that are not installed.**
+  - **Priority:** P2.
+  - **Evidence:** With only Codex installed, the agent step's **Agent** select
+    listed Codex, Claude Code, GitHub Copilot CLI, Cursor CLI, and
+    Antigravity with no status, although the **Get started** checklist marks
+    such agents "Not installed".
+  - **Fix:** Show the checklist's status in the select and disable agents
+    that are not installed, with a link to the checklist.
+  - **Done when:** An agent that cannot run is visibly marked wherever it can
+    be chosen.
+
+- [ ] **WB-33. Keep canvas cards in view after the drawer closes.**
+  - **Priority:** P2.
+  - **Evidence:** After adding a second job and closing its drawer, both
+    cards sat cut off at the left edge of the canvas with their labels
+    hidden. The canvas follows the selected job while the drawer is open
+    (`followSelection` in `WorkflowCanvas.tsx`), which is the likely cause.
+  - **Fix:** Fit the view to the graph when the drawer closes, or keep the
+    selected card centred in the uncovered area.
+  - **Done when:** A browser test adds a job, closes the drawer, and finds
+    every card fully inside the canvas.
+
 ### Validation and error messages
 
 - [ ] **WB-13. Name the field and suggest the closest match.**
@@ -2288,6 +2331,114 @@ at 375 pixels.
   - **Done when:** A user with one agent installed sees a runnable starter
     selected by default.
 
+### First run and results
+
+- [ ] **WB-24. Offer approval answers as buttons.**
+  - **Priority:** P0.
+  - **Evidence:** The default starter's three approvals are free-text
+    `relay/human-wait@v1` steps without `options`, each followed by a
+    `relay/validate-input@v1` enum check (`ai-coding-workflow.yaml:71-83`).
+    The cards ask for "Reply IMPLEMENT", then "Reply FOLLOWUP" or "Reply
+    TESTS", then "Reply ACCEPT". Answering the first one with `yes` failed the
+    run with "Workflow validation failed: - input 'value' must be one of the
+    declared enum values", and all five later jobs were skipped. **Re-run
+    failed jobs** offered only "Implement · Step 2", the check rather than
+    the question, and the step page said neither what was typed nor what was
+    expected.
+  - **Fix:** Pass the allowed answers as `options` so the card shows buttons
+    and a wrong word cannot be sent. Where free text stays, check the answer
+    in the card before accepting it, and name the expected answers in any
+    later failure.
+  - **Done when:** Each starter approval offers buttons, and a browser test
+    shows that no answer can fail the run.
+
+- [ ] **WB-25. Show the code a finished run produced.**
+  - **Priority:** P0.
+  - **Evidence:** After the guided run succeeded, its summary said "Work is
+    complete. Review the saved documents and code changes below.", but
+    **Review material** offered only five early planning documents and no
+    **Committed code changes**. The run had 320 visible artifacts; the page
+    loads the first 50, oldest first (`useRunWorkspace.tsx:237`), and
+    decides whether changes exist from that page alone
+    (`RunReviewShared.tsx:99`). The first non-empty `commits` record was the
+    74th. The summary also read "Artifacts 50"
+    (`RunSummaryOverview.tsx:75` counts loaded records). Meanwhile
+    `GET /api/runs/{id}/changes` returned the diff for `feature.py` and
+    `test_feature.py`. During the first approval the same control defaulted
+    to `INITIAL_OPUS_PLANNING_PROMPT.md`
+    (`RunReviewShared.tsx:111` picks the first loaded document), although the
+    request named three other documents.
+  - **Fix:** Decide whether changes exist from the run, not from a loaded
+    page, show the server's artifact total, and default to the documents the
+    request names or else the newest.
+  - **Done when:** A run with more than 50 artifacts shows **Committed code
+    changes** and its true artifact count without **Load more artifacts**.
+
+- [ ] **WB-26. Say where the code is and how to take it.**
+  - **Priority:** P1.
+  - **Evidence:** The guided run committed `feature.py` and `test_feature.py`
+    to `relay/run/<run id>`; `main` was unchanged, as Relay's rules require.
+    The finished page names neither that branch nor the changed files, and
+    never mentions merging. Its summary shows the source commit and `main`.
+  - **Fix:** Add a result line such as "2 files changed on branch
+    `relay/run/…`", with the commands to inspect and merge it, and point to
+    the **merge on success** option for the next run.
+  - **Done when:** A user can bring a finished run's code into their branch
+    without reading the docs.
+
+- [ ] **WB-27. Say plainly that the default starter pushes and opens a pull
+  request.**
+  - **Priority:** P1.
+  - **Evidence:** The starter's prompts tell the agent to push the branch and
+    create a pull request with GitHub CLI when none exists
+    (`01_initial_exploration_any_model.md:548-551`). The first approval
+    mentions this only as "commits, push, and PR creation when missing",
+    next to "the locked implementation". The second asks for "explicit
+    RESOLVE and verified GitHub Viewed state" and an "explicit AGREE" per
+    follow-up item.
+  - **Fix:** State on the starter card and in the first approval that the
+    agent will push and open a pull request if the repository has a remote.
+    Rewrite the approval texts in plain words, and consider a local-only
+    input.
+  - **Done when:** A beginner can tell before approving what will leave
+    their computer.
+
+- [ ] **WB-28. Use display names in run views.**
+  - **Priority:** P2.
+  - **Evidence:** While queued, the guided run's sidebar listed `refine_plan`,
+    `implement`, `review`, `refresh`, `human_review`, `tests`, and
+    `final_review`, plus loop scopes labelled `iteration` and `cycle` ("Step
+    1 › Iteration 1"). The job count changed from 9 to 11 to 15 as loop
+    scopes appeared. Commit messages read "Relay: complete job cycle". The
+    artifact table repeats one file once per scope, for example
+    `INITIAL_OPUS_PLANNING_PROMPT.md` under "Step 1", "Explore", "Read", and
+    "Instruction".
+  - **Fix:** Show each job's display name from launch, group loop scopes
+    under their job, count jobs consistently, and collapse repeated
+    artifacts to the latest copy, with the others under details.
+  - **Done when:** No generated scope name appears in the default run view.
+
+- [ ] **WB-29. Keep the Get started prompt after the slides close.**
+  - **Priority:** P2. Needs an owner decision.
+  - **Evidence:** Pressing Escape on the welcome slides also removed the
+    **Get started** banner behind them, as
+    [Local web runtime](web-ui.md#get-started) documents. The checklist then
+    lives only under the account menu.
+  - **Fix:** Keep the banner until the checklist is opened or the banner is
+    dismissed on its own.
+  - **Done when:** Skipping the slides still leaves one visible next step.
+
+- [ ] **WB-30. Explain the optional commit in the launch dialog.**
+  - **Priority:** P2.
+  - **Evidence:** For a new workflow the dialog said "Project files are ready
+    to run. 1 allowed file" and still offered **Commit workflow files**,
+    which opens a separate confirmation. Nothing says whether committing is
+    needed.
+  - **Fix:** Label it as optional, explain what "allowed file" means, or
+    hide the button when the run can start without it.
+  - **Done when:** A user can tell from the dialog alone whether to commit
+    before running.
+
 ### Accessibility
 
 - [ ] **WB-23. Name the job settings drawer.**
@@ -2303,11 +2454,15 @@ at 375 pixels.
 
 ### Suggested order for these findings
 
-1. WB-06, WB-07, WB-15: the editor stops saying one thing while the
+1. WB-24, WB-25: a first run cannot fail on a typed word, and its result is
+   visible.
+2. WB-06, WB-07, WB-15: the editor stops saying one thing while the
    workflow does another.
-2. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
+3. WB-26, WB-27, WB-31: the user knows where the code is, what leaves their
+   computer, and which job is which.
+4. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
    schema.
-3. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
-4. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
+5. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
+6. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
    the guide.
-5. WB-18, WB-21, WB-22, WB-23.
+7. WB-18, WB-21 to WB-23, WB-28 to WB-30, WB-32, WB-33.
