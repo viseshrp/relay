@@ -14,12 +14,6 @@ export function settingsErrors(
   )
     errors.retries = "Choose one or two additional attempts.";
   if (
-    !Number.isInteger(defaults.repairs.max_rounds) ||
-    defaults.repairs.max_rounds < 1 ||
-    defaults.repairs.max_rounds > 100
-  )
-    errors.rounds = "Choose 1–100 repair rounds.";
-  if (
     !Number.isInteger(settings.port) ||
     settings.port < 1 ||
     settings.port > 65535

@@ -9,7 +9,7 @@ from pathlib import Path
 from relay.errors import PathSafetyError, PromptResolutionError
 from relay.paths import global_prompts_dir, safe_resolve
 
-from .schema import ActionsJobNode, AgentNode, GlobalPrompt, LocalPrompt, LoopNode, NodeDefinition
+from .schema import ActionsJobNode, AgentNode, GlobalPrompt, LocalPrompt, NodeDefinition
 from .source_text import read_source
 
 
@@ -28,14 +28,10 @@ class ResolvedPrompt:
 
 
 def iter_agent_nodes(nodes: Mapping[str, NodeDefinition]) -> Iterable[AgentNode]:
-    """Yield agent nodes in YAML insertion order, including loop bodies."""
+    """Yield the frozen agent bindings in workflow job order."""
     for node in nodes.values():
-        if isinstance(node, AgentNode):
-            yield node
-        elif isinstance(node, ActionsJobNode):
+        if isinstance(node, ActionsJobNode):
             yield from node.bound_agents.values()
-        elif isinstance(node, LoopNode):
-            yield from iter_agent_nodes(node.body)
 
 
 def resolve_prompt(reference: LocalPrompt | GlobalPrompt, relay_root: Path) -> ResolvedPrompt:

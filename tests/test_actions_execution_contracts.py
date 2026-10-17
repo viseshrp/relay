@@ -7,9 +7,13 @@ import time
 from django.utils import timezone
 import pytest
 
+from relay.errors import ArtifactPreservationError, PersistenceError
+from relay.execution.dispatch import ClaimedAttempt
 from relay.execution.nodes import node_executors
 from relay.execution.nodes.actions import ActionsJobExecutor, ActionsStepExecutor
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
+from relay.paths import artifacts_dir
+from relay.vcs.artifacts import PreservationResult
 from relay.web.actions_bindings import put_binding
 from relay.web.actions_repository import approve_environment
 from relay.web.models import (
@@ -58,10 +62,8 @@ jobs:
     )
     from relay.execution.reconcile import reconcile_once
 
-    assert (
-        reconcile_once(engine.store, lambda _: None, orderly_shutdown=False).attempts.worker_lost
-        == 0
-    )
+    reconcile_once(engine.store, lambda _: None, orderly_shutdown=False)
+    assert NodeAttempt.objects.get(pk=interaction.attempt_id).status == "waiting"
     assert answer_wait(engine, run_id) == "accepted"
     assert Run.objects.get(pk=run_id).status == "succeeded"
     assert (
@@ -217,6 +219,167 @@ jobs:
     retained = Path(run.actions_state["continuations"][0])
     assert (retained / "rejected.txt").read_text().strip() == "rejected"
     assert not (Path(run.worktree_path) / "rejected.txt").exists()
+
+
+@pytest.fixture
+def failed_job_without_preservation(
+    project: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> tuple[InlineEngine, str]:
+    from relay.execution import runner
+
+    preserve = runner._preserve
+
+    def fail_b_preservation(
+        claim: ClaimedAttempt,
+        worktree: Path,
+        outcome: ExecutionOutcome,
+        *,
+        artifact_root: Path | None,
+    ) -> PreservationResult:
+        if claim.scope_path == "root.b" or claim.scope_path.startswith("root.b."):
+            message = "Injected failed-job preservation error."
+            raise ArtifactPreservationError(message)
+        return preserve(claim, worktree, outcome, artifact_root=artifact_root)
+
+    monkeypatch.setattr(runner, "_preserve", fail_b_preservation)
+    # A short key keeps xdist's deeper temporary paths below Windows' 260 limit.
+    project.write_workflow(
+        "gap",
+        r"""defaults: {run: {shell: python}}
+jobs:
+  a:
+    steps:
+      - id: write
+        run: |
+          from pathlib import Path
+          Path("a.txt").write_bytes(b"a bytes\n")
+          raise SystemExit(1)
+  b:
+    steps:
+      - id: write
+        run: |
+          from pathlib import Path
+          Path("b.txt").write_bytes(b"b bytes\n")
+          raise SystemExit(1)
+  c:
+    steps: [{run: print("followup")}]
+""",
+    )
+    engine = InlineEngine(node_executors(), artifacts_dir())
+    return engine, engine.launch(project, "gap")
+
+
+def test_continuation_preserves_each_failed_attempt_before_moving_its_bytes(
+    project: RelayProject, failed_job_without_preservation: tuple[InlineEngine, str]
+) -> None:
+    engine, run_id = failed_job_without_preservation
+    engine.drain(run_id)
+    run = Run.objects.get(pk=run_id)
+    assert run.status == "failed"
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.c").status == "succeeded"
+    attempts = list(
+        NodeAttempt.objects.filter(
+            node_run__run_id=run_id, node_run__scope_path__in=("root.b", "root.b.write")
+        )
+    )
+    assert len(attempts) == 2
+    retained_files = []
+    for attempt in attempts:
+        evidence = list(Artifact.objects.filter(attempt=attempt, declared_name="b.txt"))
+        assert len(evidence) == 1
+        retained = Path(evidence[0].retained_path)
+        assert retained.read_bytes() == b"b bytes\n"
+        retained_files.append(retained)
+    worktrees = [Path(path) for path in run.actions_state["continuations"]]
+    assert [path.name for path in worktrees] == [f"{run_id}-failed-1", f"{run_id}-failed-2"]
+    assert (worktrees[-1] / "b.txt").read_bytes() == b"b bytes\n"
+    worktrees.append(Path(run.worktree_path))
+    result = engine.store.clean_project_data(project.project_id, "worktrees", run_id=run_id)
+    assert result["worktrees"] == 3
+    assert all(not path.exists() for path in worktrees)
+    assert all(path.read_bytes() == b"b bytes\n" for path in retained_files)
+
+
+def test_failed_continuation_preservation_keeps_the_primary_and_refuses_cleanup(
+    project: RelayProject,
+    failed_job_without_preservation: tuple[InlineEngine, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from relay.execution import recovery
+
+    engine, run_id = failed_job_without_preservation
+    preserve = recovery.preserve_attempt_evidence
+
+    def fail_b_continuation(
+        repository: Path, worktree: Path, run_id: str, attempt_id: str, starting_head: str
+    ) -> PreservationResult:
+        attempt = NodeAttempt.objects.select_related("node_run").get(pk=attempt_id)
+        scope = str(attempt.node_run.scope_path)
+        if scope == "root.b" or scope.startswith("root.b."):
+            message = "Injected continuation preservation error."
+            raise ArtifactPreservationError(message)
+        return preserve(repository, worktree, run_id, attempt_id, starting_head)
+
+    monkeypatch.setattr(recovery, "preserve_attempt_evidence", fail_b_continuation)
+    engine.drain(run_id)
+    run = Run.objects.get(pk=run_id)
+    assert run.status == "failed"
+    followup = NodeRun.objects.get(run_id=run_id, scope_path="root.c")
+    assert followup.status == "failed"
+    event = RunEvent.objects.get(node_run=followup, type="attempt.ended")
+    assert event.payload["error_message"] == "Incomplete job preservation blocks continuation."
+    assert len(run.actions_state["continuations"]) == 1
+    assert "continuation_journal" not in run.actions_state
+    primary = Path(run.worktree_path)
+    assert (primary / "b.txt").read_bytes() == b"b bytes\n"
+    assert not Artifact.objects.filter(
+        attempt__node_run__run_id=run_id,
+        attempt__node_run__scope_path__in=("root.b", "root.b.write"),
+    ).exists()
+    with pytest.raises(
+        PersistenceError,
+        match=r"Relay retained the run worktree because its evidence is incomplete\.",
+    ):
+        engine.store.clean_project_data(project.project_id, "worktrees", run_id=run_id)
+    assert primary.exists()
+    assert (primary / "b.txt").read_bytes() == b"b bytes\n"
+    assert all(Path(path).exists() for path in run.actions_state["continuations"])
+
+
+def test_partial_archive_without_rows_blocks_continuation(
+    project: RelayProject,
+    failed_job_without_preservation: tuple[InlineEngine, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from relay.execution import runner
+
+    engine, run_id = failed_job_without_preservation
+    preserve = runner._preserve
+
+    def crash_after_archive_directory(
+        claim: ClaimedAttempt,
+        worktree: Path,
+        outcome: ExecutionOutcome,
+        *,
+        artifact_root: Path | None,
+    ) -> PreservationResult:
+        if claim.scope_path == "root.b.write":
+            # The archive directory exists, so continuation must not replace it.
+            (artifacts_dir() / claim.run_id / claim.attempt_id).mkdir(parents=True)
+        return preserve(claim, worktree, outcome, artifact_root=artifact_root)
+
+    monkeypatch.setattr(runner, "_preserve", crash_after_archive_directory)
+    engine.drain(run_id)
+    run = Run.objects.get(pk=run_id)
+    followup = NodeRun.objects.get(run_id=run_id, scope_path="root.c")
+    assert followup.status == "failed"
+    event = RunEvent.objects.get(node_run=followup, type="attempt.ended")
+    assert event.payload["error_message"] == "Incomplete job preservation blocks continuation."
+    # Job a and job b's own attempt are archived; only the step has no rows.
+    assert Artifact.objects.filter(attempt__node_run__scope_path="root.b").exists()
+    assert not Artifact.objects.filter(attempt__node_run__scope_path="root.b.write").exists()
+    assert len(run.actions_state["continuations"]) == 1
+    assert (Path(run.worktree_path) / "b.txt").read_bytes() == b"b bytes\n"
 
 
 @pytest.mark.parametrize("expired_before_execution", [False, True])

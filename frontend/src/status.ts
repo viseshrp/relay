@@ -18,21 +18,13 @@ export function statusPresentation(status: string): {
     canceling: "Cancelling",
     failing: "Finishing after an error",
     interrupted: "Resuming after restart",
-    repairing: "Repairing",
-    repair_stopped: "Repairs stopped",
   };
   const symbol =
     status === "succeeded"
       ? "check"
-      : ["failed", "repair_stopped", "failing"].includes(status)
+      : ["failed", "failing"].includes(status)
         ? "cross"
-        : [
-              "running",
-              "completing",
-              "repairing",
-              "dispatched",
-              "canceling",
-            ].includes(status)
+        : ["running", "completing", "dispatched", "canceling"].includes(status)
           ? "clock"
           : ["waiting", "paused_wait"].includes(status)
             ? "pause"

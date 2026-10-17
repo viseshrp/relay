@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -115,7 +115,7 @@ def test_workflow_preflight_requires_login_and_returns_workflow_errors(
     client.logout()
     assert client.get("/api/workflows/workflow/preflight").status_code == 401
     client.force_login(User.objects.get(username="owner"))
-    served.write(".relay/workflows/invalid.yaml", "nodes: [\n")
+    served.write(".relay/workflows/invalid.yaml", "jobs: [\n")
     response = owner.get("/api/workflows/invalid/preflight")
     assert response.status_code == 422
     assert response.json()["code"] == "workflow_validation_error"
@@ -129,7 +129,16 @@ def test_historical_provider_failure_is_visible_without_replaying_activity(
 ) -> None:
     served.write_workflow(
         "limited",
-        "version: 1\nname: Limited\nnodes:\n  review: {type: command, run: [git, status]}\n",
+        (
+            "name: Limited\n"
+            "jobs:\n"
+            "  review:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "limited")
     attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -166,6 +175,19 @@ def test_historical_provider_failure_is_visible_without_replaying_activity(
         "agent.tool_result",
         EventSource.AGENT,
         {"summary": "A quoted example of another provider limit."},
+    )
+    from relay.vcs.artifacts import preserve_attempt_evidence
+
+    engine.store.record_preservation(
+        attempt.attempt_id,
+        preserve_attempt_evidence(
+            Path(attempt.project_path),
+            Path(attempt.primary_worktree),
+            run_id,
+            attempt.attempt_id,
+            attempt.starting_head,
+            root=engine.artifact_root,
+        ),
     )
     engine.store.finish_attempt(
         attempt.attempt_id,
@@ -232,7 +254,16 @@ def test_provider_failure_notice_bounds_and_message_identity(
 ) -> None:
     served.write_workflow(
         "bounded",
-        "version: 1\nname: Bounded\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        (
+            "name: Bounded\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "bounded")
     attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -258,13 +289,21 @@ def test_command_failure_detail_reports_its_exit_code(
 ) -> None:
     served.write_workflow(
         "command-failure",
-        "version: 1\nname: Failed command\nnodes:\n"
-        "  check: {type: command, run: [git, unknown-command]}\n",
+        (
+            "name: Failed command\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "unknown-command"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "command-failure")
     engine.drain(run_id)
     problem = owner.get(f"/api/runs/{run_id}").json()["run"]["problem"]
-    assert problem["scope_path"] == "root.check"
+    assert problem["scope_path"] == "root.check.work"
     assert problem["exit_code"] == 1
     assert problem["provider_message"] is None
 
@@ -339,46 +378,45 @@ def test_run_connections_use_captured_definitions_after_the_workflow_changes(
 ) -> None:
     served.write_workflow(
         "connected",
-        "version: 1\nname: Connected\nnodes:\n"
-        "  first: {type: human_wait, prompt: Review, deadline: 1h, on_timeout: end}\n"
-        "  end: {type: command, needs: [first], run: [git, status]}\n",
+        (
+            "name: Connected\n"
+            "jobs:\n"
+            "  first:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Review\n"
+            "        timeout-minutes: 60.0\n"
+            "  end:\n"
+            "    needs:\n"
+            "    - first\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "connected")
-    served.write_workflow("connected", "version: 1\nname: Changed\nnodes: {}\n")
+    served.write_workflow(
+        "connected",
+        (
+            "name: Changed\n"
+            "jobs:\n"
+            "  main:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
+    )
     detail = owner.get(f"/api/runs/{run_id}").json()["run"]
     nodes = {node["node_id"]: node for node in detail["nodes"]}
     assert nodes["end"]["dependencies"] == ["root.first"]
-    assert nodes["first"]["controls"] == [{"target": "root.end", "label": "Time limit"}]
+    assert "controls" not in nodes["first"]
     assert detail["project"]["id"] == served.project_id
-
-
-def test_boolean_handoffs_warn_without_changing_the_workflow(
-    owner: Client,
-    served: RelayProject,
-) -> None:
-    text = (
-        "version: 1\nname: Report\nnodes:\n"
-        "  report: {type: command, run: [git, status], outputs: {ready: {exists: REVIEW.md}}}\n"
-    )
-    served.write_workflow("report", text)
-    response = owner.get("/api/workflows/report").json()
-    assert response["warnings"][0]["artifact"] == "REVIEW.md"
-    assert response["yaml"] == text
-
-
-def test_child_workflow_report_warnings_keep_the_source_workflow_key(
-    owner: Client, served: RelayProject
-) -> None:
-    served.write_workflow(
-        "child",
-        "version: 1\nname: Child\nnodes:\n"
-        "  report: {type: command, run: [git, status], outputs: {ready: {exists: REVIEW.md}}}\n",
-    )
-    served.write_workflow(
-        "parent",
-        "version: 1\nname: Parent\nnodes:\n  child: {type: subworkflow, workflow: child}\n",
-    )
-    assert owner.get("/api/workflows/parent").json()["warnings"][0]["workflow_key"] == "child.yaml"
 
 
 def test_pending_interaction_reads_and_target_links_do_not_return_old_answers(
@@ -489,7 +527,11 @@ def test_temporary_cleanup_refuses_active_runs_and_keeps_unmarked_files(
     from relay.execution.resources import allocate_attempt_resources
     from relay.web.models import NodeAttempt
 
-    attempt_id = str(NodeAttempt.objects.get(node_run__run_id=finished_run).pk)
+    attempt_id = str(
+        NodeAttempt.objects.get(
+            node_run__run_id=finished_run, node_run__node_type="actions_step"
+        ).pk
+    )
     resource = allocate_attempt_resources(finished_run, attempt_id)
     unrelated = resource.directory.parent / "personal-note.txt"
     unrelated.write_text("Keep", encoding="utf-8")
@@ -530,7 +572,19 @@ def test_instruction_editor_keeps_project_paths_and_rejects_stale_saves(
 
 
 def test_a_workflow_named_create_can_still_be_opened(owner: Client, served: RelayProject) -> None:
-    served.write_workflow("create", "version: 1\nname: Create\nnodes: {}\n")
+    served.write_workflow(
+        "create",
+        (
+            "name: Create\n"
+            "jobs:\n"
+            "  main:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
+    )
     assert owner.get("/api/workflows/create").status_code == 200
 
 
@@ -568,7 +622,17 @@ def workflow_base(owner: Client, served: RelayProject) -> str:
 @pytest.fixture
 def finished_run(served: RelayProject, engine: InlineEngine) -> str:
     served.write_workflow(
-        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "done",
+        (
+            "name: Done\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "done")
     engine.drain(run_id)
@@ -579,11 +643,42 @@ def finished_run(served: RelayProject, engine: InlineEngine) -> str:
 def waiting_run(served: RelayProject, engine: InlineEngine) -> tuple[str, int]:
     served.write_workflow(
         "approval",
-        "version: 1\nname: Approval\nnodes:\n  approve: {type: human_wait, prompt: Go?}\n",
+        (
+            "name: Approval\n"
+            "jobs:\n"
+            "  approve:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Go?\n"
+        ),
     )
     run_id = engine.launch(served, "approval")
     engine.drain(run_id)
     return run_id, HumanInteraction.objects.get(run_id=run_id).attempt_id
+
+
+def test_owner_retry_accepts_an_expired_human_wait_without_evidence(
+    owner: Client, waiting_run: tuple[str, int], engine: InlineEngine
+) -> None:
+    run_id, attempt_id = waiting_run
+    HumanInteraction.objects.filter(run_id=run_id).update(
+        deadline=datetime.now(timezone.utc) - timedelta(seconds=1)
+    )
+    assert engine.store.expire_human_waits() == 1
+    engine.drain(run_id)
+    assert run_status(run_id) == "failed"
+    assert not Artifact.objects.filter(attempt_id=attempt_id).exists()
+
+    response = post(
+        owner,
+        f"/api/runs/{run_id}/rerun-node",
+        {"scope_path": "root.approve", "idempotency_key": "retry-expired-wait"},
+    )
+
+    assert (response.status_code, response.json()) == (202, {"result": "accepted"})
+    assert not Artifact.objects.filter(attempt_id=attempt_id).exists()
 
 
 def test_auth_state_before_onboarding_issues_a_csrf_cookie(client: Client) -> None:
@@ -892,8 +987,8 @@ def test_previous_inputs_launch_through_fresh_source_capture(
 ) -> None:
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     source = (
-        "name: Previous\non: {workflow_dispatch: {inputs: {task: "
-        "{type: string, default: Original}}}}\n"
+        "name: Previous\n"
+        "on: {workflow_dispatch: {inputs: {task: {type: string, default: Original}}}}\n"
         "jobs: {check: {steps: [{run: echo Ready}]}}\n"
     )
     served.write_workflow("repeat", source)
@@ -945,7 +1040,20 @@ def test_saving_a_workflow_requires_a_live_lease(owner: Client, served: RelayPro
     response = post(
         owner,
         "/api/workflows/workflow/save",
-        {"holder": "tab-1", "yaml": "version: 1\nname: Edited\nnodes: {}\n", "base_hash": base},
+        {
+            "holder": "tab-1",
+            "yaml": (
+                "name: Edited\n"
+                "jobs:\n"
+                "  main:\n"
+                "    steps:\n"
+                "    - id: work\n"
+                "      uses: relay/command@v1\n"
+                "      with:\n"
+                '        argv: \'["git", "status"]\'\n'
+            ),
+            "base_hash": base,
+        },
     )
     assert (response.status_code, response.json()["code"]) == (409, "permission_flow_error")
 
@@ -960,10 +1068,10 @@ def test_invalid_drafts_are_retained_for_the_browser(owner: Client, workflow_bas
     response = post(
         owner,
         "/api/workflows/workflow/draft",
-        {"holder": "tab-1", "yaml": "nodes: [", "base_hash": workflow_base},
+        {"holder": "tab-1", "yaml": "jobs: [", "base_hash": workflow_base},
     )
     assert response.json()["draft"]["validation_state"] == "invalid"
-    assert owner.get("/api/workflows/workflow").json()["draft"]["yaml"] == "nodes: ["
+    assert owner.get("/api/workflows/workflow").json()["draft"]["yaml"] == "jobs: ["
 
 
 @pytest.mark.parametrize("field", ["base_hash", "yaml", "holder"])
@@ -972,7 +1080,16 @@ def test_invalid_workflow_save_fields_are_rejected(
 ) -> None:
     body = {
         "holder": "tab-1",
-        "yaml": "version: 1\nname: Edited\nnodes: {}\n",
+        "yaml": (
+            "name: Edited\n"
+            "jobs:\n"
+            "  main:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
         "base_hash": workflow_base,
     }
     body[field] = {"base_hash": "XYZ", "yaml": 5, "holder": "h" * 201}[field]
@@ -1158,7 +1275,16 @@ def test_a_failed_node_can_be_rerun_idempotently(
 ) -> None:
     served.write_workflow(
         "failure",
-        "version: 1\nname: Failure\nnodes:\n  fail: {type: command, run: [git, not-a-command]}\n",
+        (
+            "name: Failure\n"
+            "jobs:\n"
+            "  fail:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "not-a-command"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "failure")
     engine.drain(run_id)
@@ -1293,7 +1419,17 @@ def test_cleanup_rejects_a_run_from_another_project(
 ) -> None:
     other_project = create_project(tmp_path / "other-project")
     other_project.write_workflow(
-        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "done",
+        (
+            "name: Done\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     other_id = engine.launch(other_project, "done")
     engine.drain(other_id)
@@ -1321,6 +1457,32 @@ def test_selected_worktree_cleanup_waits_for_evidence_preservation(
     assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
     assert Run.objects.get(pk=finished_run).worktree_state == "created"
     assert Path(Run.objects.get(pk=finished_run).worktree_path).exists()
+
+
+@pytest.mark.parametrize("scope", ["worktrees", "all"])
+@pytest.mark.parametrize("selected", [False, True], ids=["project", "selected-run"])
+def test_cleanup_retains_bytes_when_preservation_produced_no_records(
+    owner: Client, finished_run: str, scope: str, selected: bool
+) -> None:
+    run = Run.objects.get(pk=finished_run)
+    checkout = Path(run.worktree_path)
+    artifact = Artifact.objects.filter(attempt__node_run__run=run, declared_name="commits").last()
+    assert artifact is not None
+    manifest = Path(artifact.retained_path).parent / "manifest.json"
+    manifest.unlink()
+    Artifact.objects.filter(attempt_id=artifact.attempt_id).delete()
+    evidence = checkout / "unpreserved.txt"
+    evidence.write_bytes(b"Bytes whose preservation failed.\n")
+    body: dict[str, object] = {"scope": scope, "confirm": True}
+    if selected:
+        body["run_id"] = finished_run
+
+    response = post(owner, "/api/data/clean", body)
+
+    assert (response.status_code, response.json()["code"]) == (503, "persistence_error")
+    assert evidence.read_bytes() == b"Bytes whose preservation failed.\n"
+    assert Run.objects.get(pk=finished_run).worktree_state == "created"
+    assert not RunEvent.objects.filter(run_id=finished_run, type="run.cleanup_succeeded").exists()
 
 
 def test_selected_cleanup_cannot_remove_a_workspace_during_recovery(
@@ -1475,7 +1637,7 @@ def test_template_gallery_is_owner_only_and_copies_a_real_bundle(
     ).read_bytes()
 
 
-@pytest.mark.parametrize("extra", [{"yaml": "nodes: {}"}, {"template_id": "unknown"}])
+@pytest.mark.parametrize("extra", [{"yaml": "jobs: {}"}, {"template_id": "unknown"}])
 def test_invalid_template_requests_write_no_sources(
     owner: Client,
     served: RelayProject,
@@ -1501,7 +1663,17 @@ def test_job_history_filters_tail_events_and_keeps_attempts_separate(
 ) -> None:
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     served.write_workflow(
-        "jobs", "version: 1\nname: Jobs\nnodes:\n  check: {type: command, run: [git, status]}\n"
+        "jobs",
+        (
+            "name: Jobs\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "jobs")
     first = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -1510,6 +1682,19 @@ def test_job_history_filters_tail_events_and_keeps_attempts_separate(
         engine.store.append_attempt_event(
             first.attempt_id, "command.stdout", EventSource.COMMAND, {"chunk": f"line {index}\n"}
         )
+    from relay.vcs.artifacts import preserve_attempt_evidence
+
+    engine.store.record_preservation(
+        first.attempt_id,
+        preserve_attempt_evidence(
+            Path(first.project_path),
+            Path(first.primary_worktree),
+            run_id,
+            first.attempt_id,
+            first.starting_head,
+            root=engine.artifact_root,
+        ),
+    )
     engine.store.append_attempt_event(
         first.attempt_id, "command.stderr", EventSource.COMMAND, {"chunk": "Last error\n"}
     )
@@ -1569,12 +1754,23 @@ def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
     served.write(".relay/prompts/owner.md", "Frozen owner instructions\n")
     served.write_workflow(
         "instructions",
-        "version: 1\nname: Instructions\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work: {type: agent, prompts: [{local: prompts/owner.md}]}\n",
+        (
+            "name: Instructions\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            '        prompt-files: "prompts/owner.md"\n'
+        ),
     )
     run_id = engine.launch(served, "instructions")
     served.write(".relay/prompts/owner.md", "Edited after launch\n")
-    response = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    engine.drain(run_id)
+    response = owner.get(f"/api/runs/{run_id}/job?job=root.work.work").json()["job"]
     assert response["instructions"] == [
         {
             "reference": {"local": "prompts/owner.md"},
@@ -1582,7 +1778,7 @@ def test_job_instructions_are_read_from_the_snapshot_after_the_source_changes(
             "truncated": False,
         }
     ]
-    assert response["latest_attempt"] is None
+    assert response["latest_attempt"]["status"] == "terminal"
     assert response["command"] is None
     assert response["outputs"] == {}
 
@@ -1601,30 +1797,31 @@ def test_actions_job_logs_expose_step_activity_names_and_frozen_agent_instructio
     served.write(".relay/prompts/owner.md", "Captured instructions\n")
     served.write_workflow(
         "step-logs",
-        """on: workflow_dispatch
-jobs:
-  check:
-    name: Named job
-    steps:
-      - id: script
-        name: Named script
-        run: echo Visible output
-      - id: command
-        uses: relay/command@v1
-        with: {argv: '["git", "status", "--short"]'}
-      - id: agent
-        name: Named agent
-        uses: relay/agent@v1
-        with:
-          agent: codex
-          model: m1
-          prompt-files: prompts/owner.md
-          prompt: Captured inline prompt
-      - id: review
-        name: Named review
-        uses: relay/human-wait@v1
-        with: {prompt: Review the result}
-""",
+        (
+            "on: workflow_dispatch\n"
+            "jobs:\n"
+            "  check:\n"
+            "    name: Named job\n"
+            "    steps:\n"
+            "      - id: script\n"
+            "        name: Named script\n"
+            "        run: echo Visible output\n"
+            "      - id: command\n"
+            "        uses: relay/command@v1\n"
+            '        with: {argv: \'["git", "status", "--short"]\'}\n'
+            "      - id: agent\n"
+            "        name: Named agent\n"
+            "        uses: relay/agent@v1\n"
+            "        with:\n"
+            "          agent: codex\n"
+            "          model: m1\n"
+            "          prompt-files: prompts/owner.md\n"
+            "          prompt: Captured inline prompt\n"
+            "      - id: review\n"
+            "        name: Named review\n"
+            "        uses: relay/human-wait@v1\n"
+            "        with: {prompt: Review the result}\n"
+        ),
     )
     run_id = engine.launch(served, "step-logs")
     engine.drain(run_id)
@@ -1669,18 +1866,35 @@ def test_failed_job_settings_match_the_existing_run_record(
     fake_agents.install("codex", mode="configuration")
     served.write_workflow(
         "failed-settings",
-        "version: 1\nname: Failed settings\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work:\n    type: agent\n    outputs:\n"
-        "      verdict: {json_path: {artifact: missing.json, path: verdict}}\n",
+        (
+            "name: Failed settings\n"
+            "jobs:\n"
+            "  work:\n"
+            "    outputs:\n"
+            "      verdict: ${{ steps.work.outputs.value }}\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            "        report: missing.json\n"
+            '        selector: \'{"json_path": {"path": "verdict"}}\'\n'
+        ),
     )
     run_id = engine.launch(served, "failed-settings")
     engine.drain(run_id)
     assert run_status(run_id) == "failed"
     detail = owner.get(f"/api/runs/{run_id}").json()["run"]
-    job = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]
+    job = owner.get(f"/api/runs/{run_id}/job?job=root.work.work").json()["job"]
     assert job["working_folder"] == Run.objects.get(pk=run_id).worktree_path
     assert detail["working_folder"] == job["working_folder"]
-    assert job["retry_settings"] == detail["nodes"][0]["retry_settings"]
+    assert (
+        job["retry_settings"]
+        == next(row for row in detail["nodes"] if row["scope_path"] == "root.work.work")[
+            "retry_settings"
+        ]
+    )
     assert job["retry_settings"]["agent_id"] == "codex"
     assert job["retry_settings"]["model_value"] == "m1"
 
@@ -1699,7 +1913,17 @@ def test_job_reads_reject_missing_or_invalid_targets(
     owner: Client, served: RelayProject, engine: InlineEngine, query: str, expected: int
 ) -> None:
     served.write_workflow(
-        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+        "job",
+        (
+            "name: Job\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "job")
     assert owner.get(f"/api/runs/{run_id}/job{query}").status_code == expected
@@ -1720,7 +1944,17 @@ def test_job_routes_preserve_auth_and_validate_parameters(
     owner: Client, served: RelayProject, engine: InlineEngine, path: str
 ) -> None:
     served.write_workflow(
-        "job", "version: 1\nname: Job\nnodes:\n  check: {type: command, run: [git, status]}\n"
+        "job",
+        (
+            "name: Job\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "job")
     url = f"/api/runs/{run_id}/{path}"
@@ -1735,8 +1969,16 @@ def test_job_changes_are_limited_to_the_selected_attempt(
 ) -> None:
     served.write_workflow(
         "changes",
-        "version: 1\nname: Changes\nnodes:\n"
-        "  work: {type: command, writes: true, run: [git, status]}\n",
+        (
+            "name: Changes\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "changes")
     attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -1761,7 +2003,16 @@ def test_job_reads_omit_redacted_output_and_failure_text(
 ) -> None:
     served.write_workflow(
         "private",
-        "version: 1\nname: Private\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: Private\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "private")
     attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -1802,11 +2053,24 @@ def test_job_instruction_preview_shares_a_utf8_byte_budget(
     served.write(".relay/prompts/last.md", "Last instruction")
     served.write_workflow(
         "large",
-        "version: 1\nname: Large\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work: {type: agent, prompts: [{local: prompts/large.md}, {local: prompts/last.md}]}\n",
+        (
+            "name: Large\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            '        prompt-files: "prompts/large.md\\nprompts/last.md"\n'
+        ),
     )
     run_id = engine.launch(served, "large")
-    instructions = owner.get(f"/api/runs/{run_id}/job?job=root.work").json()["job"]["instructions"]
+    engine.drain(run_id)
+    instructions = owner.get(f"/api/runs/{run_id}/job?job=root.work.work").json()["job"][
+        "instructions"
+    ]
     assert instructions[0]["text"] == first[: 262144 // 3]
     assert instructions[0]["truncated"] is True
     assert instructions[1]["text"] == "L"
@@ -1819,7 +2083,16 @@ def test_job_database_failure_keeps_the_public_error_envelope(
 ) -> None:
     served.write_workflow(
         "failure",
-        "version: 1\nname: Failure\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: Failure\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "failure")
 
@@ -1841,7 +2114,16 @@ def test_attention_counts_only_requests_on_waiting_attempts(
 ) -> None:
     served.write_workflow(
         "attention",
-        "version: 1\nname: Attention\nnodes:\n  check: {type: command, run: [git, status]}\n",
+        (
+            "name: Attention\n"
+            "jobs:\n"
+            "  check:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(served, "attention")
     attempt = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id).attempt
@@ -1874,12 +2156,15 @@ def test_attention_reads_nested_human_waits_and_excludes_dispatch_pauses(
     owner: Client, served: RelayProject, engine: InlineEngine
 ) -> None:
     served.write_workflow(
-        "nested-wait",
-        "version: 1\nname: Nested wait\nnodes:\n"
-        "  approvals:\n    type: loop\n    max_iterations: 1\n    until: '${{ loop.index >= 1 }}'\n"
-        "    exhausted: fallback\n    body:\n"
-        "      approval: {type: human_wait, prompt: Read the report.}\n"
-        "  fallback: {type: command, needs: [approvals], run: [git, status]}\n",
+        "wait-child",
+        (
+            "on: workflow_call\n"
+            "jobs: {approval: {steps: [{id: answer, uses: relay/human-wait@v1, "
+            "with: {prompt: Read the report.}}]}}\n"
+        ),
+    )
+    served.write_workflow(
+        "nested-wait", "jobs: {approvals: {uses: ./.relay/workflows/wait-child.yaml}}\n"
     )
     run_id = engine.launch(served, "nested-wait")
     engine.drain(run_id)
@@ -1889,12 +2174,13 @@ def test_attention_reads_nested_human_waits_and_excludes_dispatch_pauses(
     assert response.status_code == 202
     assert owner.get("/api/attention").json()["waiting_runs"] == [run_id]
     detail = owner.get(f"/api/runs/{run_id}?collection=interactions&pending=true").json()["run"]
-    assert detail["interactions"][0]["scope_path"] == "root.approvals#1.approval"
+    assert detail["interactions"][0]["scope_path"] == "root.approvals.approval.answer"
     assert detail["interactions"][0]["respondable"] is True
     assert detail["dispatch_paused"] is True
     response = post(owner, f"/api/runs/{run_id}/cancel", {"idempotency_key": "cancel-wait"})
     assert response.status_code == 202
     engine.store.resolve_human_wait_controls()
+    engine.drain(run_id)
     engine.drain(run_id)
     assert owner.get("/api/attention").json()["waiting_count"] == 0
 
@@ -1937,12 +2223,33 @@ def test_attention_counts_runs_independently_of_their_request_count(
 ) -> None:
     served.write_workflow(
         "two-approvals",
-        "version: 1\nname: Two approvals\nnodes:\n"
-        "  first: {type: human_wait, prompt: First approval}\n"
-        "  second: {type: human_wait, prompt: Second approval}\n",
+        (
+            "name: Two approvals\n"
+            "jobs:\n"
+            "  first:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: First approval\n"
+            "  second:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Second approval\n"
+        ),
     )
     run_id = engine.launch(served, "two-approvals")
     engine.drain(run_id)
+    existing = HumanInteraction.objects.get(run_id=run_id, status="pending")
+    HumanInteraction.objects.create(
+        run_id=run_id,
+        node_run=existing.node_run,
+        attempt=existing.attempt,
+        kind="wait",
+        request_payload={"prompt": "Second request"},
+    )
     assert owner.get(f"/api/runs/{run_id}").json()["run"]["waiting_count"] == 2
     assert owner.get("/api/attention").json()["waiting_count"] == 1
 
@@ -1966,7 +2273,14 @@ def test_history_filters_are_additive_and_titles_stay_captured(
     owner: Client, served: RelayProject, engine: InlineEngine
 ) -> None:
     workflow = (
-        "version: 1\nname: Build and review\nnodes:\n  check: {type: command, run: [git, status]}\n"
+        "name: Build and review\n"
+        "jobs:\n"
+        "  check:\n"
+        "    steps:\n"
+        "    - id: work\n"
+        "      uses: relay/command@v1\n"
+        "      with:\n"
+        '        argv: \'["git", "status"]\'\n'
     )
     served.write_workflow("identity", workflow)
     run_id = engine.launch(served, "identity")
@@ -1996,7 +2310,16 @@ def test_history_filters_are_additive_and_titles_stay_captured(
 def test_captured_workflow_is_immutable_and_bounded(
     owner: Client, served: RelayProject, engine: InlineEngine
 ) -> None:
-    original = "version: 1\nname: Captured\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    original = (
+        "name: Captured\n"
+        "jobs:\n"
+        "  check:\n"
+        "    steps:\n"
+        "    - id: work\n"
+        "      uses: relay/command@v1\n"
+        "      with:\n"
+        '        argv: \'["git", "status"]\'\n'
+    )
     served.write_workflow("captured", original)
     run_id = engine.launch(served, "captured")
     snapshot = RunSnapshot.objects.get(run_id=run_id)
@@ -2054,7 +2377,7 @@ def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
         )
 
 
-def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
+def test_workflow_validation_is_pure_and_invalid_launch_is_rejected(
     owner: Client, served: RelayProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import subprocess
@@ -2067,11 +2390,11 @@ def test_actions_validation_is_pure_and_public_legacy_launch_is_rejected(
     monkeypatch.setattr(subprocess, "Popen", unexpected_process)
     good = "jobs: {main: {steps: [{run: echo safe}]}}"
     assert post(owner, "/api/workflow-language/validate", {"yaml": good}).json()["valid"]
-    legacy = "version: 1\nname: Old\nnodes: {}\n"
-    served.write(".relay/workflows/old.yaml", legacy)
-    response = post(owner, "/api/workflow-language/validate", {"yaml": legacy})
+    invalid = "jobs: []\n"
+    served.write(".relay/workflows/invalid.yaml", invalid)
+    response = post(owner, "/api/workflow-language/validate", {"yaml": invalid})
     assert response.status_code == 200 and not response.json()["valid"]
-    assert post(owner, "/api/runs", {"workflow_key": "old", "inputs": {}}).status_code == 422
+    assert post(owner, "/api/runs", {"workflow_key": "invalid", "inputs": {}}).status_code == 422
     assert not Run.objects.exists()
 
 

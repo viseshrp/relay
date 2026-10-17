@@ -76,9 +76,8 @@ export function JobWorkspaceView({ state }: { state: JobWorkspaceState }) {
             </AccordionSummary>
             <AccordionDetails>
               <Typography>
-                {job.writes
-                  ? "This job can write to its isolated working folder."
-                  : "This job reads its isolated working folder."}
+                This step shares its job's isolated working folder. Relay
+                commits changed code when the job succeeds.
               </Typography>
               <Typography>Captured job: {scope}</Typography>
               {job.command && (

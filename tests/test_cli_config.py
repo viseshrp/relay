@@ -90,15 +90,15 @@ def supervisor_boundary(monkeypatch: pytest.MonkeyPatch) -> SupervisorBoundary:
     return boundary
 
 
-@pytest.mark.parametrize("explicit", ["workers", "host", "port"])
+@pytest.mark.parametrize("explicit", ["host", "port"])
 def test_up_overrides_only_explicit_command_options(
     supervisor_boundary: SupervisorBoundary, explicit: str
 ) -> None:
-    saved = {"host": "localhost", "port": 9001, "workers": 3}
+    saved = {"host": "localhost", "port": 9001}
     settings = paths.settings_path()
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps(saved), encoding="utf-8")
-    overrides = {"workers": "2", "host": "127.0.0.1", "port": "9002"}
+    overrides = {"host": "127.0.0.1", "port": "9002"}
 
     result = invoke("up", "--no-browser", f"--{explicit}", overrides[explicit])
 
@@ -108,11 +108,7 @@ def test_up_overrides_only_explicit_command_options(
     }
     assert result.exit_code == 0
     effective = supervisor_boundary.configurations[0]
-    assert (effective.host, effective.port, effective.workers) == (
-        expected["host"],
-        expected["port"],
-        1,
-    )
+    assert (effective.host, effective.port) == (expected["host"], expected["port"])
     assert supervisor_boundary.browser_requests == [False]
 
 
@@ -463,7 +459,17 @@ def terminal_project(
     project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
 ) -> RelayProject:
     project.write_workflow(
-        "done", "version: 1\nname: Done\nnodes:\n  a: {type: command, run: [git, status]}\n"
+        "done",
+        (
+            "name: Done\n"
+            "jobs:\n"
+            "  a:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     engine.drain(engine.launch(project, "done"))
     monkeypatch.chdir(project.repository)
@@ -526,12 +532,11 @@ def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> 
         "cleanup_policy": "retain",
         "host": "localhost",
         "port": 8080,
-        "workers": 2,
         "login_required": False,
     }
     path = tmp_path / "settings.json"
     path.write_text(json.dumps(expected), encoding="utf-8")
-    assert load_config(path).to_dict() == {**expected, "workers": 1}
+    assert load_config(path).to_dict() == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
 
 
@@ -546,7 +551,6 @@ def test_valid_owner_settings_are_preserved_by_serialization(tmp_path: Path) -> 
         '{"host": "0.0.0.0"}',
         '{"port": true}',
         '{"port": 70000}',
-        '{"workers": 0}',
         '{"login_required": "false"}',
         '{"login_required": 0}',
         '{"login_required": null}',

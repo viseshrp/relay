@@ -16,6 +16,7 @@ export interface ActivityMessage {
     status: string;
     input: string;
     output: string;
+    outputDelta?: boolean;
   };
 }
 
@@ -25,6 +26,12 @@ function record(
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value
     : null;
+}
+
+function exitCodeText(value: JsonValue | undefined): string {
+  return typeof value === "number" && Number.isInteger(value)
+    ? `Exit code: ${value}`
+    : "";
 }
 
 function readableOutput(
@@ -61,14 +68,6 @@ function readableOutput(
       typeof event.payload.tool === "string" ? event.payload.tool : "Tool";
     if (toolId && title === event.payload.tool_call_id)
       title = toolNames.get(toolId) ?? "Tool";
-    // Older Claude events stored toolu_01ABC as a title. Show "Execute" (or
-    // "Tool") instead; the original identifier stays in Advanced diagnostics.
-    if (
-      /^(?:toolu_[A-Za-z0-9]+|exec-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i.test(
-        title,
-      )
-    )
-      title = "Tool";
     if (title === "Tool" && typeof summary?.kind === "string")
       title = stageLabel(summary.kind);
     if (toolId && title !== "Tool") toolNames.set(toolId, title);
@@ -85,8 +84,23 @@ function readableOutput(
           .join("\n")
       : "";
     const native = record(summary?.tool_info);
-    const output = native?.output ?? summary?.raw_output;
-    const visible = text || (typeof output === "string" ? output : "");
+    const raw = record(summary?.raw_output);
+    // Cursor returns {stdout: "denied\n", stderr: "", exitCode: 3}.
+    const rawText = [raw?.stdout, raw?.stderr]
+      .filter((value) => typeof value === "string")
+      .join("\n");
+    const output =
+      summary?.output_delta ?? native?.output ?? summary?.raw_output;
+    const exit = exitCodeText(
+      summary?.exit_code ?? raw?.exit_code ?? raw?.exitCode,
+    );
+    // Output "denied\n" plus exit 3 becomes "denied\n\nExit code: 3".
+    const visible = [
+      text || (typeof output === "string" ? output : rawText),
+      exit,
+    ]
+      .filter(Boolean)
+      .join("\n");
     const input = record(native?.parameters ?? summary?.raw_input);
     const command =
       input?.command ?? input?.CommandLine ?? input?.path ?? input?.file_path;
@@ -104,7 +118,9 @@ function readableOutput(
       .join("\n");
   }
   if (event.type === "command.exit")
-    return `Command finished${typeof event.payload.exit_code === "number" ? ` with exit code ${event.payload.exit_code}` : ""}.`;
+    return ["Command finished.", exitCodeText(event.payload.exit_code)]
+      .filter(Boolean)
+      .join("\n");
   if (event.type === "agent.cleanup_warning")
     return typeof event.payload.message === "string"
       ? event.payload.message
@@ -160,6 +176,7 @@ function toolDetails(
     ),
     input: inputText,
     output: lines.join("\n"),
+    outputDelta: typeof summary?.output_delta === "string",
   };
 }
 
@@ -195,7 +212,18 @@ export function activityMessages(events: RunEvent[]): ActivityMessage[] {
           index += 1;
         }
         const combined = chunks.join("");
-        if (field === "chunk" && chunks.length === event.payload.parts) {
+        if (
+          field !== "chunk" ||
+          event.type === "command.stdout" ||
+          event.type === "command.stderr"
+        ) {
+          // Command parts '{"scope_path":' + '"root.other"}' remain output
+          // text and cannot replace the event's own scope.
+          event = {
+            ...event,
+            payload: { ...event.payload, [field]: combined },
+          };
+        } else if (chunks.length === event.payload.parts) {
           try {
             event = {
               ...event,
@@ -204,11 +232,7 @@ export function activityMessages(events: RunEvent[]): ActivityMessage[] {
           } catch {
             /* Original parts remain in diagnostics. */
           }
-        } else if (field !== "chunk")
-          event = {
-            ...event,
-            payload: { ...event.payload, [field]: combined },
-          };
+        }
       }
     }
     const scope =
@@ -281,13 +305,9 @@ export function relativeActivityText(
     .split(/[\\/]/)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("[\\\\/]");
-  // Only the recorded run root and its reader prefix become relative. Other
-  // absolute paths and command escapes retain their original meaning.
+  // Strip the recorded run root; keep subdirectory names and command escapes.
   return text.replace(
-    new RegExp(
-      `${pattern}[\\\\/](?:r-\\d+[\\\\/])?`,
-      /^[A-Za-z]:/.test(root) ? "gi" : "g",
-    ),
+    new RegExp(`${pattern}[\\\\/]`, /^[A-Za-z]:/.test(root) ? "gi" : "g"),
     "",
   );
 }
@@ -305,8 +325,11 @@ export function activityRows(events: RunEvent[]): ActivityMessage[] {
           ? previous.tool.title
           : message.tool.title;
       const incoming = message.tool.output;
-      const output =
-        !incoming || previous.tool.output.includes(incoming)
+      // Deltas append exactly: "Access " + "denied\n" + "denied\n" becomes
+      // "Access denied\ndenied\n". Snapshots below keep their dedupe rules.
+      const output = message.tool.outputDelta
+        ? previous.tool.output + incoming
+        : !incoming || previous.tool.output.includes(incoming)
           ? previous.tool.output
           : incoming.startsWith(previous.tool.output)
             ? incoming

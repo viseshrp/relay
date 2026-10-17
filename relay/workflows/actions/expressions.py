@@ -1,7 +1,6 @@
 """Bounded Actions expressions, independent of Python evaluation and processes.
 
-Conformance fixtures are pinned in tests/fixtures/actions. The old Python
-expression interpreter remains exclusively for historical Relay snapshots.
+Conformance fixtures are pinned in tests/fixtures/actions.
 """
 
 from __future__ import annotations

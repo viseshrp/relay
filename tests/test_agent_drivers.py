@@ -8,6 +8,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 from django.db import connections
@@ -21,7 +22,7 @@ from relay.agents.driver import AgentDriver, RoutedAgentNodeDriver, preflight_ro
 from relay.agents.events import AgentEvent
 from relay.agents.models import AgentCommand, AgentExecutionContext, AgentResult, ProbeRequirement
 from relay.agents.profiles import PROFILES
-from relay.constants import ANTIGRAVITY_PROMPT_MAX_BYTES
+from relay.constants import ANTIGRAVITY_PROMPT_MAX_BYTES, EVENT_MAX_PAYLOAD_BYTES
 from relay.errors import (
     AgentAuthError,
     AgentLaunchError,
@@ -35,7 +36,9 @@ from relay.errors import (
 from relay.execution.control import ControlResult
 from relay.execution.nodes import node_executors
 from relay.execution.runner import OutcomeKind
-from relay.web.models import NodeAttempt, RunEvent
+from relay.execution.state import AttemptStopReason
+from relay.web.actions_bindings import put_binding
+from relay.web.models import NodeAttempt, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore
 from relay.workflows.routing import RouteRequirement
 from relay.workflows.schema import AgentNode
@@ -73,6 +76,41 @@ def test_acp_attempts_retain_the_owner_visible_reply(agent_context: AgentExecuti
     assert any(
         event.event_type == "agent.message" and event.payload["text"] == "ready" for event in events
     )
+
+
+@pytest.mark.parametrize("agent_context", ["codex", "claude", "copilot", "cursor"], indirect=True)
+@pytest.mark.parametrize("mode", ["terminal-metadata", "raw-output-exit"])
+def test_acp_terminal_output_and_exit_survive_real_protocol_notifications(
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents, mode: str
+) -> None:
+    fake_agents.install(agent_context.agent_id, mode=mode)
+    events, result = execute(
+        AcpDriver(PROFILES[agent_context.agent_id], agent_context.command), agent_context
+    )
+    assert result.succeeded
+    tools = [
+        json.loads(event.payload["summary"])
+        for event in events
+        if event.event_type in {"agent.tool_call", "agent.tool_result"}
+    ]
+    if mode == "terminal-metadata":
+        assert "".join(tool.get("output_delta", "") for tool in tools) == "Access denied\ndenied\n"
+        assert tools[-1] == {"status": "failed", "exit_code": 3}
+    else:
+        assert tools[-1]["raw_output"] == {"exit_code": 3}
+        assert tools[-1]["content"] == [{"text": "Access denied\n"}]
+    initialization = next(
+        message["params"]
+        for message in fake_agents.messages()
+        if message.get("method") == "initialize"
+    )
+    capabilities = initialization["clientCapabilities"]
+    assert capabilities["_meta"] == {"terminal_output_delta": True}
+    assert capabilities.get("terminal", False) is False
+    filesystem = capabilities.get("fs", {})
+    assert filesystem.get("readTextFile", False) is False
+    assert filesystem.get("writeTextFile", False) is False
+    assert "hidden" not in json.dumps(tools)
 
 
 @pytest.mark.parametrize("agent_context", ["claude"], indirect=True)
@@ -121,6 +159,7 @@ def test_agents_receive_their_declared_output_selectors(
         )
         prompt = "\n".join(block["text"] for block in blocks)
     assert json.dumps(selectors, sort_keys=True, ensure_ascii=False) in prompt
+    assert context.workspace_instructions() in prompt
     assert "Relay worktree rules" in prompt
     assert "temporary_directory" in prompt
     selection = {
@@ -301,13 +340,19 @@ def test_acp_attempts_can_use_the_advertised_agent_authentication_method(
     assert any(message.get("method") == "authenticate" for message in fake_agents.messages())
 
 
-def test_acp_refusal_is_a_failed_provider_result(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("agent_context", ["codex", "claude", "copilot", "cursor"], indirect=True)
+@pytest.mark.parametrize("reason", ["refusal", "max_tokens", "max_turn_requests", "cancelled"])
+def test_acp_terminal_failures_keep_the_provider_reason(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
-    monkeypatch.setenv("FAKE_ACP_MODE", "refusal")
-    _events, result = execute(AcpDriver(PROFILES["codex"], agent_context.command), agent_context)
+    monkeypatch.setenv("FAKE_ACP_MODE", f"stop-{reason}")
+    _events, result = execute(
+        AcpDriver(PROFILES[agent_context.agent_id], agent_context.command), agent_context
+    )
     assert not result.succeeded
-    assert (result.stop_reason, result.error_code) == ("refusal", "agent_protocol_error")
+    assert result.stop_reason is AttemptStopReason.FAILED
+    assert result.provider_stop_reason == reason
+    assert result.error_code == "agent_execution_error"
 
 
 def test_acp_owner_cancel_stops_the_live_provider_process(
@@ -370,7 +415,7 @@ def test_provider_finishing_during_a_control_poll_keeps_its_completed_result(
             async def finalize(self) -> AgentResult:
                 # Run this callback after the execution task returns its result.
                 loop.call_soon(completed.set)
-                return AgentResult(True, "end_turn", 0)
+                return AgentResult(True, AttemptStopReason.COMPLETED, 0)
 
         def poll(attempt_id: str, worker_id: str, kinds: tuple[str, ...] | None = None) -> None:
             del attempt_id, worker_id, kinds
@@ -454,7 +499,7 @@ def test_antigravity_attempts_use_the_documented_headless_arguments(
     assert arguments[arguments.index("--model") + 1] == "m1"
     assert arguments[arguments.index("--output-format") + 1] == "stream-json"
     assert arguments[arguments.index("--input-format") + 1] == "stream-json"
-    assert arguments[arguments.index("--print-timeout") + 1] == "5m"
+    assert "--print-timeout" not in arguments
     assert "--dangerously-skip-permissions" in arguments
     assert "-p" not in arguments
     inputs = [message["input"] for message in fake_agents.messages() if "input" in message]
@@ -491,15 +536,15 @@ def test_antigravity_stdin_preserves_prompt_text_while_draining_startup_output(
 @pytest.mark.parametrize(
     ("mode", "reason", "code"),
     [
-        ("timeout", "timeout", "node_timeout"),
-        ("error-text", "failed", "agent_protocol_error"),
-        ("boolean-duration", "failed", "agent_protocol_error"),
-        ("canceled", "canceled", "canceled"),
-        ("interrupted", "interrupted", "agent_protocol_error"),
+        ("timeout", "failed", "agent_execution_error"),
+        ("error-text", "failed", "agent_execution_error"),
+        ("boolean-duration", "failed", "agent_execution_error"),
+        ("canceled", "failed", "agent_execution_error"),
+        ("interrupted", "failed", "agent_execution_error"),
         ("missing-result", "failed", "agent_protocol_error"),
     ],
 )
-def test_antigravity_terminal_failures_use_structured_status_and_duration(
+def test_antigravity_terminal_failures_ignore_duration_and_error_prose(
     agent_context: AgentExecutionContext,
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
@@ -512,6 +557,39 @@ def test_antigravity_terminal_failures_use_structured_status_and_duration(
     )
     assert not result.succeeded
     assert (result.stop_reason, result.error_code) == (reason, code)
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+@pytest.mark.parametrize("mode", ["hold", "success-hold"])
+def test_native_deadline_bounds_the_process_even_after_a_success_result(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    monkeypatch.setenv("FAKE_AGY_MODE", mode)
+    context = replace(agent_context, node=agent_context.node.model_copy(update={"timeout": "2s"}))
+    driver = AntigravityDriver(PROFILES["antigravity"], context.command)
+    _events, result = execute(driver, context)
+    assert not result.succeeded
+    assert result.stop_reason is AttemptStopReason.TIMEOUT
+    assert result.error_code == "node_timeout"
+    assert driver.process is not None and driver.process.returncode is not None
+    if mode == "success-hold":
+        assert result.provider_stop_reason == "SUCCESS"
+
+
+@pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
+def test_native_timeout_argument_uses_the_effective_remaining_deadline(
+    agent_context: AgentExecutionContext, fake_agents: FakeAgents
+) -> None:
+    context = replace(
+        agent_context,
+        node=agent_context.node.model_copy(update={"timeout": "15m"}),
+        attempt=replace(agent_context.attempt, deadline_at=time.monotonic() + 9),
+    )
+    _events, result = execute(AntigravityDriver(PROFILES["antigravity"], context.command), context)
+    assert result.succeeded
+    arguments = next(row["argv"] for row in fake_agents.messages() if "argv" in row)
+    timeout = arguments[arguments.index("--print-timeout") + 1]
+    assert timeout.endswith("s") and 1 <= int(timeout[:-1]) <= 9
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
@@ -539,24 +617,33 @@ def test_antigravity_invalid_streams_raise_relay_errors(
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
 @pytest.mark.parametrize(
-    ("mode", "denied"),
+    "mode",
     [
-        ("stderr-denied", True),
-        ("stdout-denied", False),
-        ("stderr-outside", False),
-        ("stderr-fragments", False),
+        "stderr-denied",
+        "stdout-denied",
+        "stderr-outside",
+        "stderr-fragments",
+        "headless-help-only",
+        "headless-denied-write",
+        "headless-denied-outside",
+        "headless-denied-stdout-only",
+        "headless-command-denied",
+        "headless-write-error",
+        "headless-denied-before-tool",
     ],
 )
-def test_antigravity_soft_denies_require_a_complete_in_worktree_stderr_notice(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str, denied: bool
+def test_antigravity_tool_failures_and_notices_do_not_override_success(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     monkeypatch.setenv("FAKE_AGY_MODE", mode)
-    _events, result = execute(
+    events, result = execute(
         AntigravityDriver(PROFILES["antigravity"], agent_context.command), agent_context
     )
-    assert result.succeeded is not denied
-    assert result.denied_write_targets == (("report.txt",) if denied else ())
-    assert result.error_code == ("antigravity_soft_denied" if denied else None)
+    assert result.succeeded
+    assert result.stop_reason is AttemptStopReason.COMPLETED
+    assert result.provider_stop_reason == "SUCCESS"
+    assert result.error_code is None
+    assert any(event.event_type in {"agent.stderr", "agent.message"} for event in events)
 
 
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
@@ -634,15 +721,176 @@ def test_routed_execution_persists_visible_provider_events(
     fake_agents.install("codex")
     project.write_workflow(
         "routed",
-        "version: 1\nname: Routed\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work: {type: agent, writes: true, allow_no_commit: true}\n",
+        (
+            "name: Routed\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+        ),
     )
     engine.executors = node_executors(agent_driver=RoutedAgentNodeDriver())
     run_id = engine.launch(project, "routed")
     engine.drain(run_id)
     messages = RunEvent.objects.filter(run_id=run_id, type="agent.message")
     assert [message.payload["text"] for message in messages] == ["ready"]
-    assert NodeAttempt.objects.get(node_run__run_id=run_id).agent_id == "codex"
+    assert (
+        NodeAttempt.objects.get(
+            node_run__run_id=run_id, node_run__node_type="actions_step"
+        ).agent_id
+        == "codex"
+    )
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+def test_routed_execution_preserves_oversized_visible_events(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
+
+    class LargeMessageDriver(AcpDriver):
+        async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+            yield AgentEvent("agent.message", {"text": text, "message_id": "message-1", "turn": 1})
+
+        async def finalize(self) -> AgentResult:
+            return AgentResult(True, AttemptStopReason.COMPLETED, 0)
+
+    monkeypatch.setattr("relay.agents.driver._driver", LargeMessageDriver)
+    outcome = RoutedAgentNodeDriver().execute(agent_context.attempt, agent_context.node)
+
+    assert outcome.kind is OutcomeKind.SUCCEEDED
+    payloads = list(
+        RunEvent.objects.filter(
+            attempt_id=agent_context.attempt.attempt.attempt_id, type="agent.message"
+        )
+        .order_by("id")
+        .values_list("payload", flat=True)
+    )
+    assert len(payloads) > 1
+    assert "".join(payload["text"] for payload in payloads) == text
+    assert [payload["part"] for payload in payloads] == list(range(1, len(payloads) + 1))
+    assert all(
+        payload["parts"] == len(payloads)
+        and payload["message_id"] == "message-1"
+        and payload["turn"] == 1
+        for payload in payloads
+    )
+    assert all(len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in payloads)
+
+
+@pytest.mark.usefixtures("registry_network", "database_threads")
+@pytest.mark.parametrize("representation", ["deltas", "snapshots"])
+def test_actions_driver_masks_tool_deltas_before_splitting_persisted_events(
+    project: RelayProject,
+    tmp_path: Path,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+    representation: str,
+) -> None:
+    masked_value = 'TOKEN-"\\\tEND'
+    prefix = "log\n" * (EVENT_MAX_PAYLOAD_BYTES // 4)
+
+    class TerminalDeltaDriver(AcpDriver):
+        async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
+            if representation == "snapshots":
+                for kind, text in (
+                    ("agent.tool_call", prefix + masked_value[:8]),
+                    ("agent.tool_result", prefix + masked_value + "\n"),
+                ):
+                    yield AgentEvent(
+                        kind,
+                        {
+                            "tool_call_id": "terminal",
+                            "turn": 1,
+                            "summary": json.dumps({"content": [{"text": text}]}),
+                        },
+                    )
+                return
+            for delta in (prefix + masked_value[:8], masked_value[8:] + "\n"):
+                yield AgentEvent(
+                    "agent.tool_call",
+                    {
+                        "tool_call_id": "terminal",
+                        "turn": 1,
+                        "summary": json.dumps({"output_delta": delta}),
+                    },
+                )
+            yield AgentEvent(
+                "agent.tool_result",
+                {"tool_call_id": "terminal", "turn": 1, "summary": '{"exit_code":0}'},
+            )
+
+        async def finalize(self) -> AgentResult:
+            return AgentResult(True, AttemptStopReason.COMPLETED, 0)
+
+    fake_agents.install("codex")
+    monkeypatch.setattr("relay.agents.driver._driver", TerminalDeltaDriver)
+    monkeypatch.setenv("RELAY_TEST_SECRET", masked_value)
+    put_binding(
+        f"project:{project.project_id}",
+        "KEY",
+        "secret",
+        source="environment",
+        reference="RELAY_TEST_SECRET",
+    )
+    project.write_workflow(
+        "tool_output",
+        (
+            "on: workflow_dispatch\n"
+            "jobs:\n"
+            "  check:\n"
+            "    env: {KEY: '${{ secrets.KEY }}'}\n"
+            "    steps:\n"
+            "      - uses: relay/agent@v1\n"
+            "        with: {agent: codex, model: m1}\n"
+        ),
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "tool_output")
+    engine.drain(run_id)
+
+    assert Run.objects.get(pk=run_id).status == "succeeded"
+    payloads = list(
+        RunEvent.objects.filter(run_id=run_id, type="agent.tool_call")
+        .order_by("id")
+        .values_list("payload", flat=True)
+    )
+    fragments = [payload for payload in payloads if "part" in payload]
+    assert len(fragments) > 1
+    assert [payload["part"] for payload in fragments] == list(range(1, len(fragments) + 1))
+    assert all(payload["parts"] == len(fragments) for payload in fragments)
+    summary = json.loads("".join(payload["summary"] for payload in fragments))
+    if representation == "snapshots":
+        assert summary["content"] == [{"text": prefix}]
+        results = list(
+            RunEvent.objects.filter(run_id=run_id, type="agent.tool_result")
+            .order_by("id")
+            .values_list("payload", flat=True)
+        )
+        assert len(results) > 1
+        result = json.loads("".join(payload["summary"] for payload in results))
+        assert result["content"] == [{"text": prefix + "***\n"}]
+        assert all(
+            len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in results
+        )
+        return
+    assert summary["output_delta"] == prefix
+    assert (
+        "".join(
+            json.loads(payload["summary"])["output_delta"]
+            for payload in payloads
+            if "part" not in payload
+        )
+        == "***\n"
+    )
+    assert all(
+        payload["tool_call_id"] == "terminal" and payload["turn"] == 1 for payload in payloads
+    )
+    assert all(len(json.dumps(payload).encode()) <= EVENT_MAX_PAYLOAD_BYTES for payload in payloads)
 
 
 @pytest.mark.usefixtures("registry_network")
@@ -654,14 +902,29 @@ def test_the_agent_node_port_validates_its_writers_output_handoff(
     fake_agents.install("codex")
     project.write_workflow(
         "handoff",
-        "version: 1\nname: Handoff\nmodel: m1\nagents: [codex]\nnodes:\n"
-        "  work:\n    type: agent\n    writes: true\n    outputs:\n"
-        "      ready: {label: {artifact: agent-output.md, label: Ready}}\n",
+        (
+            "name: Handoff\n"
+            "jobs:\n"
+            "  work:\n"
+            "    outputs:\n"
+            "      ready: ${{ steps.work.outputs.value }}\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+            "        report: agent-output.md\n"
+            "        label: Ready\n"
+        ),
     )
+    from tests.support import FakeAgentDriver
+
+    engine.executors = node_executors(agent_driver=FakeAgentDriver(edit_file=True))
     run_id = engine.launch(project, "handoff")
     starting_head = Run.objects.get(pk=run_id).recorded_head
 
     engine.drain(run_id)
 
-    assert NodeRun.objects.get(run_id=run_id).outputs == {"ready": "Yes"}
+    assert NodeRun.objects.get(run_id=run_id, scope_path="root.work").outputs == {"ready": "Yes"}
     assert Run.objects.get(pk=run_id).recorded_head != starting_head

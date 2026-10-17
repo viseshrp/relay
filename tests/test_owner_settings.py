@@ -23,6 +23,7 @@ from relay.projects.storage import measure_working_copies
 from relay.web.models import Artifact, HumanInteraction, NodeRun, Project, Run, RunSnapshot
 from relay.web.settings_repository import DjangoSettingsStore
 from relay.web.views import actions
+from relay.workflows.actions.compiler import bind_routes
 from relay.workflows.defaults import apply_workflow_defaults, validate_defaults
 from tests.support import FakeAgents, InlineEngine, RelayProject, create_project
 from tests.test_web_api import client as client
@@ -157,21 +158,28 @@ def test_project_model_changes_cannot_inherit_options_for_another_model(
 def test_defaults_respect_explicit_node_and_workflow_choices(
     project: RelayProject, explicit: bool
 ) -> None:
-    workflow_model = "model: m2\n" if explicit else ""
-    recovery = "recovery: {enabled: false}\n" if explicit else ""
-    job = (
-        "model: m1, timeout: null, auto_retry: true, "
-        "agent_options: {codex: {effort: null, permission_mode: ask}}"
-        if explicit
-        else ""
-    )
+    agent = {
+        "agent": "codex",
+        **({"model": "m1", "effort": None, "auto-retry": True} if explicit else {}),
+    }
     project.write_workflow(
         "defaults",
-        f"version: 1\nname: Defaults\nagents: [codex]\n{workflow_model}{recovery}nodes:\n"
-        f"  work: {{type: agent, {job}}}\n"
-        "  approve: {type: human_wait, prompt: Review}\n",
+        json.dumps(
+            {
+                **({"recovery": {"enabled": False}} if explicit else {}),
+                "jobs": {
+                    "work": {
+                        **({"timeout-minutes": 10} if explicit else {}),
+                        "steps": [{"id": "review", "uses": "relay/agent@v1", "with": agent}],
+                    },
+                    "approve": {
+                        "steps": [{"uses": "relay/human-wait@v1", "with": {"prompt": "Review"}}]
+                    },
+                },
+            }
+        ),
     )
-    loaded = load_launch_workflow(project.relay_root, "defaults")
+    loaded = bind_routes(load_launch_workflow(project.relay_root, "defaults"), {})
     defaults = validate_defaults(
         {
             "providers": {"codex": {"model": "m1", "effort": "low", "permission_mode": "ask"}},
@@ -181,12 +189,12 @@ def test_defaults_respect_explicit_node_and_workflow_choices(
         }
     )
     effective = apply_workflow_defaults(loaded, defaults, (), None)
-    node = effective.root.definition.nodes["work"]
+    node = effective.root.definition.nodes["work"].bound_agents["review"]
     assert node.model == "m1"
-    assert node.timeout == (None if explicit else "15m")
+    assert effective.root.definition.nodes["work"].timeout == ("600000ms" if explicit else "15m")
     assert node.auto_retry is explicit
     assert node.agent_options["codex"].effort == (None if explicit else "low")
-    assert effective.root.definition.nodes["approve"].timeout is None
+    assert effective.root.definition.nodes["approve"].timeout == "15m"
     assert effective.root.definition.recovery.enabled is not explicit
     assert effective.root.text == loaded.root.text
 
@@ -196,18 +204,42 @@ def test_options_do_not_leak_between_models_or_override_permission_profile(
 ) -> None:
     project.write_workflow(
         "models",
-        "version: 1\nname: Models\nmodel: m2\nagents: [codex]\nnodes:\n"
-        "  other: {type: agent}\n"
-        "  profile: {type: agent, model: m1, permission_profile: interactive}\n",
+        (
+            "name: Models\n"
+            "jobs:\n"
+            "  other:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m2\n"
+            "  profile:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/agent@v1\n"
+            "      with:\n"
+            "        agent: codex\n"
+            "        model: m1\n"
+        ),
     )
     defaults = validate_defaults(
         {"providers": {"codex": {"model": "m1", "effort": "low", "permission_mode": "auto"}}}
     )
     loaded = apply_workflow_defaults(
-        load_launch_workflow(project.relay_root, "models"), defaults, (), None
+        bind_routes(load_launch_workflow(project.relay_root, "models"), {}), defaults, (), None
     )
-    assert loaded.root.definition.nodes["other"].agent_options["codex"].effort is None
-    assert loaded.root.definition.nodes["profile"].agent_options["codex"].permission_mode is None
+    assert (
+        loaded.root.definition.nodes["other"].bound_agents["work"].agent_options["codex"].effort
+        is None
+    )
+    assert (
+        loaded.root.definition.nodes["profile"]
+        .bound_agents["work"]
+        .agent_options["codex"]
+        .permission_mode
+        == "auto"
+    )
 
 
 @pytest.mark.usefixtures("registry_network")
@@ -273,7 +305,9 @@ def test_launch_freezes_defaults_and_nested_jobs_without_rewriting_sources(
     fake_agents.install("codex", mode="configuration")
     monkeypatch.setattr(actions, "_enqueue_claim", engine.tokens.append)
     source = (
-        "name: Defaults\njobs:\n  wait:\n"
+        "name: Defaults\n"
+        "jobs:\n"
+        "  wait:\n"
         "    steps: [{uses: relay/human-wait@v1, with: {prompt: Approve}}]\n"
         "  child: {uses: ./.relay/workflows/child.yaml, needs: wait}\n"
     )

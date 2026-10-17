@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from django.conf import settings
-from django.test import Client
 import pytest
 
-from relay.config import validate_config
 from relay.execution import huey_app
 from relay.execution.dispatch import set_dispatch_notifier
 from relay.execution.launch import LaunchRequest, launch_workflow
@@ -51,8 +47,13 @@ def test_environment_resume_is_delivered_from_committed_events(
     )
     project.write_workflow(
         "gate",
-        "name: Gate\njobs:\n  main:\n    environment: prod\n"
-        "    steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]\n",
+        (
+            "name: Gate\n"
+            "jobs:\n"
+            "  main:\n"
+            "    environment: prod\n"
+            "    steps: [{uses: relay/human-wait@v1, with: {prompt: Continue?}}]\n"
+        ),
     )
     engine = InlineEngine(node_executors(), tmp_path / "artifacts")
     run_id = engine.launch(project, "gate")
@@ -75,32 +76,10 @@ def test_idle_worker_scheduling_takes_no_write_lock() -> None:
     assert probe.transactions == probe.autocommit_writes == 0
 
 
-def test_legacy_worker_count_warns_and_uses_one(caplog: pytest.LogCaptureFixture) -> None:
-    assert validate_config({"workers": 8}).workers == 1
-    assert "one worker" in caplog.text
-    warning = next(record for record in caplog.records if record.name == "relay.config")
-    assert warning.args == ()
-    assert warning.getMessage() == ("Relay uses one worker; the legacy workers setting is ignored.")
-
-
-def test_settings_api_rejects_new_parallel_worker_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "RELAY_LOGIN_REQUIRED", False)
-    client = Client()
-    current = client.get("/api/settings").json()
-    response = client.post(
-        "/api/settings",
-        data=json.dumps({"settings": {"workers": 2}, "revision": current["revision"]}),
-        content_type="application/json",
-    )
-    assert response.status_code == 422
-    assert response.json()["code"] == "config_error"
-    assert client.get("/api/settings").json()["settings"]["workers"] == 1
-
-
 def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(
     project: RelayProject,
 ) -> None:
-    from relay.web.models import Run
+    from relay.web.models import Run, RunSnapshot
 
     Run.objects.bulk_create(
         [
@@ -116,5 +95,8 @@ def test_startup_enumerates_every_active_run_beyond_one_reconciliation_page(
             )
             for index in range(205)
         ]
+    )
+    RunSnapshot.objects.bulk_create(
+        [RunSnapshot(run=run, workflow_yaml="jobs: {}") for run in Run.objects.all()]
     )
     assert len(DjangoExecutionStore().active_run_ids()) == 205

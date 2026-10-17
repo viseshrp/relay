@@ -28,12 +28,6 @@ class ProjectDefaults(StrictModel):
     workflow_defaults: WorkflowDefaults = Field(default_factory=WorkflowDefaults)
 
 
-class WorkerCountError(ConfigError):
-    """New settings cannot request concurrent execution workers."""
-
-    http_status = 422
-
-
 class SettingsStore(Protocol):
     def project_defaults(self, project_id: str) -> dict[str, object]: ...
     def save_project_defaults(
@@ -48,7 +42,7 @@ def revision(values: Mapping[str, object]) -> str:
 def validate_project_defaults(raw: object) -> dict[str, object]:
     try:
         values = ProjectDefaults.model_validate(raw).model_dump(mode="json", exclude_unset=True)
-        # Reuse owner settings validation for the legacy agent-order contract.
+        # Reuse owner settings validation for the shared agent-order contract.
         validate_config({key: value for key, value in values.items() if key != "workflow_defaults"})
     except ValidationError as error:
         issues = [
@@ -107,9 +101,6 @@ def read_settings() -> dict[str, object]:
 
 
 def save_settings(raw: object, expected_revision: str) -> dict[str, object]:
-    if isinstance(raw, dict) and isinstance(raw.get("workers"), int) and raw["workers"] > 1:
-        message = "Relay runs one worker."
-        raise WorkerCountError(message, next_action="Set workers to 1 or omit the setting.")
     config = validate_config(raw)
     path = safe_resolve(config_dir(), settings_path().name)
     temporary: Path | None = None

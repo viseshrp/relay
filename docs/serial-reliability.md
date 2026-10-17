@@ -28,9 +28,7 @@ automatic worker restart.
 
 Huey's opaque claim delivery, atomic admission, duplicate protection,
 `retries=0`, deferred admission, and repair of unstarted delivery remain.
-Legacy positive worker counts warn and use one; new API values above one are
-rejected, and the browser has no worker-count field. Existing databases and
-migration history remain in place.
+Execution concurrency is fixed at one worker.
 
 The browser reads coherent monitor snapshots through one serial queue shared
 with open jobs. State events request refreshes; output events append to logs.

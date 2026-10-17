@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
 
@@ -15,10 +14,9 @@ from relay.config import load_config
 from relay.constants import (
     API_MAX_PAGE,
     DATABASE_INTEGER_MAX,
-    MAX_LOOP_ITERATIONS,
     REVIEW_PREVIEW_MAX_BYTES,
 )
-from relay.errors import ConfigError, GitError, ProjectDiscoveryError, RelayError
+from relay.errors import ConfigError, GitError, ProjectDiscoveryError
 from relay.execution.preflight import inspect_launch_cleanliness
 from relay.execution.relaunch import read_previous_inputs
 from relay.execution.state import CleanupPolicy, RunStatus
@@ -28,9 +26,7 @@ from relay.projects.service import list_registered_projects, project_launch_sour
 from relay.workflows.editor import (
     list_workflow_documents,
     read_workflow_document,
-    workflow_handoff_warnings,
 )
-from relay.workflows.loader import load_workflow_text, load_workflow_tree
 from relay.workflows.starters import starter_inventory
 
 from ..auth import owner_required
@@ -224,32 +220,12 @@ def workflows(request: HttpRequest) -> HttpResponse:
 def workflow(request: HttpRequest, key: str) -> HttpResponse:
     relay_root, project = current_project(request)
     document = read_workflow_document(DjangoWorkflowStore(), relay_root, project.id, key)
-    try:
-        loaded = load_workflow_text(document.yaml, source=relay_root / "workflows" / key)
-        warnings = workflow_handoff_warnings(loaded.definition.nodes)
-        # Child files are loaded once, even when the workflow invokes them repeatedly.
-        with suppress(RelayError):
-            for child_key, child in load_workflow_tree(loaded, relay_root / "workflows").items():
-                warnings.extend(
-                    {**warning, "workflow_key": child_key}
-                    for warning in workflow_handoff_warnings(child.definition.nodes)
-                )
-    except RelayError:
-        warnings = []
-    repair_defaults = effective_config(DjangoSettingsStore(), project.id).workflow_defaults.repairs
     return JsonResponse(
         {
             "yaml": document.yaml,
             "draft": document.draft,
             "base_hash": document.base_hash,
             "project": asdict(project),
-            "warnings": warnings,
-            "repair_defaults": {
-                "max_rounds": repair_defaults.max_rounds,
-                "max_allowed_rounds": MAX_LOOP_ITERATIONS,
-                "fix_instruction": repair_defaults.fix_instruction,
-                "verify_instruction": repair_defaults.verify_instruction,
-            },
         }
     )
 

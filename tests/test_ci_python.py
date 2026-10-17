@@ -89,6 +89,20 @@ def test_native_tox_runs_both_lanes_and_preserves_failure(
     )
     config = tmp_path / "tox.toml"
     config.write_text(configuration, encoding="utf-8")
+    (tmp_path / "conftest.py").write_text(
+        "from pathlib import Path\nimport pytest\n"
+        "ROOT = Path(__file__).resolve().parent\n"
+        "class CollectionBoundary:\n"
+        "    @pytest.hookimpl(tryfirst=True)\n"
+        "    def pytest_collect_directory(self, path: Path, parent: pytest.Collector) -> None:\n"
+        "        if not path.is_relative_to(ROOT):\n"
+        "            raise AssertionError(\n"
+        "                f'Probe collection escaped its owned directory: {path}'\n"
+        "            )\n"
+        "def pytest_configure(config: pytest.Config) -> None:\n"
+        "    config.pluginmanager.register(CollectionBoundary(), 'owned-collection-boundary')\n",
+        encoding="utf-8",
+    )
     probe = tmp_path / "test_native_probe.py"
     finished = tmp_path / "parallel-ran"
     probe.write_text(
@@ -125,6 +139,12 @@ def test_native_tox_runs_both_lanes_and_preserves_failure(
             "py",
             "--",
             str(probe),
+            "-c",
+            str(ROOT / "pyproject.toml"),
+            "--rootdir",
+            str(tmp_path),
+            "--confcutdir",
+            str(tmp_path),
         ],
         cwd=ROOT,
         env=environment,
@@ -154,6 +174,12 @@ def _run_probe(tmp_path: Path, probe: Path) -> subprocess.CompletedProcess[str]:
             "pytest",
             "-p",
             "tests.ci_reporting",
+            "-c",
+            str(ROOT / "pyproject.toml"),
+            "--rootdir",
+            str(tmp_path),
+            "--confcutdir",
+            str(tmp_path),
             str(probe),
             "--basetemp",
             str(tmp_path / "scratch"),

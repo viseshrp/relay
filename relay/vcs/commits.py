@@ -1,4 +1,4 @@
-"""Writer commit and reader attribution invariants."""
+"""Successful job commits and protected Git ancestry."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pathlib import Path
 from relay.constants import WORKFLOW_DOCUMENT_NAMES
 from relay.errors import CommitValidationError, GitError
 
-from .cleanliness import execution_changes, execution_status, status_porcelain
+from .cleanliness import execution_changes, execution_status
 from .git import git_stdout, run_git
 
 
 @dataclass(frozen=True, slots=True)
 class CommitResult:
-    """Validated writer movement from one immutable Git commit to another."""
+    """Validated job movement from one immutable Git commit to another."""
 
     starting_head: str
     ending_head: str
@@ -43,41 +43,10 @@ def commits_between(repository: Path, starting_head: str, ending_head: str) -> t
     """List accepted commits oldest first for durable attempt metadata."""
     output = git_stdout(
         repository,
-        ["rev-list", "--reverse", f"{starting_head}..{ending_head}"],
+        # Avoid Git's ambiguous filename probe for long SHA ranges on Windows.
+        ["rev-list", "--reverse", f"{starting_head}..{ending_head}", "--"],
     )
     return tuple(output.splitlines()) if output else ()
-
-
-def validate_writer_result(
-    worktree: Path,
-    starting_head: str,
-    *,
-    allow_no_commit: bool = False,
-) -> CommitResult:
-    """Require a clean descendant HEAD, or an explicitly allowed no-op."""
-    changes = execution_changes(worktree)
-    if changes:
-        message = "A writing node finished with uncommitted worktree changes."
-        raise CommitValidationError(
-            message,
-            context={"project": str(worktree)},
-            next_action="Inspect the retained attempt evidence before rerunning the node.",
-        )
-    ending_head = current_head(worktree)
-    if not is_ancestor(worktree, starting_head, ending_head):
-        message = "A writing node moved HEAD outside its starting commit ancestry."
-        raise CommitValidationError(message, context={"project": str(worktree)})
-    commits = commits_between(worktree, starting_head, ending_head)
-    if not commits and not allow_no_commit:
-        message = "A writing node produced no commit."
-        raise CommitValidationError(
-            message,
-            context={"project": str(worktree)},
-            next_action=(
-                "Commit the node's work or declare allow_no_commit for an intentional no-op."
-            ),
-        )
-    return CommitResult(starting_head, ending_head, len(commits))
 
 
 def accept_job_result(
@@ -119,25 +88,10 @@ def accept_job_result(
     )
 
 
-def validate_reader_result(worktree: Path, starting_head: str) -> None:
-    """Reject any read-only diff or HEAD movement for exact attribution."""
-    ending_head = current_head(worktree)
-    if ending_head != starting_head or status_porcelain(worktree):
-        message = "A read-only node changed its isolated worktree."
-        raise CommitValidationError(
-            message,
-            context={"project": str(worktree)},
-            next_action=(
-                "Inspect the retained reader evidence; mark the node as writing if intended."
-            ),
-        )
-
-
 __all__ = [
     "CommitResult",
+    "accept_job_result",
     "commits_between",
     "current_head",
     "is_ancestor",
-    "validate_reader_result",
-    "validate_writer_result",
 ]

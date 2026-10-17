@@ -1,4 +1,4 @@
-"""Native Antigravity headless adapter with machine-checked soft denies."""
+"""Native Antigravity headless transport and Relay-owned process lifecycle."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import codecs
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -19,12 +20,12 @@ from relay.constants import (
     ANTIGRAVITY_PROMPT_MAX_BYTES,
     ATTEMPT_HEARTBEAT_INTERVAL_SECONDS,
     CONTROL_POLL_INTERVAL_SECONDS,
-    DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS,
     PROCESS_STREAM_CHUNK_BYTES,
     WINDOWS_BATCH_COMMAND_MAX_CHARS,
     WINDOWS_COMMAND_MAX_CHARS,
 )
 from relay.errors import (
+    AgentExecutionError,
     AgentProtocolError,
     ModelSelectionRejectedError,
     ModelUnavailableError,
@@ -38,10 +39,8 @@ from relay.execution.cancellation import (
     terminate_async_process_tree,
 )
 from relay.execution.control import cancel_stop_reason
-from relay.execution.nodes.base import declared_output_artifacts
-from relay.execution.state import ControlKind
-from relay.execution.timing import attempt_deadline, duration_seconds
-from relay.vcs.commits import current_head
+from relay.execution.state import AttemptStopReason, ControlKind
+from relay.execution.timing import attempt_deadline
 
 from .configuration import native_configuration, validate_native_requirement
 from .events import AgentEvent, normalize_antigravity_event
@@ -58,10 +57,6 @@ from .models import (
 )
 
 _MODEL_LIST_TIMEOUT_SECONDS = 15.0
-_SOFT_DENY = re.compile(
-    r"(?i)(?:\bdenied\b|soft[- ]?deny|requires approval|permission[^\n]*not granted)"
-)
-_ACTION_TARGET = re.compile(r"(?:write_file|delete_file|move_file|command)\(([^)]+)\)")
 
 
 def _prompt(context: AgentExecutionContext) -> str:
@@ -74,7 +69,7 @@ def _prompt(context: AgentExecutionContext) -> str:
         ("Relay agent selection", context.agent_selection()),
     )
     suffix = "".join(
-        f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}"
+        (f"\n\n--- {heading} (JSON) ---\n{json.dumps(value, sort_keys=True, ensure_ascii=False)}")
         for heading, value in sections
     )
     workspace = f"\n\n{context.workspace_instructions()}"
@@ -82,12 +77,9 @@ def _prompt(context: AgentExecutionContext) -> str:
     return prompt_bytes + suffix + workspace + (f"\n\n{outputs}" if outputs else "")
 
 
-def _timeout_value(context: AgentExecutionContext) -> str:
-    """A node's `15m` remains `15m`; an absent timeout becomes `5m`."""
-    return context.node.timeout or f"{DEFAULT_ANTIGRAVITY_PRINT_TIMEOUT_SECONDS // 60}m"
-
-
-def _argv(context: AgentExecutionContext, prompt: str) -> tuple[str, ...]:
+def _argv(
+    context: AgentExecutionContext, prompt: str, deadline_at: float | None
+) -> tuple[str, ...]:
     """Bound the stdin prompt separately from the platform command line."""
     prompt_bytes = len(prompt.encode("utf-8"))
     if prompt_bytes > ANTIGRAVITY_PROMPT_MAX_BYTES:
@@ -110,9 +102,10 @@ def _argv(context: AgentExecutionContext, prompt: str) -> tuple[str, ...]:
         "stream-json",
         "--model",
         context.model_value,
-        "--print-timeout",
-        _timeout_value(context),
     ]
+    if deadline_at is not None:
+        seconds = max(1, math.ceil(deadline_at - time.monotonic()))
+        values.extend(("--print-timeout", f"{seconds}s"))
     validate_native_requirement(
         native_configuration(context.agent_id, context.model_value),
         ProbeRequirement(context.model_value, context.effort, context.permission_mode),
@@ -158,32 +151,6 @@ async def _send_prompt(process: asyncio.subprocess.Process, prompt: str) -> None
     await stream.wait_closed()
 
 
-def _inside_worktree(target: str, worktree: Path) -> str | None:
-    cleaned = target.strip().strip("`'\"")
-    if not cleaned:
-        return None
-    candidate = Path(cleaned)
-    resolved = (candidate if candidate.is_absolute() else worktree / candidate).resolve()
-    try:
-        relative = resolved.relative_to(worktree.resolve())
-    except ValueError:
-        return None
-    return relative.as_posix()
-
-
-def _denied_targets(notice: str, worktree: Path) -> tuple[str, ...]:
-    """A stderr notice `denied write_file(src/a.py)` yields (`src/a.py`,)."""
-    if not _SOFT_DENY.search(notice):
-        return ()
-    # Only a complete stderr tool notice is eligible. Natural-language stdout
-    # and partial raw chunks must never become permission decisions.
-    candidates = _ACTION_TARGET.findall(notice)
-    targets = {
-        target for item in candidates if (target := _inside_worktree(item, worktree)) is not None
-    }
-    return tuple(sorted(targets))
-
-
 def _model_rows(output: str) -> tuple[tuple[str, str], ...]:
     """`gemini-pro Gemini Pro\n` becomes ((`gemini-pro`, `Gemini Pro`),)."""
     rows = []
@@ -225,6 +192,8 @@ async def _read_lines(
         visible = decoder.decode(chunk)
         if visible:
             await queue.put((f"{kind}_raw", visible))
+        if kind == "stderr":
+            continue
         parts = chunk.split(b"\n")
         for index, part in enumerate(parts):
             if not oversized:
@@ -382,20 +351,15 @@ class AntigravityDriver:
             message = f"Unsupported Antigravity permission profile {context.permission_profile!r}."
             raise AgentProtocolError(message, context={"agent": self.profile.agent_id})
         queue = asyncio.Queue(maxsize=AGENT_EVENT_QUEUE_MAX_ITEMS)
-        denied = set()
         terminal_status = None
-        terminal_timed_out = False
         requested_stop = None
         readers = ()
         stopper = None
         sender = None
         try:
             prompt = _prompt(context)
-            arguments = _argv(context, prompt)
-            # agy reports failures as ERROR plus free text, without a documented
-            # timeout code. Enforce its advertised print ceiling locally as well.
-            print_deadline = attempt_deadline(_timeout_value(context), context.attempt.deadline_at)
-            print_limit = duration_seconds(_timeout_value(context))
+            deadline = attempt_deadline(context.node.timeout, context.attempt.deadline_at)
+            arguments = _argv(context, prompt, deadline)
             command = AgentCommand(arguments[0], arguments[1:])
             resources = context.attempt.resources
             process = await spawn_process(
@@ -432,13 +396,6 @@ class AntigravityDriver:
                     completed_streams += 1
                 elif kind == "stderr_raw" and isinstance(value, str):
                     yield AgentEvent("agent.stderr", {"text": value})
-                elif kind == "stderr_line" and isinstance(value, str):
-                    denied.update(_denied_targets(value, context.cwd))
-                elif kind == "stderr_oversized":
-                    message = "Antigravity emitted a stderr line above Relay's byte limit."
-                    raise AgentProtocolError(  # noqa: TRY301
-                        message, context={"agent": self.profile.agent_id}
-                    )
                 elif kind == "stdout_raw" and isinstance(value, str):
                     yield AgentEvent("agent.provider_event", {"text": value})
                 elif kind == "stdout_oversized":
@@ -476,16 +433,6 @@ class AntigravityDriver:
                     if isinstance(result, dict):
                         status = result.get("status")
                         terminal_status = status if isinstance(status, str) else None
-                        elapsed = result.get("duration_seconds")
-                        # The documented numeric duration proves expiry without
-                        # interpreting prose such as "timeout configuration failed".
-                        terminal_timed_out = (
-                            terminal_status == "ERROR"
-                            and print_limit is not None
-                            and isinstance(elapsed, (int, float))
-                            and not isinstance(elapsed, bool)
-                            and elapsed >= print_limit
-                        )
                 if requested_stop is None:
                     control = await asyncio.to_thread(
                         context.attempt.runtime.claim_next_control,
@@ -501,19 +448,14 @@ class AntigravityDriver:
                         )
                         if applied:
                             reason = cancel_stop_reason(control)
-                            requested_stop = reason.value
+                            requested_stop = reason
                             stopper = asyncio.create_task(terminate_async_process_tree(process))
                 now = time.monotonic()
                 if requested_stop is None and (
                     context.attempt.timed_out()
-                    or (
-                        print_deadline is not None
-                        and now >= print_deadline
-                        and terminal_status != "SUCCESS"
-                        and process.returncode is None
-                    )
+                    or (deadline is not None and now >= deadline and process.returncode is None)
                 ):
-                    requested_stop = "timeout"
+                    requested_stop = AttemptStopReason.TIMEOUT
                     stopper = asyncio.create_task(terminate_async_process_tree(process))
                 if now >= heartbeat_due:
                     alive = await asyncio.to_thread(
@@ -533,52 +475,38 @@ class AntigravityDriver:
             if requested_stop is None:
                 await sender
             await process.wait()
-            required = set(declared_output_artifacts(context.node.outputs).values())
-            denied_required = any(
-                requested == target
-                or requested.startswith(target.rstrip("/") + "/")
-                or target.startswith(requested.rstrip("/") + "/")
-                for requested in required
-                for target in denied
-            )
-            denied_without_commit = (
-                context.node.writes
-                and bool(denied)
-                and current_head(context.cwd) == context.attempt.attempt.starting_head
-            )
-            soft_denied = context.node.writes and (denied_required or denied_without_commit)
             succeeded = (
-                requested_stop is None
-                and process.returncode == 0
-                and terminal_status == "SUCCESS"
-                and not soft_denied
+                requested_stop is None and process.returncode == 0 and terminal_status == "SUCCESS"
             )
+            stop_reason = AttemptStopReason.COMPLETED if succeeded else AttemptStopReason.FAILED
             error_code = None
-            stop_reason = "completed"
+            message = None
             if requested_stop is not None:
-                error_code = "node_timeout" if requested_stop == "timeout" else requested_stop
                 stop_reason = requested_stop
-            elif terminal_timed_out:
-                error_code = "node_timeout"
-                stop_reason = "timeout"
-            elif soft_denied:
-                error_code = "antigravity_soft_denied"
-                stop_reason = "soft_denied"
-            elif terminal_status == "CANCELED":
-                error_code = "canceled"
-                stop_reason = "canceled"
-            elif terminal_status == "INTERRUPTED":
-                error_code = AgentProtocolError.error_code
-                stop_reason = "interrupted"
+                error_code = (
+                    "node_timeout"
+                    if requested_stop is AttemptStopReason.TIMEOUT
+                    else requested_stop.value
+                )
             elif not succeeded:
-                error_code = AgentProtocolError.error_code
-                stop_reason = "failed"
+                error_code = (
+                    AgentExecutionError.error_code
+                    if terminal_status in {"SUCCESS", "ERROR", "CANCELED", "INTERRUPTED"}
+                    else AgentProtocolError.error_code
+                )
+                message = (
+                    f"The provider reported {terminal_status} "
+                    f"and exited with code {process.returncode}."
+                    if terminal_status is not None
+                    else "The provider exited without a terminal result."
+                )
             self.result = AgentResult(
                 succeeded,
                 stop_reason,
                 process.returncode,
                 error_code,
-                tuple(sorted(denied)),
+                provider_stop_reason=terminal_status,
+                error_message=message,
             )
         except Exception as error:
             if self.process is not None and stopper is None:
@@ -592,10 +520,10 @@ class AntigravityDriver:
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
-                "failed",
+                AttemptStopReason.FAILED,
                 self.process.returncode if self.process is not None else None,
                 mapped.error_code,
-                tuple(sorted(denied)),
+                provider_stop_reason=terminal_status,
             )
             raise mapped from None
         finally:

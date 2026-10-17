@@ -31,11 +31,10 @@ The command accepts these options:
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Loopback address: `127.0.0.1`, `localhost`, or `::1` |
 | `--port` | `7845` | TCP port from 1 through 65535 |
-| `--workers` | `1` | Hidden legacy flag; warns and uses one execution thread |
 | `--no-browser` | off | Start without opening the system browser |
 | `--login / --no-login` | login required | Require owner credentials, or open the local app directly |
 
-Command-line values override `host`, `port`, `workers`, and `login_required`
+Command-line values override `host`, `port`, and `login_required`
 in Relay's settings file. A second live supervisor or an occupied address fails
 before another pair of children starts. Configuration and bind failures exit
 with status 4. A child or supervision failure exits with status 5.
@@ -94,8 +93,7 @@ The Relay logo opens this Home dashboard. Workflow recovery drafts are saved
 before leaving an editor, including when returning through browser history.
 If Home remembers a project that no longer exists, it selects the served
 project or another registered project for the workspace controls.
-Existing workflow, run, job, interaction, and settings links remain valid;
-`view=author` still redirects to `view=workflows`.
+Workspace links select a workflow, run, job, interaction, or settings view.
 
 Home puts **Waiting for you** first, with **Open request** links to the exact
 request. It also shows active and paused runs, recent results with status and
@@ -152,6 +150,7 @@ They contain example data, never owner projects or provider output. Screenshots
 and explanations sit beside each other on desktop and stack below 800 pixels.
 Regenerate the images and measured highlights with
 `npm --prefix frontend run capture:welcome`, then rebuild the frontend.
+Set `RELAY_CAPTURE_OUTPUT` to save a validation capture outside the source tree.
 Use **Next**, **Back**, numbered slide buttons, or the arrow keys. **Skip
 introduction**, Escape, or clicking outside closes the introduction.
 
@@ -171,7 +170,7 @@ login, can replay either introduction.
 **Reset onboarding**, which makes both appear on the next opening or reload.
 When browser storage is blocked, dismissal lasts for the current app session;
 reset reports the storage limitation instead of claiming it was saved.
-Closing the welcome slides also hides the older setup welcome prompt; the
+Closing the welcome slides also hides the setup welcome prompt; the
 agent checklist remains available from **Help > Get started**.
 
 When the project inventory is empty, the workspace shows a **Start using
@@ -275,7 +274,6 @@ saved-file hash protect publication. A recovered draft can be inspected or
 replaced with the saved source. Saving validates and publishes that workflow
 and every pending local prompt edit together. Saved sources and drafts use
 the current jobs-and-steps format.
-Historical run snapshots remain inspectable.
 
 JSON-formatted current workflow sources appear as block YAML in the editor and
 captured workflow viewer. Unchanged form fields do not create recovery drafts.
@@ -340,13 +338,20 @@ the editing lease or rewriting the workflow file. A newer draft from another
 tab causes a conflict. The editor shows the saved source beside the draft.
 Leaving the page with unsaved changes triggers the browser's warning.
 
-Save validates the complete workflow, prompts, and subworkflows, then publishes
+Save validates the complete workflow, prompts, and reusable workflows, then publishes
 YAML and local prompt edits as one recoverable bundle. A portable source lock
 protects readers and launch capture; an interrupted publication rolls back
 before the next source operation. Save sends the SHA-256 hashes loaded by the
 tab. If another process changed a file, Relay returns a conflict and
 keeps the recovery draft. Reload the saved file, reconcile the draft, and Save
-again. A successful Save clears the draft and refreshes the base hash.
+again. A successful Save clears the draft, refreshes the base hash, and
+refreshes the saved name in the workflow picker and sidebar.
+An inventory refresh failure leaves the save successful and its base hash
+current, so the next save can proceed without an edit conflict. A non-blocking
+notice explains that workflow names in the picker and sidebar may be stale
+until the next successful list refresh or page reload.
+Workflow management shares this list refresh. A response that arrives after
+the owner switches workflows or projects cannot replace the new selection.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
 edit keeps the last valid graph visible with an explanation.
@@ -399,7 +404,7 @@ including configured newline conversion, before committing the reviewed index.
 The panel repeats preflight after the commit.
 
 **Advanced options** explains **Override model for this run** and **After a
-successful run**. Historical workflows can also expose **Start from job**.
+successful run**. **Start from job** lists declared entry points.
 Cached models are suggestions; Relay
 sends the exact entered value. Working copies can be deleted on success or
 kept; saved reports and commits remain available. Start points list only jobs
@@ -450,23 +455,10 @@ automatic error recovery and quota retries; deadlines continue to apply.
 Choose **Resume** explicitly when ready.
 
 While paused, the header says: "Paused. Running jobs will finish; nothing new
-will start until you resume." Upcoming agent jobs have an **Edit** icon in the
-job list, available from both Summary and job logs. Relay prefetches their
-provider choices, shares probes for identical agent/model routes, and limits
-the number of routes loading at once. The icon becomes available when the
-dialog can open populated. A failed probe shows **Check again** beside the job.
-Switching runs or resuming discards pending probes and edit controls.
-
-Choose **Edit** to select an advertised tool, model, effort, or permission mode.
-The dialog uses provider labels for current effort and permission choices;
-defaults remain the provider defaults. Cancel or Escape returns focus to the
-job's edit control. A changed tool/model reveals editable **Handoff
-instructions** for the unstarted job;
-effort and permission changes alone keep that editor hidden. **Save settings**
-keeps the run paused. The server validates changed choices afresh before
-saving. Completed work, captured instructions, saved outputs, and other jobs
-stay unchanged. Settings for active or completed attempts
-cannot be changed through this control.
+will start until you resume." The server supports validated settings changes
+for a materialized agent step that has never started. Completed attempts and
+captured prompts remain immutable. See
+[Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 The Runs tab lists history for the selected project. A selected run shows
 its title, number, state, source, duration, and controls. Pending requests appear
@@ -497,6 +489,11 @@ Waiting and failed jobs move to the top with their parent and repair context;
 each loaded job appears once, including iteration markers. **Load more jobs**
 extends the same list. The Summary has one graph without a duplicate chip
 block. Select **Summary** for the run graph, approvals, and overall status.
+Failure notices in Summary, job logs, and embedded step logs share the same
+recorded reason. A provider failure status can accompany exit code zero.
+Configured Relay deadlines remain distinct from provider failures. An explicit
+public error message remains the first explanation.
+
 Selecting a job in the list, graph, or failure notice opens its log in the
 right column. The URL records
 `job=<scope path>` so a reload or shared link opens the same job.
@@ -554,7 +551,9 @@ The monitor combines the SSE stream with paginated database reads:
 - Activity joins adjacent text fragments and command stream bytes into readable
   messages, with stage, tool, time, and attempt attribution. Turn, message,
   attempt, stage, and stdout/stderr boundaries stay separate. Split tool JSON
-  is assembled before readable summaries are shown. For example, `"Hello "` plus
+  is assembled before readable summaries are shown. Numbered command stdout
+  and stderr parts join as plain text, including JSON-shaped output, without
+  changing the event's scope or attempt. For example, `"Hello "` plus
   `"world\n"` becomes `"Hello world\n"` within one message;
   opaque tool IDs remain in diagnostics, and duplicate command titles appear
   once. For example, a `git status` title and command show one `git status`;
@@ -575,7 +574,7 @@ blocks through React. Raw HTML and images stay inert; links accept only HTTP,
 HTTPS, email, or fragment targets. Tool calls and their results become one
 expandable row, matched by job, attempt, turn, and tool ID. Each row has a short
 title, a status symbol and text, and expandable input and output. Recorded run
-and reader-folder prefixes become relative paths in the display; other paths
+roots become relative paths in the display; other paths
 and original event bytes remain unchanged. Thoughts are collapsed by default.
 Agent messages, thoughts, and tool results use purple text on a light lavender
 background in Summary and job logs. Job and agent labels identify the source
@@ -663,8 +662,10 @@ under Advanced diagnostics for a full large diff. Relay does not guess or
 submit the approval response.
 
 Tool permission requests require an explicit offered decision. Simple agent
-forms have typed fields; complex forms retain a JSON fallback. Optional
-feedback is sent into the same live ACP session after its current turn ends.
+forms have typed fields; complex forms retain a JSON fallback. Choice menus
+preserve the provider's labels, descriptions, ordering, and exact values.
+Optional feedback is sent into the same live ACP session after its current
+turn ends.
 This does not restart the worker or edit static instructions.
 
 **Link to run** and **Link to request** include the project, run, and interaction.
@@ -678,7 +679,7 @@ Confirmation creates one durable, idempotent control request and fans it out
 to live attempts. A stale or duplicate answer cannot reach a later attempt. Manual
 rerun is available only for a failed run and failed node; Relay preserves
 evidence and creates a new attempt. A nested failed node also reopens its failed
-loop or subworkflow parents, while successful siblings remain complete. An
+loop or reusable-workflow parents, while successful siblings remain complete. An
 interrupted run resumes automatically when `relay up` restarts, also as a new
 attempt. Restart recovery never resumes an old provider session; feedback
 during a live permission or elicitation pause continues that existing session.
@@ -706,8 +707,7 @@ history, or everything for the project. Nothing is selected initially;
 deletion requires a confirmation dialog. Everything also requires typing the
 project name. Relay rejects cleanup while any run for
 the project is active. Worktree removal preserves evidence first, and cleanup
-never changes the launch branch. A disposable reader left by an interruption
-is removed before its primary run worktree. Run-record cleanup is rejected
+never changes the launch branch. Run-record cleanup is rejected
 until that run's worktree, retained branch, and attempt refs are gone; the
 `all` scope applies the safe worktree, Git-ref, then record order.
 
@@ -808,27 +808,13 @@ remain evidence. Changing a model through **Retry with settings** still uses
 its separate handoff editor. Provider quota resets retain their own notice and
 confirmed schedule. Automatic recovery never answers a declared human wait.
 
-## Stage repairs
+## Bounded fix-and-check loops
 
-Current workflows express bounded repair work with `relay/loop@v1` and a local
-reusable workflow. Agent recovery settings live in the agent action's inputs.
-Retained legacy runs expose their captured repair rounds and policies. See
-[Stage repair rules](workflows.md#stage-repair-rules) for the current action
-contract and historical compatibility.
-
-The run map and stage list show the main stages. **Repairing** and **Repairs
-stopped** identify a source stage whose repair work is active or failed. Open
-the **Repairs** panel to inspect its round, budget, roles, instructions, and
-child attempt statuses. Reports and activity remain available. Run settings
-are captured; **Edit repairs for future runs** opens the editable workflow.
-The panel shows saved settings for an unstarted or failed role, including
-owner-selected model, effort, and permission overrides. Other role settings
-are labeled as workflow defaults. A held repair shows **Repairs paused**.
-
-An existing captured loop can be grouped through the
-[repair presentation API](http-api.md#repair-presentation) while dispatch is
-paused. This changes its display without changing prompts, attempts, outputs,
-or execution order. Ordinary loops stay visible unless explicitly grouped.
+Use `relay/loop@v1` with a local reusable workflow for repeated fix-and-check
+work. Its iteration limit, stop condition, reports, and child attempts are
+explicit workflow choices. Open the loop step and its child jobs to inspect
+retained results. There is no implicit repair policy, Repairs panel, or repair
+presentation API. See [Stage repair rules](workflows.md#stage-repair-rules).
 
 ## Supervisor and shutdown
 
@@ -850,8 +836,8 @@ canceled; other in-flight attempts are recorded as interrupted. Attempts that
 finish successfully keep their outputs and protected commits, and failed
 attempts keep their failure details.
 
-An orderly restart preserves attempt evidence before resetting a writer or
-removing a disposable reader worktree. It reopens each interrupted run and
+An orderly restart verifies the protected shared workspace before reopening
+each interrupted current run and
 creates a new attempt; it never resumes an old agent session. Failed attempts
 remain failed unless the owner retries them or a confirmed provider-reset
 schedule becomes due. A worker process that dies without the shutdown
@@ -863,7 +849,7 @@ Startup holds a lifetime kernel lock and checks the old supervisor's recorded
 creation identity before recovering its abandoned web and worker children.
 It signals only matching creation identities and leaves reused PIDs alone.
 Verified attempt processes must exit before workspace recovery. Unknown
-legacy identities remain untouched and can block recovery. See
+creation identities remain untouched and can block recovery. See
 [Restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
 
 Relay removes the supervisor lease and shutdown marker only after a clean stop.
@@ -882,7 +868,7 @@ recovery draft. The run sidebar's workflow filter is stored in the
 `workflow` URL parameter and survives reloads.
 
 **Add a stage** offers agent work, commands, human reviews, conditions,
-loops, and subworkflows. New conditions include an editable continuation
+loops, and reusable workflows. New conditions include an editable continuation
 job; new loops include a command body and an exhaustion job. Condition
 result branches and loop stop/exhaustion settings edit the YAML document.
 Subworkflow creation requires selecting another existing workflow. Detailed
@@ -891,9 +877,11 @@ loop-body definitions remain editable in YAML.
 An empty project keeps the workspace sidebar and offers **New workflow**.
 Its editor and launch controls wait until a workflow is selected.
 
-`view=workflows` is the canonical editor URL; older `view=author` links open
-that view and update the URL. The Runs tab opens history. When a run needs a
-response, it returns to that run; visiting Workflows preserves the current
+`view=workflows` opens the editor. A `workflow` parameter also opens its
+selected workflow without `view`, for example `?workflow=review.yaml`.
+An unknown `view` without a `workflow` or `run` parameter opens Home.
+The Runs tab opens history. When a run needs
+a response, it returns to that run; visiting Workflows preserves the current
 waiting run so another request does not replace it. The history sidebar
 selects all workflows or one workflow.
 History rows show the captured title, permanent project run number, source
@@ -921,7 +909,7 @@ with job, attempt, readable size, authenticated downloads, and expandable
 file hashes. Each download has a distinct accessible name. **Workflow file**
 opens the immutable captured YAML in a read-only dialog. **Edit current
 workflow** opens the saved source editor separately. Annotations link to
-failed jobs. Agent messages, approvals, repairs, and code review stay in the
+failed jobs. Agent messages, approvals, loop results, and code review stay in the
 same run.
 
 Unstarted jobs show a waiting explanation without a log-history error.
@@ -1056,7 +1044,7 @@ Current argv steps use `relay/command@v1` with `argv` or a saved command name
 in `with.command`. Scripts use `run`, `shell`, and `working-directory`. Workflow,
 job, and step `env` mappings follow Actions precedence over frozen owner defaults.
 Owner command changes affect future launches; existing runs retain resolved
-arguments. Historical forms and run snapshots use their captured v1 rules.
+arguments.
 
 An editable checkout can rebuild its frontend while the server is running.
 Static serving refreshes its file catalog when a new asset hash is requested
@@ -1144,14 +1132,16 @@ connects the remaining findings to their implementation and regression tests.
 Visual tests use a separate disposable server and database on port 4176,
 so functional test runs cannot appear on the Home dashboard. Baselines live
 under `frontend/e2e/baselines/{platform}`. Linux CI is the reference for CI
-screenshots; macOS baselines support local checks. Relative times and private
-paths are masked rather than relaxing the pixel-difference threshold.
+screenshots; macOS and Windows baselines support local checks. Relative times
+and private paths are masked rather than relaxing the pixel-difference
+threshold.
 
 To refresh Linux baselines, dispatch the Main workflow on the working branch
 with **Generate Linux visual baselines for review** enabled. Review the
 `linux-visual-baselines` artifact before committing its PNG files. Generate
-macOS baselines only from an isolated checkout with the visual Playwright
-configuration and `--update-snapshots`.
+macOS and Windows baselines only from an isolated checkout with the visual
+Playwright configuration and `--update-snapshots`. Review every changed image
+before committing.
 
 Every normal and worst-case fixture screen receives an axe audit with WCAG
 2.0, 2.1, and 2.2 tags, failing on serious or critical violations. The previous

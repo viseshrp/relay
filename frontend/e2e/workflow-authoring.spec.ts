@@ -40,7 +40,22 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
     .getByRole("navigation", { name: "Workflow job navigation" })
     .getByRole("button", { name: "Work", exact: true })
     .click();
+  // Finish the drawer's entrance before selecting a tab inside it.
+  await page.getByRole("dialog").evaluate(async (dialog) => {
+    await Promise.all(
+      dialog
+        .getAnimations({ subtree: true })
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity,
+        )
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
   await page.getByRole("tab", { name: "Steps", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "Steps", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
   await page
     .getByRole("textbox", { name: "New prompt file", exact: true })
     .fill(promptFile);
@@ -72,6 +87,14 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
     page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toHaveText("Authoring smoke");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workflow sidebar" })
+      .getByRole("link", { name: /Authoring smoke/ }),
   ).toBeVisible();
   const source = await (
     await page.request.get("/api/workflows/workflow.yaml")
@@ -109,6 +132,67 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
       { exact: true },
     ),
   ).toBeVisible();
+});
+
+test("inventory refresh failure preserves save success and the next save base", async ({
+  page,
+}) => {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Workflow settings", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Workflow name", exact: true })
+    .fill("Saved despite inventory failure");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const inventory = /\/api\/workflows(?:\?.*)?$/;
+  await page.route(inventory, (route) => {
+    return route.fulfill({
+      status: 503,
+      json: {
+        code: "inventory_unavailable",
+        message: "Inventory temporarily unavailable.",
+        context: {},
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+  const warning = page
+    .getByRole("alert")
+    .filter({ hasText: "The workflow list could not refresh." });
+  await expect(warning).toBeVisible();
+  await expect(page.getByText(/Unsaved changes:/)).toHaveCount(0);
+  const saved = await (
+    await page.request.get("/api/workflows/workflow.yaml")
+  ).json();
+  expect(parse(saved.yaml).name).toBe("Saved despite inventory failure");
+  expect(saved.draft).toBeNull();
+  await page.unroute(inventory);
+  await page
+    .getByRole("button", { name: "Workflow settings", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Workflow name", exact: true })
+    .fill("Inventory recovered");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const saving = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        "/api/workflows/workflow.yaml/save" &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const response = await saving;
+  expect(response.request().postDataJSON().base_hash).toBe(saved.base_hash);
+  expect(response.status(), await response.text()).toBe(200);
+  await expect(
+    page.getByRole("combobox", { name: "Workflow", exact: true }),
+  ).toHaveText("Inventory recovered");
+  await expect(warning).toHaveCount(0);
 });
 
 test("drawing changes rewrite YAML and can be undone, redone, and formatted", async ({
@@ -287,7 +371,7 @@ test("script editing previews the host arguments, saves, executes, and deletes j
     await page.request.get("/api/workflow-language")
   ).json();
   await expect(page.locator(".script-editor").locator("..")).toContainText(
-    manifest.host_scripts.python.argv[0],
+    JSON.stringify(manifest.host_scripts.python.argv[0]),
   );
   await page.getByRole("button", { name: "Close job settings" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -319,10 +403,12 @@ test("script editing previews the host arguments, saves, executes, and deletes j
   });
   expect(launched.status(), await launched.text()).toBe(201);
   const run = (await launched.json()).run_id;
+  // Both successful jobs commit before the run reaches its terminal state.
   await expect
     .poll(
       async () =>
         (await (await page.request.get(`/api/runs/${run}`)).json()).run.status,
+      { timeout: 15_000 },
     )
     .toBe("succeeded");
   const events = (

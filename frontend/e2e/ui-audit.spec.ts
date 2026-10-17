@@ -5,7 +5,7 @@ import {
 } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-import { post, currentWorkflow, openSettings } from "./setup-helpers";
+import { post, openSettings, expectRunStatus } from "./setup-helpers";
 
 async function document(page: Page, key = "workflow.yaml") {
   return (await page.request.get(`/api/workflows/${key}`)).json();
@@ -17,7 +17,10 @@ async function create(page: Page, key: string, name: string, nodes: object) {
   const response = await post(page, "/api/workflows", {
     key,
     holder,
-    yaml: stringify(currentWorkflow({ version: 1, name, nodes })),
+    yaml: stringify({
+      name: name,
+      jobs: nodes,
+    }),
   });
   expect(response.ok(), await response.text()).toBeTruthy();
 }
@@ -29,14 +32,6 @@ async function launch(page: Page, key: string): Promise<string> {
   expect(response.ok(), await response.text()).toBeTruthy();
   const result: { run_id: string } = await response.json();
   return result.run_id;
-}
-async function settled(page: Page, id: string, status: string) {
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe(status);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -123,14 +118,34 @@ test("workflow history filters persist in the URL and Back restores run and job 
   page,
 }) => {
   await create(page, "audit-a", "Audit A", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   await create(page, "audit-b", "Audit B", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
   const id = await launch(page, "audit-a");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   await page.goto("/?view=runs&workflow=audit-a.yaml");
   await expect(
     page.getByRole("heading", { name: "Audit A", exact: true }),
@@ -178,12 +193,33 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
   page,
 }) => {
   await create(page, "audit-wait", "Audit waiting", {
-    approval: { type: "human_wait", prompt: "Review the result." },
-    later: { type: "command", needs: ["approval"], run: ["git", "status"] },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Review the result.",
+          },
+        },
+      ],
+    },
+    later: {
+      needs: ["approval"],
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   const id = await launch(page, "audit-wait");
-  await settled(page, id, "paused_wait");
-  await page.goto(`/?view=runs&run=${id}&job=root.approval.step_1`);
+  await expectRunStatus(page, id, "paused_wait");
+  await page.goto(`/?view=runs&run=${id}&job=root.approval.work`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
     log.getByRole("button", { name: "Human review", exact: true }),
@@ -196,8 +232,8 @@ test("human reviews and unstarted jobs have accurate log labels and empty states
     .getByRole("link", { name: /^later / })
     .click();
   await expect(
-    log.getByText("No attempt has started yet.", { exact: true }),
-  ).toBeVisible();
+    log.getByRole("combobox", { name: "Attempt", exact: true }),
+  ).toHaveText("Not started");
   await expect(log.getByText(/Incomplete/)).toHaveCount(0);
   await expect(
     log.getByRole("button", { name: "Retry log history", exact: true }),
@@ -230,7 +266,7 @@ test("a named script step opens its terminal output", async ({ page }) => {
             {
               id: "script",
               name: "Visible command",
-              run: "echo Captured terminal output",
+              run: "echo 'Captured terminal output'",
             },
           ],
         },
@@ -239,7 +275,7 @@ test("a named script step opens its terminal output", async ({ page }) => {
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const id = await launch(page, "script-log");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   await page.goto(`/?view=runs&run=${id}&job=root.check.script`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
@@ -257,10 +293,20 @@ test("Workflow file shows frozen source and empty internal artifacts remain hidd
   page,
 }) => {
   await create(page, "audit-frozen", "Original source", {
-    check: { type: "command", run: ["git", "status"] },
+    check: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
   });
   const id = await launch(page, "audit-frozen");
-  await settled(page, id, "succeeded");
+  await expectRunStatus(page, id, "succeeded");
   const original = await document(page, "audit-frozen.yaml");
   const saved = await post(page, "/api/workflows/audit-frozen.yaml/save", {
     holder: await page.evaluate(() =>
@@ -369,7 +415,17 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
       ).toBeTruthy();
     const key = `audit-add-${type}`;
     await create(page, key, `Create ${type}`, {
-      base: { type: "command", run: ["git", "status"] },
+      base: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
     });
     await page.goto(`/?view=workflows&workflow=${key}.yaml`);
     await page.getByRole("button", { name: "Add job", exact: true }).click();
@@ -402,6 +458,6 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
     const saved = parse((await document(page, `${key}.yaml`)).yaml);
     expect(saved.jobs.job_1).toBeDefined();
     const id = await launch(page, key);
-    await settled(page, id, "succeeded");
+    await expectRunStatus(page, id, "succeeded");
   });
 }

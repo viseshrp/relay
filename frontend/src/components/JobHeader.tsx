@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 
 import { errorMessage } from "../api";
+import { failureReason } from "../failure";
 import { jobDuration } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
 
@@ -59,10 +60,7 @@ export function JobHeader({ state }: { state: JobWorkspaceState }) {
       </Typography>
       {failed && (
         <Alert severity="error" sx={{ mt: 1 }}>
-          <Typography>
-            {attempt?.error_message ??
-              `Job failed${attempt?.exit_code !== null ? ` with exit code ${attempt?.exit_code}` : ""}.`}
-          </Typography>
+          <Typography>{failureReason(attempt, "Job")}</Typography>
           {attempt?.provider_message && (
             <Typography sx={{ whiteSpace: "pre-wrap" }}>
               {attempt.provider_message}

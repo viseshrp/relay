@@ -3,13 +3,9 @@ import {
   openJobSettings,
   closeJobSettings,
 } from "./setup-helpers";
-import { historicalPost, currentWorkflow } from "./setup-helpers";
+import { post } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-
-async function post(page: Page, path: string, data: object = {}) {
-  return historicalPost(page, path, data);
-}
 
 async function save(page: Page) {
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -331,18 +327,26 @@ test("permission requests send owner feedback through the same agent session", a
   const created = await post(page, "/api/workflows", {
     key: "agent-feedback",
     holder,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name: "Feedback",
-        model: "m1",
-        agents: ["codex"],
-        nodes: { work: { type: "agent" } },
-      }),
-    ),
+    yaml: stringify({
+      name: "Feedback",
+      jobs: {
+        work: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/agent@v1",
+              with: {
+                agent: "codex",
+                model: "m1",
+              },
+            },
+          ],
+        },
+      },
+    }),
   });
   expect(created.ok()).toBeTruthy();
-  await page.goto("/?view=author&workflow=agent-feedback.yaml");
+  await page.goto("/?view=workflows&workflow=agent-feedback.yaml");
   await page
     .getByRole("region", { name: "Workflow header" })
     .getByRole("button", { name: "Run workflow", exact: true })
@@ -391,10 +395,19 @@ test("a review completed during initial loading updates progress before the stre
         key: "loading-review",
         holder,
         yaml: stringify({
-          version: 1,
           name: "Loading review",
-          nodes: {
-            review: { type: "human_wait", prompt: "Respond REVIEWED." },
+          jobs: {
+            review: {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/human-wait@v1",
+                  with: {
+                    prompt: "Respond REVIEWED.",
+                  },
+                },
+              ],
+            },
           },
         }),
       })

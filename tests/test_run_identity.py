@@ -12,7 +12,14 @@ from relay.web.models import Project, Run, RunSnapshot
 from tests.support import InlineEngine, RelayProject, create_project
 
 WORKFLOW = (
-    "version: 1\nname: Build and review\nnodes:\n  check: {type: command, run: [git, status]}\n"
+    "name: Build and review\n"
+    "jobs:\n"
+    "  check:\n"
+    "    steps:\n"
+    "    - id: work\n"
+    "      uses: relay/command@v1\n"
+    "      with:\n"
+    '        argv: \'["git", "status"]\'\n'
 )
 
 

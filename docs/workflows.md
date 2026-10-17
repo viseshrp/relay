@@ -13,10 +13,7 @@ sources without starting processes or retrieving credentials. See
 [local language audit](workflow-language-compatibility.md) for provenance,
 limits, and the implementation map.
 
-Saved workflow sources and new launches require `jobs` and ordered `steps`.
-The previous `version: 1` / `nodes` authoring format is unsupported. Replace old
-files with current sources; Relay does not provide a conversion-preview flow.
-Captured run snapshots remain available in run history.
+Launch snapshots capture jobs, steps, sources, and routes.
 
 ## Jobs and ordered steps
 
@@ -53,8 +50,7 @@ The root accepts `name`, `description`, `run-name`, `on`, `env`, `defaults`,
 `strategy`, `env`, `defaults`, `outputs`, `environment`, `concurrency`,
 `cache-mode`, `timeout-minutes`, `continue-on-error`, and `steps`; a reusable
 job uses `uses`, `with`, and `secrets` instead of steps. Every job runs on this
-computer. There is no runner selection or parallelism field. Removed fields
-are rejected, including `runs-on`, `max-parallel`, and environment `deployment`.
+computer. Runner selection, parallelism, and deployments are unsupported.
 
 Steps accept `id`, `name`, `if`, `env`, `timeout-minutes`,
 `continue-on-error`, and either `run` with `shell` and `working-directory`,
@@ -86,6 +82,12 @@ interpreter command containing `{0}` for the script path. The default is the
 platform's ordinary script shell. Workflow and job `defaults.run` provide a
 shell and working directory; step values override them. Working directories
 must resolve inside the run workspace.
+
+The built-in `python` shell uses Relay's interpreter with `-X utf8`, so
+redirected output and default text-file encoding support Unicode on Windows.
+An inherited `PYTHONIOENCODING` still overrides its standard-stream encoding.
+Custom interpreter commands and explicit command argument vectors retain
+their requested arguments.
 
 `relay/command@v1` requires exactly one of `argv` (a JSON string containing a
 nonempty argument vector) or `command` (an owner-configured command name).
@@ -278,10 +280,6 @@ two repair rounds and commits after verification. For a reusable repair body,
 through 100, `until-output`, and `equals`. Every iteration is a durable serial
 scope. Exhausting the budget fails the loop.
 
-Historical `repairs`, embedded loop bodies, switch nodes, and entrypoint graphs
-remain readable in legacy captured runs. They are not public Actions keys and
-are not silently converted to a different repair contract.
-
 ## Human waits
 
 `relay/human-wait@v1` accepts a rendered `prompt` and optional
@@ -361,6 +359,12 @@ JSON `selector` with retained `label`, `json_path`, or `yaml_path` selectors.
 It exports `value`. Required selectors retain exact bytes; `exists` returns a
 boolean string and does not require or retain a report. A successful agent
 turn alone does not establish a required report or verdict.
+
+An agent action with `with.report` receives the resolved selector as a separate
+JSON contract after its captured instructions. The same contract validates its
+result. A full `selector` determines the artifact path for both validation and
+retention; the shorthand path does not replace it. Relay adds workspace facts
+and declared requirements without adding report content or provenance rules.
 
 ## Artifacts and caches
 

@@ -1,10 +1,6 @@
 import { expect, test } from "./a11y-test";
 import { stringify } from "yaml";
-import {
-  openSettings,
-  historicalPost as post,
-  currentWorkflow,
-} from "./setup-helpers";
+import { openSettings, post, expectRunStatus } from "./setup-helpers";
 import type { DashboardData } from "../src/types";
 
 test.beforeEach(async ({ page }) => {
@@ -24,6 +20,12 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => {
   await post(page, "/__test__/reset");
+});
+
+test("an unknown workspace view opens Home", async ({ page }) => {
+  await page.goto("/?view=missing");
+  await expect(page.getByRole("main", { name: "Relay home" })).toBeVisible();
+  await expect(page).toHaveURL(/\?view=home&project=/);
 });
 
 test("Home recovers when its remembered project no longer exists", async ({
@@ -63,13 +65,22 @@ test("Home shows real project results and logo navigation keeps workspace drafts
   const created = await post(page, "/api/workflows", {
     key: "dashboard-check",
     holder: "dashboard-test",
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name: "Dashboard check",
-        nodes: { check: { type: "command", run: ["git", "status"] } },
-      }),
-    ),
+    yaml: stringify({
+      name: "Dashboard check",
+      jobs: {
+        check: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
+      },
+    }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const launch = await post(page, "/api/runs", {
@@ -119,13 +130,22 @@ test("Home shows real project results and logo navigation keeps workspace drafts
   const yaml = page
     .getByLabel("Workflow YAML editor", { exact: true })
     .locator(".cm-content");
-  const changed = stringify(
-    currentWorkflow({
-      version: 1,
-      name: "Remember this draft",
-      nodes: { check: { type: "command", run: ["git", "status"] } },
-    }),
-  );
+  const changed = stringify({
+    name: "Remember this draft",
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            uses: "relay/command@v1",
+            with: {
+              argv: JSON.stringify(["git", "status"]),
+            },
+          },
+        ],
+      },
+    },
+  });
   await expect(
     page.getByRole("region", { name: "Workflow header" }),
   ).toContainText("Dashboard check");
@@ -171,10 +191,19 @@ test("waiting cards open the exact human request and disappear after an answer",
         key: "dashboard-review",
         holder: "dashboard-review",
         yaml: stringify({
-          version: 1,
           name: "Review the change",
-          nodes: {
-            review: { type: "human_wait", prompt: "Review the change" },
+          jobs: {
+            review: {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/human-wait@v1",
+                  with: {
+                    prompt: "Review the change",
+                  },
+                },
+              ],
+            },
           },
         }),
       })
@@ -288,13 +317,7 @@ test("compact recent results reveal loaded records and still page to older runs"
   });
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const body: { run_id: string } = await launched.json();
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${body.run_id}`)).json()).run
-          .status,
-    )
-    .toBe("succeeded");
+  await expectRunStatus(page, body.run_id, "succeeded");
   const data: DashboardData = await (
     await page.request.get("/api/dashboard")
   ).json();

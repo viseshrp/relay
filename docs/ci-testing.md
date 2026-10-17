@@ -27,8 +27,9 @@ Each worker owns its database template, Huey queue, environment, provider
 transcripts, and temporary repositories. Every test gets a fresh database
 copy. Real Git and deterministic provider subprocesses remain enabled.
 
-Linux/Python 3.14 records branch coverage from both lanes and uploads the
-canonical XML to Codecov. The other 14 jobs run every test without
+Linux and Windows on Python 3.14 record branch coverage from both lanes and
+upload their XML to Codecov. The combined reports include native Windows
+process behavior. The other 13 jobs run every test without
 suite-wide coverage instrumentation. Sources, exclusions, and thresholds
 remain unchanged. Local tox runs collect coverage by default.
 
@@ -51,6 +52,19 @@ Set `RELAY_TEST_WORKERS=0` for serial execution of both lanes. Set
 An empty lane is valid for a focused file; an empty overall inventory fails.
 Local missing Node runtimes and declared platform skips keep their reasons.
 Both Node runtimes are required in CI.
+
+Symlink fixtures report the host capability error when link creation is
+unavailable. A separate Windows directory-junction test exercises artifact
+subject and product-selection rejection with a real reparse point without
+requiring symlink privileges.
+
+Both nested runner probes load the repository's pytest configuration with
+`-c` and set `--rootdir` and `--confcutdir` to their own scratch directory.
+Only the native tox probe,
+`test_native_tox_runs_both_lanes_and_preserves_failure`, also installs a
+collection guard that rejects directories outside that root. On Windows,
+that guard prevents collection from inspecting temporary folders that another
+worker is deleting.
 
 Tox resets its own temporary directory before each invocation. Local
 reports live in `.tox/py313/tmp/reports` for the example above. CI supplies
@@ -78,6 +92,12 @@ GitHub Actions invokes Playwright directly on four separate Ubuntu jobs.
 Each job downloads the same prepared build and starts its own isolated
 Relay server. Playwright uses `--shard=N/4`, one worker per server, zero
 retries, and file-level ordering. Snapshot updates are forbidden.
+
+The isolated browser consumer polls both running and waiting runs. It uses
+the inline engine's advancement path to enqueue ready nodes and redeliver
+committed dispatch intent. A delivery deferred by an owner pause must be
+queued again after unpausing, including a suspended scope whose run remains
+`paused_wait` after its human response is accepted.
 
 The fourth shard also runs the complete no-login and visual suites in
 separate Actions steps. Both steps use `always()` after valid asset setup,

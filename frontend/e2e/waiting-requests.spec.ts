@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { expectRunStatus, post } from "./setup-helpers";
 import type { Attention } from "../src/attention";
 import type { RunDetail, RunEvent } from "../src/types";
 
@@ -11,16 +11,19 @@ declare global {
 }
 let activeRun: string | null = null;
 
-async function create(page: Page, key: string, nodes: object) {
+async function create(
+  page: Page,
+  key: string,
+  nodes: object,
+  reusable = false,
+) {
   const created = await post(page, "/api/workflows", {
     key,
     holder: `waiting-${key}`,
     yaml: stringify({
-      version: 1,
       name: key,
-      model: "m1",
-      agents: ["codex"],
-      nodes,
+      ...(reusable ? { on: { workflow_call: {} } } : {}),
+      jobs: nodes,
     }),
   });
   expect(created.status(), await created.text()).toBe(201);
@@ -106,43 +109,62 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
       const job =
         kind === "wait"
           ? {
-              type: "human_wait",
-              prompt: "Check this nested approval. Respond YES.",
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/human-wait@v1",
+                  with: {
+                    prompt: "Check this nested approval. Respond YES.",
+                  },
+                },
+              ],
             }
-          : { type: "agent" };
-      if (placement === "child")
-        await create(page, `${key}-child`, { question: job });
+          : {
+              steps: [
+                {
+                  id: "work",
+                  uses: "relay/agent@v1",
+                  with: {
+                    agent: "codex",
+                    model: "m1",
+                  },
+                },
+              ],
+            };
+      await create(page, `${key}-child`, { question: job }, true);
       const group = placement === "repair" ? "repairs" : "rounds";
       await create(
         page,
         key,
         placement === "child"
-          ? { child: { type: "subworkflow", workflow: `${key}-child` } }
+          ? { child: { uses: `./.relay/workflows/${key}-child.yaml` } }
           : {
-              before: { type: "command", run: ["git", "status"] },
               [group]: {
-                type: "loop",
-                needs: ["before"],
-                max_iterations: 1,
-                until: "${{ loop.index >= 1 }}",
-                exhausted: "fallback",
-                body: { question: job },
-              },
-              fallback: {
-                type: "command",
-                needs: [group],
-                run: ["git", "status"],
+                steps: [
+                  {
+                    uses: "relay/loop@v1",
+                    with: {
+                      workflow: `./.relay/workflows/${key}-child.yaml`,
+                      "max-iterations": 1,
+                    },
+                  },
+                ],
               },
             },
       );
       const id = await launch(page, key);
       await expect
-        .poll(async () => {
-          const run = await detail(page, id);
-          if (run.status === "failed")
-            throw new Error(run.failure_summary ?? JSON.stringify(run.problem));
-          return run.interactions.length;
-        })
+        .poll(
+          async () => {
+            const run = await detail(page, id);
+            if (run.status === "failed")
+              throw new Error(
+                run.failure_summary ?? JSON.stringify(run.problem),
+              );
+            return run.interactions.length;
+          },
+          { timeout: 20_000 },
+        )
         .toBe(1);
       if (placement === "repair") {
         expect(
@@ -150,14 +172,6 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
             await post(page, `/api/runs/${id}/pause`, {
               paused: true,
               idempotency_key: "pause-for-group",
-            })
-          ).ok(),
-        ).toBeTruthy();
-        expect(
-          (
-            await post(page, `/api/runs/${id}/repairs`, {
-              groups: { "root.repairs": "root.before" },
-              idempotency_key: "group-repairs",
             })
           ).ok(),
         ).toBeTruthy();
@@ -238,9 +252,7 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
             })
           ).ok(),
         ).toBeTruthy();
-      await expect
-        .poll(async () => (await detail(page, id)).status)
-        .toBe("succeeded");
+      await expectRunStatus(page, id, "succeeded");
       await expect(banner).toHaveCount(0);
       await page
         .getByRole("navigation", { name: "Jobs", exact: true })
@@ -255,25 +267,42 @@ for (const kind of ["wait", "permission", "elicitation"] as const)
     });
   }
 
-test("returning from Workflows keeps the selected run when several runs are waiting", async ({
+test("returning from Workflows keeps the selected run while another run is queued", async ({
   page,
 }) => {
   await create(page, "other-waiting", {
-    approval: { type: "human_wait", prompt: "Another pending request." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Another pending request.",
+          },
+        },
+      ],
+    },
   });
   await create(page, "selected-waiting", {
-    approval: { type: "human_wait", prompt: "Answer this selected run." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Answer this selected run.",
+          },
+        },
+      ],
+    },
   });
   expect((await post(page, "/__test__/commit")).ok()).toBeTruthy();
+  const selected = await launch(page, "selected-waiting");
+  await expectRunStatus(page, selected, "paused_wait", 30_000);
   const other = await launch(page, "other-waiting");
+  activeRun = selected;
   try {
-    const selected = await launch(page, "selected-waiting");
-    await expect
-      .poll(async () => (await detail(page, other)).interactions.length)
-      .toBe(1);
-    await expect
-      .poll(async () => (await detail(page, selected)).interactions.length)
-      .toBe(1);
+    expect((await detail(page, other)).interactions).toHaveLength(0);
     await page.goto(`/?view=runs&run=${selected}`);
     await expect(
       page.getByRole("region", { name: "Waiting for you", exact: true }),
@@ -303,8 +332,15 @@ test("a job log keeps its pending response available above the output", async ({
 }) => {
   await create(page, "waiting-job-log", {
     approval: {
-      type: "human_wait",
-      prompt: "Read the job output and approve.",
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Read the job output and approve.",
+          },
+        },
+      ],
     },
   });
   const id = await launch(page, "waiting-job-log");
@@ -598,7 +634,17 @@ test("desktop notifications require opt-in and announce new waits and completion
     )
     .toBe("true");
   await create(page, "notify-wait", {
-    approval: { type: "human_wait", prompt: "Approve this run." },
+    approval: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Approve this run.",
+          },
+        },
+      ],
+    },
   });
   const id = await launch(page, "notify-wait");
   await expect

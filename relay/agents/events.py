@@ -13,6 +13,7 @@ from relay.execution.state import EventSensitivity
 
 # Reserve half of the persistence limit for scope/attempt metadata and SSE framing.
 _SAFE_CHUNK_BYTES = EVENT_MAX_PAYLOAD_BYTES // 2
+TOOL_EVENT_TYPES = frozenset({"agent.tool_call", "agent.tool_result"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +113,7 @@ def _visible_content(content: object) -> Mapping[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str:
+def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> dict[str, object]:
     summary = {}
     if update.kind is not None:
         summary["kind"] = update.kind
@@ -141,7 +142,31 @@ def _tool_summary(update: schema.ToolCallStart | schema.ToolCallProgress) -> str
             visible.append({"terminal_id": item.terminal_id})
     if visible:
         summary["content"] = visible
-    return json.dumps(summary, separators=(",", ":"), ensure_ascii=False)
+    metadata = update.field_meta
+    if isinstance(metadata, dict):
+        # Public, matching terminal IDs only: {terminal_id: "c1", data: "denied\n"}
+        # becomes summary.output_delta = "denied\n"; other metadata stays private.
+        for key in ("terminal_output_delta", "terminal_output"):
+            output = metadata.get(key)
+            if (
+                isinstance(output, dict)
+                and output.get("terminal_id") == update.tool_call_id
+                and isinstance(output.get("data"), str)
+                and output.get("private") is not True
+            ):
+                summary["output_delta"] = output["data"]
+                break
+        exited = metadata.get("terminal_exit")
+        if (
+            isinstance(exited, dict)
+            and exited.get("terminal_id") == update.tool_call_id
+            and exited.get("private") is not True
+        ):
+            code = exited.get("exit_code")
+            if isinstance(code, int) and not isinstance(code, bool):
+                # {terminal_id: "c1", exit_code: 3} becomes summary.exit_code = 3.
+                summary["exit_code"] = code
+    return summary
 
 
 def _plan_payload(update: schema.AgentPlanUpdate | schema.AgentPlanContentUpdate) -> object:
@@ -188,25 +213,35 @@ def normalize_acp_update(update: object) -> tuple[AgentEvent, ...]:
             () if content is None else (AgentEvent("agent.provider_event", {"content": content}),)
         )
     if isinstance(update, schema.ToolCallStart):
+        if _is_private(update):
+            return ()
         return (
             AgentEvent(
                 "agent.tool_call",
                 {
                     "tool": update.title,
                     "tool_call_id": update.tool_call_id,
-                    "summary": _tool_summary(update),
+                    "summary": json.dumps(
+                        _tool_summary(update), separators=(",", ":"), ensure_ascii=False
+                    ),
                 },
             ),
         )
     if isinstance(update, schema.ToolCallProgress):
+        if _is_private(update):
+            return ()
         terminal = update.status in {"completed", "failed"}
+        summary = _tool_summary(update)
+        if not summary and not update.title:
+            # No visible fields or title remain, so there is nothing to render.
+            return ()
         return (
             AgentEvent(
                 "agent.tool_result" if terminal else "agent.tool_call",
                 {
                     "tool": update.title or update.tool_call_id,
                     "tool_call_id": update.tool_call_id,
-                    "summary": _tool_summary(update),
+                    "summary": json.dumps(summary, separators=(",", ":"), ensure_ascii=False),
                 },
             ),
         )
@@ -284,6 +319,7 @@ def normalize_antigravity_event(raw: Mapping[str, object]) -> tuple[AgentEvent, 
 
 
 __all__ = [
+    "TOOL_EVENT_TYPES",
     "AgentEvent",
     "bounded_agent_events",
     "normalize_acp_update",

@@ -11,6 +11,7 @@ from typing import Literal
 
 from relay.errors import RelayError
 from relay.execution.runner import AttemptContext
+from relay.execution.state import AttemptStopReason
 from relay.workflows.schema import AgentNode
 
 from .usage_limits import ProviderUsageLimit
@@ -177,12 +178,8 @@ class AgentExecutionContext:
             "TMPDIR/TMP/TEMP directory, for downloaded skills, scratch scripts, "
             "and other transient files. Do not put them in the Git worktree. "
             "Keep required task reports at their prescribed artifact paths. "
-            "Follow the task's commit contract: uncommitted source changes or "
-            "unrelated files reject a writer's result; readers must leave the "
-            "checkout unchanged. Use Relay agent selection to identify the "
-            "executing tool and exact model in report provenance; source-prompt "
-            "role names do not change the selected agent. Do not infer provider "
-            "default effort or permission values from an unset override."
+            "Ordered steps share this worktree. Relay commits changed code "
+            "when the job succeeds."
         )
 
     def output_instructions(self) -> str:
@@ -198,12 +195,10 @@ class AgentExecutionContext:
         # even when the report has no findings to address.
         return (
             "Relay declared outputs (JSON):\n"
-            "These selectors are validated before this step can succeed. "
+            "These selectors are validated after the provider returns. "
             "Files referenced by label, json_path, or yaml_path selectors are required; "
-            "create them with the supplied task's required content "
-            "even when there are no findings. "
-            "An exists selector records a boolean and permits an absent file. "
-            "Keep phase boundaries and report only evidence-based outcomes.\n"
+            "each must contain the declared label or key path. "
+            "An exists selector records a boolean and permits an absent file.\n"
             + json.dumps(selectors, sort_keys=True, ensure_ascii=False)
         )
 
@@ -213,11 +208,12 @@ class AgentResult:
     """Provider-independent terminal result after one fresh session."""
 
     succeeded: bool
-    stop_reason: str
+    stop_reason: AttemptStopReason
     exit_code: int | None = None
     error_code: str | None = None
-    denied_write_targets: tuple[str, ...] = ()
     usage_limit: ProviderUsageLimit | None = None
+    provider_stop_reason: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

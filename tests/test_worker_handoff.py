@@ -20,7 +20,7 @@ from relay.execution.reconcile import reconcile_once
 from relay.execution.runner import ExecutionOutcome, OutcomeKind
 from relay.vcs.commits import CommitResult
 from relay.web import supervisor
-from relay.web.models import NodeAttempt, RunLock
+from relay.web.models import ActionsJobLease, NodeAttempt
 from tests.support import Clock, InlineEngine, RelayProject, git
 from tests.test_supervisor_recovery import stdout_line
 
@@ -37,22 +37,39 @@ def test_clock_jump_or_sleep_cannot_hand_off_a_writer_before_git_finalization(
 
     project.write_workflow(
         "owned",
-        "version: 1\nname: Owned\nnodes:\n"
-        "  old: {type: command, writes: true, run: [git, status]}\n"
-        "  replacement: {type: command, writes: true, run: [git, status]}\n",
+        (
+            "name: Owned\n"
+            "jobs:\n"
+            "  old:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+            "  replacement:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     reached_git = threading.Event()
     allow_git = threading.Event()
-    original = runner.validate_writer_result
+    original = runner.accept_job_result
 
     def pause_finalization(
-        worktree: Path, starting_head: str, *, allow_no_commit: bool = False
+        worktree: Path,
+        starting_head: str,
+        job_id: str,
+        *,
+        snapshot_files: frozenset[str] = frozenset(),
     ) -> CommitResult:
         reached_git.set()
         assert allow_git.wait(10)
-        return original(worktree, starting_head, allow_no_commit=allow_no_commit)
+        return original(worktree, starting_head, job_id, snapshot_files=snapshot_files)
 
-    monkeypatch.setattr(runner, "validate_writer_result", pause_finalization)
+    monkeypatch.setattr(runner, "accept_job_result", pause_finalization)
 
     class Writer:
         def execute(self, context: runner.AttemptContext) -> ExecutionOutcome:
@@ -61,7 +78,7 @@ def test_clock_jump_or_sleep_cannot_hand_off_a_writer_before_git_finalization(
             git(context.worktree, "commit", "-qm", "Owned bytes")
             return ExecutionOutcome(OutcomeKind.SUCCEEDED)
 
-    engine = InlineEngine({"command": Writer()}, tmp_path / "artifacts")
+    engine = InlineEngine({"actions_job": Writer()}, tmp_path / "artifacts")
     run_id = engine.launch(project, "owned")
     old, replacement = engine.tokens.popleft(), engine.tokens.popleft()
 
@@ -77,7 +94,7 @@ def test_clock_jump_or_sleep_cannot_hand_off_a_writer_before_git_finalization(
             assert reached_git.wait(10)
             clock.advance(jump)
             reconcile_once(engine.store, lambda _: None, orderly_shutdown=False)
-            assert RunLock.objects.filter(run_id=run_id).exists()
+            assert ActionsJobLease.objects.filter(node__run_id=run_id).exists()
             result = engine.store.claim_dispatch(replacement, "replacement-worker")
             assert result.disposition is ClaimDisposition.BUSY
             assert NodeAttempt.objects.get(worker_id=engine.worker_id).status == "running"

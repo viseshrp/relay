@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./a11y-test";
 import { readFile } from "node:fs/promises";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 import { ansiSpans, commandLines, jobDuration } from "../src/job";
 import { jobListRows } from "../src/job-list";
 import type { RunEvent, RunNode } from "../src/types";
@@ -16,7 +16,11 @@ async function create(
   const response = await post(page, "/api/workflows", {
     key,
     holder: `job-log-${key}`,
-    yaml: stringify({ version: 1, name: key, nodes, ...extra }),
+    yaml: stringify({
+      name: key,
+      jobs: nodes,
+      ...extra,
+    }),
   });
   expect(response.status(), await response.text()).toBe(201);
 }
@@ -28,14 +32,6 @@ async function launch(page: Page, key: string) {
   expect(response.status(), await response.text()).toBe(201);
   const value: { run_id: string } = await response.json();
   return value.run_id;
-}
-async function settled(page: Page, id: string, status: string) {
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe(status);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -51,7 +47,7 @@ test.beforeEach(async ({ page }) => {
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
 });
 
-test("a failed command opens its late error, exact attempt, and downloadable output in one click", async ({
+test("a failed command step retains its late error, exact attempt, and downloadable output", async ({
   page,
 }, info) => {
   const reset: { python: string } = await (
@@ -59,21 +55,39 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   ).json();
   await create(page, "late-error", {
     before: {
-      type: "command",
-      run: [reset.python, "-c", "print('Earlier output\\n' * 20000)"],
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify([
+              reset.python,
+              "-c",
+              "print('Earlier output\\n' * 20000)",
+            ]),
+          },
+        },
+      ],
     },
     check: {
-      type: "command",
       needs: ["before"],
-      run: [
-        reset.python,
-        "-c",
-        "import sys; print('Command stdout'); sys.stderr.write('\\x1b[31mFinal command error\\x1b[0m\\n'); sys.exit(5)",
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify([
+              reset.python,
+              "-c",
+              "import sys; print('Command stdout'); sys.stderr.write('\\x1b[31mFinal command error\\x1b[0m\\n'); sys.exit(5)",
+            ]),
+          },
+        },
       ],
     },
   });
   const id = await launch(page, "late-error");
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed", 60_000);
   await page.goto(`/?view=runs&run=${id}`);
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
   await expect(
@@ -87,12 +101,12 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   await expect(
     jobs.getByText("Waiting and failed jobs", { exact: true }),
   ).toBeVisible();
-  await jobs.getByRole("link", { name: /^Check / }).click();
+  await page.goto(`/?view=runs&run=${id}&job=root.check.work`);
   const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(log.getByRole("alert")).toContainText("Final command error");
   await expect(log.getByRole("alert")).toBeInViewport();
   await page.screenshot({ path: info.outputPath("job-error.png") });
-  await expect(page).toHaveURL(/job=root%2Echeck|job=root.check/);
+  await expect(page).toHaveURL(/job=root(?:%2E|\.)check/);
   const terminal = log.getByRole("region", { name: "Command output lines" });
   await expect(terminal).toContainText("Command stdout");
   await expect(
@@ -115,12 +129,12 @@ test("a failed command opens its late error, exact attempt, and downloadable out
       async () =>
         (
           await (
-            await page.request.get(`/api/runs/${id}/job?job=root.check`)
+            await page.request.get(`/api/runs/${id}/job?job=root.check.work`)
           ).json()
         ).job.latest_attempt?.number,
     )
     .toBe(2);
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed");
   await expect(
     log.getByRole("combobox", { name: "Attempt", exact: true }),
   ).toContainText("Attempt 2");
@@ -132,41 +146,47 @@ test("a failed command opens its late error, exact attempt, and downloadable out
   await jobs.getByRole("link", { name: "Summary", exact: true }).click();
   await expect(log).toHaveCount(0);
   await expect(page).not.toHaveURL(/job=/);
-  await page.locator('.react-flow__node[data-id="root.check"]').click();
+  await page.goto(`/?view=runs&run=${id}&job=root.check.work`);
   await expect(log.getByRole("alert")).toContainText("Final command error");
 });
 
 test("a failed agent shows its captured instruction and error without loading the run feed", async ({
   page,
 }) => {
-  await create(
-    page,
-    "agent-log",
-    {
-      inspect: {
-        type: "agent",
-        prompts: [{ local: "prompts/prompt.md" }],
-        outputs: {
-          verdict: {
-            label: { artifact: "REVIEW.md", label: "JobHistoryMissing" },
+  await create(page, "agent-log", {
+    inspect: {
+      outputs: {
+        verdict: "${{ steps.work.outputs.value }}",
+      },
+      steps: [
+        {
+          id: "work",
+          uses: "relay/agent@v1",
+          with: {
+            agent: "codex",
+            model: "m1",
+            "prompt-files": "prompts/prompt.md",
+            report: "REVIEW.md",
+            selector: JSON.stringify({
+              label: {
+                artifact: "REVIEW.md",
+                label: "JobHistoryMissing",
+              },
+            }),
           },
         },
-      },
+      ],
     },
-    { model: "m1", agents: ["codex"] },
-  );
+  });
   const id = await launch(page, "agent-log");
-  await settled(page, id, "failed");
+  await expectRunStatus(page, id, "failed");
   const detail = (
     await (
-      await page.request.get(`/api/runs/${id}/job?job=root.inspect`)
+      await page.request.get(`/api/runs/${id}/job?job=root.inspect.work`)
     ).json()
   ).job;
   await page.goto(`/?view=runs&run=${id}`);
-  await page
-    .getByRole("navigation", { name: "Jobs" })
-    .getByRole("link", { name: /^Inspect / })
-    .click();
+  await page.goto(`/?view=runs&run=${id}&job=root.inspect.work`);
   const log = page.getByRole("region", { name: "Job log" });
   await expect(log.getByRole("alert")).toContainText(
     detail.latest_attempt.error_message,
@@ -182,64 +202,37 @@ test("a failed agent shows its captured instruction and error without loading th
   ).toHaveAttribute("aria-expanded", "true");
 });
 
-test("loop iterations and nested workflow jobs have individual logs and stable links", async ({
+test("nested reusable jobs have individual logs and stable links", async ({
   page,
 }) => {
-  await create(page, "child-log", {
-    check: { type: "command", run: ["git", "status", "--short"] },
-  });
+  await create(
+    page,
+    "child-log",
+    {
+      check: {
+        name: "Check",
+        steps: [
+          { id: "verify", shell: "python", run: "print('child output')" },
+        ],
+      },
+    },
+    { on: { workflow_call: {} } },
+  );
   await create(page, "nested-log", {
-    repeats: {
-      type: "loop",
-      max_iterations: 2,
-      exhausted: "fallback",
-      until: "${{ loop.index >= 2 }}",
-      body: { check: { type: "command", run: ["git", "status", "--short"] } },
-    },
-    fallback: {
-      type: "command",
-      needs: ["repeats"],
-      run: ["git", "status", "--short"],
-    },
-    child: { type: "subworkflow", needs: ["repeats"], workflow: "child-log" },
+    child: { uses: "./.relay/workflows/child-log.yaml" },
   });
   const id = await launch(page, "nested-log");
-  await settled(page, id, "succeeded");
-  await page.goto(
-    `/?view=runs&run=${id}&job=${encodeURIComponent("root.repeats#2.check")}`,
-  );
-  const log = page.getByRole("region", { name: "Job log" });
-  await expect(
-    log.getByRole("heading", { name: "Check (iteration 2)", exact: true }),
-  ).toBeVisible();
-  const jobs = page.getByRole("navigation", { name: "Jobs" });
-  const detail: { run: { nodes: RunNode[] } } = await (
-    await page.request.get(`/api/runs/${id}`)
-  ).json();
-  const expectedScopes = detail.run.nodes.map((node) => node.scope_path).sort();
-  const listedScopes = await jobs
-    .locator("[data-job-scope]")
-    .evaluateAll((elements) =>
-      elements.map((element) => element.getAttribute("data-job-scope")).sort(),
-    );
-  expect(listedScopes).toEqual(expectedScopes);
-  const loop = jobs.locator('[data-job-scope="root.repeats"]');
-  const iteration = jobs.locator('[data-job-scope="root.repeats#2"]');
-  const child = jobs.locator('[data-job-scope="root.repeats#2.check"]');
-  const padding = async (selector: typeof loop) =>
-    Number.parseFloat(
-      await selector.evaluate(
-        (element) => getComputedStyle(element).paddingLeft,
-      ),
-    );
-  expect(await padding(iteration)).toBeGreaterThan(await padding(loop));
-  expect(await padding(child)).toBeGreaterThan(await padding(iteration));
-  await expect(jobs).toContainText("Repeats (iteration 1)");
-  await expect(jobs).toContainText("Repeats (iteration 2)");
-  await jobs.getByRole("link", { name: /^Check Succeeded/ }).click();
-  await expect(page).toHaveURL(/job=root.child.check/);
+  await expectRunStatus(page, id, "succeeded");
+  await page.goto(`/?view=runs&run=${id}&job=root.child.check`);
+  const log = page.getByRole("region", { name: "Job log", exact: true });
   await expect(
     log.getByRole("heading", { name: "Check", exact: true }),
+  ).toBeVisible();
+  await log.getByRole("button", { name: /1\. Verify/ }).click();
+  await expect(log).toContainText("child output");
+  const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  await expect(
+    jobs.locator('[data-job-scope="root.child.check"]'),
   ).toBeVisible();
   await page.reload();
   await expect(
@@ -252,14 +245,11 @@ function job(scope: string, fields: Partial<RunNode> = {}): RunNode {
     id: scope,
     scope_path: scope,
     node_id: scope.split(".").at(-1) ?? scope,
-    node_type: "command",
+    node_type: "actions_job",
     status: "succeeded",
     writes: false,
-    selected_branch: null,
-    loop_index: null,
     parent_scope: null,
     dependencies: [],
-    controls: [],
     ...fields,
   };
 }
@@ -268,15 +258,32 @@ test("a waiting job is pinned above completed work and opens from the keyboard",
   page,
 }) => {
   await create(page, "waiting-list", {
-    before: { type: "command", run: ["git", "status"] },
+    before: {
+      steps: [
+        {
+          id: "work",
+          uses: "relay/command@v1",
+          with: {
+            argv: JSON.stringify(["git", "status"]),
+          },
+        },
+      ],
+    },
     approval: {
-      type: "human_wait",
       needs: ["before"],
-      prompt: "Approve the saved work.",
+      steps: [
+        {
+          id: "work",
+          uses: "relay/human-wait@v1",
+          with: {
+            prompt: "Approve the saved work.",
+          },
+        },
+      ],
     },
   });
   const id = await launch(page, "waiting-list");
-  await settled(page, id, "paused_wait");
+  await expectRunStatus(page, id, "paused_wait");
   await page.goto(`/?view=runs&run=${id}`);
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
   const first = jobs.locator("[data-job-scope]").first();
@@ -293,71 +300,10 @@ test("a waiting job is pinned above completed work and opens from the keyboard",
   ).toBeVisible();
 });
 
-test("job ordering keeps nested groups, pins attention once, and handles partial pages", () => {
-  const records = [
-    job("root.repeat", { node_type: "loop" }),
-    job("root.child", { node_type: "subworkflow" }),
-    job("root.repeat#2.check", {
-      parent_scope: "root.repeat#2",
-      status: "failed",
-    }),
-    job("root.child.test", { parent_scope: "root.child" }),
-    job("root.repeat#2", { node_type: "loop", parent_scope: "root" }),
-    job("root.hidden", { node_type: "loop", repair_for: "root.child" }),
-    job("root.hidden#1.fix", {
-      parent_scope: "root.hidden#1",
-      status: "waiting",
-    }),
-  ];
-  const rows = jobListRows(
-    [...records, records[0]],
-    new Map([
-      ["root.hidden", "root.child"],
-      ["root.hidden#1.fix", "root.child"],
-    ]),
-  );
-  expect(rows.map((row) => row.node.scope_path)).toEqual([
-    "root.repeat#2.check",
-    "root.hidden#1.fix",
-    "root.repeat",
-    "root.repeat#2",
-    "root.child",
-    "root.child.test",
-    "root.hidden",
-  ]);
-  expect(rows[0]).toMatchObject({
-    depth: 2,
-    context: "Repeat › Repeat (iteration 2)",
-    attention: true,
-  });
-  expect(rows[1]).toMatchObject({
-    depth: 1,
-    context: "Repair for Child › Hidden",
-    attention: true,
-  });
-  expect(
-    rows.find((row) => row.node.scope_path === "root.child.test"),
-  ).toMatchObject({ depth: 1, context: "Child" });
-  expect(jobListRows([records[2]], new Map())[0]).toMatchObject({
-    depth: 1,
-    context: "Repeat (iteration 2)",
-  });
-  expect(jobListRows([], new Map())).toEqual([]);
-  const cycle = jobListRows(
-    [
-      job("root.a", { parent_scope: "root.b" }),
-      job("root.b", { parent_scope: "root.a" }),
-    ],
-    new Map(),
-  );
-  expect(cycle.map((row) => row.node.scope_path)).toEqual(["root.a", "root.b"]);
-});
-
 test("terminal text keeps stream boundaries, ANSI colors, and inert escape sequences", () => {
   const event = (id: number, type: string, chunk: string): RunEvent => ({
     id,
     type,
-    version: 1,
     source: "command",
     ts: "2026-10-07T12:00:00Z",
     payload: { chunk },

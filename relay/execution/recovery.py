@@ -1,6 +1,4 @@
-"""Workspace preparation shared by manual reruns and orderly restart."""
-
-from __future__ import annotations
+"""Verify the shared job workspace before an owner retry or restart."""
 
 from pathlib import Path
 from typing import Protocol
@@ -9,94 +7,74 @@ from relay.errors import DirtyRepositoryError, WorktreeError
 from relay.paths import artifacts_dir
 from relay.vcs.artifacts import (
     PreservationResult,
-    RecoveryReport,
     preserve_attempt_evidence,
-    restore_recovery_reports,
     validate_attempt_evidence,
-    validate_recovery_reports,
 )
-from relay.vcs.cleanliness import execution_changes, require_clean
+from relay.vcs.cleanliness import execution_changes
 from relay.vcs.commits import current_head
-from relay.vcs.worktree import remove_worktree, reset_worktree
 
 from .resume import RecoveryTarget
 
 
-class RecoveryEvidenceStore(Protocol):
-    """Persistence boundary for newly retained attempt evidence."""
-
-    def record_preservation(
-        self,
-        attempt_id: str,
-        preservation: PreservationResult,
-    ) -> None: ...
-
-    def capture_recovery_reports(self, target: RecoveryTarget) -> None: ...
-
-    def recovery_reports(self, target: RecoveryTarget) -> tuple[RecoveryReport, ...]: ...
+class EvidenceStore(Protocol):
+    def record_preservation(self, attempt_id: str, preservation: PreservationResult) -> None: ...
 
 
-def prepare_recovery_workspace(
-    store: RecoveryEvidenceStore,
-    target: RecoveryTarget,
+def preserve_missing_attempt_evidence(
+    store: EvidenceStore,
+    repository: Path,
+    worktree: Path,
+    run_id: str,
+    attempt_id: str,
+    starting_head: str,
 ) -> None:
-    """Preserve once, then restore or remove only the interrupted checkout."""
-    repository = Path(target.project_path)
+    """Retain an unarchived attempt without replacing existing evidence."""
+    if not (artifacts_dir() / run_id / attempt_id).exists():
+        # A worker loss or an allocation failure can finish before preservation.
+        # Existing directories must still pass validation, even if damaged.
+        preservation = preserve_attempt_evidence(
+            repository, worktree, run_id, attempt_id, starting_head
+        )
+        store.record_preservation(attempt_id, preservation)
+
+
+def prepare_recovery_workspace(target: RecoveryTarget, store: EvidenceStore) -> None:
+    """Keep partial job bytes; refuse missing, dirty, or moved workspaces."""
     worktree = Path(target.worktree_path)
-    if not worktree.exists() and target.ephemeral_reader:
-        return
     if not worktree.exists():
-        message = "The interrupted run's primary worktree is missing."
+        message = "The run's primary worktree is missing, so Relay cannot retry or resume it."
         raise WorktreeError(
             message,
             context={"project": target.project_path},
             next_action="Restore or explicitly clean the retained run before restarting it.",
         )
-    if not target.uses_git or target.attempt_id is None:
-        if target.uses_git:
-            require_clean(worktree, stage="interrupted run recovery")
-        else:
-            # Structural parents share the primary checkout with completed
-            # writers. Keep their unstaged root reports under the same exact
-            # exemptions used at writer completion; code and staged reports
-            # still block recovery. This check never changes the checkout.
-            changes = execution_changes(worktree)
-            if changes:
-                message = "The Git worktree is not clean at interrupted run recovery."
-                # ("?? a.py", " M b.py") becomes "?? a.py\n M b.py" in diagnostics.
-                raise DirtyRepositoryError(
-                    message,
-                    context={"project": str(worktree), "changes": "\n".join(changes)},
-                    next_action="Commit or set aside the listed code changes before continuing.",
-                )
-        if current_head(worktree) != target.protected_head:
-            message = "The interrupted run worktree moved away from its protected commit."
-            raise WorktreeError(message, context={"project": target.project_path})
-        return
-
-    retained = artifacts_dir() / target.run_id / target.attempt_id
-    if not retained.is_dir():
-        preservation = preserve_attempt_evidence(
-            repository, worktree, target.run_id, target.attempt_id, target.starting_head
+    # Root reports keep the same exemptions as a successful job boundary.
+    # Code changes and staged reports require an owner decision before recovery.
+    changes = execution_changes(worktree)
+    if changes:
+        message = (
+            "The run's Git worktree has uncommitted changes, so Relay cannot retry or resume it."
         )
-        store.record_preservation(target.attempt_id, preservation)
-    # Previously captured evidence can be damaged later. Verify all archived
-    # bytes and the retained commit before removing the current partial work.
-    validate_attempt_evidence(repository, target.run_id, target.attempt_id, target.starting_head)
-    # Retain ignored/rejected reports from older attempts before any reset.
-    # The database then selects the failed report and successful handoffs.
-    store.capture_recovery_reports(target)
-    reports = store.recovery_reports(target)
-    validate_recovery_reports(reports)
-    if target.ephemeral_reader:
-        remove_worktree(repository, worktree)
-        return
-    reset_worktree(
-        worktree,
-        target.starting_head,
-        protected_head=target.protected_head,
-    )
-    restore_recovery_reports(worktree, reports)
-
-
-__all__ = ["RecoveryEvidenceStore", "prepare_recovery_workspace"]
+        raise DirtyRepositoryError(
+            message,
+            context={"project": str(worktree), "changes": "\n".join(changes)},
+            next_action="Commit or set aside the listed code changes before continuing.",
+        )
+    if current_head(worktree) != target.protected_head:
+        message = (
+            "The run's worktree moved away from its protected commit, "
+            "so Relay cannot retry or resume it."
+        )
+        raise WorktreeError(message, context={"project": target.project_path})
+    if target.attempt_id is not None and not target.interrupted and target.evidence_required:
+        preserve_missing_attempt_evidence(
+            store,
+            Path(target.project_path),
+            worktree,
+            target.run_id,
+            target.attempt_id,
+            target.starting_head,
+        )
+        validate_attempt_evidence(
+            Path(target.project_path), target.run_id, target.attempt_id, target.starting_head
+        )

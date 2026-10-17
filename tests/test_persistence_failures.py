@@ -100,7 +100,7 @@ def unavailable_database(
         ("execution", "scope_node_record", (MISSING_UUID, "1"), {}),
         ("execution", "transition_scope_node", ("1", "dependencies_satisfied"), {}),
         ("execution", "mark_attempt_waiting", ("1", None), {}),
-        ("execution", "release_attempt_lock", ("1",), {}),
+        ("execution", "release_attempt_admission", ("1",), {}),
         ("execution", "submit_control", ("1", "cancel", "owner", {}, 600.0), {}),
         ("execution", "claim_next_control", ("1", "worker"), {}),
         ("execution", "apply_control", ("1", "worker"), {}),
@@ -174,7 +174,16 @@ def test_coordinator_contention_logs_the_database_cause_but_keeps_the_public_err
 
     project.write_workflow(
         "heartbeat",
-        "version: 1\nname: Heartbeat\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        (
+            "name: Heartbeat\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     engine.launch(project, "heartbeat")
     claim = engine.store.claim_dispatch(engine.tokens.popleft(), engine.worker_id)

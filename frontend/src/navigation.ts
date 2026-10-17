@@ -29,7 +29,10 @@ export function readLocation(): LocationState {
           ? "settings"
           : parameters.get("view") === "runs" || parameters.has("run")
             ? "runs"
-            : "workflows",
+            : parameters.get("view") === "workflows" ||
+                parameters.has("workflow")
+              ? "workflows"
+              : "home",
     project:
       parameters.get("project") ?? (!query ? remembered.get("project") : null),
     workflow: parameters.get("workflow"),
@@ -80,14 +83,9 @@ export function viewHref(
 }
 
 export function stageLabel(scope: string): string {
-  // root.human_walkthrough -> Human walkthrough; root.build#2.check -> Check (iteration 2).
-  const parts = scope.split(".");
-  const raw = parts[parts.length - 1]
-    .replace(/#\d+$/, "")
-    .replace(/[_-]+/g, " ");
-  const label = raw.charAt(0).toUpperCase() + raw.slice(1);
-  const iteration = scope.match(/#(\d+)/)?.[1];
-  return iteration ? `${label} (iteration ${iteration})` : label;
+  // root.release.verify_release -> Verify release.
+  const raw = scope.split(".").at(-1)!.replace(/[_-]+/g, " ");
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 export function statusLabel(status: string): string {

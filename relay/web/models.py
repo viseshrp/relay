@@ -22,7 +22,6 @@ from relay.execution.state import (
     EventSource,
     InteractionKind,
     InteractionStatus,
-    LockMode,
     NodeStatus,
     NodeType,
     PreservationState,
@@ -189,7 +188,6 @@ class Run(RelayModel):
     dispatch_paused: models.BooleanField = models.BooleanField(default=False)
     dispatch_paused_at: models.DateTimeField = models.DateTimeField(null=True, blank=True)
     dispatch_paused_seconds: models.FloatField = models.FloatField(default=0)
-    repair_groups: models.JSONField = models.JSONField(default=dict)
     actions_state: models.JSONField = models.JSONField(default=dict)
 
     class Meta:
@@ -212,17 +210,13 @@ class RunSnapshot(RelayModel):
         Run, on_delete=models.CASCADE, related_name="snapshot", primary_key=True
     )
     workflow_yaml: models.TextField = models.TextField()
-    subworkflows: models.JSONField = models.JSONField(default=dict)
     resolved_prompts: models.JSONField = models.JSONField(default=list)
     typed_inputs: models.JSONField = models.JSONField(default=dict)
     route_table: models.JSONField = models.JSONField(default=dict)
-    default_model: models.TextField = models.TextField(blank=True)
-    agent_prefs: models.JSONField = models.JSONField(default=list)
     relay_version: models.TextField = models.TextField()
     runtime_versions: models.JSONField = models.JSONField(default=dict)
     hashes: models.JSONField = models.JSONField(default=dict)
     launch_defaults: models.JSONField = models.JSONField(default=dict)
-    semantics_revision: models.CharField = models.CharField(max_length=64, default="relay-v1")
     resolved_definition: models.JSONField = models.JSONField(default=dict)
     created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
 
@@ -246,8 +240,6 @@ class NodeRun(RelayModel):
         max_length=16, choices=NodeStatus.choices(), default=NodeStatus.PENDING
     )
     writes: models.BooleanField = models.BooleanField(default=False)
-    selected_branch: models.TextField = models.TextField(null=True, blank=True)
-    loop_index: models.PositiveIntegerField = models.PositiveIntegerField(null=True, blank=True)
     outcome: models.CharField = models.CharField(max_length=16, blank=True)
     conclusion: models.CharField = models.CharField(max_length=16, blank=True)
     job_id: models.TextField = models.TextField(blank=True)
@@ -663,23 +655,4 @@ class AutomaticRetry(RelayModel):
     class Meta:
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=("state",), name="relay_auto_retry_state_idx")
-        ]
-
-
-class RunLock(RelayModel):
-    """A reader or writer admission lease tied to one live attempt."""
-
-    run: models.ForeignKey = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="locks")
-    attempt: models.OneToOneField = models.OneToOneField(
-        NodeAttempt, on_delete=models.CASCADE, related_name="run_lock"
-    )
-    mode: models.CharField = models.CharField(max_length=8, choices=LockMode.choices())
-    starting_head: models.CharField = models.CharField(max_length=40)
-    recorded_head: models.CharField = models.CharField(max_length=40)
-    acquired_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
-    heartbeat_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        indexes: ClassVar[list[models.Index]] = [
-            models.Index(fields=("run", "mode"), name="relay_run_lock_mode_idx")
         ]

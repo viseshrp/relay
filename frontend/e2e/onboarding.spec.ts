@@ -1,5 +1,5 @@
 import { expect, test } from "./a11y-test";
-import { post, openSettings, currentWorkflow } from "./setup-helpers";
+import { post, openSettings } from "./setup-helpers";
 import { stringify } from "yaml";
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -128,10 +128,6 @@ test("the full spotlight tour reaches each settings control without changing sav
     "Automatic recovery",
     "Maximum automatic retries",
     "After a successful run",
-    "New repair rules",
-    "Maximum repair rounds",
-    "Fixer instructions",
-    "Verifier instructions",
     "Project overrides",
     "Require login",
     "Loopback address",
@@ -328,13 +324,22 @@ test("long workflow names fit the header and settings never overlap their save c
   const created = await post(page, "/api/workflows", {
     key: "long.yaml",
     holder,
-    yaml: stringify(
-      currentWorkflow({
-        version: 1,
-        name,
-        nodes: { test: { type: "command", run: ["python3", "-V"] } },
-      }),
-    ),
+    yaml: stringify({
+      name: name,
+      jobs: {
+        test: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["python3", "-V"]),
+              },
+            },
+          ],
+        },
+      },
+    }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=long.yaml");
@@ -370,20 +375,6 @@ test("long workflow names fit the header and settings never overlap their save c
   if (!retries || !limit)
     throw new Error("Expected recovery controls to have layout boxes.");
   expect(limit.y - (retries.y + retries.height)).toBeGreaterThanOrEqual(12);
-  await page
-    .getByRole("button", { name: "Defaults for new repair rules", exact: true })
-    .click();
-  await expect
-    .poll(async () => {
-      const verifier = await page
-        .getByRole("textbox", { name: "Verifier instructions", exact: true })
-        .boundingBox();
-      const save = await page
-        .getByRole("button", { name: "Save global settings", exact: true })
-        .boundingBox();
-      return !!verifier && !!save && save.y > verifier.y + verifier.height;
-    })
-    .toBeTruthy();
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   await page.screenshot({

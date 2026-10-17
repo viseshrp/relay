@@ -1,7 +1,6 @@
 import { countLabel } from "../count";
 import { RunSettingsDetails } from "./RunSettingsDetails";
 import { RunDiagnostics } from "./RunDiagnostics";
-import { RunRepairDetails } from "./RunRepairDetails";
 import { RunSummaryOverview } from "./RunSummaryOverview";
 
 import { Alert, Box, Button, Paper, Stack, Typography } from "@mui/material";
@@ -46,14 +45,12 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
     stepProgress,
     visibleStages,
     graph,
-    repairOwners,
     focusStage,
     setGraphJobs,
     showStep,
     cancelRun,
     artifactCursor,
     loadMoreArtifacts,
-    repairGroups,
     eventCursor,
     loadEvents,
   } = state;
@@ -170,7 +167,7 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
                 runMode
                 nodes={graph.nodes}
                 edges={graph.edges}
-                selectedId={repairOwners.get(focusStage ?? "") ?? focusStage}
+                selectedId={focusStage}
                 onSelect={(id) => {
                   const members = graph.nodes.find((node) => node.id === id)
                     ?.data.members;
@@ -200,7 +197,6 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
               ["failed", "canceling"].includes(detail.status) ? (
                 <RunProblemNotice
                   problem={detail.problem}
-                  displayScope={repairOwners.get(detail.problem.scope_path)}
                   onShowStep={showStep}
                   onCancelRetry={() => void cancelRun()}
                 />
@@ -252,7 +248,6 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
             more={artifactCursor !== null}
             onMore={() => void loadMoreArtifacts()}
           />
-          {repairGroups.length > 0 && <RunRepairDetails state={state} />}
 
           <Paper variant="outlined" className="section-card">
             <Typography variant="h6" sx={{ mb: 1.5 }}>

@@ -31,6 +31,7 @@ from relay.execution.state import EventSource
 from relay.projects.service import initialize_project, register_current_project
 from relay.web.models import HumanInteraction, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore, DjangoProjectStore
+from relay.workflows.defaults import WorkflowDefaults
 from relay.workflows.schema import AgentNode
 
 PYTHON = Path(sys.executable).as_posix()
@@ -130,6 +131,7 @@ class InlineEngine:
     artifact_root: Path
     worker_id: str = "test-worker"
     tokens: deque[str] = field(default_factory=deque)
+    workflow_defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults)
 
     def __post_init__(self) -> None:
         set_dispatch_notifier(self.tokens.append)
@@ -157,6 +159,7 @@ class InlineEngine:
             entry_point,
             tuple(owner_agents),
             "owner",
+            defaults=self.workflow_defaults,
         )
         result = launch_workflow(
             self.store, project.relay_root, project.project_id, request, self.tokens.append
@@ -217,10 +220,12 @@ def event_types(run_id: str, prefix: str = "") -> list[str]:
 
 @dataclass
 class FakeAgentDriver:
-    """Agent driver stand-in: writes `agent-output.md` and commits it for writers."""
+    """Agent driver stand-in with optional edits accepted at the job boundary."""
 
     calls: list[str] = field(default_factory=list)
     outcome_kind: OutcomeKind = OutcomeKind.SUCCEEDED
+    edit_file: bool = False
+    error_code: str = "agent_failed"
 
     def execute(self, context: AttemptContext, node: AgentNode) -> ExecutionOutcome:
         self.calls.append(context.attempt.scope_path)
@@ -231,13 +236,11 @@ class FakeAgentDriver:
             {"text": f"working on {context.attempt.scope_path}"},
         )
         if self.outcome_kind is not OutcomeKind.SUCCEEDED:
-            return ExecutionOutcome(self.outcome_kind, error_code="agent_failed")
-        if node.writes:
+            return ExecutionOutcome(self.outcome_kind, error_code=self.error_code)
+        if self.edit_file:
             (context.worktree / "agent-output.md").write_text(
                 f"Ready: Yes\nScope: {context.attempt.scope_path}\n", encoding="utf-8"
             )
-            git(context.worktree, "add", "agent-output.md")
-            git(context.worktree, "commit", "-q", "-m", f"Agent {context.attempt.scope_path}")
         return ExecutionOutcome(OutcomeKind.SUCCEEDED)
 
 

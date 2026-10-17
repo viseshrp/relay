@@ -29,10 +29,6 @@ const steps: {
       "recovery",
       "retryLimit",
       "cleanup",
-      "repairs",
-      "repairRounds",
-      "fixer",
-      "verifier",
     ] as const
   ).map((topic) => ({
     topic,

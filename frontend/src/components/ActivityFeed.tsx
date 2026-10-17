@@ -173,7 +173,12 @@ export function ActivityFeed({
   const filteredEvents = useMemo(
     () =>
       scope
-        ? events.filter((event) => event.payload.scope_path === scope)
+        ? events.filter(
+            (event) =>
+              event.payload.scope_path === scope ||
+              (typeof event.payload.scope_path === "string" &&
+                event.payload.scope_path.startsWith(`${scope}.`)),
+          )
         : events,
     [events, scope],
   );

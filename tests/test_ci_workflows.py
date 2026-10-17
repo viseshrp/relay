@@ -131,11 +131,10 @@ def test_python_workflows_preserve_every_environment_and_reject_test_filters(nam
 
 
 @pytest.mark.parametrize("name", ["main", "release"])
-def test_only_the_canonical_environment_collects_suite_coverage(name: str) -> None:
+def test_linux_and_windows_canonical_environments_collect_suite_coverage(name: str) -> None:
     workflow = _load(f".github/workflows/{name}.yml")
     assert workflow["jobs"]["tests"]["env"]["RELAY_TEST_COVERAGE"] == (
-        "${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' "
-        "&& 'true' || 'false' }}"
+        "${{ matrix.python-version == '3.14' && matrix.os != 'macos-latest' && 'true' || 'false' }}"
     )
     if name == "main":
         assert workflow["env"]["MAIN_PYTHON_VERSION"] == "3.14"
@@ -145,8 +144,7 @@ def test_only_the_canonical_environment_collects_suite_coverage(name: str) -> No
             if step.get("uses", "").startswith("codecov/codecov-action@")
         )
         assert upload["if"] == (
-            "${{ matrix.python-version == env.MAIN_PYTHON_VERSION "
-            "&& matrix.os == 'ubuntu-latest' }}"
+            "${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os != 'macos-latest' }}"
         )
         assert upload["with"]["files"] == "${{ runner.temp }}/rp/reports/coverage.xml"
 

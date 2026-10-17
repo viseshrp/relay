@@ -52,6 +52,27 @@ def selector(value: str = "m1") -> dict[str, object]:
 AI_HANDOFF = 'Generated instructions: café\r\nKeep ${literal} and quotes: "yes".\r\n'
 
 
+def fulfill_report_contract(cwd: Path, prompt: str) -> None:
+    """Act on the report contract delivered through the actual provider prompt."""
+    if "Relay declared outputs (JSON):" not in prompt:
+        return
+    outputs = json.loads(prompt.rsplit("\n", 1)[-1])
+    for selector in outputs.values():
+        if "exists" in selector:
+            continue
+        kind, details = next(iter(selector.items()))
+        target = cwd / details["artifact"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "label":
+            content = details["label"] + ": Yes\n"
+        else:
+            value: object = "Yes"
+            for key in reversed(details["path"].split(".")):
+                value = {key: value}
+            content = json.dumps(value)
+        target.write_text(content, encoding="utf-8")
+
+
 def ai_starter_artifacts(cwd: Path, prompt: str) -> None:
     """Supply phase artifacts while exercising the real starter runner offline."""
 
@@ -147,7 +168,7 @@ class WireAgent:
                 {"group": "efforts", "name": "Efforts", "options": effort["options"]}
             ]
         options.append(effort)
-        if self.mode != "configuration-legacy":
+        if self.mode != "configuration-session-modes":
             options.append(
                 {
                     "id": "mode",
@@ -182,6 +203,20 @@ class WireAgent:
         params = params if isinstance(params, dict) else {}
         trace(message)
         if request_id in {"owner-permission", "owner-question"} and "result" in message:
+            if request_id == "owner-question" and self.mode in {
+                "elicitation-choices",
+                "elicitation-enum",
+                "elicitation-empty-choice",
+            }:
+                self.update(
+                    {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": "Owner answer: " + json.dumps(message["result"]),
+                        },
+                    }
+                )
             self.reply(self.pending_prompt, {"stopReason": "end_turn"})
             self.pending_prompt = None
             return
@@ -210,7 +245,7 @@ class WireAgent:
                 self.selected, self.effort, self.permission_mode = "m1", "high", "ask"
                 options = [] if self.mode == "no-selector" else self.configuration()
                 result = {"sessionId": "scratch-session", "configOptions": options}
-                if self.mode == "configuration-legacy":
+                if self.mode == "configuration-session-modes":
                     result["modes"] = {
                         "currentModeId": "ask",
                         "availableModes": [
@@ -261,6 +296,11 @@ class WireAgent:
             self.reply(request_id, {})
         elif method == "session/prompt":
             self.prompt_count += 1
+            if self.mode == "report-contract":
+                blocks = params["prompt"]
+                fulfill_report_contract(
+                    Path(self.cwd), "\n".join(block["text"] for block in blocks)
+                )
             if self.mode == "configuration-ai-starter":
                 blocks = params.get("prompt", [])
                 if isinstance(blocks, list):
@@ -321,7 +361,39 @@ class WireAgent:
                     request_id, RequestError.internal_error(data={"errorKind": "rate_limit"})
                 )
                 return
-            if self.mode == "elicitation" and self.prompt_count == 1:
+            if (
+                self.mode
+                in {
+                    "elicitation",
+                    "elicitation-choices",
+                    "elicitation-enum",
+                    "elicitation-empty-choice",
+                }
+                and self.prompt_count == 1
+            ):
+                component: dict[str, object] = {"type": "string", "title": "Component"}
+                if self.mode != "elicitation":
+                    component["description"] = "Choose the component to inspect."
+                if self.mode == "elicitation-choices":
+                    component["oneOf"] = [
+                        {
+                            "const": "STAGING_exact_v2",
+                            "title": "Staging",
+                            "description": "Use the staging environment.",
+                        },
+                        {"const": "production", "title": "Production"},
+                    ]
+                elif self.mode == "elicitation-enum":
+                    component["enum"] = ["alpha", "ALPHA"]
+                elif self.mode == "elicitation-empty-choice":
+                    component["oneOf"] = [
+                        {
+                            "const": "",
+                            "title": "Skip",
+                            "description": "Leave the component unspecified.",
+                        },
+                        {"const": "Editor", "title": "Editor"},
+                    ]
                 self.pending_prompt = request_id if isinstance(request_id, (int, str)) else None
                 emit(
                     {
@@ -334,9 +406,7 @@ class WireAgent:
                             "mode": "form",
                             "requestedSchema": {
                                 "type": "object",
-                                "properties": {
-                                    "component": {"type": "string", "title": "Component"}
-                                },
+                                "properties": {"component": component},
                                 "required": ["component"],
                             },
                         },
@@ -386,6 +456,53 @@ class WireAgent:
                             "content": {"type": "text", "text": f"Message {index}\n"},
                         }
                     )
+            if self.mode == "terminal-metadata":
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "command-1",
+                        "title": "Execute",
+                        "kind": "execute",
+                        "status": "in_progress",
+                        "content": [{"type": "terminal", "terminalId": "command-1"}],
+                    }
+                )
+                for text in ("Access ", "denied\n", "denied\n"):
+                    self.update(
+                        {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": "command-1",
+                            "_meta": {
+                                "terminal_output_delta": {"terminal_id": "command-1", "data": text},
+                                "provider_private": "hidden",
+                            },
+                        }
+                    )
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "command-1",
+                        "status": "failed",
+                        "_meta": {"terminal_exit": {"terminal_id": "command-1", "exit_code": 3}},
+                    }
+                )
+            if self.mode == "raw-output-exit":
+                self.update(
+                    {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "command-1",
+                        "title": "Execute",
+                        "status": "failed",
+                        "rawInput": {"command": "check"},
+                        "rawOutput": {"exit_code": 3},
+                        "content": [
+                            {
+                                "type": "content",
+                                "content": {"type": "text", "text": "Access denied\n"},
+                            }
+                        ],
+                    }
+                )
             if self.mode.startswith("configuration"):
                 self.update(
                     {
@@ -413,7 +530,13 @@ class WireAgent:
                     gate = Path(self.mode.removeprefix("quiet-until:"))
                     while not gate.exists():
                         time.sleep(0.01)
-                reason = "refusal" if self.mode == "refusal" else "end_turn"
+                reason = (
+                    self.mode.removeprefix("stop-")
+                    if self.mode.startswith("stop-")
+                    else "refusal"
+                    if self.mode == "refusal"
+                    else "end_turn"
+                )
                 self.reply(request_id, {"stopReason": reason})
         elif method == "session/cancel":
             if self.pending_prompt is not None:
@@ -459,6 +582,13 @@ def agy_main(arguments: list[str]) -> None:
         raise SystemExit(2)
     trace({"input_closed": True})
     emit({"event": "init", "init": {"model": "other" if mode == "drift" else model}})
+    if mode == "report-contract":
+        fulfill_report_contract(Path.cwd(), message["message"]["content"])
+    if mode in {"hold", "success-hold"}:
+        if mode == "success-hold":
+            emit({"event": "result", "result": {"status": "SUCCESS"}})
+        while True:
+            time.sleep(0.1)
     if mode == "malformed":
         write_line("{")
         return
@@ -468,6 +598,63 @@ def agy_main(arguments: list[str]) -> None:
     if mode == "oversized":
         write_line("x" * 1_000_000)
         return
+    if mode.startswith("headless-"):
+        target = str(
+            Path.cwd() / ("../outside.txt" if mode == "headless-denied-outside" else "report.txt")
+        )
+        notice = (
+            'jetski: no output produced — a tool required the "write_file" permission '
+            "that headless mode cannot prompt for, so it was auto-denied. "
+            "Add an allow-rule under permissions.allow in settings.json "
+            "(e.g. write_file(<target>))."
+        )
+        command = mode == "headless-command-denied"
+        if command:
+            notice = notice.replace('"write_file"', '"command"').replace(
+                "write_file(<target>)", "command(<target>)"
+            )
+        if mode == "headless-denied-before-tool":
+            write_line(notice, stderr=True)
+        if mode != "headless-help-only":
+            tool = "run_command" if command else "write_to_file"
+            parameters = {"CommandLine": "echo hello"} if command else {"TargetFile": target}
+            error = (
+                "user denied permission for command(echo hello)"
+                if command
+                else f"permission check failed: user denied permission for write_file({target})"
+            )
+            if mode == "headless-write-error":
+                error = "Writing failed because the disk is full."
+            emit(
+                {
+                    "event": "step_update",
+                    "step_update": {
+                        "conversation_id": "native-denial-fixture",
+                        "step_index": 2,
+                        "state": "ERROR",
+                        "step_type": "tool",
+                        "tool_name": tool,
+                        "tool_info": {
+                            "name": tool,
+                            "parameters": parameters,
+                            "error": {"type": "TOOL_ERROR", "message": error},
+                        },
+                    },
+                }
+            )
+        if mode == "headless-denied-stdout-only":
+            emit(
+                {
+                    "event": "step_update",
+                    "step_update": {
+                        "step_type": "agent_response",
+                        "state": "DONE",
+                        "text_delta": notice,
+                    },
+                }
+            )
+        elif mode != "headless-denied-before-tool":
+            write_line(notice, stderr=True)
     if mode.startswith("stderr-"):
         if mode == "stderr-denied":
             write_line("denied write_file(report.txt)", stderr=True)
@@ -496,6 +683,8 @@ def agy_main(arguments: list[str]) -> None:
     elif mode in {"canceled", "interrupted"}:
         result["status"] = mode.upper()
     emit({"event": "result", "result": result})
+    if mode == "nonzero-success":
+        raise SystemExit(3)
 
 
 def main() -> None:

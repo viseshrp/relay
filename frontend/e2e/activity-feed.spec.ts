@@ -4,7 +4,7 @@ import { activityRows, relativeActivityText } from "../src/activity";
 import { safeMarkdownHref } from "../src/components/SafeMarkdown";
 import { toolStatus } from "../src/components/ActivityFeed";
 import type { RunEvent } from "../src/types";
-import { historicalPost as post } from "./setup-helpers";
+import { expectRunStatus, post } from "./setup-helpers";
 
 function event(
   id: number,
@@ -12,9 +12,9 @@ function event(
   payload: RunEvent["payload"],
 ): RunEvent {
   return {
+    version: 1,
     id,
     type,
-    version: 1,
     source: "agent",
     ts: "2026-10-07T12:00:00Z",
     payload: {
@@ -25,6 +25,123 @@ function event(
     },
   };
 }
+
+for (const { name, chunks } of [
+  { name: "plain text", chunks: ["First line\n", "Second line\n"] },
+  {
+    name: "JSON text with a scope key",
+    chunks: ['{"scope_path":', '"root.spoofed","message":"Ready"}\n'],
+  },
+])
+  test(`numbered command output joins ${name} without changing scope`, () => {
+    const rows = activityRows(
+      chunks.map((chunk, index) =>
+        event(index + 1, "command.stdout", {
+          chunk,
+          part: index + 1,
+          parts: chunks.length,
+        }),
+      ),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      text: chunks.join(""),
+      scope: "root.review",
+    });
+  });
+
+test("unsplit command output keeps its original text and scope", () => {
+  const chunk = '{"scope_path":"root.spoofed"}\n';
+  const rows = activityRows([event(1, "command.stdout", { chunk })]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ text: chunk, scope: "root.review" });
+});
+
+test("terminal output deltas preserve repeated fragments and failure details", () => {
+  const events = [
+    event(1, "agent.tool_call", {
+      tool: "Execute",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({
+        status: "in_progress",
+        raw_input: { command: "check" },
+      }),
+    }),
+    ...["Access ", "denied\n", "denied\n"].map((output_delta, index) =>
+      event(index + 2, "agent.tool_call", {
+        tool: "cmd",
+        tool_call_id: "cmd",
+        summary: JSON.stringify({ output_delta }),
+      }),
+    ),
+    event(5, "agent.tool_result", {
+      tool: "cmd",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({ status: "failed", exit_code: 3 }),
+    }),
+  ];
+  expect(activityRows(events)[0].tool).toMatchObject({
+    title: "Ran check",
+    status: "failed",
+    input: "check",
+    output: "Access denied\ndenied\n\nExit code: 3",
+  });
+});
+
+for (const field of ["exit_code", "exitCode"])
+  for (const code of [0, 3, -1])
+    test(`raw tool output displays ${field} ${code}`, () => {
+      const rows = activityRows([
+        event(1, "agent.tool_result", {
+          tool: "Execute",
+          tool_call_id: "cmd",
+          summary: JSON.stringify({
+            status: "completed",
+            raw_output: { [field]: code },
+          }),
+        }),
+      ]);
+      expect(rows[0].tool?.output).toBe(`Exit code: ${code}`);
+    });
+
+for (const { code, name } of [
+  { code: true, name: "boolean" },
+  { code: "3", name: "string" },
+  { code: 1.5, name: "fraction" },
+  { code: null, name: "null" },
+])
+  test(`raw tool output ignores a ${name} exit code`, () => {
+    const rows = activityRows([
+      event(1, "agent.tool_result", {
+        tool: "Execute",
+        tool_call_id: "cmd",
+        summary: JSON.stringify({
+          status: "completed",
+          raw_output: { exit_code: code },
+        }),
+      }),
+    ]);
+    expect(rows[0].tool?.output).toBe("");
+  });
+
+test("terminal metadata takes precedence and command exits use the same wording", () => {
+  const rows = activityRows([
+    event(1, "agent.tool_result", {
+      tool: "Execute",
+      tool_call_id: "cmd",
+      summary: JSON.stringify({
+        status: "completed",
+        exit_code: 0,
+        raw_output: { exit_code: 3, exitCode: 2 },
+      }),
+    }),
+    event(2, "command.exit", { exit_code: 0 }),
+    event(3, "command.exit", { exit_code: null }),
+  ]);
+  expect(rows[0].tool?.output).toBe("Exit code: 0");
+  expect(rows[1].text).toBe("Command finished.\nExit code: 0");
+  expect(rows[2].text).toBe("Command finished.");
+});
 
 test("matched tools merge across messages without crossing attempts, jobs, or turns", () => {
   const rows = activityRows([
@@ -111,16 +228,16 @@ test("matched tools merge across messages without crossing attempts, jobs, or tu
     expect(toolStatus(status).text).toBe(text);
 });
 
-test("relative paths strip only recorded roots and reader folders on each platform", () => {
+test("relative paths preserve subdirectories on each platform", () => {
   expect(
     relativeActivityText(
       "Read /work/run/r-42/docs/guide.md and /work/run-extra/file",
       "/work/run/",
     ),
-  ).toBe("Read docs/guide.md and /work/run-extra/file");
+  ).toBe("Read r-42/docs/guide.md and /work/run-extra/file");
   expect(
     relativeActivityText("C:\\Relay\\Run\\r-2\\README.md", "c:\\relay\\run"),
-  ).toBe("README.md");
+  ).toBe("r-2\\README.md");
   expect(relativeActivityText("/work/Run/file", "/work/run")).toBe(
     "/work/Run/file",
   );
@@ -177,14 +294,30 @@ async function setup(
     key,
     holder: "activity-test",
     yaml: stringify({
-      version: 1,
       name: "Readable activity",
-      nodes: {
-        before: { type: "command", run: ["git", "status"] },
+      jobs: {
+        before: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/command@v1",
+              with: {
+                argv: JSON.stringify(["git", "status"]),
+              },
+            },
+          ],
+        },
         review: {
-          type: "human_wait",
           needs: ["before"],
-          prompt: "Review the saved work.",
+          steps: [
+            {
+              id: "work",
+              uses: "relay/human-wait@v1",
+              with: {
+                prompt: "Review the saved work.",
+              },
+            },
+          ],
         },
       },
     }),
@@ -197,12 +330,7 @@ async function setup(
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const id: string = (await response.json()).run_id;
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
-    )
-    .toBe("paused_wait");
+  await expectRunStatus(page, id, "paused_wait");
   const folder: string = (
     await (await page.request.get(`/api/runs/${id}`)).json()
   ).run.working_folder;
@@ -217,12 +345,66 @@ async function append(
 ): Promise<void> {
   const response = await post(page, "/__test__/activity", {
     run_id: id,
-    scope: "root.review",
+    scope: "root.review.work",
     type,
     payload,
   });
   expect(response.ok(), await response.text()).toBeTruthy();
 }
+
+test("a command without terminal metadata shows its raw exit code in tool details", async ({
+  page,
+}) => {
+  const { id } = await setup(page, "raw-command-exit");
+  await append(page, id, "agent.tool_result", {
+    tool: "Execute",
+    tool_call_id: "command-1",
+    summary: JSON.stringify({
+      status: "failed",
+      raw_input: { command: "check" },
+      raw_output: { exit_code: 3 },
+      content: [{ text: "Access denied\n" }],
+    }),
+  });
+  await page.goto(`/?view=runs&run=${id}`);
+  const tool = page
+    .getByRole("region", { name: "Activity feed", exact: true })
+    .locator("details.activity-tool")
+    .filter({ hasText: "Ran check" });
+  await expect(tool.locator("summary")).toContainText("Failed");
+  await tool.locator("summary").click();
+  await expect(tool).toContainText("Access denied");
+  await expect(tool).toContainText("Exit code: 3");
+});
+
+test("Cursor command output shows Unicode, stderr, and its camel-case exit code", async ({
+  page,
+}) => {
+  const { id } = await setup(page, "cursor-command-output");
+  await append(page, id, "agent.tool_result", {
+    tool: "Shell",
+    tool_call_id: "cursor-command-1",
+    summary: JSON.stringify({
+      status: "failed",
+      raw_input: { command: "node diagnose.cjs" },
+      raw_output: {
+        exitCode: 3,
+        stdout: "RELAY_STDOUT café 雪 😀\n***\n",
+        stderr: "RELAY_STDERR expected exit 3\n",
+      },
+    }),
+  });
+  await page.goto(`/?view=runs&run=${id}`);
+  const tool = page
+    .getByRole("region", { name: "Activity feed", exact: true })
+    .locator("details.activity-tool")
+    .filter({ hasText: "Ran node diagnose.cjs" });
+  await expect(tool.locator("summary")).toContainText("Failed");
+  await tool.locator("summary").click();
+  await expect(tool).toContainText("RELAY_STDOUT café 雪 😀");
+  await expect(tool).toContainText("RELAY_STDERR expected exit 3");
+  await expect(tool).toContainText("Exit code: 3");
+});
 
 test("Markdown formatting renders while HTML, images, and unsafe URLs stay inert", async ({
   page,
@@ -278,7 +460,7 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     tool_call_id: "read-1",
     summary: JSON.stringify({
       status: "in_progress",
-      raw_input: { file_path: `${folder}/r-2/REVIEW.md` },
+      raw_input: { file_path: `${folder}/REVIEW.md` },
     }),
   });
   await append(page, id, "agent.thought", {
@@ -370,15 +552,13 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     original.events.some(
       (event) =>
         typeof event.payload.summary === "string" &&
-        event.payload.summary.includes(`${folder}/r-2/REVIEW.md`),
+        JSON.parse(event.payload.summary).raw_input?.file_path ===
+          `${folder}/REVIEW.md`,
     ),
   ).toBe(true);
   await page.goto(`/?view=runs&run=${id}&job=root.review`);
-  await page.getByRole("button", { name: "Human review", exact: true }).click();
-  const jobLog = page.getByRole("region", {
-    name: "Human review log",
-    exact: true,
-  });
+  const jobLog = page.getByRole("region", { name: "Job log", exact: true });
+  await jobLog.getByRole("button", { name: /1\. Work/ }).click();
   await expect(
     jobLog.getByRole("heading", { name: "Review result", exact: true }),
   ).toBeVisible();
@@ -386,7 +566,9 @@ test("Summary and job conversation show safe Markdown, one tool row, thoughts, a
     jobLog.getByRole("combobox", { name: "Filter by job", exact: true }),
   ).toHaveCount(0);
   expect(
-    await jobLog.evaluate((element) => getComputedStyle(element).overflowY),
+    await jobLog
+      .getByRole("region", { name: "Human review log", exact: true })
+      .evaluate((element) => getComputedStyle(element).overflowY),
   ).toBe("auto");
 });
 

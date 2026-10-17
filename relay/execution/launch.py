@@ -25,12 +25,11 @@ from relay.vcs.commits import current_head
 from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
 from relay.workflows.defaults import apply_workflow_defaults
-from relay.workflows.loader import resolve_workflow_path
 from relay.workflows.routing import compile_route_requirements
-from relay.workflows.schema import LoopNode, NodeDefinition, SubworkflowNode, WorkflowDefinition
+from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import parse_scope_path
 from relay.workflows.snapshot import SnapshotBundle, build_snapshot
-from relay.workflows.validation import ValidatedWorkflow, resolve_inputs
+from relay.workflows.validation import ValidatedWorkflow
 
 from .launch_request import FrozenLaunchBindings, LaunchRequest
 from .preflight import launch_source_files, load_launch_workflow
@@ -81,57 +80,17 @@ class LaunchStore(SchedulingStore, AgentObservationStore, Protocol):
 
 
 def _normalize_entry_point(value: str) -> str:
-    """``build`` -> ``root.build``; ``root.loop#2.check`` stays unchanged."""
+    """``build`` -> ``root.build``; an already qualified job stays unchanged."""
     normalized = value if value.startswith("root.") else f"root.{value}"
     parse_scope_path(normalized)
     return normalized
 
 
-def _subworkflow_definition(
-    workflow: ValidatedWorkflow,
-    reference: str,
-) -> WorkflowDefinition:
-    workflows_root = workflow.root.path.parent.resolve()
-    path = resolve_workflow_path(workflows_root, reference)
-    key = path.relative_to(workflows_root).as_posix()
-    child = workflow.subworkflows.get(key)
-    if child is None:
-        message = f"Entrypoint subworkflow {reference!r} is missing from validation."
-        raise WorkflowValidationError(message)
-    return child.definition
-
-
 def _validate_entry_scope(workflow: ValidatedWorkflow, scope_path: str) -> None:
-    nodes = workflow.root.definition.nodes
     segments = parse_scope_path(scope_path)
-    for index, segment in enumerate(segments):
-        node = nodes.get(segment.node_id)
-        if node is None:
-            message = f"Entrypoint scope {scope_path!r} names an unknown node."
-            raise WorkflowValidationError(message)
-        final = index == len(segments) - 1
-        if final:
-            if segment.iteration is not None and not isinstance(node, LoopNode):
-                message = f"Entrypoint scope {scope_path!r} uses # on a non-loop node."
-                raise WorkflowValidationError(message)
-            if (
-                isinstance(node, LoopNode)
-                and segment.iteration is not None
-                and segment.iteration > node.max_iterations
-            ):
-                message = f"Entrypoint scope {scope_path!r} exceeds the loop bound."
-                raise WorkflowValidationError(message)
-            return
-        if isinstance(node, LoopNode):
-            if segment.iteration is None or segment.iteration > node.max_iterations:
-                message = f"Entrypoint scope {scope_path!r} has an invalid loop iteration."
-                raise WorkflowValidationError(message)
-            nodes = node.body
-        elif isinstance(node, SubworkflowNode) and segment.iteration is None:
-            nodes = _subworkflow_definition(workflow, node.workflow).nodes
-        else:
-            message = f"Entrypoint scope {scope_path!r} descends through a leaf node."
-            raise WorkflowValidationError(message)
+    if len(segments) != 1 or segments[0].node_id not in workflow.root.definition.nodes:
+        message = f"Entrypoint scope {scope_path!r} must name a workflow job."
+        raise WorkflowValidationError(message)
 
 
 def _file_sha256(path: Path) -> str:
@@ -151,6 +110,7 @@ def _validate_entry_point(
     requested: str | None,
     resolved_inputs: Mapping[str, object],
     repository: Path,
+    supplied_inputs: Mapping[str, object],
 ) -> str | None:
     if requested is None:
         return None
@@ -167,7 +127,9 @@ def _validate_entry_point(
     missing_inputs = [
         name
         for name in entry.inputs
-        if name not in resolved_inputs or resolved_inputs[name] is None
+        if name not in resolved_inputs
+        or resolved_inputs[name] is None
+        or (name not in supplied_inputs and workflow.root.definition.inputs[name].default is None)
     ]
     if missing_inputs:
         message = "Entrypoint inputs are missing: " + ", ".join(sorted(missing_inputs)) + "."
@@ -198,81 +160,78 @@ def launch_workflow(
     with source_lock(relay_root):
         workflow = load_launch_workflow(relay_root, request.workflow_key)
         actions_context: dict[str, object] = {}
-        if workflow.root.definition.actions:
-            from relay.workflows.actions.compiler import bind_routes, validate_commands
-            from relay.workflows.actions.language import resolve_inputs as actions_inputs
-            from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
+        from relay.workflows.actions.compiler import bind_routes, validate_commands
+        from relay.workflows.actions.language import resolve_inputs as actions_inputs
+        from relay.workflows.prompts import iter_agent_nodes, resolve_prompt
 
-            bindings = store.freeze_launch_bindings(project_id)
-            actions_context.update(bindings)
-            from relay.workflows.schema import ActionsJobNode
+        bindings = store.freeze_launch_bindings(project_id)
+        actions_context.update(bindings)
+        from relay.workflows.schema import ActionsJobNode
 
-            node = next(iter(workflow.root.definition.nodes.values()))
-            if isinstance(node, ActionsJobNode):
-                validate_commands(
-                    workflow.root.definition.actions, node.sources, request.defaults.commands
-                )
-            typed_inputs = actions_inputs(
-                workflow.root.definition.actions,
-                request.inputs,
-                environments=tuple(bindings["environments"]),
+        node = next(iter(workflow.root.definition.nodes.values()))
+        if isinstance(node, ActionsJobNode):
+            validate_commands(
+                workflow.root.definition.actions, node.sources, request.defaults.commands
             )
-            source = project_launch_source(relay_root.parent)
-            actions_context["relay"] = {
-                "workflow": workflow.root.definition.name,
-                "workflow_ref": request.workflow_key,
-                "actor": request.launcher,
-                "repository": relay_root.parent.name,
-                "event_name": "workflow_dispatch",
-                "ref": f"refs/heads/{source.branch}" if source.branch else "",
-                "ref_name": source.branch or "",
-                "ref_type": "branch" if source.branch else "",
-                "sha": source.commit,
-                "event": {"inputs": typed_inputs},
-                **request.event_context,
-            }
-            if request.event_context.get("event_name") == "push" and (
-                request.event_context.get("sha") != source.commit
-                or (
-                    not str(request.event_context.get("ref", "")).startswith("refs/tags/")
-                    and request.event_context.get("ref") != f"refs/heads/{source.branch}"
-                )
-            ):
-                message = "The observed Git ref is not the current owner checkout source."
-                raise WorkflowValidationError(message)
-            from relay.workflows.actions import expressions
-
-            actions_context["run_name"] = expressions.string(
-                expressions.interpolate(
-                    workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
-                    {
-                        "relay": actions_context["relay"],
-                        "inputs": typed_inputs,
-                        "vars": actions_context["vars"],
-                    },
-                )
+        typed_inputs = actions_inputs(
+            workflow.root.definition.actions,
+            request.inputs,
+            environments=tuple(bindings["environments"]),
+        )
+        source = project_launch_source(relay_root.parent)
+        actions_context["relay"] = {
+            "workflow": workflow.root.definition.name,
+            "workflow_ref": request.workflow_key,
+            "actor": request.launcher,
+            "repository": relay_root.parent.name,
+            "event_name": "workflow_dispatch",
+            "ref": f"refs/heads/{source.branch}" if source.branch else "",
+            "ref_name": source.branch or "",
+            "ref_type": "branch" if source.branch else "",
+            "sha": source.commit,
+            "event": {"inputs": typed_inputs},
+            **request.event_context,
+        }
+        if request.event_context.get("event_name") == "push" and (
+            request.event_context.get("sha") != source.commit
+            or (
+                not str(request.event_context.get("ref", "")).startswith("refs/tags/")
+                and request.event_context.get("ref") != f"refs/heads/{source.branch}"
             )
-            from relay.workflows.titles import truncate_run_title
+        ):
+            message = "The observed Git ref is not the current owner checkout source."
+            raise WorkflowValidationError(message)
+        from relay.workflows.actions import expressions
 
-            actions_context["run_name"] = truncate_run_title(str(actions_context["run_name"]))
-            workflow = bind_routes(
-                workflow,
+        actions_context["run_name"] = expressions.string(
+            expressions.interpolate(
+                workflow.root.definition.actions.get("run-name", workflow.root.definition.name),
                 {
+                    "relay": actions_context["relay"],
                     "inputs": typed_inputs,
                     "vars": actions_context["vars"],
-                    "relay": actions_context["relay"],
                 },
             )
-            workflow = replace(
-                workflow,
-                prompts=tuple(
-                    resolve_prompt(reference, relay_root)
-                    for agent in iter_agent_nodes(workflow.root.definition.nodes)
-                    for reference in agent.prompts
-                ),
-            )
-        else:
-            typed_inputs = resolve_inputs(workflow.root.definition, request.inputs)
+        )
+        from relay.workflows.titles import truncate_run_title
+
+        actions_context["run_name"] = truncate_run_title(str(actions_context["run_name"]))
+        workflow = bind_routes(
+            workflow,
+            {
+                "inputs": typed_inputs,
+                "vars": actions_context["vars"],
+                "relay": actions_context["relay"],
+            },
+        )
+        workflow = replace(
+            workflow,
+            prompts=tuple(
+                resolve_prompt(reference, relay_root)
+                for agent in iter_agent_nodes(workflow.root.definition.nodes)
+                for reference in agent.prompts
+            ),
+        )
     workflow = apply_workflow_defaults(
         workflow, request.defaults, tuple(request.owner_agents), request.model
     )
@@ -286,6 +245,7 @@ def launch_workflow(
         request.entry_point,
         typed_inputs,
         repository,
+        request.inputs,
     )
     normalized_request = LaunchRequest(
         request.workflow_key,

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import type { RunSummary } from "../src/types";
-import { historicalPost as post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -33,7 +33,7 @@ async function finishedRuns(
   const created = await post(page, `/api/workflows?project=${project}`, {
     key: "storage-check",
     holder: "storage-check",
-    yaml: "version: 1\nname: Storage cleanup check\nnodes:\n  check: {type: command, run: [git, status]}\n",
+    yaml: "name: Storage cleanup check\njobs: {check: {steps: [{run: print(1), shell: python}]}}\n",
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const runs: RunSummary[] = [];

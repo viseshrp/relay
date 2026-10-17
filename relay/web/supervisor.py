@@ -41,7 +41,7 @@ from relay.execution.process_identity import (
     process_identity,
 )
 from relay.execution.reconcile import ReconcileStore, reconcile_once
-from relay.execution.recovery import RecoveryEvidenceStore, prepare_recovery_workspace
+from relay.execution.recovery import EvidenceStore, prepare_recovery_workspace
 from relay.execution.resume import ResumeStore, resume_interrupted
 from relay.execution.scheduler import SchedulingStore
 from relay.manage import MigrationLock, apply_migrations
@@ -60,7 +60,7 @@ class SupervisorStore(
     ReconcileStore,
     ResumeStore,
     SchedulingStore,
-    RecoveryEvidenceStore,
+    EvidenceStore,
     Protocol,
 ):
     """Durable operations coordinated by the parent process."""
@@ -289,9 +289,9 @@ def _stop_abandoned_attempts(store: SupervisorStore) -> None:
     verified = {identity.pid for _, identity in processes}
     for _, pid in store.active_attempt_processes():
         if pid not in verified and process_identity(pid) is not None:
-            message = "Relay cannot verify an older attempt's process before recovery."
+            message = "Relay cannot verify an attempt's process before recovery."
             raise PersistenceError(
-                message, next_action="Stop the older Relay worker normally before restarting."
+                message, next_action="Stop the Relay worker normally before restarting."
             )
     _force_attempt_processes(processes)
 
@@ -355,10 +355,7 @@ def _startup_reconcile(store: SupervisorStore) -> None:
     else:
         store.fail_worker_attempts()
     reconcile_once(store, enqueue_claim, orderly_shutdown=orderly_shutdown)
-    resume_interrupted(
-        store,
-        lambda target: prepare_recovery_workspace(store, target),
-    )
+    resume_interrupted(store, lambda target: prepare_recovery_workspace(target, store))
     marker.unlink(missing_ok=True)
 
 

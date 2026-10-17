@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 import platform
-from typing import cast
 
 from relay import __version__
 
@@ -20,17 +19,13 @@ class SnapshotBundle:
     """JSON-compatible fields persisted exactly once with a Run."""
 
     workflow_yaml: str
-    subworkflows: dict[str, object]
     resolved_prompts: list[dict[str, str]]
     typed_inputs: dict[str, object]
     route_table: dict[str, dict[str, object]]
-    default_model: str
-    agent_prefs: list[dict[str, object]]
     relay_version: str
     runtime_versions: dict[str, str]
     hashes: dict[str, str]
     launch_defaults: dict[str, object] = field(default_factory=dict)
-    semantics_revision: str = "relay-v1"
     resolved_definition: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -56,23 +51,7 @@ def build_snapshot(
     launch_defaults: Mapping[str, object] | None = None,
 ) -> SnapshotBundle:
     """Capture exact workflow and prompt bytes plus all launch decisions."""
-    subworkflows = {}
     hashes = {"workflow": _digest(workflow.root.text)}
-    agent_prefs: list[dict[str, object]] = [
-        {
-            "workflow": workflow.root.path.name,
-            "agents": list(workflow.root.definition.agents),
-        }
-    ]
-    for key, loaded in workflow.subworkflows.items():
-        digest = _digest(loaded.text)
-        child_record: dict[str, object] = {"yaml": loaded.text, "sha256": digest}
-        if launch_defaults is not None:
-            child_record["definition"] = loaded.definition.model_dump(mode="json", by_alias=True)
-        subworkflows[key] = child_record
-        hashes[f"subworkflow:{key}"] = digest
-        agent_prefs.append({"workflow": key, "agents": list(loaded.definition.agents)})
-
     prompt_rows = [prompt.to_dict() for prompt in workflow.prompts]
     for index, prompt in enumerate(workflow.prompts):
         hashes[f"prompt:{index}:{prompt.source}:{prompt.reference}"] = prompt.sha256
@@ -82,36 +61,21 @@ def build_snapshot(
         "pydantic": _package_version("pydantic"),
         "ruamel.yaml": _package_version("ruamel.yaml"),
     }
-    actions = bool(workflow.root.definition.actions)
-    semantics_revision = "relay-v1"
-    if actions:
-        from .actions.compiler import sources_hashes
-        from .actions.language import DIALECT, UPSTREAM
-        from .schema import ActionsJobNode
+    from .actions.compiler import sources_hashes
+    from .actions.language import UPSTREAM
 
-        hashes.update(
-            sources_hashes(
-                cast(ActionsJobNode, next(iter(workflow.root.definition.nodes.values()))).sources
-            )
-        )
-        runtime_versions["actions-language"] = UPSTREAM
-        semantics_revision = DIALECT
+    hashes.update(sources_hashes(next(iter(workflow.root.definition.nodes.values())).sources))
+    runtime_versions["actions-language"] = UPSTREAM
     return SnapshotBundle(
         workflow_yaml=workflow.root.text,
-        subworkflows=subworkflows,
         resolved_prompts=prompt_rows,
         typed_inputs=dict(typed_inputs),
         route_table=serialize_route_table(routes),
-        default_model=workflow.root.definition.model or "",
-        agent_prefs=agent_prefs,
         relay_version=__version__,
         runtime_versions=runtime_versions,
         hashes=hashes,
         launch_defaults=dict(launch_defaults or {}),
-        semantics_revision=semantics_revision,
-        resolved_definition=(
-            workflow.root.definition.model_dump(mode="json", by_alias=True) if actions else {}
-        ),
+        resolved_definition=(workflow.root.definition.model_dump(mode="json", by_alias=True)),
     )
 
 

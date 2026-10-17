@@ -23,7 +23,7 @@ from relay.paths import shutdown_marker_path
 from relay.projects.service import INITIAL_PROJECT_FILES
 from relay.vcs.git import run_git
 from relay.web import process_ownership, supervisor
-from relay.web.models import Instance, NodeAttempt, Run, RunLock
+from relay.web.models import ActionsJobLease, Instance, NodeAttempt, Run
 from relay.web.repositories import DjangoExecutionStore
 from tests.support import Clock, InlineEngine, RelayProject
 
@@ -288,7 +288,7 @@ def test_supervisor_launches_thread_workers_with_the_owner_configuration(
 ) -> None:
     boundary = supervisor_boundary
     supervisor.run_supervisor(
-        RelayConfig(port=9001, workers=3, login_required=login_required),
+        RelayConfig(port=9001, login_required=login_required),
         open_browser=False,
         on_ready=boundary.stop_when_ready,
     )
@@ -389,7 +389,16 @@ def test_supervisor_child_failure_settles_the_claim_and_releases_the_lease(
 ) -> None:
     project.write_workflow(
         "running",
-        "version: 1\nname: Running\nnodes:\n  work: {type: command, run: [git, status]}\n",
+        (
+            "name: Running\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "running")
     boundary = supervisor_boundary
@@ -561,7 +570,17 @@ def test_startup_marker_never_authorizes_signaling_a_previous_attempt_pid(
     supervisor_boundary: SupervisorBoundary, project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow(
-        "resume", "version: 1\nname: Resume\nnodes:\n  work: {type: command, run: [git, status]}\n"
+        "resume",
+        (
+            "name: Resume\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "resume")
     claim = engine.store.claim_dispatch(engine.tokens.popleft(), "old-worker").attempt
@@ -583,16 +602,16 @@ def test_startup_marker_never_authorizes_signaling_a_previous_attempt_pid(
     assert marker.exists()
 
 
-def test_orphan_recovery_preserves_workspaces_when_a_live_legacy_attempt_is_unverified(
+def test_orphan_recovery_preserves_workspaces_when_a_live_attempt_is_unverified(
     supervisor_boundary: SupervisorBoundary, project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow(
-        "legacy", "version: 1\nname: Legacy\nnodes:\n  work: {type: command, run: [git, status]}\n"
+        "unverified", "jobs: {work: {steps: [{run: print(1), shell: python}]}}\n"
     )
-    run_id = engine.launch(project, "legacy")
+    run_id = engine.launch(project, "unverified")
     claim = engine.store.claim_dispatch(engine.tokens.popleft(), "older-worker").attempt
     assert claim is not None
-    # A migrated attempt has a PID but no historical creation time to trust.
+    # A PID alone does not prove the process's creation identity.
     NodeAttempt.objects.filter(pk=claim.attempt_id).update(
         process_pid=os.getpid(), process_started=None
     )
@@ -619,8 +638,16 @@ def test_shutdown_preserves_workspace_admission_until_worker_exit_is_confirmed(
 ) -> None:
     project.write_workflow(
         "held",
-        "version: 1\nname: Held\nnodes:\n"
-        "  work: {type: command, writes: true, run: [git, status]}\n",
+        (
+            "name: Held\n"
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - id: work\n"
+            "      uses: relay/command@v1\n"
+            "      with:\n"
+            '        argv: \'["git", "status"]\'\n'
+        ),
     )
     run_id = engine.launch(project, "held")
     boundary = supervisor_boundary
@@ -643,5 +670,5 @@ def test_shutdown_preserves_workspace_admission_until_worker_exit_is_confirmed(
     with pytest.raises(PersistenceError, match="children have not exited"):
         supervisor.run_supervisor(RelayConfig(), open_browser=False, on_ready=stop_with_live_writer)
     assert NodeAttempt.objects.get(pk=attempts[0]).status == "running"
-    assert RunLock.objects.filter(run_id=run_id).exists()
+    assert ActionsJobLease.objects.filter(node__run_id=run_id).exists()
     assert process_ownership.read_ownership() is not None

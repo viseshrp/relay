@@ -9,9 +9,9 @@ function event(
   payload: RunEvent["payload"],
 ): RunEvent {
   return {
+    version: 1,
     id,
     type,
-    version: 1,
     source: "agent",
     ts: "2026-10-04T12:00:00Z",
     payload: { scope_path: "root.build", attempt_number: 1, ...payload },
@@ -91,20 +91,26 @@ test("native Antigravity tools show the command and output without raw JSON", ()
   );
 });
 
-test("legacy tool summaries omit opaque IDs and duplicate command titles", () => {
+test("tool summaries omit opaque IDs and duplicate command titles", () => {
   const messages = activityMessages([
     event(1, "agent.tool_call", {
       tool: "git status",
       summary: '{"raw_input":{"command":"git status"}}',
     }),
-    event(2, "agent.tool_call", { tool: "toolu_01ABC", summary: "{}" }),
+    event(2, "agent.tool_call", {
+      tool: "call-a",
+      tool_call_id: "call-a",
+      summary: "{}",
+    }),
     event(3, "agent.tool_result", {
-      tool: "toolu_01ABC",
+      tool: "call-a",
+      tool_call_id: "call-a",
       summary:
         '{"kind":"execute","status":"completed","content":[{"text":"clean"}]}',
     }),
     event(4, "agent.tool_result", {
-      tool: "exec-12345678-1234-1234-1234-123456789abc",
+      tool: "call-b",
+      tool_call_id: "call-b",
       summary: '{"status":"completed"}',
     }),
   ]);
@@ -124,48 +130,13 @@ function node(
     id: scope_path,
     scope_path,
     node_id: scope_path.split(".").at(-1)!,
-    node_type: "command",
+    node_type: "actions_job",
     status: "succeeded",
     writes: false,
-    loop_index: null,
     dependencies,
-    controls: [],
     parent_scope,
-    selected_branch: null,
   };
 }
-
-test("captured loop iterations and nested branches retain their execution order", () => {
-  const graph = capturedRunGraph([
-    node("root.repeat"),
-    node("root.end", ["root.repeat"]),
-    node("root.repeat#1.a", [], "root.repeat#1"),
-    node("root.repeat#1.b", ["root.repeat#1.a"], "root.repeat#1"),
-    node("root.repeat#2.a", [], "root.repeat#2"),
-  ]);
-  expect(
-    graph.edges.some(
-      (edge) =>
-        edge.source === "root.repeat#1::complete" &&
-        edge.target === "root.repeat#2.a",
-    ),
-  ).toBeTruthy();
-  expect(
-    graph.edges.some(
-      (edge) =>
-        edge.source === "root.repeat#2::complete" && edge.target === "root.end",
-    ),
-  ).toBeTruthy();
-  const positions = new Map(
-    graph.nodes.map((stage) => [stage.id, stage.position]),
-  );
-  expect(positions.get("root.repeat#2.a")!.y).toBeGreaterThan(
-    positions.get("root.repeat#1.b")!.y,
-  );
-  expect(positions.get("root.end")!.y).toBeGreaterThan(
-    positions.get("root.repeat#2.a")!.y,
-  );
-});
 
 test("the top-level scope adds no synthetic completion job", () => {
   const graph = capturedRunGraph([
@@ -179,15 +150,11 @@ test("the top-level scope adds no synthetic completion job", () => {
     "root.second",
     "root.child",
     "root.child.check",
-    "root.child::complete",
   ]);
-  expect(
-    graph.edges.some(
-      (edge) =>
-        edge.source === "root.child.check" &&
-        edge.target === "root.child::complete",
-    ),
-  ).toBeTruthy();
+  expect(graph.edges.map((edge) => [edge.source, edge.target])).toEqual([
+    ["root.first", "root.second"],
+    ["root.second", "root.child"],
+  ]);
   expect(
     graph.nodes.some((stage) => stage.id === "root::complete"),
   ).toBeFalsy();

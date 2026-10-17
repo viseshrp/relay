@@ -12,7 +12,6 @@ RECOVERABLE_ERRORS = frozenset(
         "commit_validation_error",
         "dirty_repository_error",
         "node_timeout",
-        "agent_protocol_error",
     }
 )
 PENDING_RECOVERY_STATES = ("scheduled", "preparing")

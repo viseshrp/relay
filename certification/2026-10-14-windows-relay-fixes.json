@@ -1,0 +1,401 @@
+{
+  "date": "2026-10-14",
+  "platform": "Windows 11 Home 10.0.26300 x64",
+  "relay_branch": "feat/windows-dogfood-fixes",
+  "relay_base": "391ca00cee606e78ce874d9fbd3d2e464d4677fd",
+  "run_id": "4f247e7e-cedc-4b46-aca8-5ef368c07649",
+  "run": {
+    "status": "succeeded",
+    "recorded_head": "f074fb361d6eeda40b6a9aaca21b44ea2bd30826",
+    "run_branch": "relay/run/4f247e7e-cedc-4b46-aca8-5ef368c07649",
+    "worktree_path": "C:\\Users\\vises\\AppData\\Local\\Temp\\relay-windows-20261014\\storage\\relay\\worktrees\\4f247e7e-cedc-4b46-aca8-5ef368c07649",
+    "cleanup_policy": "retain"
+  },
+  "attempts": [
+    {
+      "scope_path": "root.windows",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": null
+    },
+    {
+      "scope_path": "root.windows.approval",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": null
+    },
+    {
+      "scope_path": "root.windows.implement",
+      "status": "terminal",
+      "agent_id": "codex",
+      "agent_version": "2.2.2",
+      "model_value": "gpt-6.1-sol",
+      "process_pid": null,
+      "exit_code": 3221225786
+    },
+    {
+      "scope_path": "root.windows.memory",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": 0
+    },
+    {
+      "scope_path": "root.windows.package",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": 0
+    },
+    {
+      "scope_path": "root.windows.quality",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": 0
+    },
+    {
+      "scope_path": "root.windows.unit",
+      "status": "terminal",
+      "agent_id": "",
+      "agent_version": "",
+      "model_value": "",
+      "process_pid": null,
+      "exit_code": 0
+    }
+  ],
+  "event_count": 5394,
+  "display_name_events": [
+    {
+      "id": 5246,
+      "time_utc": "2026-10-14 17:22:41.375782",
+      "scope_path": "root.windows",
+      "display_name": "Implement and verify on Windows"
+    },
+    {
+      "id": 5257,
+      "time_utc": "2026-10-14 17:22:41.574446",
+      "scope_path": "root.windows.implement",
+      "display_name": "Inspect Windows support and capture a diagnostic"
+    },
+    {
+      "id": 10467,
+      "time_utc": "2026-10-14 17:29:04.970486",
+      "scope_path": "root.windows.approval",
+      "display_name": "Confirm Windows verification"
+    },
+    {
+      "id": 10481,
+      "time_utc": "2026-10-14 17:31:32.263041",
+      "scope_path": "root.windows.quality",
+      "display_name": "Types and lint"
+    },
+    {
+      "id": 10504,
+      "time_utc": "2026-10-14 17:31:35.520702",
+      "scope_path": "root.windows.unit",
+      "display_name": "Unit and integration coverage"
+    },
+    {
+      "id": 10557,
+      "time_utc": "2026-10-14 17:31:40.328195",
+      "scope_path": "root.windows.package",
+      "display_name": "Build and package checks"
+    },
+    {
+      "id": 10606,
+      "time_utc": "2026-10-14 17:31:43.680285",
+      "scope_path": "root.windows.memory",
+      "display_name": "Windows memory release regression"
+    }
+  ],
+  "run_resume_events": [
+    {
+      "id": 10475,
+      "time_utc": "2026-10-14 17:31:26.494492",
+      "status": "running"
+    }
+  ],
+  "tool_events": 4093,
+  "empty_tool_summaries": 0,
+  "diagnostics": [
+    {
+      "tool_call_id": "exec-7719ab63-3d1c-42f9-a40a-475ca9e60f4b",
+      "diagnostic": "RELAY_EXPECTED_DIAGNOSTIC",
+      "exit_codes": [
+        1
+      ]
+    },
+    {
+      "tool_call_id": "exec-a351e720-333f-4efd-9231-13e824dfdbab",
+      "diagnostic": "RELAY_EXPECTED_DIAGNOSTIC",
+      "exit_codes": [
+        7
+      ]
+    }
+  ],
+  "memory": [
+    {
+      "path": "test-results\\memory-placeholder-suspens-33bf1-ows-separate-site-awake-tab\\memory.json",
+      "sha256": "b53771080ecff6c86b8a8990f732319e7c7cb1403901b883456746fd88d03571",
+      "measurement_summary": {
+        "browser": "Chrome/153.0.8010.12",
+        "route": "all windows",
+        "sameSite": false,
+        "allocationMiB": 128,
+        "fixture": {
+          "processId": 860,
+          "growthMiB": 135.97265625,
+          "beforeMiB": 191.63671875,
+          "afterMiB": 0,
+          "releasedMiB": 191.63671875
+        },
+        "sample_count": 29,
+        "elapsed_ms": 23535.14289999999,
+        "minimum_heartbeats": 1,
+        "target_present_after": false
+      }
+    },
+    {
+      "path": "test-results\\memory-placeholder-suspens-680da-ory-tab-same-site-awake-tab\\memory.json",
+      "sha256": "dec90ba1a55a84d8ba8933636c4501109ad53fe364bcddba2a354b831332e62b",
+      "measurement_summary": {
+        "browser": "Chrome/153.0.8010.12",
+        "route": "tab",
+        "sameSite": true,
+        "allocationMiB": 128,
+        "fixture": {
+          "processId": 43040,
+          "growthMiB": 136.1015625,
+          "beforeMiB": 189.05078125,
+          "afterMiB": 0,
+          "releasedMiB": 189.05078125
+        },
+        "sample_count": 29,
+        "elapsed_ms": 23527.6615,
+        "minimum_heartbeats": 1,
+        "target_present_after": false
+      }
+    },
+    {
+      "path": "test-results\\memory-placeholder-suspens-7dc59-tab-separate-site-awake-tab\\memory.json",
+      "sha256": "b6263af41be8b2e34d6e67f4810b673999c3389b545b4c8f9ff87f704f618378",
+      "measurement_summary": {
+        "browser": "Chrome/153.0.8010.12",
+        "route": "tab",
+        "sameSite": false,
+        "allocationMiB": 128,
+        "fixture": {
+          "processId": 23800,
+          "growthMiB": 136.15234375,
+          "beforeMiB": 188.328125,
+          "afterMiB": 0,
+          "releasedMiB": 188.328125
+        },
+        "sample_count": 29,
+        "elapsed_ms": 23507.497,
+        "minimum_heartbeats": 1,
+        "target_present_after": false
+      }
+    },
+    {
+      "path": "test-results\\memory-placeholder-suspens-d49e9-windows-same-site-awake-tab\\memory.json",
+      "sha256": "1d2cf6bc17dd07414eb8f736a08c1a521590d33a0517a4ade3de2c61ea5d5b70",
+      "measurement_summary": {
+        "browser": "Chrome/153.0.8010.12",
+        "route": "all windows",
+        "sameSite": true,
+        "allocationMiB": 128,
+        "fixture": {
+          "processId": 51252,
+          "growthMiB": 135.97265625,
+          "beforeMiB": 188.23046875,
+          "afterMiB": 0,
+          "releasedMiB": 188.23046875
+        },
+        "sample_count": 29,
+        "elapsed_ms": 23461.0398,
+        "minimum_heartbeats": 2,
+        "target_present_after": false
+      }
+    }
+  ],
+  "suspendit_doc_commit": "f074fb361d6eeda40b6a9aaca21b44ea2bd30826",
+  "suspendit_worktree_clean": true,
+  "suspendit_unit_tests": 120,
+  "suspendit_memory_tests": 4,
+  "suspendit_package_sha256": "804758eceada6c9b291727604af36fb34095364107ec11f7bcc22f09b8888c66",
+  "checks": {
+    "python_initial_full": {
+      "passed": 2912,
+      "skipped": 37,
+      "failed": 3,
+      "coverage": false
+    },
+    "ci_probe_retest_passed": 15,
+    "script_tests": {
+      "passed": 51,
+      "skipped": 1,
+      "deselected": 1
+    },
+    "browser_passed": 38,
+    "frontend_unit_passed": 16,
+    "no_login_passed": 4,
+    "frontend_build_tests": {
+      "passed": 1036,
+      "skipped": 5
+    },
+    "make_check": "passed",
+    "wheel_and_sdist_content": "passed",
+    "wheel_without_node_smoke": {
+      "auth_status": 200,
+      "index_status": 200,
+      "asset": "/assets/index-iKmG1_3G.js",
+      "asset_status": 200,
+      "asset_bytes": 148308,
+      "auth": {
+        "owner_created": false,
+        "authenticated": true,
+        "username": "local",
+        "login_required": false,
+        "password_rules": [
+          "Your password can’t be too similar to your other personal information.",
+          "Your password must contain at least 8 characters.",
+          "Your password can’t be a commonly used password.",
+          "Your password can’t be entirely numeric."
+        ]
+      }
+    },
+    "focused_python_passed": 149
+  },
+  "remaining_limitations": [
+    "Windows symlink creation requires an unavailable privilege (WinError 1314). The full suite was not repeated after fixing the two probe failures.",
+    "Other operating systems and Python versions were not exercised in this retest."
+  ],
+  "distributions": [
+    {
+      "name": "relay_app-0.0.0-py3-none-any.whl",
+      "sha256": "50b77d9d3515b0d965cfe4bb1a61f1e8bd31852800083112a2d746f6b512089d"
+    },
+    {
+      "name": "relay_app-0.0.0.tar.gz",
+      "sha256": "0c786fa6112abffe8dbfe626f888cbfaa24d4855664cd698b057f4aec433decc"
+    }
+  ],
+  "screenshots_sha256": {
+    "2026-10-14-windows-relay-diagnostic.png": "14fba787b0080e54a33df2fadc9c4b3b5ae2268379a4345eb29c5c990aae8819",
+    "2026-10-14-windows-relay-fixed.png": "f8045b2f63de34cd5321982d31f2a779a9fb4f7a42f3ece7a86e3c5dc07f18c5",
+    "2026-10-14-windows-relay-resumed.png": "25cb5b0f3a8e3a4959da45a2b2c42c8185cacfcce51f6a96d3f6fa625c9d579a"
+  },
+  "full_python_followup": "https://github.com/viseshrp/relay/pull/23",
+  "relay_source_files": [
+    {
+      "path": "certification/README.md",
+      "sha256": "10b8942c9ab04320c0ecc2c21d9b54f10ed9062c816122be3b0e741801a0906f"
+    },
+    {
+      "path": "docs/agents.md",
+      "sha256": "df01b00c2c0298623397eb87ec0330279497119d15a544413f792f213083d204"
+    },
+    {
+      "path": "docs/execution.md",
+      "sha256": "044255899e0aff57862f41232fbdcbece6971fe288d94865775a718420d3898a"
+    },
+    {
+      "path": "docs/http-api.md",
+      "sha256": "973e205ce41e0f3b8e7b6cd783810a603794579338d9332e0aaf4037d519b297"
+    },
+    {
+      "path": "docs/web-ui.md",
+      "sha256": "d117a00648edef0db1a9de35fb3446de68ef48605baf1e8a25dbf9c78ff8804b"
+    },
+    {
+      "path": "docs/workflows.md",
+      "sha256": "8398c409db0a511f5a560c12ff250e7f85570a372307dc85a9650a9e43d3aa63"
+    },
+    {
+      "path": "frontend/e2e/activity-feed.spec.ts",
+      "sha256": "826767467c57c325e093509b5a16c9d346cea4d28e2c996bbf21b7651b5d32c6"
+    },
+    {
+      "path": "frontend/e2e/run-actions.spec.ts",
+      "sha256": "110f7500d32068874ac16cfd1fafca5ba72c16753144da637853c2ac0455cebe"
+    },
+    {
+      "path": "frontend/e2e/workflow-authoring.spec.ts",
+      "sha256": "0322c0c2cf21c092099b9a7d3fcc58123948cacd3b47f00ff967ce91411e83af"
+    },
+    {
+      "path": "frontend/src/activity.ts",
+      "sha256": "b353b54fd0934153207d05e813f4c79bb380b799b2c60186073624cca241b92b"
+    },
+    {
+      "path": "frontend/src/components/useActionsWorkflowWorkspace.tsx",
+      "sha256": "40fc3e9fc0bafc6a681269162ba365d8528424976c60ada3155ae7770ceb479d"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "a86cd179cf33f3de53f44b7b3c18b9087c25c44feaa9a78fda872662bc2074e5"
+    },
+    {
+      "path": "relay/agents/acp_driver.py",
+      "sha256": "f93a786b1c8bf016e663af7c06ffe57ed66a44e9417c183441a182e7da4b46c7"
+    },
+    {
+      "path": "relay/agents/events.py",
+      "sha256": "b43a563d177e1034c5a0638af3ded4cf7d53b1d8a5f96b6baf6613b5f35d4468"
+    },
+    {
+      "path": "relay/execution/action_files.py",
+      "sha256": "615685f5bb2056410fa46b5588e6349b2c578c0d2c188256552ba7831a295ce1"
+    },
+    {
+      "path": "relay/web/actions_repository.py",
+      "sha256": "f4e9120fc6a6fb4562ae04315b3707aa0ae60afa0043cb8d8ae36f6658cc46f7"
+    },
+    {
+      "path": "relay/web/repositories.py",
+      "sha256": "83ea918b858615bdef94df8148bd02e567053ae71d651977657f99c95558a153"
+    },
+    {
+      "path": "tests/fake_agent.py",
+      "sha256": "3d29c5899164fb4f938b0845cb036db6ae0424ec414b16dcd9aa365809631e51"
+    },
+    {
+      "path": "tests/test_actions_files_products.py",
+      "sha256": "033e9a08c80968acf947377c319793d50215941f9eb786453dcca790b98884a8"
+    },
+    {
+      "path": "tests/test_actions_runtime.py",
+      "sha256": "c61cf79675af00b36c6600a8c22105ddc60aab19fec683202c594d311cafaeeb"
+    },
+    {
+      "path": "tests/test_agent_domain.py",
+      "sha256": "7d2f2dcb61cf838cffd092f9e09d5d9a65ff8b788e9811fbe0d0edd28d1e6fcb"
+    },
+    {
+      "path": "tests/test_agent_drivers.py",
+      "sha256": "24b692298ed35e028e5167c272fdafab8a3f41a2ecc4a00839455fc76782f698"
+    },
+    {
+      "path": "tests/test_ci_python.py",
+      "sha256": "c04eca6fa7fd8616068dba8869c541b6afa7a63cd33e1ef164de88562c3b802c"
+    },
+    {
+      "path": "tests/test_run_monitor.py",
+      "sha256": "73a2e881085038cd766c9fd13eb879fc635a55976b2a359d75e2f9d14c03e055"
+    }
+  ]
+}

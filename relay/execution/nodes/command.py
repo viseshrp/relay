@@ -26,7 +26,7 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import AttemptStopReason, ControlKind, EventSource
 from relay.workflows.schema import CommandNode
 
-from .base import parse_node, validated_outputs
+from .base import parse_node
 
 
 def _creation_flags() -> int:
@@ -205,13 +205,7 @@ class CommandExecutor:
                 exit_code=process.returncode,
                 error_code=NodeExecutionError.error_code,
             )
-        outputs, artifacts = validated_outputs(context.worktree, node.outputs)
-        return ExecutionOutcome(
-            OutcomeKind.SUCCEEDED,
-            outputs=outputs,
-            declared_artifacts=artifacts,
-            exit_code=process.returncode,
-        )
+        return ExecutionOutcome(OutcomeKind.SUCCEEDED, exit_code=process.returncode)
 
 
 __all__ = ["CommandExecutor"]

@@ -2,38 +2,7 @@ import { Alert, Button, Stack, Typography } from "@mui/material";
 
 import { stageLabel } from "../navigation";
 import type { RunProblem } from "../types";
-
-function failureReason(problem: RunProblem): string {
-  if (problem.message) return problem.message;
-  if (problem.exit_code !== null && problem.exit_code !== 0) {
-    return `The tool exited with code ${problem.exit_code}. Open the step's activity for its output.`;
-  }
-  const reasons: Record<string, string> = {
-    agent_protocol_error: "The agent stopped before completing its request.",
-    agent_usage_limit: "The provider's usage limit stopped this step.",
-    agent_auth_error:
-      "The agent needs a working sign-in before it can continue.",
-    agent_launch_error: "Relay could not start the selected agent.",
-    model_unavailable_error:
-      "The selected model is unavailable from the configured tools.",
-    model_selection_rejected_error: "The agent rejected the selected model.",
-    agent_configuration_error:
-      "The agent rejected the requested configuration.",
-    output_validation_error: "The step did not produce its required output.",
-    repair_exhausted:
-      "The configured repair rounds ended without a passing verification. Open Repairs to inspect the rejected reports.",
-    node_timeout: "The step reached its time limit.",
-    worker_lost: "The worker stopped before finishing this step.",
-    soft_denied: "The tool did not have permission to complete its work.",
-    git_error: "A Git operation could not complete.",
-    worktree_error: "Relay could not prepare or clean up the working folder.",
-  };
-  return (
-    reasons[problem.error_code ?? ""] ??
-    reasons[problem.stop_reason ?? ""] ??
-    "The step could not finish. Open its activity to inspect the cause."
-  );
-}
+import { failureReason } from "../failure";
 
 export function RunProblemNotice({
   problem,
@@ -83,8 +52,8 @@ export function RunProblemNotice({
                 "The provider did not supply a confirmed future reset. Automatic retry is stopped; retry manually when the limit is resolved.")
               : problem.retry?.state === "canceled"
                 ? "Automatic retry is canceled. You can retry this step manually."
-                : problem.error_code === "repair_exhausted"
-                  ? "The repair budget stays spent. Change the rule in a new run if more rounds are needed."
+                : problem.error_code === "loop_exhausted"
+                  ? "The iteration limit stays spent. Change the workflow for a new run if more iterations are needed."
                   : "Retry this step when the cause is resolved."}
         </Typography>
         <Button

@@ -5,7 +5,7 @@ import {
 } from "./setup-helpers";
 import { expect, test, type Page } from "./a11y-test";
 import { parse, stringify } from "yaml";
-import { post, currentWorkflow } from "./setup-helpers";
+import { post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");

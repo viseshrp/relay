@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { stringify } from "yaml";
-import { historicalPost as post } from "./setup-helpers";
+import { post, expectRunStatus } from "./setup-helpers";
 import type { MonitorPage } from "../src/run-monitor";
 
 function gate() {
@@ -11,14 +11,25 @@ function gate() {
   return { pending, release };
 }
 const runs: string[] = [];
-async function waitingRun(page: Page, key: string) {
+async function waitingRun(page: Page, key: string, wait = true) {
   const created = await post(page, "/api/workflows", {
     key,
     holder: key,
     yaml: stringify({
-      version: 1,
       name: key,
-      nodes: { review: { type: "human_wait", prompt: `Approve ${key}.` } },
+      jobs: {
+        review: {
+          steps: [
+            {
+              id: "work",
+              uses: "relay/human-wait@v1",
+              with: {
+                prompt: `Approve ${key}.`,
+              },
+            },
+          ],
+        },
+      },
     }),
   });
   expect(created.ok(), await created.text()).toBeTruthy();
@@ -30,13 +41,16 @@ async function waitingRun(page: Page, key: string) {
   expect(launched.ok(), await launched.text()).toBeTruthy();
   const { run_id: id } = await launched.json();
   runs.push(id);
-  await expect
-    .poll(
-      async () =>
-        (await (await page.request.get(`/api/runs/${id}/monitor`)).json())
-          .interactions.length,
-    )
-    .toBe(1);
+  if (wait) {
+    await expect
+      .poll(
+        async () =>
+          (await (await page.request.get(`/api/runs/${id}/monitor`)).json())
+            .interactions.length,
+        { timeout: 30_000 },
+      )
+      .toBe(1);
+  }
   return id as string;
 }
 test.beforeEach(async ({ page }) => {
@@ -304,6 +318,7 @@ test("constant page changes retain the accepted collection and let an open job l
                 id: String(number),
                 node_id: `extra_${number}`,
                 scope_path: `root.extra_${number}`,
+                display_name: `Extra ${number}`,
               };
         },
       );
@@ -343,7 +358,7 @@ test("constant page changes retain the accepted collection and let an open job l
     ).toBeVisible();
     await page
       .getByRole("navigation", { name: "Jobs" })
-      .getByRole("link", { name: /^Review/ })
+      .getByRole("link", { name: /^review /i })
       .click();
     await expect.poll(() => jobReads).toBeGreaterThan(0);
     expect(phase).toBe("changing");
@@ -364,8 +379,9 @@ test("constant page changes retain the accepted collection and let an open job l
 });
 
 test("changing runs cancels old monitor and job reads", async ({ page }) => {
+  test.setTimeout(60_000);
   const oldRun = await waitingRun(page, "old-selection");
-  const newRun = await waitingRun(page, "new-selection");
+  const newRun = await waitingRun(page, "new-selection", false);
   const stream = gate(),
     stale = gate(),
     release = gate();
@@ -400,6 +416,20 @@ test("changing runs cancels old monitor and job reads", async ({ page }) => {
     );
     stream.release();
     await stale.pending;
+    const monitor: MonitorPage = await (
+      await page.request.get(`/api/runs/${oldRun}/monitor`)
+    ).json();
+    const request = monitor.interactions[0];
+    expect(
+      (
+        await post(page, `/api/attempts/${request.attempt_id}/wait`, {
+          interaction_id: request.id,
+          idempotency_key: "advance-selection",
+          value: "Approved",
+        })
+      ).ok(),
+    ).toBeTruthy();
+    await expectRunStatus(page, newRun, "paused_wait", 30_000);
     await page
       .getByRole("button", { name: "Run history", exact: true })
       .click();

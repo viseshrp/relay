@@ -5,7 +5,7 @@ authenticated model probe and an end-to-end run in a disposable Git worktree.
 Command discovery, registry metadata, and source review are supporting evidence,
 not a live certification.
 
-## Latest local pass
+## Latest five-provider pass
 
 The latest pass ran on macOS 26.6.1 arm64 on 2026-10-03. The structured record
 is in [`2026-10-03-macos-arm64.json`](2026-10-03-macos-arm64.json). Each successful
@@ -36,10 +36,10 @@ All five agents meet the certification bar below on this macOS arm64 host.
 Claude and Cursor completed native CLI account sign-in before their successful
 runs. The sanitized [Claude](2026-10-03-claude-sign-in.jpg) and
 [Cursor](2026-10-03-cursor-sign-in.jpg) screenshots show the completed browser
-handoffs. Live agent execution on Linux and Windows, live cancellation, model
-drift, elicitation, provider timeout paths, and Antigravity's `respect_settings`
-soft-deny notice remain unverified. Passing offline CI on those operating
-systems does not certify a live provider.
+handoffs. That macOS pass did not exercise Linux providers, live cancellation,
+model drift, elicitation, timeouts, or native permission denials. The Windows
+live-control record below covers those scenarios and Linux Copilot. Passing
+offline CI on an operating system does not certify a live provider there.
 
 The current registry fixture is
 [`fixtures/registry-2026-10-03.json`](fixtures/registry-2026-10-03.json). Relay
@@ -55,6 +55,43 @@ output arrived without a reload, and the monitor showed `succeeded` with
 `SSE complete`. Refreshing history showed the same terminal status. The
 [screenshot](2026-10-03-browser-smoke.jpg) and the `browser_smoke` entry in the
 structured record capture that run. Ctrl+C stopped the supervisor cleanly.
+
+## Windows dogfood and fix retest
+
+On 2026-10-14, live Codex ACP 2.2.2 with exact model `gpt-6.1-sol` completed
+a retained SuspendIt workflow on Windows. The
+[initial run](2026-10-14-windows-suspendit.md) found four Relay defects. The
+[fix retest](2026-10-14-windows-relay-fixes.md) verifies their fixes through
+live execution, browser checks, an owner wait, and retained tool diagnostics.
+
+The [Windows ACP record](2026-10-15-windows-acp.json) certifies Claude Code,
+Copilot CLI, and Cursor CLI on the fixed Actions runtime. All three completed
+fresh exact-model selection, one-use permission exchanges, retained reports,
+job commits, browser output checks, and verified worktree cleanup. Copilot
+returns its command exit code in public text; Claude and Cursor also return
+structured exit fields. The final supervisor stopped cooperatively.
+
+The [fresh Windows Claude check](2026-10-15-windows-actions-only.md)
+records Claude Code 2.1.300 through ACP 0.91.0, exact `default` selection,
+masked Unicode output, a retained report, one job commit, and verified
+worktree and process cleanup. Its structured record contains only live
+provider evidence.
+
+The [Windows live controls](2026-10-16-windows-live-controls.md) and their
+[structured record](2026-10-16-windows-live-controls.json) verify fresh Codex
+and Antigravity execution, owner cancellation, structured elicitation,
+controlled model drift, ACP and native timeouts, and native permission
+denials. They record fixes found during those runs and authenticated Linux
+Copilot execution in a disposable WSL2 container. Linux Claude, Cursor, and
+Antigravity still need sign-in; Linux Codex is deferred at the owner's request.
+
+The [Windows provider checks](2026-10-16-windows-codex-antigravity.md)
+record a fresh successful Codex pipeline and Antigravity's `SUCCESS` result
+without its required report.
+Relay rejects that missing report without inferring an outcome from
+provider tool messages or changing provider permissions. The record
+identifies its tested implementation, exact versions and model values,
+artifact hashes, and cleanup results.
 
 ## Certification bar
 

@@ -28,6 +28,44 @@ function object(
     ? value
     : null;
 }
+
+type ElicitationChoice = {
+  value: string | number | boolean;
+  label: string;
+  description?: string;
+};
+
+function scalarChoice(
+  value: JsonValue | undefined,
+): value is string | number | boolean {
+  return ["string", "number", "boolean"].includes(typeof value);
+}
+
+export function elicitationChoices(
+  field: Record<string, JsonValue>,
+): ElicitationChoice[] | null {
+  const values = field.enum;
+  if (Array.isArray(values)) {
+    if (field.oneOf != null || !values.length || !values.every(scalarChoice))
+      return null;
+    return values.map((value) => ({ value, label: String(value) }));
+  }
+  if (!Array.isArray(field.oneOf) || !field.oneOf.length) return null;
+  const choices: ElicitationChoice[] = [];
+  for (const raw of field.oneOf) {
+    const option = object(raw);
+    if (!option || typeof option.const !== "string") return null;
+    choices.push({
+      value: option.const,
+      label: typeof option.title === "string" ? option.title : option.const,
+      ...(typeof option.description === "string"
+        ? { description: option.description }
+        : {}),
+    });
+  }
+  return choices;
+}
+
 export function ReviewEvidence({
   runId,
   artifacts,

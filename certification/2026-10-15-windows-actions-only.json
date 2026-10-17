@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-15",
+  "platform": {
+    "os": "Windows 11",
+    "build": "10.0.26300.0",
+    "architecture": "x64",
+    "python": "3.14.7",
+    "node": [
+      "20.20.2",
+      "24.12.0"
+    ],
+    "pwsh": "7.6.5",
+    "git": "2.54.0.windows.1",
+    "uv": "0.12.5",
+    "playwright": "1.63.0"
+  },
+  "live_claude": {
+    "provider": "claude",
+    "run_id": "ae044e85-1721-4f4a-86e9-4236ed85557f",
+    "status": "succeeded",
+    "source_head": "6e23ab493cd9d1a45325be0fcf38b186e07cc6f5",
+    "model_value": "default",
+    "agent_version": "0.91.0",
+    "starting_head": "072439b470199b1c516fe043b5ac5cc2602aa5f2",
+    "job_commit": "d51247bd67d4f0207b0b7a4de3da3c655f1fc73f",
+    "protected_head": "d51247bd67d4f0207b0b7a4de3da3c655f1fc73f",
+    "commit_count": 1,
+    "report_sha256": "aa05fa2ba3b07a2fc074d0a5f8cb2128f191257860a4aa5607d2cc31f7de47a1",
+    "report_bytes": 225,
+    "all_downloads_verified": 8,
+    "permission_answers_once": 2,
+    "unicode_stdout": true,
+    "stderr": true,
+    "structured_exit_code": 3,
+    "masked_synthetic_secret": true,
+    "source_checkout_clean": true,
+    "worktree_clean": true,
+    "process_identities_cleared": true,
+    "terminal_delta_updates": 1,
+    "events_sha256": "9cfb66bfb2ecdac1f78292a93b434b5a8cb7c73f4b5bb57e7fbb183dff48fa83",
+    "claude_code_version": "2.1.300",
+    "cleanup": {
+      "run_id": "ae044e85-1721-4f4a-86e9-4236ed85557f",
+      "worktree_removed": true,
+      "worktree_state": "removed",
+      "provider_process_cleared": true,
+      "retained_downloads_reverified": 8,
+      "cleanup_scope": "worktrees"
+    },
+    "shutdown": {
+      "forced": false,
+      "owner_and_children_exited": true,
+      "ownership_record_removed": true,
+      "log_confirmed_clean_stop": true,
+      "provider_processes_already_cleared": true,
+      "worktrees_already_removed": true,
+      "retained_artifacts_reverified": 8
+    }
+  }
+}

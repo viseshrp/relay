@@ -15,7 +15,6 @@ export function RunJobSidebar({ state }: { state: RunWorkspaceState }) {
   const {
     detail,
     selectedJob,
-    repairOwners,
     nodeCursor,
     showStep,
     onSelectJob,
@@ -42,7 +41,6 @@ export function RunJobSidebar({ state }: { state: RunWorkspaceState }) {
           <JobList
             nodes={detail.nodes}
             selected={selectedJob}
-            repairOwners={repairOwners}
             hasMore={nodeCursor !== null}
             onSelect={(scope) => (scope ? showStep(scope) : onSelectJob(null))}
             onMore={() => void loadMoreNodes()}

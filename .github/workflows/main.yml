@@ -74,7 +74,7 @@ jobs:
       # Keep tox on the same managed patch release as the Windows 3.10 job.
       UV_PYTHON_PREFERENCE: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.10' && 'only-managed' || 'system' }}
       RELAY_TEST_WORKERS: ${{ inputs.serial_python == true && '0' || (matrix.os == 'macos-latest' && '2' || '3') }}
-      RELAY_TEST_COVERAGE: ${{ matrix.python-version == '3.14' && matrix.os == 'ubuntu-latest' && 'true' || 'false' }}
+      RELAY_TEST_COVERAGE: ${{ matrix.python-version == '3.14' && matrix.os != 'macos-latest' && 'true' || 'false' }}
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -111,7 +111,7 @@ jobs:
           retention-days: 1
 
       - name: Upload coverage to Codecov
-        if: ${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.python-version == env.MAIN_PYTHON_VERSION && matrix.os != 'macos-latest' }}
         uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -391,7 +391,7 @@ jobs:
         run: |
           npm --prefix frontend run build
           cd frontend
-          npx playwright test --config playwright.visual.config.ts --update-snapshots --grep 'visual .* at'
+          npx playwright test --config playwright.visual.config.ts --update-snapshots=all --grep 'visual .* at'
 
       - name: Retain generated Linux visual baselines
         uses: actions/upload-artifact@v7.0.2

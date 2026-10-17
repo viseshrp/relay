@@ -1,8 +1,11 @@
 """File interfaces, masking, and retained products against isolated storage."""
 
+import json
 import os
 from pathlib import Path
+import stat
 import subprocess
+from typing import cast
 
 import pytest
 
@@ -19,7 +22,10 @@ from relay.execution.action_files import (
 )
 from relay.execution.action_products import cache_mode, capture, checked_path, restore, verify
 from relay.execution.masking import Redactor
+from relay.execution.runner import RunnerStore
+from relay.execution.state import EventSource
 from relay.workflows.actions.patterns import matches, select_paths
+from tests.support import symlink_or_skip
 
 
 def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path: Path) -> None:
@@ -42,6 +48,32 @@ def test_implicit_shell_writes_utf8_file_commands_on_the_host_platform(tmp_path:
         shell=False,
     )
     assert key_values(file_text(output)) == {"value": "ready"}
+
+
+def test_python_shell_uses_utf8_for_redirected_output_and_files(tmp_path: Path) -> None:
+    arguments = shell_script(
+        tmp_path,
+        "from pathlib import Path\nprint('王秀英')\nPath('result.txt').write_text('王秀英')\n",
+        "python",
+    )
+    environment = {
+        **os.environ,
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "LC_ALL": "C",
+    }
+    environment.pop("PYTHONIOENCODING", None)
+    result = subprocess.run(  # noqa: S603 - owned script with Relay's Python interpreter
+        arguments,
+        cwd=tmp_path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        timeout=15,
+        shell=False,
+    )
+    assert result.stdout.decode("utf-8").strip() == "王秀英"
+    assert (tmp_path / "result.txt").read_text(encoding="utf-8") == "王秀英"
 
 
 def test_multiline_file_values_preserve_crlf_and_empty_values() -> None:
@@ -103,11 +135,47 @@ def test_subject_and_product_links_are_rejected(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("private", encoding="utf-8")
     link = tmp_path / "link"
-    link.symlink_to(target)
+    symlink_or_skip(link, target)
     with pytest.raises(PathSafetyError):
         declared_subjects("link", tmp_path, [])
     with pytest.raises(PathSafetyError):
         select_paths(tmp_path, ["**"], files_only=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction")
+def test_subject_and_product_junctions_are_rejected(tmp_path: Path) -> None:
+    workspace, target = tmp_path / "workspace", tmp_path / "outside"
+    workspace.mkdir()
+    target.mkdir()
+    sentinel = target / "private.txt"
+    sentinel.write_text("private", encoding="utf-8")
+    link = workspace / "link"
+    subprocess.run(  # noqa: S603 - create a junction between owned temporary directories
+        [
+            str(Path(os.environ["SYSTEMROOT"]) / "System32" / "cmd.exe"),
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            str(link),
+            str(target),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=15,
+        shell=False,
+    )
+    try:
+        assert link.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        assert (link / "private.txt").read_text(encoding="utf-8") == "private"
+        with pytest.raises(PathSafetyError):
+            declared_subjects("link/private.txt", workspace, [])
+        with pytest.raises(PathSafetyError):
+            select_paths(workspace, ["**"], files_only=True)
+        assert sentinel.read_text(encoding="utf-8") == "private"
+    finally:
+        link.rmdir()
+    assert sentinel.read_text(encoding="utf-8") == "private"
 
 
 def test_retained_product_hashes_block_corruption_before_restore(tmp_path: Path) -> None:
@@ -185,6 +253,313 @@ class RecordingLog:
         self.events.append((kind, payload))
 
 
+@pytest.fixture
+def action_log() -> tuple[ActionRuntime, CommandLog, RecordingLog]:
+    recorder = RecordingLog()
+    masks = Redactor()
+    log = CommandLog(cast(RunnerStore, recorder), "attempt", masks)
+    return ActionRuntime(cast(RunnerStore, recorder), log, masks), log, recorder
+
+
+def tool_output(recorder: RecordingLog) -> str:
+    return "".join(
+        json.loads(str(payload["summary"])).get("output_delta", "")
+        for kind, payload in recorder.events
+        if kind in {"agent.tool_call", "agent.tool_result"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("secret", "deltas"),
+    [
+        ("TOKEN-1234567890", ("prefix TOKEN-12345", "67890\n")),
+        ('TOKEN-"\\\tEND', ('prefix TOKEN-"\\\tEND\n',)),
+        ('TOKEN-"\\\tEND', ('prefix TOKEN-"\\', "\tEND\n")),
+    ],
+    ids=["split", "escaped", "split-escaped"],
+)
+def test_agent_tool_deltas_mask_decoded_secrets(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    secret: str,
+    deltas: tuple[str, ...],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register(secret)
+    for delta in deltas:
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "terminal", "turn": 1, "summary": json.dumps({"output_delta": delta})},
+        )
+    log.flush()
+    assert tool_output(recorder) == "prefix ***\n"
+    assert all(payload["tool_call_id"] == "terminal" for _, payload in recorder.events)
+
+
+@pytest.mark.parametrize(
+    ("other_attempt", "other_tool", "other_turn"),
+    [("other", "terminal", 1), ("attempt", "other", 1), ("attempt", "terminal", 2)],
+    ids=["attempt", "tool", "turn"],
+)
+def test_agent_tool_prefixes_do_not_cross_stream_boundaries(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    other_attempt: str,
+    other_tool: str,
+    other_turn: int,
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    other_recorder = RecordingLog()
+    other_log = CommandLog(cast(RunnerStore, other_recorder), other_attempt, proxy.masks)
+    other_proxy = ActionRuntime(cast(RunnerStore, other_recorder), other_log, proxy.masks)
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"TOKEN-12345"}'},
+    )
+    assert tool_output(recorder) == ""
+    other_proxy.append_attempt_event(
+        other_attempt,
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": other_tool, "turn": other_turn, "summary": '{"output_delta":"67890\\n"}'},
+    )
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"67890\\n"}'},
+    )
+    log.flush()
+    other_log.flush()
+    assert tool_output(recorder) == "***\n"
+    assert tool_output(other_recorder) == "67890\n"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "summary", "expected_summary"),
+    [
+        ("agent.tool_result", '{"status":"completed"}', {"status": "completed"}),
+        ("agent.tool_call", '{"exit_code":0}', {"exit_code": 0}),
+        ("agent.tool_result", '{"output_delta":""}', {"output_delta": "TOKEN-"}),
+    ],
+    ids=["result", "exit", "final-delta"],
+)
+def test_agent_tool_completion_flushes_safe_prefixes_before_step_shutdown(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+    event_type: str,
+    summary: str,
+    expected_summary: dict[str, object],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    assert tool_output(recorder) == "prefix "
+    proxy.append_attempt_event(
+        "attempt",
+        event_type,
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": summary},
+    )
+    assert tool_output(recorder) == "prefix TOKEN-"
+    assert json.loads(str(recorder.events[-1][1]["summary"])) == expected_summary
+    completed_events = list(recorder.events)
+    log.flush()
+    assert recorder.events == completed_events
+
+
+def test_step_shutdown_flushes_unfinished_tool_output_once(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    assert tool_output(recorder) == "prefix "
+    log.flush()
+    assert tool_output(recorder) == "prefix TOKEN-"
+    assert all(
+        kind == "agent.tool_call" and payload["tool_call_id"] == "terminal" and payload["turn"] == 1
+        for kind, payload in recorder.events
+    )
+    flushed_events = list(recorder.events)
+    log.flush()
+    assert recorder.events == flushed_events
+
+
+@pytest.mark.parametrize("field", ["content", "raw_output", "nested_output"])
+def test_cumulative_tool_snapshots_hold_secret_prefixes_until_replaced(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], field: str
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for text in ("prefix TOKEN-12345", "prefix TOKEN-1234567890\n"):
+        if field == "content":
+            summary = {"content": [{"text": text}]}
+        elif field == "raw_output":
+            summary = {"raw_output": {"stdout": text}}
+        else:
+            summary = {"raw_output": {"contents": [{"text": text}]}}
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": json.dumps(summary)},
+        )
+    first, second = (json.loads(str(payload["summary"])) for _, payload in recorder.events)
+    assert "TOKEN-" not in json.dumps(first)
+    assert "prefix " in json.dumps(first)
+    assert "TOKEN-" not in json.dumps(second)
+    assert "prefix ***\\n" in json.dumps(second)
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "snapshot", "turn": 1, "summary": '{"status":"completed"}'},
+    )
+    log.flush()
+    assert len(recorder.events) == 3
+
+
+def test_replaced_snapshots_discard_their_previous_pending_suffix(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for text in ("prefix TOKEN-", "different output"):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {
+                "tool_call_id": "snapshot",
+                "turn": 1,
+                "summary": json.dumps({"content": [{"text": text}]}),
+            },
+        )
+    log.flush()
+    assert len(recorder.events) == 2
+    assert json.loads(str(recorder.events[-1][1]["summary"])) == {
+        "content": [{"text": "different output"}]
+    }
+
+
+def test_replaced_snapshot_arrays_discard_removed_text_fields(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for content in ([{"text": "unchanged"}, {"text": "TOKEN-"}], [{"text": "unchanged"}]):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": json.dumps({"content": content})},
+        )
+    log.flush()
+    assert len(recorder.events) == 2
+    assert not proxy.masks.pending
+
+
+def test_snapshot_field_keys_cannot_alias_another_tools_opaque_id(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    other_tool = 'terminal:snapshot:["content",0,"text"]'
+    for tool, summary in (
+        ("terminal", {"content": [{"text": "prefix TOKEN-12345"}]}),
+        (other_tool, {"output_delta": "67890\n"}),
+        ("terminal", {"content": [{"text": "prefix TOKEN-1234567890\n"}]}),
+    ):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": tool, "turn": 1, "summary": json.dumps(summary)},
+        )
+    log.flush()
+    other = [payload for _, payload in recorder.events if payload["tool_call_id"] == other_tool]
+    assert len(other) == 1
+    assert json.loads(str(other[0]["summary"])) == {"output_delta": "67890\n"}
+    assert "TOKEN-" not in json.dumps(recorder.events)
+
+
+@pytest.mark.parametrize("shutdown", [False, True], ids=["tool-result", "step-shutdown"])
+def test_snapshot_completion_flushes_only_its_own_safe_suffixes_once(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], shutdown: bool
+) -> None:
+    proxy, log, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    for tool, summary in (
+        (
+            "snapshot",
+            {"content": [{"text": "first TOKEN-"}], "raw_output": {"stderr": "second TOKEN-"}},
+        ),
+        ("other", {"content": [{"text": "other TOKEN-"}]}),
+    ):
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_call",
+            EventSource.AGENT,
+            {"tool_call_id": tool, "turn": 1, "summary": json.dumps(summary)},
+        )
+    if shutdown:
+        log.flush()
+    else:
+        proxy.append_attempt_event(
+            "attempt",
+            "agent.tool_result",
+            EventSource.AGENT,
+            {"tool_call_id": "snapshot", "turn": 1, "summary": '{"status":"completed"}'},
+        )
+        assert all(payload["tool_call_id"] == "snapshot" for _, payload in recorder.events[2:])
+        assert recorder.events[-1][0] == "agent.tool_result"
+        log.flush()
+    assert tool_output(recorder) == "TOKEN-TOKEN-TOKEN-"
+    flushed = list(recorder.events)
+    log.flush()
+    assert recorder.events == flushed
+
+
+def test_plain_tool_result_still_masks_secrets_and_flushes_held_output(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    proxy, _, recorder = action_log
+    proxy.masks.register("TOKEN-1234567890")
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_call",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": '{"output_delta":"prefix TOKEN-"}'},
+    )
+    proxy.append_attempt_event(
+        "attempt",
+        "agent.tool_result",
+        EventSource.AGENT,
+        {"tool_call_id": "terminal", "turn": 1, "summary": "finished TOKEN-1234567890"},
+    )
+    assert (
+        "".join(
+            json.loads(str(payload["summary"]))["output_delta"]
+            for _, payload in recorder.events[:-1]
+        )
+        == "prefix TOKEN-"
+    )
+    assert recorder.events[-1][1]["summary"] == "finished ***"
+
+
 def test_workflow_commands_stop_resume_mask_and_annotate() -> None:
     from typing import cast
 
@@ -213,3 +588,43 @@ def test_workflow_commands_stop_resume_mask_and_annotate() -> None:
         for kind, payload in recorder.events
     )
     assert recorder.events[-1] == ("agent.message", {"text": "::error::***"})
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["ordinary line\n" * 20_000, 'Ω"\\' * 20_000 + "\n"],
+    ids=["many-lines", "escaped-unicode"],
+)
+def test_command_output_retains_large_reads_in_bounded_batches(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog], output: str
+) -> None:
+    from relay.constants import EVENT_MAX_PAYLOAD_BYTES
+
+    _, log, recorder = action_log
+    log.feed("command.stdout", output)
+    log.flush()
+
+    assert "".join(str(payload["chunk"]) for _, payload in recorder.events) == output
+    assert len(recorder.events) < 100
+    assert all(
+        len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) < EVENT_MAX_PAYLOAD_BYTES
+        for _, payload in recorder.events
+    )
+
+
+def test_command_batches_preserve_mask_and_annotation_order(
+    action_log: tuple[ActionRuntime, CommandLog, RecordingLog],
+) -> None:
+    _, log, recorder = action_log
+    log.feed(
+        "command.stdout",
+        "before\n::add-mask::private\nprivate\n::notice::private\nafter\n",
+    )
+    log.flush()
+
+    assert recorder.events == [
+        ("command.stdout", {"chunk": "before\n"}),
+        ("command.stdout", {"chunk": "***\n"}),
+        ("actions.notice", {"message": "***", "properties": {}}),
+        ("command.stdout", {"chunk": "after\n"}),
+    ]

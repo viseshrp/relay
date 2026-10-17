@@ -29,15 +29,6 @@ export interface WorkflowDocumentResponse {
   draft: WorkflowDraft | null;
   base_hash: string;
   project: ProjectRecord;
-  warnings: HandoffWarning[];
-  repair_defaults: RepairDefaults;
-}
-
-export interface RepairDefaults {
-  max_rounds: number;
-  max_allowed_rounds: number;
-  fix_instruction: string;
-  verify_instruction: string;
 }
 
 export interface ProjectRecord {
@@ -71,14 +62,6 @@ export interface LaunchCleanliness {
     reasons: string[];
   }>;
   truncated: boolean;
-}
-
-export interface HandoffWarning {
-  workflow_key?: string;
-  scope_path: string;
-  output: string;
-  artifact: string;
-  message: string;
 }
 
 export interface ModelObservation {
@@ -249,30 +232,8 @@ export interface RunNode {
   started_at?: string | null;
   ended_at?: string | null;
   writes: boolean;
-  selected_branch: string | null;
-  loop_index: number | null;
   parent_scope: string | null;
   dependencies: string[];
-  controls: Array<{ target: string; label: string }>;
-  repair_for?: string | null;
-  repair_settings?: {
-    legacy: boolean;
-    max_rounds: number;
-    accepted_output: string | null;
-    accepted_value: JsonScalar;
-    fix_instruction: string | null;
-    verify_instruction: string | null;
-    roles: Record<
-      string,
-      {
-        type: string;
-        model: string | null;
-        agents: string[] | null;
-        agent_options: Record<string, AgentOptions> | null;
-        writes: boolean | null;
-      }
-    >;
-  } | null;
   retry_settings?: RetryConfiguration | null;
   pending_settings?: RetryConfiguration | null;
 }
@@ -286,6 +247,7 @@ export interface JobAttempt {
   started_at: string | null;
   ended_at: string | null;
   stop_reason: string | null;
+  provider_stop_reason: string | null;
   exit_code: number | null;
   error_code: string | null;
   error_message: string | null;
@@ -390,6 +352,7 @@ export interface RunProblem extends RetryConfiguration {
   attempt_number: number;
   error_code: string | null;
   stop_reason: string | null;
+  provider_stop_reason: string | null;
   exit_code: number | null;
   message: string | null;
   provider_message: string | null;
@@ -444,18 +407,12 @@ export interface WorkflowDefaults {
   timeout: string | null;
   auto_retry: boolean;
   recovery: { enabled: boolean; max_retries: number };
-  repairs: {
-    max_rounds: number;
-    fix_instruction: string;
-    verify_instruction: string;
-  };
 }
 export interface OwnerSettings {
   agent_preferences: string[];
   cleanup_policy: "clean_on_success" | "retain" | "merge_on_success";
   host: string;
   port: number;
-  workers: number;
   login_required: boolean;
   workflow_defaults: WorkflowDefaults;
 }
@@ -469,11 +426,8 @@ export interface SettingsResponse {
 export interface ProjectDefaultOverrides {
   agent_preferences?: string[];
   cleanup_policy?: OwnerSettings["cleanup_policy"];
-  workflow_defaults?: Partial<
-    Omit<WorkflowDefaults, "recovery" | "repairs">
-  > & {
+  workflow_defaults?: Partial<Omit<WorkflowDefaults, "recovery">> & {
     recovery?: Partial<WorkflowDefaults["recovery"]>;
-    repairs?: Partial<WorkflowDefaults["repairs"]>;
   };
 }
 export interface ProjectSettingsResponse {

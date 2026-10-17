@@ -1,0 +1,1273 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-16T02:19:56.301499+00:00",
+  "scope": "Windows Relay live controls and fixes, exact artifact verification, isolated native provider policies, and Linux Copilot certification. Later automated gate results are recorded on PR 23.",
+  "code_checkpoint": "3cffed5bcf95f0a07bd6b9050c0a625a5f722622",
+  "product_trees": {
+    "relay": "1aa96e36e46ba4c01036777084c6e426b290fcfe",
+    "frontend_src": "7c9f8916571fc04d3d98bc4946f03c35bfbf4ac4"
+  },
+  "merge_on_hold": true,
+  "platform": {
+    "os": "Windows 11",
+    "build": "10.0.26300.0",
+    "architecture": "x64",
+    "python": "3.14.7",
+    "node": [
+      "20.20.2",
+      "24.12.0"
+    ],
+    "pwsh": "7.6.5",
+    "git": "2.54.0.windows.1",
+    "uv": "0.12.5",
+    "playwright": "1.63.0"
+  },
+  "live_cases": [
+    {
+      "provider": "codex",
+      "scenario": "codex-success-final",
+      "platform": "Windows",
+      "backend_checkpoint": "8953659af761854dd28d94216277c5092e3b4fcb",
+      "versions": {
+        "codex-acp": "2.2.2",
+        "codex": "0.160.1"
+      },
+      "requested_model": "gpt-6.1-sol",
+      "permission_mode_override": null,
+      "run_id": "1e611917-eca1-4f02-8a8e-e331cc0b1385",
+      "status": "succeeded",
+      "source_commit": "1fc8228c89d3199d5398ea4b451a5fa49c4ff027",
+      "workflow_sha256": "2d07414d58b1525649e70444ccee9cc72ffe6eb665805b428a383df0ea3d8ae6",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "source_head_unchanged": true,
+        "source_clean": true,
+        "worktree_clean": true,
+        "job_commit_count": 1,
+        "ending_head": "32096fd8b09916f69739feeb83341fe7b067f7bf",
+        "report_sha256": "e43f538964b10037e489c3dcf03a03bd94f6c8fdb9730378c7cd5832bd427b8a",
+        "report_bytes": 257,
+        "all_public_events_masked": true,
+        "manifests_refs_hashes_verified": true,
+        "provider_tool_exit_code": 3,
+        "unicode_and_markers_verified": true,
+        "retained_report_verified_after_worktree_cleanup": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 8,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "PROVIDER-RETEST.md",
+          "sha256": "e43f538964b10037e489c3dcf03a03bd94f6c8fdb9730378c7cd5832bd427b8a",
+          "bytes": 257
+        },
+        {
+          "name": "report",
+          "sha256": "e43f538964b10037e489c3dcf03a03bd94f6c8fdb9730378c7cd5832bd427b8a",
+          "bytes": 257
+        },
+        {
+          "name": "commits",
+          "sha256": "92c578801c42bb4ef09ecb0e6b778e782cf9747a3a4f6cd403ce336b0b0bde83",
+          "bytes": 41
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "371cfc657676ce9898a170fc7928b9900062c817d25726798f377f89077e4a92",
+        "bytes": 461654
+      },
+      "expected_status": "succeeded",
+      "browser_screenshots": [
+        {
+          "name": "browser-job.png",
+          "sha256": "3a5e75c04de748caa62c429f9e96d567bfa2bf6ef3d8b105f445b4e303a19905",
+          "bytes": 107395
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "scenario": "codex-cancel",
+      "platform": "Windows",
+      "backend_checkpoint": "8953659af761854dd28d94216277c5092e3b4fcb",
+      "versions": {
+        "codex-acp": "2.2.2",
+        "codex": "0.160.1"
+      },
+      "requested_model": "gpt-6.1-sol",
+      "permission_mode_override": null,
+      "run_id": "f80d2d5b-1d0b-4d33-862a-c05d1618422f",
+      "status": "canceled",
+      "source_commit": "22c0640c0575ebe0a132ef73c6c6bb1ddcdfa465",
+      "workflow_sha256": "ed98a4cf4dfa595c3c51bc1b9cb00ea50a7c77a87f0a5fd0e38390f7d6f4b6dd",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "all_recorded_processes_exited": true,
+        "tracked_processes": 29,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "status": "canceled"
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 6,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "e4713eefe5bc9b3c6bd00624aead4266bcf974fc13a11601ca2ce12ae05a59d5",
+          "bytes": 30
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "e4713eefe5bc9b3c6bd00624aead4266bcf974fc13a11601ca2ce12ae05a59d5",
+          "bytes": 30
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "51a4258a9d823519156bbb4adab9fefb34607b0a74e703a045a16535d06c8de9",
+        "bytes": 60210
+      },
+      "cancellation-latency": {
+        "seconds": 4.72609710006509,
+        "status": "canceled",
+        "started_with_real_parent_and_child": true
+      },
+      "expected_status": "canceled",
+      "browser_screenshots": [
+        {
+          "name": "browser-job.png",
+          "sha256": "23bb434ae57ba4fbdc83307e0e970908bc5c655caeb4da2b21c813cfb169fe8c",
+          "bytes": 87606
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "scenario": "codex-timeout",
+      "platform": "Windows",
+      "backend_checkpoint": "8953659af761854dd28d94216277c5092e3b4fcb",
+      "versions": {
+        "codex-acp": "2.2.2",
+        "codex": "0.160.1"
+      },
+      "requested_model": "gpt-6.1-sol",
+      "permission_mode_override": null,
+      "run_id": "e65c4bbb-eca1-4933-a94d-494e4f602a8b",
+      "status": "failed",
+      "source_commit": "a97375e87b7c5154c2310c1cec4fbc1ab8a98a31",
+      "workflow_sha256": "0c8c6a0fc806382cb71a45243bd50460856c3bf9f32ea908e36e38a2777ff27f",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "all_recorded_processes_exited": true,
+        "tracked_processes": 29,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "status": "failed"
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 6,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "3ee978399fd1dd23ed0e6d81bc30f5d6e82d715c299d74c5461d0d41fb924657",
+          "bytes": 30
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "3ee978399fd1dd23ed0e6d81bc30f5d6e82d715c299d74c5461d0d41fb924657",
+          "bytes": 30
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "227182ec1686850fd23f753a7818206ebfe70f7270b0fb27b1212a6fbdd860ef",
+        "bytes": 24606
+      },
+      "timeout-latency": {
+        "controller_seconds": 64.31734890001826,
+        "started_with_real_parent_and_child": true,
+        "owner_cancel_submitted": false
+      },
+      "public_problem": {
+        "error_code": "node_timeout",
+        "stop_reason": "timeout",
+        "exit_code": null,
+        "attempt_number": 1
+      },
+      "expected_status": "failed",
+      "browser_screenshots": [
+        {
+          "name": "browser-job.png",
+          "sha256": "1d8152267e9616ee9cac7d97a49c41a4af8420d6e87b6917f4a8809038c9e54f",
+          "bytes": 88853
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "scenario": "codex-model-drift",
+      "platform": "Windows",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "codex-acp": "2.2.2",
+        "codex": "0.160.1"
+      },
+      "requested_model": "gpt-6.1-sol",
+      "permission_mode_override": null,
+      "run_id": "f5b50ff9-54c3-4427-93de-0a5944b5a655",
+      "status": "failed",
+      "source_commit": "b9310136961e609a090cb3fb27598195c84923c2",
+      "workflow_sha256": "7f3b2b494002bab0e47fa34b2fc9351ef0d0a8c1463aed6816301e4b9424aa58",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "controlled_boundary_fault": true,
+        "actual_provider_model_unchanged": true,
+        "original_exact_model": "gpt-6.1-sol",
+        "preservation_verified": true,
+        "process_records_cleared": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 4,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "2d6810f8c5deb56d14479fd3d9e387ee94a966e3ff02a78144519d0ca870f5c5",
+        "bytes": 55949
+      },
+      "controlled_live_fault": "The forwarding ACP proxy injects one model-selection notification. The real provider model remains unchanged; Relay rejects the notification without fallback.",
+      "public_problem": {
+        "error_code": "model_selection_rejected_error",
+        "stop_reason": "failed",
+        "exit_code": null,
+        "attempt_number": 1
+      },
+      "expected_status": "failed",
+      "browser_screenshots": [
+        {
+          "name": "browser-live.png",
+          "sha256": "f9b6f357e0e9a1d657608a27551e27a5ce845025552a0e21fad49f0b3fbb9044",
+          "bytes": 98214
+        }
+      ]
+    },
+    {
+      "provider": "codex",
+      "scenario": "codex-elicitation-final-2",
+      "platform": "Windows",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "codex-acp": "2.2.2",
+        "codex": "0.160.1"
+      },
+      "requested_model": "gpt-6.1-sol",
+      "permission_mode_override": null,
+      "run_id": "df0cc01e-7553-4d3a-9308-d3639871558f",
+      "status": "succeeded",
+      "source_commit": "fb92ee2fd8a6d5e42706f9e72649d0a197d962bb",
+      "workflow_sha256": "039a05e43dcb1565e355305b49eff2c6d0a5e4b7e8a1932c022f6988b07d0cf7",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "run_id": "df0cc01e-7553-4d3a-9308-d3639871558f",
+        "status": "succeeded",
+        "interaction": {
+          "id": 3,
+          "attempt_id": 15,
+          "kind": "elicitation",
+          "status": "answered",
+          "response_payload": {
+            "value": {
+              "test_deployment_target": "staging (Recommended)"
+            },
+            "interaction_id": "3"
+          }
+        },
+        "one_live_session": true,
+        "one_agent_attempt": true,
+        "exact_value_acknowledged": "staging (Recommended)",
+        "browser_choices_verified": true,
+        "source_head_unchanged": true,
+        "source_clean": true,
+        "worktree_clean": true,
+        "job_commit_count": 0,
+        "process_records_cleared": true,
+        "manifests_refs_hashes_verified": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 4,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "09c2bb0d17c7b24d85c75c2ec0b188988c450838cda180e996317ecc81ba1b21",
+        "bytes": 89699
+      },
+      "controlled_provider_mode": "The forwarding ACP proxy selects the advertised collaboration_mode=plan so the real provider can issue request_user_input. Model, effort, and permission overrides stay unchanged.",
+      "expected_status": "succeeded",
+      "browser_screenshots": [
+        {
+          "name": "browser-choices.png",
+          "sha256": "5d8fea3dc83d6b86cb1684309144a68a315cf65b5069f554c809afb6ae52ed33",
+          "bytes": 99255
+        },
+        {
+          "name": "browser-completed.png",
+          "sha256": "7df75c4388064faa089734f6c84834c92c1cef653ef827302f3c30cf897be9aa",
+          "bytes": 80427
+        }
+      ]
+    },
+    {
+      "provider": "antigravity",
+      "scenario": "antigravity-success-current",
+      "platform": "Windows",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "agy": "1.3.6"
+      },
+      "requested_model": "gemini-3.8-flash-low",
+      "permission_mode_override": "accept-edits",
+      "run_id": "51ed4143-cd31-496d-8b78-cd2cf7d5c027",
+      "status": "succeeded",
+      "source_commit": "e3d5514deb6671fc49039e496727806fcfdbd9b6",
+      "workflow_sha256": "964de6631b61232b10755d7c22210d374725408a55f2eba289a2595eab797a8d",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "source_head_unchanged": true,
+        "source_clean": true,
+        "worktree_clean": true,
+        "job_commit_count": 1,
+        "ending_head": "9edc09d3ddb8b70cb394e384feacadc21400a737",
+        "report_sha256": "9a599cd812e9b87360dd51868cad7af0482ec4a449b43b755151a486abb20224",
+        "report_bytes": 35,
+        "manifests_refs_hashes_verified": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 6,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "PROVIDER-RETEST.md",
+          "sha256": "9a599cd812e9b87360dd51868cad7af0482ec4a449b43b755151a486abb20224",
+          "bytes": 35
+        },
+        {
+          "name": "report",
+          "sha256": "9a599cd812e9b87360dd51868cad7af0482ec4a449b43b755151a486abb20224",
+          "bytes": 35
+        },
+        {
+          "name": "commits",
+          "sha256": "30305566a38a1f8aa00c56bbbb2e26dbf2ad9bab6056f6f12f946d344b5d299e",
+          "bytes": 41
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "f29732c15b311b136e2ba33ec352728bd3abe8f0f9b1389caf8c17072f122604",
+        "bytes": 25248
+      },
+      "expected_status": "succeeded",
+      "browser_screenshots": [
+        {
+          "name": "browser-live.png",
+          "sha256": "cbb17a6782d6e30c8148ecad10a94fe47542976f164baa4dea7f9af8d5820dec",
+          "bytes": 99879
+        }
+      ]
+    },
+    {
+      "provider": "antigravity",
+      "scenario": "antigravity-cancel-native",
+      "platform": "Windows",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "agy": "1.3.6"
+      },
+      "requested_model": "gemini-3.8-flash-low",
+      "permission_mode_override": "accept-edits",
+      "run_id": "70e5e149-d9c9-4109-a0ca-43aed96f5846",
+      "status": "canceled",
+      "source_commit": "483bb8364120301b58cdae4bb53f298d4f8cce32",
+      "workflow_sha256": "687420e961176a88c6c88d34c66bf98af8dd561b180026043fcc9ded3efcc6e8",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "all_recorded_processes_exited": true,
+        "tracked_processes": 3,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "status": "canceled"
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 6,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "CANCEL-PROBE.md",
+          "sha256": "f8649b547541d5a8e42172bbe8872c66203adfea70310f6b91bf50ce6405a02c",
+          "bytes": 2241
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "CANCEL-PROBE.md",
+          "sha256": "f8649b547541d5a8e42172bbe8872c66203adfea70310f6b91bf50ce6405a02c",
+          "bytes": 2241
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "4effda9e737c0dc1a2ad184b9d61661bdddba4fdada946ea117f5879d203cf06",
+        "bytes": 14375
+      },
+      "cancellation-latency": {
+        "seconds": 2.1951339000370353,
+        "status": "canceled",
+        "started_with_live_native_activity": true
+      },
+      "expected_status": "canceled"
+    },
+    {
+      "provider": "antigravity",
+      "scenario": "antigravity-timeout",
+      "platform": "Windows",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "agy": "1.3.6"
+      },
+      "requested_model": "gemini-3.8-flash-low",
+      "permission_mode_override": "respect_settings",
+      "run_id": "a2eec7b7-e955-4daa-b009-89129270088a",
+      "status": "failed",
+      "source_commit": "f27802289df533a59c3fcbd9980483f8719253c1",
+      "workflow_sha256": "d41b56dae4959b5ddcfad39d538f944f2a7f0f7748a2a548d7f3ce083d9018e8",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "all_recorded_processes_exited": true,
+        "tracked_processes": 6,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "status": "failed"
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 6,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "3626549a6359c3dc45c9527b71232a61841c72ab73151ebb2c336bc2bde6e17f",
+          "bytes": 29
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "processes.json",
+          "sha256": "3626549a6359c3dc45c9527b71232a61841c72ab73151ebb2c336bc2bde6e17f",
+          "bytes": 29
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "63620a5786929cf45c09f37ae99f8ac5a5d2a83d470ac67c00458e4599f86a6b",
+        "bytes": 12365
+      },
+      "timeout-latency": {
+        "controller_seconds": 66.24181819998194,
+        "started_with_real_parent_and_child": true,
+        "owner_cancel_submitted": false
+      },
+      "public_problem": {
+        "error_code": "node_timeout",
+        "stop_reason": "timeout",
+        "exit_code": null,
+        "attempt_number": 1
+      },
+      "expected_status": "failed"
+    },
+    {
+      "provider": "antigravity",
+      "scenario": "antigravity-success-soft-deny-final",
+      "platform": "Windows",
+      "backend_checkpoint": "9c6dc95d48e77f9e5a23847f6e84e8a09158ee4b",
+      "versions": {
+        "agy": "1.3.6"
+      },
+      "requested_model": "gemini-3.8-flash-low",
+      "permission_mode_override": "respect_settings",
+      "run_id": "1d19f2fa-6577-473e-822e-7563a7adf1fc",
+      "status": "failed",
+      "source_commit": "ec251acc06fe914a3cd46c507cbb7867f0fa817c",
+      "workflow_sha256": "32c152add46e271b8684e26408e218d46b731a38a21fe772dde9be9ea9ea28a0",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "status": "failed",
+        "error_code": "antigravity_soft_denied",
+        "stop_reason": "soft_denied",
+        "provider_exit_code": 0,
+        "report_absent": true,
+        "source_clean_and_unchanged": true,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "target_association_needs_fix": false,
+        "matched_write_target": "PROVIDER-RETEST.md",
+        "placeholder_ignored": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 4,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "4d4abe33bb30a167f90b1ef11d45e58d174899e8eb6fe25e3a8f00bd064b7724",
+        "bytes": 16742
+      },
+      "public_problem": {
+        "error_code": "antigravity_soft_denied",
+        "stop_reason": "soft_denied",
+        "exit_code": 0,
+        "attempt_number": 1
+      },
+      "expected_status": "failed",
+      "browser_screenshots": [
+        {
+          "name": "browser-live.png",
+          "sha256": "7be2a645927c8327294db3bffec440dfcc5c17fc57cf228e29cda5e46705ec1b",
+          "bytes": 111995
+        }
+      ]
+    },
+    {
+      "provider": "antigravity",
+      "scenario": "antigravity-success-soft-deny-ui",
+      "platform": "Windows",
+      "backend_checkpoint": "3cffed5bcf95f0a07bd6b9050c0a625a5f722622",
+      "versions": {
+        "agy": "1.3.6"
+      },
+      "requested_model": "gemini-3.8-flash-low",
+      "permission_mode_override": "respect_settings",
+      "run_id": "d7e65095-cb60-4879-9ef2-0d8eac2b8cce",
+      "status": "failed",
+      "source_commit": "43d159be1e751f994abc6a313ea1551a236e2886",
+      "workflow_sha256": "2b1e74ebcdee390c93189fdccc67efa21f9efcd020dec9c7a0f1d37e0411aa01",
+      "runtime_version": "0.0.3.dev20261014172802",
+      "verification": {
+        "status": "failed",
+        "error_code": "antigravity_soft_denied",
+        "stop_reason": "soft_denied",
+        "provider_exit_code": 0,
+        "report_absent": true,
+        "source_clean_and_unchanged": true,
+        "process_records_cleared": true,
+        "preservation_verified": true,
+        "target_association_needs_fix": false,
+        "matched_write_target": "PROVIDER-RETEST.md",
+        "placeholder_ignored": true,
+        "browser_failure_reason_verified": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 4,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "97ad2eaf919ae92334cdb7fc48902bdbe3949aced635e1ceca5e2311bcdad7ca",
+        "bytes": 16743
+      },
+      "public_problem": {
+        "error_code": "antigravity_soft_denied",
+        "stop_reason": "soft_denied",
+        "exit_code": 0,
+        "attempt_number": 1
+      },
+      "expected_status": "failed",
+      "browser_screenshots": [
+        {
+          "name": "browser-live.png",
+          "sha256": "5a7a7d7c22e78a98815f796a7f0205dd1a32688e004f45fa47080b565cd33425",
+          "bytes": 113027
+        }
+      ]
+    },
+    {
+      "provider": "copilot",
+      "scenario": "copilot-success-current",
+      "platform": "Linux in Debian bookworm container on Windows WSL2",
+      "backend_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+      "versions": {
+        "copilot": "1.0.98",
+        "python": "3.12.15",
+        "node": "24.12.0"
+      },
+      "requested_model": "auto",
+      "permission_mode_override": null,
+      "run_id": "f920bb82-6067-4bd8-a3b9-d5d60821c52c",
+      "status": "succeeded",
+      "source_commit": "a3a67a66cec96644f41648f08939e4193ce5f4df",
+      "workflow_sha256": "5e1ede874f809caccdf3c527ed76bb9b18896c8a8ce057727492f035473a439f",
+      "runtime_version": "0.0.3.dev20261016012213",
+      "verification": {
+        "source_head_unchanged": true,
+        "source_clean": true,
+        "worktree_clean": true,
+        "job_commit_count": 1,
+        "ending_head": "c75485704624bdbab87355c6a4b022bae03f3949",
+        "report_sha256": "cf2030567d40659b0ae517bcecb8463ea2c47892d08b574e34075f0a937e9d15",
+        "report_bytes": 131,
+        "all_public_events_masked": true,
+        "manifests_refs_hashes_verified": true,
+        "provider_tool_exit_code": 3,
+        "unicode_and_markers_verified": true,
+        "retained_report_verified_after_worktree_cleanup": true
+      },
+      "cleanup": {
+        "worktree_removed": true,
+        "retained_downloads_verified": 8,
+        "all_bytes_and_sha256_match": true
+      },
+      "artifact_downloads": [
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "commits",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "name": "PROVIDER-RETEST.md",
+          "sha256": "cf2030567d40659b0ae517bcecb8463ea2c47892d08b574e34075f0a937e9d15",
+          "bytes": 131
+        },
+        {
+          "name": "report",
+          "sha256": "cf2030567d40659b0ae517bcecb8463ea2c47892d08b574e34075f0a937e9d15",
+          "bytes": 131
+        },
+        {
+          "name": "commits",
+          "sha256": "db54aa8b83eed5df4801f01165a8c2ab58c5d10ce7b1b40da9df1b984c7b2d9c",
+          "bytes": 41
+        },
+        {
+          "name": "worktree_diff",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ],
+      "public_events": {
+        "name": "events.json",
+        "sha256": "50e7d84f7d323ec8eafb20ace49b973473df55bfe42c9108b724603b7047e900",
+        "bytes": 55385
+      },
+      "expected_status": "succeeded"
+    }
+  ],
+  "linux_remaining": {
+    "codex": "Deferred at the owners explicit request. No Linux Codex certification is claimed.",
+    "claude": "Installed; account sign-in required.",
+    "cursor": "Installed; account sign-in required. The prior login link expired.",
+    "antigravity": "Installed; account sign-in required."
+  },
+  "native_denial_regressions": {
+    "baseline_checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+    "before": {
+      "name": "native-deny-before.log",
+      "sha256": "5ef85728d67f9269109a21229ee96057c0ce4ae8055603a2913b807d27755f8f",
+      "bytes": 37891
+    },
+    "baseline_failed": 6,
+    "baseline_passed": 1,
+    "after": {
+      "name": "native-deny-fixed.log",
+      "sha256": "e6bc4912ffb4c5b0fb727220981e60cc7b5a2c58fb65ce550b741b6d0e741711",
+      "bytes": 5486
+    },
+    "focused_adapter_passed": 34,
+    "cases_added": 7
+  },
+  "browser_regressions": {
+    "elicitation-before-confirmed.json": {
+      "report": {
+        "name": "elicitation-before-confirmed.json",
+        "sha256": "a4d4e6eeb560b865b4d2010b526f0e72673430c49c43346308be87d43480ccca",
+        "bytes": 6767
+      },
+      "stats": {
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      }
+    },
+    "elicitation-empty-before.json": {
+      "report": {
+        "name": "elicitation-empty-before.json",
+        "sha256": "10c0713f486430247d6c22f36c5fa6707888748c013eda037dbd7870bb323063",
+        "bytes": 9123
+      },
+      "stats": {
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      }
+    },
+    "elicitation-final-three.json": {
+      "report": {
+        "name": "elicitation-final-three.json",
+        "sha256": "0fa87996432fc47521a141ebdf3f5243806c43f003305ab1a10b9bc685f3e547",
+        "bytes": 5713
+      },
+      "stats": {
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "native-denial-ui-before-confirmed.json": {
+      "report": {
+        "name": "native-denial-ui-before-confirmed.json",
+        "sha256": "ac718dffbb2f0967bc21141c59a3bb2db74fb7fb9fe1e2b8dab661788be81f4f",
+        "bytes": 8193
+      },
+      "stats": {
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 1,
+        "flaky": 0
+      }
+    },
+    "native-denial-ui-fixed-final.json": {
+      "report": {
+        "name": "native-denial-ui-fixed-final.json",
+        "sha256": "cc7e7ee88852bbed8373c1c4532e1ba3df0070e653ccf6310bfcc42104ec900c",
+        "bytes": 8988
+      },
+      "stats": {
+        "expected": 6,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "authoring-diagnostic-repetition.json": {
+      "report": {
+        "name": "authoring-diagnostic-repetition.json",
+        "sha256": "b5cec00e55a105c2be521c26861303bbd0888b9af210f1417a335b10dd182cd7",
+        "bytes": 7930
+      },
+      "stats": {
+        "expected": 5,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "authoring-motion-fixed.json": {
+      "report": {
+        "name": "authoring-motion-fixed.json",
+        "sha256": "eb703d664e0b5086db777d0d83d28c6291aadb39f09344472adf8402e624ab86",
+        "bytes": 7934
+      },
+      "stats": {
+        "expected": 5,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  },
+  "initial_complete_browser_attempt": {
+    "checkpoint": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+    "functional_collected": 300,
+    "functional_passed": 299,
+    "functional_failed": 1,
+    "failure": "The workflow-authoring Steps tab remained unselected after a pointer click. The unchanged case passed five focused repeats. The test now waits for the drawer entrance and asserts selected tab state; five focused repeats passed.",
+    "failed_report": {
+      "name": "report.json",
+      "sha256": "70428c1a067e428a650c9fe1ba18766e77f2b511efe65aedf914327fb24f1330",
+      "bytes": 77083
+    },
+    "failed_trace": {
+      "name": "trace.zip",
+      "sha256": "a84b5066355015176dbf09a7a47241327c177d1c59eb0797e561558a14a4fbd9",
+      "bytes": 3355229
+    },
+    "no_retries_or_snapshot_updates": true
+  },
+  "native_python": {
+    "checkout": "9c6dc95d48e77f9e5a23847f6e84e8a09158ee4b",
+    "command": "uv run tox -e py314",
+    "workers": 3,
+    "collected": 2815,
+    "passed": 2783,
+    "skipped": 32,
+    "complete_inventory_verified": true,
+    "reports": [
+      {
+        "name": "inventory.json",
+        "sha256": "751c69f75989773efbca20f9e3ac9ba7012e214428304999c69ec67b69c4aab5",
+        "bytes": 472756
+      },
+      {
+        "name": "junit-serial.xml",
+        "sha256": "7520257f41362e217c1a7103254752d9e66e5a959348e2a5ca655a981ff101db",
+        "bytes": 22473
+      },
+      {
+        "name": "junit-parallel.xml",
+        "sha256": "f91f060ac1013e130b117cec011f6d10f6c8ee30b9a53cfb652592cfce80748f",
+        "bytes": 1147757
+      },
+      {
+        "name": "coverage.xml",
+        "sha256": "9d56bee84e2c4a11ed7583d099682dc76043c09c27bca5ddc2f7b9dd897b355e",
+        "bytes": 774331
+      },
+      {
+        "name": "coverage.json",
+        "sha256": "e2829e874cb9591ffac41db8eab6c7730cb22680e0f9396523be5f35915c47b9",
+        "bytes": 1451847
+      }
+    ],
+    "log": {
+      "name": "python-full-windows-9c6dc95.log",
+      "sha256": "dabe658e2be33aaf6c0c1bdeafda8367a6988ef7a366cbcb11a49f94ee921e1e",
+      "bytes": 924031
+    }
+  },
+  "hosted_checkpoint": {
+    "head": "8576a9a3fb7ede14b9454f61266109db0bcfbe91",
+    "merge_checkout": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+    "merge_parents": [
+      "b30310cf891e6077ca8c2da73b7612d47b8c7461",
+      "8576a9a3fb7ede14b9454f61266109db0bcfbe91"
+    ],
+    "run_url": "https://github.com/viseshrp/relay/actions/runs/38834535903",
+    "python_environments": [
+      {
+        "environment": "python-results-macos-latest-3.10",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2800,
+        "skip": 8
+      },
+      {
+        "environment": "python-results-macos-latest-3.11",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2800,
+        "skip": 8
+      },
+      {
+        "environment": "python-results-macos-latest-3.12",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2800,
+        "skip": 8
+      },
+      {
+        "environment": "python-results-macos-latest-3.13",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2800,
+        "skip": 8
+      },
+      {
+        "environment": "python-results-macos-latest-3.14",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2800,
+        "skip": 8
+      },
+      {
+        "environment": "python-results-ubuntu-latest-3.10",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2804,
+        "skip": 4
+      },
+      {
+        "environment": "python-results-ubuntu-latest-3.11",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2804,
+        "skip": 4
+      },
+      {
+        "environment": "python-results-ubuntu-latest-3.12",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2804,
+        "skip": 4
+      },
+      {
+        "environment": "python-results-ubuntu-latest-3.13",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2804,
+        "skip": 4
+      },
+      {
+        "environment": "python-results-ubuntu-latest-3.14",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2804,
+        "skip": 4
+      },
+      {
+        "environment": "python-results-windows-latest-3.10",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2798,
+        "skip": 10
+      },
+      {
+        "environment": "python-results-windows-latest-3.11",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2798,
+        "skip": 10
+      },
+      {
+        "environment": "python-results-windows-latest-3.12",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2798,
+        "skip": 10
+      },
+      {
+        "environment": "python-results-windows-latest-3.13",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2798,
+        "skip": 10
+      },
+      {
+        "environment": "python-results-windows-latest-3.14",
+        "checkout_sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+        "collected": 2808,
+        "pass": 2798,
+        "skip": 10
+      }
+    ],
+    "browser_summary": {
+      "sha": "a7c54d242e663b688ae6539ef00cb8c7cfd8f1d1",
+      "tests": 349,
+      "errors": []
+    },
+    "codecov_patch_and_project": "passed",
+    "all_check_results": "passed or deliberately skipped publication, release, and baseline-generation jobs"
+  },
+  "earlier_failures": [
+    {
+      "run_id": "6dfa1641-ddf0-493d-b61a-e1d220da06e3",
+      "checkpoint": "7f62800",
+      "observation": "Codex sandbox-created report was unreadable to Relay. Preservation failed before Artifact rows existed; cleanup then deleted the unpreserved report. Its original bytes were lost. The new cleanup guard and owner ACL fixes prevent these failures."
+    },
+    {
+      "run_id": "e93ea466-556b-400c-9485-10c89aef9dbe",
+      "observation": "Owner access was repaired, but native Node path resolution still failed. This run is not certified as a successful diagnostic."
+    },
+    {
+      "run_id": "584520da-99cc-453f-b05d-c55c33fcddc7",
+      "observation": "The live oneOf question rendered as a text field. Canceled to fix the choice renderer."
+    },
+    {
+      "run_id": "29b1f2b9-a58d-42a3-a004-e050632d7e6f",
+      "observation": "The first UI retest served stale checkout assets and expired. The verified retest explicitly published the new assets."
+    },
+    {
+      "run_id": "f7ba4780-39e8-4a6b-a227-8ba8c3f1a100",
+      "observation": "A real native denial exposed the erroneous placeholder target. The matching-target fix is verified by regressions and a fresh live run."
+    }
+  ],
+  "original_review_documents": {
+    "REVIEW.md": "f95e5dc1cac1f9499e5a5a3480d00769cc13a9907bf964d44477c9f836d7fd16",
+    "REVIEW_FIX_PROMPT.md": "69adcacd04763cff8380009981e0588ab6f6a582bcc903e1aea106128d8190c2",
+    "WALKTHROUGH.md": "79e838b496ac4b1b49a9d85f334fcf51c1afd3d7a9a1438fed30dfcea38f58f0"
+  },
+  "source_sha256": {
+    "relay/windows_security.py": "445345609ada476694a362a3976eeb8faffe3e564d13d2ab903239848808a6a0",
+    "relay/paths.py": "4812b0cc334ddac90fe49d7c93e0b4cd7ef73688948c392bed00379e15394032",
+    "relay/execution/resources.py": "4aef053b7039830f0947c2b3d8b5a8c3ce97b0afb5ebe603c0ccb7753b9e780a",
+    "relay/agents/antigravity_driver.py": "806dc5bb110f9c5e002f46bab760669004292be94bec84206a423dec216be73e",
+    "relay/agents/acp_driver.py": "e17a1c48c0158a208c370aab55272deffe481ee12c57eed1b3df46f75b53562c",
+    "relay/execution/action_commands.py": "2de225dc47918061b2e0aa2140c3e8cc1bf286fbb4a9cbc2f7417c9a2e914789",
+    "relay/execution/masking.py": "c1765913e719c25e038f6eed9cba6ae27e50c7f22662022cdc7cb007d924d5c4",
+    "relay/web/repositories.py": "615b33d3efb026269d4981d5ec0700dd64ef5c5910e332a84e75b8f08d7a1686",
+    "frontend/src/failure.ts": "fbdcfc1c42033d27cf0c645eeb514a74cf6223dba960370dd8fd09dc462f8a02",
+    "frontend/src/components/RunReviewShared.tsx": "966f44d6c6c39e990550a1f3509f3cb6045c22fdf88ea1c7bcc754ae871a48b9",
+    "frontend/src/components/useReviewRequest.tsx": "2e5a6a858deb1e9a563bc891f7868400b37d1777c58c23abe64935403bc70ed6",
+    "frontend/src/components/ReviewRequestView.tsx": "e9ceb24a87e1cfa7f67f59291f24e7d6d6a9c45033054a1b021ba9cd94c43767"
+  },
+  "packaging": {
+    "checkout": "3cffed5bcf95f0a07bd6b9050c0a625a5f722622",
+    "metadata_and_content_checks": "passed",
+    "archives": [
+      {
+        "name": "relay_app-0.0.3.dev20261016021921-py3-none-any.whl",
+        "sha256": "5413f8ce9289b3f6d0f0791303cb7d507c59a7785f4ac2a20f8469e15f341401",
+        "bytes": 8850625
+      },
+      {
+        "name": "relay_app-0.0.3.dev20261016021921.tar.gz",
+        "sha256": "e95ee42a6e2abb7dccd04ba2a223cec570365c7f02432923f6ee99c587135ea9",
+        "bytes": 5786278
+      }
+    ],
+    "installed_wheel_without_node": {
+      "verified": true,
+      "node_available": false,
+      "auth_status": 200,
+      "html_status": 200,
+      "asset_bytes": 146822,
+      "login_required": false,
+      "remaining_supervisor_leases": 0,
+      "clean_shutdown": true
+    },
+    "log": {
+      "name": "wheel-smoke-3cffed5.log",
+      "sha256": "2776fdc16987cae8f165f7fca38f36145999977813cbbbee168c4cc596477f25",
+      "bytes": 1662
+    }
+  }
+}

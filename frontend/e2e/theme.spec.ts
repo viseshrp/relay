@@ -137,6 +137,9 @@ test("browser theme-color meta tags honor active theme across OS and preference 
 });
 
 async function verifyInputContrast(page: Page): Promise<void> {
+  await expect(
+    page.locator(".MuiOutlinedInput-notchedOutline").first(),
+  ).toBeVisible();
   const contrastResults = await page.evaluate(() => {
     function parseRgb(color: string): [number, number, number] {
       const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);

@@ -16,18 +16,39 @@ import sys
 import tempfile
 from threading import Event, Thread
 from types import SimpleNamespace
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import uuid4
 
 import pytest
 
+if TYPE_CHECKING:
+    from tests.support import InlineEngine
+
 ThreadResult = TypeVar("ThreadResult")
 WORKFLOW = (
-    "name: Configuration\non: workflow_dispatch\njobs:\n"
-    "  work:\n    steps:\n"
-    "      - id: agent\n        uses: relay/agent@v1\n"
+    "name: Configuration\n"
+    "on: workflow_dispatch\n"
+    "jobs:\n"
+    "  work:\n"
+    "    steps:\n"
+    "      - id: agent\n"
+    "        uses: relay/agent@v1\n"
     '        with: {agents: \'["codex","claude"]\', model: m1}\n'
 )
+
+
+def advance_browser_runs(engine: InlineEngine) -> None:
+    """Schedule active fixture runs through the inline worker."""
+    from relay.web.models import Run
+
+    for run_id in (
+        Run.objects.filter(status__in=("running", "paused_wait"))
+        .exclude(run_branch__startswith="relay/ui-fixture/")
+        .values_list("id", flat=True)
+    ):
+        # A paused claim may already own an attempt and delivery intent. The
+        # production worker wakes it from events; the inline worker requeues it.
+        engine.advance(str(run_id))
 
 
 def serve(root: Path, port: int, *, login_required: bool = True) -> None:
@@ -62,7 +83,6 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     from relay.agents.driver import RoutedAgentNodeDriver
     from relay.errors import ConfigError
     from relay.execution.nodes import node_executors
-    from relay.execution.scheduler import dispatch_ready_nodes
     from relay.execution.state import EventSource
     from relay.manage import apply_migrations
     from relay.paths import artifacts_dir, settings_path
@@ -150,7 +170,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                 return JsonResponse(
                     {"message": "The preceding fixture has not stopped."}, status=503
                 )
-            clear_ui_fixtures()
+            clear_ui_fixtures(root)
             WorkflowControl.objects.all().delete()
             # The feedback scenario replaces Codex and the shared ACP mode.
             # Restore its configuration so later tests get the normal capabilities.
@@ -280,58 +300,6 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Add browser-test review material")
         return JsonResponse({"ok": True})
 
-    @api_errors
-    @owner_required
-    @require_POST
-    def historical_workflow(request: HttpRequest) -> JsonResponse:
-        """Seed old source only to exercise retained-run monitoring contracts."""
-        from relay.workflows.editor import _atomic_create
-        from relay.workflows.loader import load_workflow_text, resolve_workflow_path
-
-        body = json_body(request)
-        key, source = body.get("key"), body.get("yaml")
-        if not isinstance(key, str) or not isinstance(source, str):
-            message = "A historical fixture requires a key and YAML source."
-            raise ConfigError(message)
-        relay_root, _project = actions.current_project(request)
-        loaded = load_workflow_text(source)
-        if loaded.definition.actions:
-            message = "Use the public API for current workflow fixtures."
-            raise ConfigError(message)
-        path = resolve_workflow_path(relay_root / "workflows", key)
-        _atomic_create(path, source)
-        return JsonResponse({"key": path.name, "yaml": source}, status=201)
-
-    @api_errors
-    @owner_required
-    @require_POST
-    def historical_run(request: HttpRequest) -> JsonResponse:
-        """Capture a legacy snapshot through its internal compatibility service."""
-        from relay.execution.launch import LaunchRequest, launch_workflow
-        from relay.owner_settings import effective_config
-        from relay.web.settings_repository import DjangoSettingsStore
-
-        body = json_body(request)
-        relay_root, selected = actions.current_project(request)
-        config = effective_config(DjangoSettingsStore(), selected.id)
-        result = launch_workflow(
-            engine.store,
-            relay_root,
-            selected.id,
-            LaunchRequest(
-                workflow_key=body["workflow_key"],
-                inputs=body.get("inputs", {}),
-                model=body.get("model"),
-                cleanup_policy=body.get("cleanup_policy", config.cleanup_policy),
-                entry_point=body.get("entry_point"),
-                owner_agents=config.agent_preferences,
-                launcher="owner",
-                defaults=config.workflow_defaults,
-            ),
-            engine.tokens.append,
-        )
-        return JsonResponse({"run_id": result.run_id}, status=201)
-
     @owner_required
     @require_POST
     def feedback_provider(request: HttpRequest) -> JsonResponse:
@@ -342,8 +310,19 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @owner_required
     @require_POST
     def elicitation_provider(request: HttpRequest) -> JsonResponse:
-        del request
-        providers.install("codex", mode="elicitation")
+        body = json_body(request)
+        choice_format = body.get("choices")
+        modes = {
+            "oneOf": "elicitation-choices",
+            "enum": "elicitation-enum",
+            "empty": "elicitation-empty-choice",
+        }
+        mode = (
+            modes.get(choice_format, "elicitation")
+            if isinstance(choice_format, str)
+            else "elicitation"
+        )
+        providers.install("codex", mode=mode)
         return JsonResponse({"ok": True})
 
     @owner_required
@@ -356,12 +335,31 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @api_errors
     @owner_required
     @require_POST
+    def native_result_provider(request: HttpRequest) -> JsonResponse:
+        body = json_body(request)
+        modes = {"failure": "interrupted", "success-with-denied-tool": "headless-denied-write"}
+        mode = body.get("mode")
+        if not isinstance(mode, str) or mode not in modes:
+            message = "Choose a supported native provider result fixture."
+            raise ConfigError(message)
+        providers.install("antigravity", mode=modes[mode])
+        return JsonResponse({"ok": True})
+
+    @api_errors
+    @owner_required
+    @require_POST
     def activity(request: HttpRequest) -> JsonResponse:
         body = json_body(request)
         run_id, scope, event_type, payload = (
             body.get(field) for field in ("run_id", "scope", "type", "payload")
         )
-        allowed = {"agent.message", "agent.thought", "agent.tool_call", "agent.tool_result"}
+        allowed = {
+            "agent.message",
+            "agent.thought",
+            "agent.tool_call",
+            "agent.tool_result",
+            "node.display_name_changed",
+        }
         if (
             not isinstance(run_id, str)
             or not isinstance(scope, str)
@@ -379,9 +377,18 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         if attempt is None:
             message = "The browser-test job has no attempt."
             raise ConfigError(message)
-        DjangoExecutionStore().append_attempt_event(
-            str(attempt.pk), event_type, EventSource.AGENT, payload
-        )
+        if event_type == "node.display_name_changed":
+            from relay.web.actions_repository import display_name
+
+            value = payload.get("display_name")
+            if not isinstance(value, str):
+                message = "The browser-test display name is invalid."
+                raise ConfigError(message)
+            display_name(str(attempt.pk), value)
+        else:
+            DjangoExecutionStore().append_attempt_event(
+                str(attempt.pk), event_type, EventSource.AGENT, payload
+            )
         return JsonResponse({"ok": True})
 
     @api_errors
@@ -402,11 +409,10 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/resource-remnant", resource_remnant))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
-    urlpatterns.insert(0, path("__test__/historical-workflows", historical_workflow))
-    urlpatterns.insert(0, path("__test__/historical-runs", historical_run))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
+    urlpatterns.insert(0, path("__test__/native-result-provider", native_result_provider))
     urlpatterns.insert(0, path("__test__/activity", activity))
 
     # Close each SDK callback's database connection in its owning thread.
@@ -442,12 +448,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                     continue
                 if engine.tokens:
                     engine.run_token(engine.tokens.popleft())
-                for run_id in (
-                    Run.objects.filter(status="running")
-                    .exclude(run_branch__startswith="relay/ui-fixture/")
-                    .values_list("id", flat=True)
-                ):
-                    dispatch_ready_nodes(engine.store, str(run_id), engine.tokens.append)
+                advance_browser_runs(engine)
         finally:
             connections.close_all()
 

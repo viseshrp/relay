@@ -51,35 +51,39 @@ non-roaming Windows storage. Default roots are:
 | Windows | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay` | `%LOCALAPPDATA%\relay\Logs` |
 
 Relay creates these directories only when needed. POSIX directories use mode
-`0700`. Windows uses the account's inherited ACLs; review that directory's ACL
-if other local accounts can access the profile.
+`0700`. Windows directories inherit the account's profile permissions; the
+default `%LOCALAPPDATA%` location is limited to that account. Relay changes no
+Windows permissions. Providers own their sandbox's file permissions. If a
+sandbox creates a file Relay's account cannot read, the job commit or evidence
+preservation fails with that error and the worktree is retained. Fix access in
+the provider's sandbox settings.
 
 The config root contains `settings.json` and `prompts/`. The data root contains
-`relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and `registry-cache/`.
-It also contains `supervisor.lock` and `supervisor-processes.json`, the kernel
-lease and atomic process ownership record used for
-[restart after a lost supervisor](execution.md#restart-after-a-lost-supervisor).
-Snapshots are database rows. Each process that emits a diagnostic, including
-a CLI command, writes a rotating `relay-{pid}.log` with up to three backups
-of 5 MB each. Quiet commands create no empty log file. Every log file Relay
-creates starts with the line `Relay process log`, and a rotation keeps that
-line. Retention and data cleanup change only `relay-{pid}.log` files and
-rotations that start with it, so other files in the same directory are never
-removed or emptied. Logging setup removes stopped-process files that hold only
-that line and retains the three most recent stopped-process log sets that have
-records, including their rotations. Files for live or unverifiable PIDs are
-retained; a reused PID can therefore keep an older set until that process
-exits. Files without the line, such as the former shared `relay.log` or logs
-from earlier builds, are left for manual cleanup. The
-[2026-10-03 Windows CI run](https://github.com/viseshrp/relay/actions/runs/37129432298)
-verified retention with a live process, a stopped process, and foreign files
-on Python 3.10 through 3.14.
-A `RELAY_LOG_PATH=/path/custom.log` override produces
-`/path/custom-{pid}.log` and its rotations. A shared override directory is
-safe because Relay changes only the files it marked. Separate files prevent
-concurrent processes from rotating the same open file. Diagnostic context
-such as run, attempt, path, and cursor appears as escaped JSON alongside the
-message and exception trace.
+`relay.db`, `huey.db`, `artifacts/`, `worktrees/`, `resources/`, and
+`registry-cache/`. It also contains `supervisor.lock` and
+`supervisor-processes.json`, the kernel lease and atomic process ownership
+record used for [restart after a lost
+supervisor](execution.md#restart-after-a-lost-supervisor). Snapshots are
+database rows. Each process that emits a diagnostic, including a CLI command,
+writes a rotating `relay-{pid}.log` with up to three backups of 5 MB each. Quiet
+commands create no empty log file. Every log file Relay creates starts with the
+line `Relay process log`, and a rotation keeps that line. Retention and data
+cleanup change only `relay-{pid}.log` files and rotations that start with it, so
+other files in the same directory are never removed or emptied. Logging setup
+removes stopped-process files that hold only that line and retains the three
+most recent stopped-process log sets that have records, including their
+rotations. Files for live or unverifiable PIDs are retained; a reused PID can
+therefore keep an older set until that process exits. Files without the line,
+such as the former shared `relay.log` or logs from earlier builds, are left for
+manual cleanup. The [2026-10-03 Windows CI
+run](https://github.com/viseshrp/relay/actions/runs/37129432298) verified
+retention with a live process, a stopped process, and foreign files on Python
+3.10 through 3.14. A `RELAY_LOG_PATH=/path/custom.log` override produces
+`/path/custom-{pid}.log` and its rotations. A shared override directory is safe
+because Relay changes only the files it marked. Separate files prevent
+concurrent processes from rotating the same open file. Diagnostic context such
+as run, attempt, path, and cursor appears as escaped JSON alongside the message
+and exception trace.
 
 ## Owner settings
 
@@ -95,9 +99,10 @@ For example, this file opens the loopback app without owner credentials:
 
 `login_required` must be a JSON boolean and defaults to `true`. Restart Relay
 after changing it. An explicit `relay up --login` or `relay up --no-login`
-overrides the saved value for that process. Disabling login preserves the
-owner account and all run data. See [Open without a login](web-ui.md#open-without-a-login)
-for the access boundary and browser protections.
+overrides the saved value for that process. Disabling login preserves the owner
+account and all run data. See [Open without a
+login](web-ui.md#open-without-a-login) for the access boundary and browser
+protections.
 
 The supervisor passes its resolved choice to both children through
 `RELAY_LOGIN_REQUIRED=true` or `RELAY_LOGIN_REQUIRED=false`. Direct ASGI
@@ -109,18 +114,19 @@ the web settings read `login_required` from the saved file.
 `relay.db` is the durable source for projects, drafts, editor leases, runs,
 snapshots, scoped nodes, attempts, dispatch claims, events, artifacts,
 interactions, control requests, agent observations, and run locks. SQLite uses
-foreign keys, WAL mode, FULL durability, and a 15-second busy timeout. Writes use
-`IMMEDIATE` mode to reserve the write lock before reading. Competing writers
+foreign keys, WAL mode, FULL durability, and a 15-second busy timeout. Writes
+use `IMMEDIATE` mode to reserve the write lock before reading. Competing writers
 wait for that reservation for up to 15 seconds; contention beyond that limit
 becomes a Relay persistence error. Transactions contain short database changes;
-Git subprocesses, network requests, and worktree cleanup run outside them.
-This follows [Django's SQLite transaction guidance](https://docs.djangoproject.com/en/5.2/ref/databases/#transactions-behavior).
+Git subprocesses, network requests, and worktree cleanup run outside them. This
+follows [Django's SQLite transaction
+guidance](https://docs.djangoproject.com/en/5.2/ref/databases/#transactions-behavior).
 The default Django connection applies WAL, FULL durability, foreign keys, and
 the busy timeout. Dashboard, attention, job, and monitor reads use a separate
-`snapshot` connection to the same database. Its deferred, query-only
-transaction reads one consistent WAL snapshot without reserving the writer.
-Read results are materialized before leaving the snapshot. Model writes and
-explicit default-connection access are rejected inside that context.
+`snapshot` connection to the same database. Its deferred, query-only transaction
+reads one consistent WAL snapshot without reserving the writer. Read results are
+materialized before leaving the snapshot. Model writes and explicit
+default-connection access are rejected inside that context.
 
 The installation's Django secret key is written and flushed in a temporary
 file, then published through an atomic link that cannot overwrite another
@@ -182,8 +188,9 @@ marker naming its run, attempt, and random token. The child environment points
 A tool that starts a disposable browser should use that profile directory;
 Relay never redirects or deletes the owner's personal browser profile.
 
-Completion removes only the allocation Relay created. Terminal-run cleanup
-also removes marked allocations for ended attempts and can be retried from
+Completion removes only allocations Relay created. Failed runs retain private
+job state needed for a retry; successful completion removes it. Explicit
+terminal-run cleanup removes marked allocations and can be retried from
 **Settings > Storage** by selecting a completed run and confirming. The browser
 loads only the selected project's succeeded, failed, and canceled runs, with
 bounded pages for older runs. A replaced directory, symlinked marker, wrong run,
@@ -193,13 +200,14 @@ record deletion. Worktrees, retained evidence, provider credentials, and other
 Relay runs use separate storage and remain outside temporary cleanup.
 
 On POSIX, each command or agent runs in a new process group; Relay stops its
-remaining descendants when the lifecycle ends. On Windows, a launcher joins
-an unnamed Job Object before creating the target. Its non-inheritable job
-handle uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so surviving descendants stop
-when the launcher exits. Cleanup never scans personal browser processes. A PID
-saved by an earlier instance authorizes a stop only when its recorded OS
-creation identity still matches; unverified older PIDs are left alone. See Microsoft's
-[Job Objects documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+remaining descendants when the lifecycle ends. On Windows, a launcher joins an
+unnamed Job Object before creating the target. Its non-inheritable job handle
+uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so surviving descendants stop when
+the launcher exits. Cleanup never scans personal browser processes. A PID saved
+by an earlier instance authorizes a stop only when its recorded OS creation
+identity still matches; unverified older PIDs are left alone. See Microsoft's
+[Job Objects
+documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 
 Files created outside the supplied temporary and profile folders remain
 outside Relay's ownership. Cleanup failures are logged and reported as run
@@ -217,10 +225,8 @@ tables, independent of operating-system registries and MIME files.
 ## Retention and deletion
 
 Run history remains until the owner confirms deletion. Each project keeps a
-monotonic run counter. Deleting history never reuses a run number. Existing
-runs receive numbers in snapshot creation order during migration; subsequent
-runs keep their assigned number. Project rows are
-protected while runs reference them. Deleting a run may cascade only through
+monotonic run counter. Deleting history never reuses a run number. Project rows
+are protected while runs reference them. Deleting a run may cascade only through
 that run's owned snapshot, nodes, attempts, events, interactions, controls,
 and artifact metadata.
 
@@ -260,52 +266,48 @@ The complete settings inventory is:
 | Setting | Global control | Project or workflow override | Applies |
 | --- | --- | --- | --- |
 | Ordered agents | Default agent order | Project order; workflow and job `agents` come first | New launches |
-| Exact model | Shared default model and one model per agent | Project model; workflow `model`; run override; job `model` | New launches |
-| Thinking effort | Each agent's Thinking effort | Project agent defaults; job `agent_options.<id>.effort` | Matching exact model |
-| Agent permissions | Each agent's What the agent may do | Project agent defaults; job `permission_profile` or `agent_options.<id>.permission_mode` | Matching exact model |
-| Job timeout | Job timeout, such as `15m` | Project timeout; agent or command `timeout` | New launches |
-| Shared commands | Named program and argument lists | Project command map; job `run: {command: name}` selects one, or declares its own argument list | New command jobs |
-| Environment variables | Variable names and string values | Project variable map; workflow `env`; command job `env`; workflow/job `inherit_env` opt-out | New command jobs |
-| Automatic retry participation | Allow automatic retries for jobs | Project default; job `auto_retry` | New launches |
+| Exact model | Shared default model and one model per agent | Project model; run override; agent action `with.model` | New launches |
+| Thinking effort | Each agent's Thinking effort | Project agent defaults; agent action `with.effort` | Matching exact model |
+| Agent permissions | Each agent's What the agent may do | Project agent defaults and explicit owner retry choices | Matching exact model |
+| Job timeout | Job timeout, such as `15m` | Project timeout; job or step `timeout-minutes` | New launches |
+| Shared commands | Named program and argument lists | Project command map; command action `with.command` or `with.argv` | New command jobs |
+| Environment variables | Variable names and string values | Project variable map; workflow, job, and step `env` | New command jobs |
+| Automatic retry participation | Allow automatic retries for jobs | Project default; agent action `with.auto-retry` | New launches |
 | Automatic recovery | Enabled and maximum retries, 1 or 2 | Project policy; explicit workflow `recovery` fields | New launches |
 | Working-copy cleanup | After a successful run | Project policy; run launch `cleanup_policy` | New launches |
 | Merge successful run commits | Off | Project policy; run launch `cleanup_policy: merge_on_success` | New launches |
-| Repair rounds | Defaults for new repair rules, 1 through 100 | Project default; saved rule `max_rounds` | New editor rules |
-| Repair instructions | Fixer and verifier instructions | Project default; saved rule instructions | New editor rules |
 | Login requirement | Server and account | Explicit `relay up --login / --no-login` | Restart required |
 | Loopback address | Server and account | Explicit `relay up --host` | Restart required |
 | Port | Server and account, 1 through 65535 | Explicit `relay up --port` | Restart required |
-| Worker count | One execution worker | Legacy settings and flags warn and use one | New API values above one rejected |
 | Desktop notifications | Notifications | Browser permission and this browser's preference | Immediately |
 | Welcome slides and guided tour | Welcome and guided tour provides replay and reset | This browser and installation address; no project override | Reset applies on next opening |
 | Storage locations | Storage shows config, data, logs, and shared instructions | Existing platform/environment path adapters | Read-only in the page |
 | Local account | Server and account shows the current account and active login policy | Existing onboarding and sign-in | Read-only in the page |
 | Retained data deletion | Storage shows project counts, sizes, and deletion categories | Explicit confirmed project cleanup | On confirmation |
 
-Models resolve in this order: job, explicit run override, workflow, shared
+Models resolve in this order: agent action, explicit run override, workflow
+agent defaults, shared
 project/global model. If none supplies a model, Relay uses the configured model
 of the first agent in the effective agent order. It then requires fresh proof
 of that same exact value through the existing routing service. It never tries
 another agent's different default model to make a failed launch succeed.
 
-Per-agent effort and permissions inherit only when that agent's configured
-model equals the resolved exact model. An explicit job option takes precedence;
-an explicit `null` leaves that provider option unset even when a global value
-exists. An explicit `permission_profile` also prevents a global permission mode
-from replacing it. Changing an agent's model in Settings clears its saved
+Per-agent effort and permissions inherit only when that agent's configured model
+equals the resolved exact model. An explicit agent action option takes
+precedence; an explicit `null` leaves that provider option unset even when a
+global value exists. Changing an agent's model in Settings clears its saved
 options. Unsupported saved choices remain errors at launch.
 
 A project model change also clears inherited effort and permissions from the
 global model. Explicit project options for the new model still take precedence.
 
-Recovery fields inherit individually; `recovery: {enabled: false}` disables
-an inherited policy. Agent and command jobs without a declared timeout inherit
-the saved timeout; `timeout: null` explicitly opts out. Human waits and
-structural deadlines remain workflow decisions. Native agent ceilings still
-apply when the inherited timeout is absent.
+Recovery fields inherit individually; `recovery: {enabled: false}` disables an
+inherited policy. Jobs without `timeout-minutes` inherit the saved timeout.
+Human waits and explicit step deadlines remain workflow decisions. Native agent
+ceilings still apply when the inherited timeout is absent.
 
 Shared commands are named argument lists, such as `test: [python, -m, pytest]`.
-A command job selects one explicitly with `run: {command: test}`. Existing
+A `relay/command@v1` step selects one with `with: {command: test}`. Explicit
 argument lists remain explicit and do not inherit a different command.
 Missing names stop launch before a run is created. Programs and arguments
 remain separate; Relay does not expand shell syntax or environment variables
@@ -317,21 +319,16 @@ can edit or remove entries. An empty map removes all entries for that project.
 Turning the override off restores the current global map.
 
 Command variables resolve in this order, with later values winning: global
-or replacement project `env`, workflow `env`, then job `env`. They are merged
-over the existing worker and resource environment when the process starts.
-Workflow `inherit_env: false` skips global/project variables. Job
-`inherit_env: false` skips both those variables and workflow variables; its
-own `env` still applies over the worker environment. Loop jobs and command
-repair roles use their containing workflow's variables. Child workflows use
-their own workflow variables, plus project/global defaults, rather than the
-parent workflow's variables. These defaults do not configure agent processes.
+or replacement project `env`, workflow `env`, job `env`, then step `env`.
+They are merged over the owned process environment. Reusable workflows use
+their captured variables and explicitly passed inputs.
 
-Launch snapshots capture resolved arguments and variables, including child
-jobs and repair roles. Later settings edits affect future runs. Variable
-values are stored in local settings and captured run data. Ordinary variables
-do not automatically register output masks; use a declared secret binding
-for sensitive values. Names must be nonempty and contain neither `=` nor a
-NUL character. Values must be strings without NUL characters.
+Launch snapshots capture workflow sources, resolved owner defaults, arguments,
+and variable definitions. Later settings edits affect future runs. Values are
+stored in local settings and captured run data. Ordinary variables do not
+register output masks; use a declared secret binding for sensitive values.
+Names must be nonempty and contain neither `=` nor a NUL character. Values
+must be strings without NUL characters.
 
 For example, this global file sets Codex first, keeps successful working
 copies, and supplies a model and timeout for workflows that omit them:
@@ -357,13 +354,14 @@ newer bytes. Project saves use the same conflict behavior in a database
 transaction. Login and server saves change only the next startup; current
 access, accounts, and run data remain intact.
 
-Dependency order, conditions, input defaults,
-output contracts, instructions, write access, no-op permission, approval
-questions/deadlines, loop bounds, subworkflow mappings, repair verdicts, and
-entry-point evidence remain explicit workflow choices. They define the task or
-its safety boundary and are not injected into every project. Provider login,
-credentials, installation, resource bounds, and process ownership stay with
-their existing adapters. `--no-browser` remains a startup-only CLI choice.
+Dependency order, conditions, input defaults, report contracts, instructions,
+approval questions and deadlines, loop bounds, reusable workflow mappings,
+verification outputs, and entry-point evidence remain explicit workflow choices.
+They define the task or its safety boundary and are not injected into every
+project. Provider login, credentials, and installation belong to the provider
+and owner. Relay's adapters own run-resource bounds and process ownership.
+`--no-browser` remains a
+startup-only CLI choice.
 
 **Settings › Storage** replaces project-wide cleanup on run pages. It counts
 retained reports from database metadata and measures working-copy files without

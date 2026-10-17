@@ -12,7 +12,9 @@ import pytest
 from relay.constants import API_MAX_PAGE_BYTES
 from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoReadStore
+from relay.workflows.schema import ActionsJobNode
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
+from tests.support import InlineEngine, RelayProject
 from tests.test_web_api import client as client
 from tests.test_web_api import finished_run as finished_run
 from tests.test_web_api import owner as owner
@@ -43,6 +45,33 @@ def test_output_advances_the_event_cursor_without_invalidating_state(
     state = RunEvent.objects.create(run_id=finished_run, type="run.rerun", source="run", payload={})
     third = owner.get(f"/api/runs/{finished_run}/monitor").json()
     assert third["state_cursor"] == state.pk
+
+
+def test_resolved_action_names_advance_monitor_state_once(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    from relay.web.actions_repository import display_name
+
+    served.write_workflow(
+        "names", "jobs:\n  main:\n    steps:\n      - run: print('ready')\n        shell: python\n"
+    )
+    run_id = engine.launch(served, "names")
+    engine.drain(run_id)
+    attempt = NodeAttempt.objects.get(
+        node_run__run_id=run_id, node_run__scope_path="root.main.step_1"
+    )
+    first = owner.get(f"/api/runs/{run_id}/monitor").json()
+
+    display_name(str(attempt.pk), "Check Windows output")
+
+    updated = owner.get(f"/api/runs/{run_id}/monitor").json()
+    assert updated["state_cursor"] > first["state_cursor"]
+    step = next(row for row in updated["nodes"] if row["scope_path"] == "root.main.step_1")
+    assert step["display_name"] == "Check Windows output"
+    display_name(str(attempt.pk), "Check Windows output")
+    assert (
+        owner.get(f"/api/runs/{run_id}/monitor").json()["state_cursor"] == updated["state_cursor"]
+    )
 
 
 def test_monitor_returns_one_consistent_snapshot(
@@ -128,8 +157,10 @@ def test_monitor_pages_all_nodes_beyond_a_thousand(owner: Client, finished_run: 
                 run_id=finished_run,
                 scope_path=f"root.extra_{index}",
                 node_id=f"extra_{index}",
-                node_type="command",
-                frozen_def={"type": "command", "run": ["echo", "ok"]},
+                node_type="actions_job",
+                frozen_def=ActionsJobNode(
+                    job_id=f"extra_{index}", job={"steps": [{"run": "echo ok"}]}, workflow={}
+                ).model_dump(mode="json"),
             )
             for index in range(1005)
         ]
@@ -148,13 +179,13 @@ def test_monitor_pages_all_nodes_beyond_a_thousand(owner: Client, finished_run: 
             break
         assert value["nodes_next"] > cursor
         cursor = value["nodes_next"]
-    assert len(set(ids)) == len(ids) == 1006
+    assert len(set(ids)) == len(ids) == 1007
 
 
 def test_job_pages_include_metadata_in_the_byte_budget_and_continue_beyond_a_thousand(
     owner: Client, finished_run: str
 ) -> None:
-    node = NodeRun.objects.get(run_id=finished_run)
+    node = NodeRun.objects.get(run_id=finished_run, node_type="actions_job")
     head = NodeAttempt.objects.get(node_run=node).starting_head
     attempts = NodeAttempt.objects.bulk_create(
         [

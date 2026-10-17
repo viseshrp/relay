@@ -1,10 +1,8 @@
 import { expect, test } from "./a11y-test";
 import { post } from "./setup-helpers";
-import type { ArtifactRecord, RunNode } from "../src/types";
+import type { ArtifactRecord } from "../src/types";
 
-test("one repair round and one artifact byte use singular labels", async ({
-  page,
-}) => {
+test("one artifact byte uses a singular label", async ({ page }) => {
   await page.request.get("/api/auth");
   expect(
     (
@@ -18,35 +16,6 @@ test("one repair round and one artifact byte use singular labels", async ({
   const response = await post(page, "/__test__/worst-case", { enabled: false });
   expect(response.ok()).toBeTruthy();
   const fixture: { project: string; run: string } = await response.json();
-  const repair: RunNode = {
-    id: "single-round",
-    scope_path: "root.hidden",
-    node_id: "hidden",
-    node_type: "loop",
-    status: "pending",
-    writes: false,
-    selected_branch: null,
-    loop_index: null,
-    parent_scope: null,
-    dependencies: [],
-    controls: [],
-    repair_for: "root.build",
-    repair_settings: {
-      legacy: false,
-      max_rounds: 1,
-      accepted_output: "ready",
-      accepted_value: "Yes",
-      fix_instruction: "fix",
-      verify_instruction: "verify",
-      roles: {},
-    },
-  };
-  await page.route(`**/api/runs/${fixture.run}/monitor?*`, async (route) => {
-    const response = await route.fetch();
-    const body: { nodes: RunNode[] } = await response.json();
-    body.nodes.push(repair);
-    await route.fulfill({ response, json: body });
-  });
   await page.route(`**/api/runs/${fixture.run}/artifacts?*`, async (route) => {
     const response = await route.fetch();
     const body: { artifacts: ArtifactRecord[] } = await response.json();
@@ -68,7 +37,5 @@ test("one repair round and one artifact byte use singular labels", async ({
     await route.fulfill({ response, json: body });
   });
   await page.goto(`/?view=runs&project=${fixture.project}&run=${fixture.run}`);
-  await page.getByRole("button", { name: /^Repairs ·/ }).click();
-  await expect(page.getByText(/^Up to 1 round ·/)).toBeVisible();
   await expect(page.locator('#run-artifacts [title="1 byte"]')).toHaveCount(1);
 });

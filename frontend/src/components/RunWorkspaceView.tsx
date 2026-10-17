@@ -108,7 +108,7 @@ export function RunWorkspaceView({ state }: { state: RunWorkspaceState }) {
           modelOptions={runAgain.models}
           previousRun={runAgain.source}
           blockedReason={
-            Object.keys(runAgain.workflow.nodes).length === 0
+            runAgain.workflow.jobs.length === 0
               ? "Add a job to this empty workflow before running it."
               : null
           }

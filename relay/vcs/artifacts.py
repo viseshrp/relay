@@ -191,7 +191,13 @@ def _preserve_declared(
 ) -> list[PreservedArtifact]:
     records = []
     for name, reference in declared.items():
-        safe_name = _component(name, "artifact name")
+        # Actions subjects such as "subject:report.txt" are logical names.
+        # Hash them for storage so the colon and Unicode stay out of filenames.
+        safe_name = (
+            "subject-" + sha256(name.encode("utf-8")).hexdigest()
+            if name.startswith("subject:")
+            else _component(name, "artifact name")
+        )
         try:
             source = safe_resolve(worktree, reference)
         except PathSafetyError:
@@ -449,7 +455,7 @@ def validate_attempt_evidence(
 def preserve_recovery_reports(
     worktree: Path, run_id: str, attempt_id: str, filenames: tuple[str, ...]
 ) -> tuple[PreservedArtifact, ...]:
-    """Supplement older evidence without replacing its ref or manifest."""
+    """Retain rejected reports without replacing the attempt's ref or manifest."""
     target = (
         artifacts_dir(create=True)
         / _component(run_id, "run id")

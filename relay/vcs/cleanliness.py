@@ -66,8 +66,8 @@ def execution_status(
     documents = {(prefix / name).as_posix() for name in WORKFLOW_DOCUMENT_NAMES}
     initial_files = (
         {
-            # Native Windows initialization writes "version: 1\n" as
-            # b"version: 1\r\n". Either complete starter encoding is unchanged.
+            # Native Windows text writes can convert LF to CRLF. Both complete
+            # starter encodings preserve the same initial workflow bytes.
             (prefix / ".relay" / relative).as_posix(): (
                 text.encode("utf-8"),
                 text.replace("\n", "\r\n").encode("utf-8"),

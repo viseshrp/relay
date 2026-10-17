@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import os
 from pathlib import Path
 import re
+import stat
 
 from relay.errors import PathSafetyError, WorkflowValidationError
 
@@ -92,7 +93,9 @@ def select_paths(root: Path, patterns: Sequence[str], *, files_only: bool = Fals
                 raise WorkflowValidationError(message)
             path = Path(directory) / name
             relative = path.relative_to(root).as_posix()
-            if path.is_symlink() or (bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)):
+            if path.is_symlink() or bool(
+                getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ):
                 if matches(relative, normalized, file_glob=True):
                     message = "File selection includes a symbolic link."
                     raise PathSafetyError(message)

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "./a11y-test";
 import { parse } from "yaml";
-import { closeJobSettings } from "./setup-helpers";
+import { closeJobSettings, expectRunStatus } from "./setup-helpers";
 
 async function post(page: Page, path: string, body: object = {}) {
   const cookie = (await page.context().cookies()).find(
@@ -56,12 +56,7 @@ async function launch(page: Page) {
   const response = await created;
   expect(response.status()).toBe(201);
   const { run_id: runId } = await response.json();
-  await expect
-    .poll(async () => {
-      const detail = await page.request.get(`/api/runs/${runId}`);
-      return (await detail.json()).run.status;
-    })
-    .toBe("succeeded");
+  await expectRunStatus(page, runId, "succeeded");
   const events = await page.request.get(`/api/runs/${runId}/events`);
   return (await events.json()).events;
 }

@@ -26,9 +26,8 @@ import type {
   RetryConfiguration,
   RetryOptions,
 } from "../types";
-import { repairOwnership, visibleRunStages } from "../graph";
 import { projectPath } from "../navigation";
-import { parseWorkflow, type WorkflowValue } from "../workflow";
+import type { LaunchWorkflow } from "../workflow";
 import { launchView, parseActions } from "../actions-workflow";
 
 import { attentionChanged } from "../attention";
@@ -120,7 +119,7 @@ export function useRunWorkspace({
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [runAgain, setRunAgain] = useState<{
     source: PreviousRunInputs;
-    workflow: WorkflowValue;
+    workflow: LaunchWorkflow;
     models: string[];
     open: boolean;
   } | null>(null);
@@ -605,11 +604,6 @@ export function useRunWorkspace({
         ),
       ]);
       if (controller.signal.aborted) return;
-      const parsed = parseWorkflow(document.yaml);
-      if (parsed.value === null)
-        throw new Error(
-          `Fix the saved workflow's YAML before running it again. ${parsed.errors.join(" ")}`,
-        );
       const actions = parseActions(document.yaml);
       if (!actions.value)
         throw new Error(
@@ -729,28 +723,7 @@ export function useRunWorkspace({
     () => runSummaryGraph(detail?.nodes ?? [], now),
     [detail?.nodes, now],
   );
-  const visibleStages = useMemo(
-    () => visibleRunStages(runJobs(detail?.nodes ?? [])),
-    [detail],
-  );
-  const repairOwners = useMemo(
-    () => repairOwnership(detail?.nodes ?? []),
-    [detail],
-  );
-  const repairGroups =
-    detail?.nodes.filter((node) => node.repair_for && node.repair_settings) ??
-    [];
-  const repairChildren = useMemo(() => {
-    const groups = new Map<string, RunNode[]>();
-    for (const node of detail?.nodes ?? []) {
-      const owner = repairOwners.get(node.scope_path);
-      if (!owner || node.repair_settings) continue;
-      const group = groups.get(owner) ?? [];
-      group.push(node);
-      groups.set(owner, group);
-    }
-    return groups;
-  }, [detail, repairOwners]);
+  const visibleStages = useMemo(() => runJobs(detail?.nodes ?? []), [detail]);
   const pendingInteractions = Array.from(
     new Map(
       [
@@ -764,9 +737,7 @@ export function useRunWorkspace({
     ).values(),
   );
   const currentStages = visibleStages.filter((node) =>
-    ["waiting", "running", "failed", "repairing", "repair_stopped"].includes(
-      node.status,
-    ),
+    ["waiting", "running", "failed"].includes(node.status),
   );
   const focusStage =
     selectedStage ??
@@ -858,7 +829,6 @@ export function useRunWorkspace({
     setLocalFilters,
     onSelectWorkflow,
     selectedJob,
-    repairOwners,
     nodeCursor,
     showStep,
     onSelectJob,
@@ -889,8 +859,6 @@ export function useRunWorkspace({
     recovery,
     artifactCursor,
     loadMoreArtifacts,
-    repairGroups,
-    repairChildren,
     eventCursor,
     loadEvents,
     streamState,

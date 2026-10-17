@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from relay.errors import ArtifactPreservationError
+from relay.execution.action_files import declared_subjects
 from relay.vcs.artifacts import (
     PreservationResult,
     preserve_attempt_evidence,
@@ -55,6 +56,25 @@ def test_unchanged_archived_bytes_and_partial_commit_pass_validation(
         archived_attempt.repository, "rev-parse", archived_attempt.evidence.retained_ref
     ) == (archived_attempt.evidence.ending_head)
     assert (archived_attempt.repository / "unfinished.txt").read_bytes() == PARTIAL_BYTES
+
+
+@pytest.mark.parametrize("filename", ["report.txt", "résumé 雪.txt"], ids=["ascii", "unicode"])
+def test_actions_subject_names_are_retained_in_portable_files(
+    tmp_path: Path, filename: str
+) -> None:
+    repository = init_repository(tmp_path / "subject-repository")
+    head = git(repository, "rev-parse", "HEAD")
+    (repository / filename).write_bytes(PARTIAL_BYTES)
+    _subjects, declared = declared_subjects(filename, repository, [])
+    evidence = preserve_attempt_evidence(
+        repository, repository, RUN_ID, ATTEMPT_ID, head, declared_artifacts=declared
+    )
+    retained = next(item for item in evidence.files if item.kind == "declared")
+    assert retained.name == f"subject:{filename}"
+    assert Path(retained.retained_path).name.startswith("subject-")
+    assert ":" not in Path(retained.retained_path).name
+    assert Path(retained.retained_path).read_bytes() == PARTIAL_BYTES
+    validate_attempt_evidence(repository, RUN_ID, ATTEMPT_ID, head)
 
 
 @pytest.mark.parametrize("payload", [b"{", b"\xff", b"null", b"[]"])

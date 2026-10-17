@@ -86,6 +86,7 @@ def allocate_attempt_resources(run_id: str, attempt_id: str) -> AttemptResources
     try:
         ensure_private_dir(root)
         directory = Path(tempfile.mkdtemp(prefix="attempt-", dir=root))
+        ensure_private_dir(directory)
         token = str(uuid.uuid4())
         (directory / _MARKER).write_text(
             json.dumps(

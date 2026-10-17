@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from hashlib import sha256
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from relay.errors import WorkflowValidationError
 from relay.workflows.schema import (
@@ -36,7 +36,7 @@ from .language import (
 )
 
 if TYPE_CHECKING:
-    from relay.workflows.validation import ValidatedWorkflow
+    from relay.workflows.records import ValidatedWorkflow
 
 
 def definition(
@@ -75,7 +75,6 @@ def definition(
             timeout=_timeout(job.get("timeout-minutes"), default=360),
         )
     return WorkflowDefinition(
-        version=1,
         name=str(value.get("name") or document.source.as_posix()),
         inputs=inputs,
         nodes=nodes,
@@ -176,21 +175,19 @@ def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
     )
     return AgentNode(
         type="agent",
-        writes=False,
-        allow_no_commit=True,
         agents=agents,
         model=model,
         prompts=prompts,
         agent_options=options,
-        auto_retry=raw.get("auto-retry", True) not in (False, "false"),
+        **(
+            {"auto_retry": raw["auto-retry"] not in (False, "false")} if "auto-retry" in raw else {}
+        ),
     )
 
 
 def bind_routes(workflow: ValidatedWorkflow, values: Mapping[str, Any]) -> ValidatedWorkflow:
     """Resolve routes only from launch-static data; dynamic matrices cannot invent them."""
-    if not workflow.root.definition.actions:
-        return workflow
-    sources = cast(ActionsJobNode, next(iter(workflow.root.definition.nodes.values()))).sources
+    sources = next(iter(workflow.root.definition.nodes.values())).sources
     nodes = {}
 
     def dynamic(raw: object, context: Mapping[str, Any]) -> bool:

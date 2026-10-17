@@ -26,15 +26,6 @@ for (const width of [320, 390, 760, 1440])
     });
     await expect(shared).toBeVisible();
     const before = await (await page.request.get("/api/settings")).json();
-    await page
-      .getByRole("button", {
-        name: "Defaults for new repair rules",
-        exact: true,
-      })
-      .click();
-    await expect(
-      page.getByRole("textbox", { name: "Verifier instructions", exact: true }),
-    ).toBeVisible();
     for (const field of await page
       .locator(".settings-content .help-field:visible")
       .all()) {

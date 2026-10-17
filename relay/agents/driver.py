@@ -19,6 +19,7 @@ from relay.constants import (
 from relay.errors import (
     AgentAuthError,
     AgentConfigurationError,
+    AgentExecutionError,
     AgentLaunchError,
     AgentProtocolError,
     ModelSelectionRejectedError,
@@ -36,7 +37,7 @@ from relay.workflows.schema import AgentNode
 from .acp_driver import AcpDriver
 from .antigravity_driver import AntigravityDriver
 from .discovery import discover_agents, discovered_by_id
-from .events import AgentEvent, bounded_agent_events
+from .events import AgentEvent
 from .models import (
     AgentCommand,
     AgentConfiguration,
@@ -143,6 +144,8 @@ def _aggregate_error(reasons: Mapping[str, ProbeFailure]) -> RelayError:
         error_type = ModelSelectionRejectedError
     elif prefixes == {AgentProtocolError.error_code}:
         error_type = AgentProtocolError
+    elif prefixes == {AgentExecutionError.error_code}:
+        error_type = AgentExecutionError
     elif prefixes == {AgentConfigurationError.error_code}:
         error_type = AgentConfigurationError
     else:
@@ -364,20 +367,6 @@ def probe_installed_agents(
     return rows
 
 
-def _stop_reason(result: AgentResult) -> AttemptStopReason:
-    return {
-        "completed": AttemptStopReason.COMPLETED,
-        "end_turn": AttemptStopReason.COMPLETED,
-        "canceled": AttemptStopReason.CANCELED,
-        "timeout": AttemptStopReason.TIMEOUT,
-        "interrupted": AttemptStopReason.INTERRUPTED,
-        "soft_denied": AttemptStopReason.SOFT_DENIED,
-        "max_tokens": AttemptStopReason.FAILED,
-        "max_turn_requests": AttemptStopReason.FAILED,
-        "refusal": AttemptStopReason.FAILED,
-    }.get(result.stop_reason, AttemptStopReason.FAILED)
-
-
 class RoutedAgentNodeDriver:
     """Execute the captured route or an explicitly authorized retry replacement."""
 
@@ -517,27 +506,29 @@ class RoutedAgentNodeDriver:
         context: AgentExecutionContext,
     ) -> ExecutionOutcome:
         async for event in driver.start_attempt(context):
-            for chunk in bounded_agent_events(event):
+            for part in context.attempt.runtime.prepare_agent_events(event):
                 await asyncio.to_thread(
                     context.attempt.runtime.append_attempt_event,
                     context.attempt.attempt.attempt_id,
-                    chunk.event_type,
+                    part.event_type,
                     EventSource.AGENT,
-                    chunk.payload,
-                    sensitivity=chunk.sensitivity,
+                    part.payload,
+                    sensitivity=part.sensitivity,
                 )
         result = await driver.finalize()
         return ExecutionOutcome(
             OutcomeKind.SUCCEEDED if result.succeeded else OutcomeKind.FAILED,
-            stop_reason=_stop_reason(result),
+            stop_reason=result.stop_reason,
             exit_code=result.exit_code,
             error_code=result.error_code,
-            error_message=(
+            error_message=result.error_message
+            or (
                 "The provider's usage limit stopped this step."
                 if result.usage_limit is not None
                 else None
             ),
             usage_limit=result.usage_limit,
+            provider_stop_reason=result.provider_stop_reason,
         )
 
 

@@ -80,11 +80,11 @@ check or no ready agent returns exit code 6.
 
 Administration commands show readable text by default. Use `relay doctor
 --json`, `relay project list --json`, `relay project relink OLD_PATH NEW_PATH
---json`, or `relay data clean --json` to keep their previous sorted JSON
-output. `relay --json COMMAND` also selects that output for a nested command.
+--json`, or `relay data clean --json` for sorted JSON output.
+`relay --json COMMAND` also selects that output for a nested command.
 Relay errors show `Error: <message>` and, when available,
-`Next: <next_action>`; `--json` keeps the previous error envelope and exit
-codes. Initialization and startup keep their previous text in `--json` mode.
+`Next: <next_action>`. The `--json` option returns a structured error envelope.
+Initialization and startup use text in `--json` mode.
 
 `relay doctor` uses the launch cleanliness checker for untouched starter files
 and root reports. It lists allowed changes as a warning. Unrelated edits and
@@ -161,8 +161,10 @@ cleanup are browser actions.
 
 Relay Phase 1 is implemented but unreleased. All five supported agents passed
 authenticated writer-workflow certification on macOS arm64 on 2026-10-03.
-Live provider execution on Linux and Windows remains unverified. Exact
-versions, model selectors, artifact hashes, cleanup results, and remaining
+Codex ACP completed a live Windows workflow on 2026-10-14. Claude Code,
+Copilot CLI, and Cursor CLI passed Windows Actions diagnostics on 2026-10-15.
+Antigravity on Windows and live provider execution on Linux remain unverified.
+Exact versions, model selectors, artifact hashes, cleanup results, and remaining
 verification limits are recorded in [`certification/`](certification/README.md).
 The persistence, workflow, CLI, HTTP, SSE, and artifact formats become versioned
 contracts at the first release.

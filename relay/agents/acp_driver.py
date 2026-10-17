@@ -28,6 +28,7 @@ from relay.constants import (
 from relay.errors import (
     AgentAuthError,
     AgentConfigurationError,
+    AgentExecutionError,
     AgentProtocolError,
     AgentUsageLimitError,
     ModelSelectionRejectedError,
@@ -44,7 +45,7 @@ from relay.execution.cancellation import (
     terminate_async_process_tree,
 )
 from relay.execution.control import ClaimedControl, cancel_stop_reason
-from relay.execution.state import ControlKind, InteractionKind
+from relay.execution.state import AttemptStopReason, ControlKind, InteractionKind
 
 from .configuration import acp_configuration, require_choice
 from .events import AgentEvent, normalize_acp_update
@@ -195,6 +196,9 @@ async def _apply_overrides(
 def _capabilities(profile: AgentProfile) -> schema.ClientCapabilities:
     methods = profile.required_client_methods
     return schema.ClientCapabilities(
+        # Request _meta.terminal_output_delta notifications from the adapter;
+        # see Codex ACP 2.2.2 dist/index.js, terminal-output capability handling.
+        field_meta={"terminal_output_delta": True},
         fs=schema.FileSystemCapabilities(
             readTextFile="fs/read_text_file" in methods,
             writeTextFile="fs/write_text_file" in methods,
@@ -261,7 +265,7 @@ class RelayAcpClient:
     expected_options: dict[str, str]
     expected_mode: str | None
     drift_error: RelayError | None
-    control_stop: str | None
+    control_stop: AttemptStopReason | None
     interaction_lock: asyncio.Lock
     feedback: list[str]
     turn: int
@@ -420,7 +424,7 @@ class RelayAcpClient:
                 )
                 if applied:
                     if control.kind == ControlKind.CANCEL.value:
-                        self.control_stop = cancel_stop_reason(control).value
+                        self.control_stop = cancel_stop_reason(control)
                     elif isinstance(feedback := control.payload.get("feedback"), str):
                         self.feedback.append(feedback)
                     return control
@@ -910,9 +914,20 @@ class AcpDriver:
             succeeded = response.stop_reason == "end_turn" and client.control_stop is None
             return AgentResult(
                 succeeded,
-                client.control_stop or response.stop_reason,
+                client.control_stop
+                or (AttemptStopReason.COMPLETED if succeeded else AttemptStopReason.FAILED),
                 process.returncode,
-                None if succeeded else AgentProtocolError.error_code,
+                None
+                if succeeded
+                else client.control_stop.value
+                if client.control_stop is not None
+                else AgentExecutionError.error_code,
+                provider_stop_reason=response.stop_reason,
+                error_message=(
+                    f"The provider stopped with reason {response.stop_reason!r}."
+                    if not succeeded and client.control_stop is None
+                    else None
+                ),
             )
 
     async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
@@ -931,7 +946,7 @@ class AcpDriver:
                 now = time.monotonic()
                 if requested_stop is None:
                     if context.attempt.timed_out():
-                        requested_stop = "timeout"
+                        requested_stop = AttemptStopReason.TIMEOUT
                     else:
                         control = await asyncio.to_thread(
                             context.attempt.runtime.claim_next_control,
@@ -944,7 +959,7 @@ class AcpDriver:
                             control.request_id,
                             context.attempt.attempt.worker_id,
                         ):
-                            requested_stop = cancel_stop_reason(control).value
+                            requested_stop = cancel_stop_reason(control)
                     if requested_stop is not None:
                         client.control_stop = requested_stop
                         stop_deadline = now + CANCELLATION_GRACE_SECONDS
@@ -974,7 +989,11 @@ class AcpDriver:
                 if requested_stop is None:
                     raise
             if requested_stop is not None:
-                error_code = "node_timeout" if requested_stop == "timeout" else requested_stop
+                error_code = (
+                    "node_timeout"
+                    if requested_stop is AttemptStopReason.TIMEOUT
+                    else requested_stop.value
+                )
                 self.result = AgentResult(
                     False,
                     requested_stop,
@@ -994,7 +1013,7 @@ class AcpDriver:
                 limit = client.usage_limit or ProviderUsageLimit()
                 self.result = AgentResult(
                     False,
-                    "failed",
+                    AttemptStopReason.FAILED,
                     self.process.returncode if self.process is not None else None,
                     AgentUsageLimitError.error_code,
                     usage_limit=limit,
@@ -1004,7 +1023,7 @@ class AcpDriver:
             mapped = map_agent_exception(error, agent_id=self.profile.agent_id)
             self.result = AgentResult(
                 False,
-                "failed",
+                AttemptStopReason.FAILED,
                 self.process.returncode if self.process is not None else None,
                 mapped.error_code,
             )

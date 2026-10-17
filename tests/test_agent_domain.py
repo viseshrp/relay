@@ -26,6 +26,7 @@ from relay.constants import EVENT_MAX_PAYLOAD_BYTES, REGISTRY_CACHE_TTL_SECONDS
 from relay.errors import (
     AgentAuthError,
     AgentDiscoveryError,
+    AgentExecutionError,
     AgentLaunchError,
     AgentProtocolError,
     RelayError,
@@ -47,8 +48,9 @@ def test_probe_failure_keeps_error_identity_separate_from_prose() -> None:
     ("error", "expected"),
     [
         (RequestError.auth_required(), AgentAuthError),
-        (RequestError.invalid_params(), AgentProtocolError),
-        (RequestError(-1, "Authentication required"), AgentProtocolError),
+        (RequestError.invalid_params(), AgentExecutionError),
+        (RequestError.method_not_found("unsupported"), AgentExecutionError),
+        (RequestError(-1, "Authentication required"), AgentExecutionError),
         (FileNotFoundError("binary"), AgentLaunchError),
         (ConnectionResetError("closed"), AgentProtocolError),
         (BrokenPipeError("closed"), AgentProtocolError),
@@ -60,7 +62,11 @@ def test_agent_exception_mapping_uses_types_and_codes_not_text(
 ) -> None:
     mapped = map_agent_exception(error, agent_id="codex")
     assert isinstance(mapped, expected)
-    assert mapped.context == {"agent": "codex"}
+    assert mapped.context == (
+        {"agent": "codex", "provider_error_code": str(error.code)}
+        if isinstance(error, RequestError) and expected is AgentExecutionError
+        else {"agent": "codex"}
+    )
 
 
 def test_an_existing_relay_error_is_preserved() -> None:
@@ -139,6 +145,18 @@ def test_acp_private_content_never_becomes_a_visible_event(privacy: dict[str, ob
     assert normalize_acp_update(update) == ()
 
 
+def test_acp_private_tool_starts_never_become_visible_events() -> None:
+    update = schema.ToolCallStart.model_validate(
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "private-call",
+            "title": "Private command",
+            "_meta": {"private": True},
+        }
+    )
+    assert normalize_acp_update(update) == ()
+
+
 def test_acp_non_text_content_is_preserved_without_private_metadata() -> None:
     update = schema.SessionNotification.model_validate(
         {
@@ -193,6 +211,63 @@ def test_acp_tool_progress_retains_the_result_state(status: str, expected: str) 
     assert event.event_type == expected
     assert event.payload["tool"] == "tool-1"
     assert json.loads(event.payload["summary"])["raw_output"] == {"ok": True}
+
+
+@pytest.mark.parametrize("channel", ["terminal_output_delta", "terminal_output"])
+def test_acp_terminal_metadata_retains_only_public_output(channel: str) -> None:
+    update = schema.ToolCallProgress.model_validate(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "command-1",
+            "_meta": {
+                channel: {
+                    "terminal_id": "command-1",
+                    "data": "same\nsame\n",
+                    "private_field": "secret",
+                },
+                "provider_private": "secret",
+            },
+        }
+    )
+    event = normalize_acp_update(update)[0]
+    assert json.loads(event.payload["summary"]) == {"output_delta": "same\nsame\n"}
+
+
+def test_acp_terminal_exit_retains_failure() -> None:
+    base = {"sessionUpdate": "tool_call_update", "toolCallId": "command-1"}
+    update = schema.ToolCallProgress.model_validate(
+        {
+            **base,
+            "status": "failed",
+            "_meta": {
+                "terminal_exit": {"terminal_id": "command-1", "exit_code": 3, "signal": None}
+            },
+        }
+    )
+    event = normalize_acp_update(update)[0]
+    assert event.event_type == "agent.tool_result"
+    assert json.loads(event.payload["summary"]) == {"status": "failed", "exit_code": 3}
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"private": True, "terminal_output_delta": {"data": "secret", "terminal_id": "command-1"}},
+        {"terminal_output_delta": {"data": "wrong tool", "terminal_id": "other"}},
+        {"terminal_exit": {"private": True, "terminal_id": "command-1", "exit_code": 3}},
+    ],
+    ids=["empty", "private-update", "different-terminal", "private-exit"],
+)
+def test_acp_unusable_terminal_updates_are_discarded(metadata: dict[str, object]) -> None:
+    update = schema.ToolCallProgress.model_validate(
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "command-1",
+            "_meta": metadata,
+        }
+    )
+    assert normalize_acp_update(update) == ()
 
 
 def test_acp_plan_updates_retain_owner_visible_entries() -> None:

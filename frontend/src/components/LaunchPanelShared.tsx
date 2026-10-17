@@ -1,10 +1,10 @@
 import type { PreviousRunInputs, ProjectRecord } from "../types";
-import type { WorkflowValue } from "../workflow";
+import type { LaunchWorkflow } from "../workflow";
 
 interface LaunchPanelProps {
   open: boolean;
   workflowKey: string | null;
-  workflow: WorkflowValue | null;
+  workflow: LaunchWorkflow | null;
   project: ProjectRecord;
   requestProject: string | null;
   modelOptions: string[];

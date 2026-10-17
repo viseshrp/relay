@@ -277,6 +277,7 @@ authorized_licenses = [
     "apache",
     "apache 2.0",
     "apache software license",
+    "apache-2.0", # SPDX name for the already-authorized Apache 2.0 license.
     "bsd",
     "bsd license",
     "bsd-3-clause",

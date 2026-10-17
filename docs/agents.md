@@ -5,6 +5,21 @@ CLI, and Cursor CLI through ACP; Antigravity through its native headless
 interface. Relay discovers existing commands. It does not install an agent,
 create a vendor account, or store provider credentials.
 
+## Execution ownership
+
+Relay schedules declared jobs and steps, passes captured inputs and output
+contracts, isolates their workspaces, and preserves their results. Providers own
+their internal tools, permission enforcement, authentication, available models,
+and execution outcomes. Relay reports unsupported provider features without
+implementing substitutes or changing the requested settings.
+
+Provider-declared execution failures return `agent_execution_error`. Malformed
+exchanges return `agent_protocol_error`. Neither authorizes automatic repair.
+The exact provider stop reason is diagnostic data; only Relay controls can
+report its owner cancellation, orderly shutdown, or configured deadline expiry.
+Explicit workflow loops, owner retries, and confirmed usage-reset schedules
+retain their own rules.
+
 ## Exact-model routing
 
 An agent action's `with.model` is an exact, case-sensitive value advertised by
@@ -30,7 +45,7 @@ session repeats the selection proof. If a later `config_option_update` reports
 a different value, Relay cancels and fails that attempt.
 
 Current workflow YAML has no permission field. Owner provider settings select
-permission modes; retained legacy snapshots can contain `permission_profile`.
+permission modes for the exact model.
 Relay reports permission and route failures together before running a step.
 Registry installation metadata is advisory; a registry fetch failure does not
 prevent installed agents from proving their routes.
@@ -40,15 +55,14 @@ prevent installed agents from proving their routes.
 The editor loads each tool's supported choices after selecting the exact model.
 ACP effort comes from its `thought_level` selector, with known option IDs as a
 fallback for adapters that omit categories. Permission modes use the `mode`
-selector or the legacy session-mode menu when no corresponding selector is
-available. Provider labels, exact values, descriptions, and ordering are
-preserved. Model selection can change the effort menu, as described by the
-[ACP configuration contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
+selector or the session-mode menu when no corresponding selector is available.
+Provider labels, exact values, descriptions, and ordering are preserved. Model
+selection can change the effort menu, as described by the [ACP configuration
+contract](https://agentclientprotocol.com/protocol/v1/session-config-options).
 
 Both controls initially show **Provider default**. Reading the choices does
 not write an override. The workflow editor stores an explicit effort as the
 agent action's `with.effort`; permissions remain in owner provider settings.
-Retained legacy snapshots keep their `agent_options.<agent-id>` overrides.
 Returning to Provider default removes the corresponding override. A tool that
 advertises no separate selector shows only Provider default. Changing a step's
 model resets its effort; saved owner permissions require fresh validation.
@@ -59,16 +73,15 @@ through every change. Unsupported choices fail before a run is created. A
 configuration update that changes an explicit override cancels the attempt.
 Defaults never cause an effort or mode setter call.
 
-Antigravity offers `respect_settings`, `accept-edits`, `plan`, and `auto_approve`.
-The middle two pass the exact value with `--mode`; only `auto_approve` adds
-`--dangerously-skip-permissions`. An explicit native mode takes precedence over
-the legacy `permission_profile`. Its advertised
-model slugs include effort, so Relay offers the effort already identified by
-that exact slug. Explicitly choosing it passes `--effort`; selecting a different
-effort requires a different exact model. Relay rejects an effort override that
-would silently switch the model. The
-[native headless interface](https://antigravity.google/docs/cli/headless/)
-documents the effort flag and permission policy.
+Antigravity offers `respect_settings`, `accept-edits`, `plan`, and
+`auto_approve`. The middle two pass the exact value with `--mode`; only
+`auto_approve` adds `--dangerously-skip-permissions`. Its advertised model slugs
+include effort, so Relay offers the effort already identified by that exact
+slug. Explicitly choosing it passes `--effort`; selecting a different effort
+requires a different exact model. Relay rejects an effort override that would
+silently switch the model. The [native headless
+interface](https://antigravity.google/docs/cli/headless/) documents the effort
+flag and permission policy.
 
 ACP authentication failures use the protocol's `auth_required` code. An
 adapter disconnect or early exit is a protocol failure; words such as `auth`
@@ -103,10 +116,11 @@ prompt bytes `Review this file.\n` remain unchanged in their block, while input
 `{"target":"api"}` appears in a separate block headed `Relay inputs (JSON)`.
 Relay never appends an earlier conversation transcript.
 
-Claude ACP usage-limit failures use the adapter's structured `errorKind`
-and `_claude/rateLimit` metadata. Relay retains the rejected reset as an
+Claude ACP usage-limit failures use the adapter's structured `errorKind` and
+`_claude/rateLimit` metadata. Relay retains the rejected reset as an
 `agent.usage_limit` event and schedules recovery only with a confirmed future
-UTC timestamp. This follows the [adapter source](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
+UTC timestamp. This follows the [adapter
+source](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
 Other adapters and native Antigravity do not currently expose a supported reset
 contract to Relay; their public limit messages remain visible for manual
 recovery. Relay never switches providers or reduces effort to bypass a limit.
@@ -123,15 +137,18 @@ Output validation still rejects missing files and unresolved labels or paths.
 Both transports also provide the selected tool, exact model, permission profile,
 and requested effort and permission overrides. For example, `opus` appears as
 `"model_value": "opus"`; an unset effort appears as `"effort_override": null`,
-which does not claim a particular provider default. Agents receive instructions
-to use that selection for report provenance, regardless of role names in static
-source prompts. Retained attempt metadata and provider startup events remain
+which does not claim a particular provider default. The workflow's own
+instructions define report content and provenance. Retained attempt metadata
+and provider startup events remain
 the evidence for which tool and model ran.
 
 ACP message, thought, tool-call, tool-result, and plan updates become Relay
 events. Content explicitly marked for an audience that excludes `user`, or
 marked private in ACP metadata, is dropped. A visible string larger than the
 event limit is split into numbered UTF-8-safe parts sized after JSON escaping.
+Attempt runtimes choose where to split each complete normalized event so that
+Actions masking can precede splitting. Drivers persist prepared parts in order,
+yielding between writes so cancellation can stop the remaining parts.
 For example, a 70 KiB plain-text message becomes three ordered `agent.message`
 events; quotes, backslashes, and control characters can require more parts.
 Each provider payload stays within 32 KiB, reserving space for Relay metadata
@@ -155,8 +172,8 @@ sends the feedback as another documented `session/prompt` in the same live
 session, retaining its exact model, options, cancellation mailbox, heartbeat,
 and original deadline. A declined permission stays declined; feedback can ask
 the agent for an alternative after that turn ends. Canceling the attempt never
-starts a feedback turn. Static prompt files are unchanged.
-This follows the [ACP prompt-turn contract](https://agentclientprotocol.com/protocol/v1/prompt-turn).
+starts a feedback turn. Static prompt files are unchanged. This follows the [ACP
+prompt-turn contract](https://agentclientprotocol.com/protocol/v1/prompt-turn).
 Restart recovery still creates a new attempt and session.
 
 Text updates retain an optional ACP message ID and Relay turn number. Native
@@ -165,13 +182,41 @@ the browser join fragments without merging different messages or attempts.
 Tool summaries retain their call IDs; original numbered event parts remain
 available in diagnostics.
 
+Relay advertises terminal-output deltas and retains the adapter's
+`terminal_output_delta` or `terminal_output` text and terminal exit code from
+ACP metadata. Only these known public fields are copied; private updates and
+unrelated metadata are omitted. The browser appends each output delta once,
+including repeated fragments, and shows the exit code in tool details. For
+commands without terminal metadata, the browser also reads integer exit codes
+from `raw_output.exit_code` or Cursor's `raw_output.exitCode`. Structured raw
+output also displays its string `stdout` and `stderr` fields. Terminal metadata
+takes precedence. Tools and command steps display the same `Exit code: N`
+wording. Metadata-only updates with no retained fields produce no empty tool
+event. Actions also hold possible secret suffixes in cumulative tool `content`
+and `raw_output` snapshots. Each text field has its own stream identity. A new
+snapshot replaces its previous pending suffix; it does not append that suffix to
+the new value. Tool completion or step shutdown flushes any remaining safe
+suffix once. This prevents a partial snapshot from retaining a prefix of a
+secret that a later snapshot masks in full. Terminal deltas and exit codes were
+verified on Windows with Codex ACP 2.2.2 in the [Windows
+retest](../certification/2026-10-14-windows-relay-fixes.md). The [2026-10-15
+Windows ACP record](../certification/2026-10-15-windows-acp.json) also verifies
+Claude deltas, Cursor structured raw output, and Copilot cumulative snapshots
+through live Actions workflows and browser checks. Copilot returns its exit code
+in public text rather than a structured integer; Relay displays that footer
+without inferring an exit field. Actions steps decode these summaries before
+masking and event-size splitting. They mask output deltas as one stream per
+attempt and tool call, hold possible secret prefixes, and flush before a
+terminal result or exit is persisted. Step shutdown also flushes unfinished tool
+streams. Numbered parts and tool IDs remain attached to the masked output.
+
 Cancel asks
 ACP to cancel the session before Relay stops its process tree. Relay signals
 the isolated process group, waits up to ten seconds, then forces the tree to
 stop. On Windows it uses a console break followed by `taskkill /T /F` when
 needed; on Linux it signals the process group with `SIGTERM` then `SIGKILL`.
-The final exit wait is bounded. Windows behavior remains unverified until a
-Windows certification run.
+The final exit wait is bounded. The dated live-control records below identify
+the Windows cancellation checks actually performed.
 
 The Phase 1 profiles advertise no client-mediated file or terminal methods:
 
@@ -204,10 +249,9 @@ manager.
 | Antigravity | [Antigravity CLI installation](https://antigravity.google/docs/cli/install/) | Authenticate once in `agy` or configure its supported API key. |
 
 Adapter commands remain argument vectors. Registry package text such as
-`@agentclientprotocol/codex-acp@1.12.0` is displayed verbatim; Relay does not
-split, shell-expand, or execute it until a later explicit browser installation
-confirmation. A stale validated registry cache may support discovery when a
-refresh fails, but Relay displays its age and warning.
+`@agentclientprotocol/codex-acp@1.12.0` is displayed verbatim. Installation stays
+with the owner and provider. A stale validated registry cache may support
+discovery when a refresh fails, but Relay displays its age and warning.
 Concurrent refreshes publish complete cache files independently. A cache write
 failure leaves the previous validated cache available and reports a Relay
 discovery error when no usable cache remains.
@@ -236,9 +280,14 @@ while `PLAN_CRITIQUE.md` stays in the repository root. The Git cleanliness check
 still rejects an uncommitted `.skills/review.md` file in the checkout.
 
 Relay masks declared workflow secrets and `add-mask` values in public run
-output. Agent prose does not register workflow commands or masks. Arbitrary
-inherited variables, Git diffs, and retained files are not automatically
-redacted and can contain sensitive data until the owner deletes the run.
+output. Agent prose does not register workflow commands or masks.
+Actions terminal-delta masking decodes JSON escapes before matching secrets.
+For example, `TOKEN-12345` followed by `67890\n` becomes `***\n` when the
+declared secret is `TOKEN-1234567890`; a declared `a"b\c` also becomes `***`.
+Every supported agent workflow runs through this streaming proxy.
+Arbitrary inherited variables, Git diffs, and retained files are not
+automatically redacted and can contain sensitive data until the owner deletes
+the run.
 Provider authentication data stays in the provider's own CLI or
 operating-system credential store. Workflow secret references use the
 separate [binding contract](workflows.md#variables-secrets-and-environments).
@@ -261,8 +310,8 @@ Relay sends one UTF-8 JSON line to stdin and closes the pipe:
 
 The content contains the ordered prompt files followed by the three Relay JSON
 sections. JSON escaping preserves newlines, quotes and Unicode without passing
-the prompt through a Windows batch command line. The
-[headless stdin contract](https://antigravity.google/docs/cli/headless/#stream-prompts-from-stdin)
+the prompt through a Windows batch command line. The [headless stdin
+contract](https://antigravity.google/docs/cli/headless/#stream-prompts-from-stdin)
 allows EOF immediately after the final prompt; Antigravity completes that turn,
 emits its result and exits. Relay drains stdout and stderr while writing stdin
 so startup diagnostics cannot block prompt delivery.
@@ -272,17 +321,13 @@ The `auto_approve` permission profile adds
 allows every Antigravity tool and should be used only with a trusted prompt.
 Headless mode cannot pause for mid-run permission or elicitation input.
 
-Antigravity always has a print timeout. A node timeout such as `15m` becomes
-`--print-timeout 15m`. With no node timeout, Relay uses Antigravity's documented
-five-minute default and passes `--print-timeout 5m` explicitly.
-Relay also enforces that ceiling with a monotonic deadline from process
-startup, including when the node has no declared timeout. Expiry reports
-`node_timeout` with stop reason `timeout`. A received `SUCCESS` result is
-not reclassified as a print timeout while buffered output drains. Relay does
-not infer timeout from the free-text `error` field. An `ERROR` result whose
-documented numeric `duration_seconds` reaches the print ceiling also reports
-a timeout. The headless documentation provides no separate timeout code.
-Live timeout behavior remains unverified.
+Relay enforces the effective configured job, step, or owner timeout across the
+native process lifecycle. When configured, the remaining deadline is passed as
+`--print-timeout`; the local monotonic deadline remains authoritative. Without a
+configured limit, Relay leaves the provider's timeout default unset. An `ERROR`
+result remains a provider failure regardless of its elapsed duration or error
+text. The Windows live check exercised a configured one-minute deadline while
+a real native command and its child were running; both exited.
 
 The disposable `agy models` probe has a 15-second response limit and runs in
 its own process group. Relay stops that group before reporting a model-list
@@ -305,18 +350,17 @@ only to the executable, adapter arguments, model and flags; the prompt travels
 through stdin. An oversized command reports the same code with guidance to
 shorten its arguments or model value.
 
-Relay retains stdout and stderr in UTF-8-safe chunks before normalizing NDJSON,
-using a bounded queue that applies pipe backpressure. JSON parsing holds at
-most one 1 MiB line; a larger line is retained as raw output and then fails the
-attempt as a protocol error. Cancellation and timeout drain bytes already read
-before the attempt settles. Relay detects soft denies only in complete stderr
-tool notices, as described by the headless documentation. The exact notice
-format remains unverified until live certification. A target such as
-`write_file(src/report.md)` becomes worktree-relative `src/report.md`; a path
-outside the worktree is ignored by the write-target rule. A writing attempt
-fails with `soft_denied` when a denied target covers a required artifact, or
-when at least one worktree-targeting write was denied and the attempt produced
-no commit. A read-only node records but ignores these denies.
+Relay retains stdout and stderr in UTF-8-safe chunks using a bounded queue that
+applies pipe backpressure. Only stdout is parsed as NDJSON, holding at most one
+1 MiB line. An oversized or malformed line fails the protocol exchange after
+its raw output is retained. Stderr remains opaque diagnostic text.
+Cancellation and timeout drain bytes already read before the attempt settles.
+
+Native success requires the provider's terminal `SUCCESS` and exit code zero.
+Internal failed tools and permission notices do not override that result.
+Declared workflow reports are validated separately. Native `ERROR`, `CANCELED`,
+and `INTERRUPTED` results stop the step as provider failures; they never enter
+Relay's owner-cancel or restart-recovery paths.
 
 ## Certification evidence
 
@@ -341,8 +385,21 @@ their concrete backend models were not identified.
 
 Claude's model menu is available without authentication, so model selection
 alone does not certify its account. Its certified writer run followed native
-CLI sign-in. All five agents passed the macOS certification bar. Live provider
-behavior on Linux and Windows, cancellation, model drift, elicitation,
-timeouts, and Antigravity soft denies remain unverified. The sanitized results,
-completed sign-in screenshots, and fresh validated registry fixture are under
+CLI sign-in. All five agents passed the macOS certification bar. The
+[Windows Codex retest](../certification/2026-10-14-windows-relay-fixes.md)
+verified Codex ACP 2.2.2 with exact model `gpt-6.1-sol`, including terminal
+deltas and exit codes. The
+[Windows ACP follow-up](../certification/2026-10-15-windows-acp.json) verifies
+Claude Code, Copilot CLI, and Cursor CLI on the reviewed Actions runtime.
+The [Windows live-control follow-up][windows-controls] verifies fresh Codex
+and Antigravity execution, cancellation, elicitation,
+controlled model drift, ACP and native timeouts, and native permission
+denials. It also records authenticated Linux Copilot execution in a
+disposable WSL2 container. Linux Claude, Cursor, and Antigravity still require
+sign-in. Linux Codex is deferred at the owner's request.
+
+[windows-controls]: ../certification/2026-10-16-windows-live-controls.md
+
+The sanitized results, completed sign-in screenshots, and fresh validated
+registry fixture are under
 [`certification/`](../certification/README.md).

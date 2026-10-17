@@ -26,7 +26,6 @@ const overrideLabels: Record<
   timeout: "job timeout",
   auto_retry: "automatic job retries",
   recovery: "automatic recovery",
-  repairs: "new repair rules",
   commands: "shared commands",
   env: "environment variables",
 };

@@ -1,6 +1,7 @@
 import { Alert, Box, Stack, Typography } from "@mui/material";
 import { JobLog } from "./JobLog";
 import type { JobWorkspaceState } from "./useJobWorkspace";
+import { failureReason } from "../failure";
 
 export function StepLogEmbedded({ state }: { state: JobWorkspaceState }) {
   const {
@@ -28,10 +29,7 @@ export function StepLogEmbedded({ state }: { state: JobWorkspaceState }) {
       {error && <Alert severity="error">{error}</Alert>}
       {failed && (
         <Alert severity="error">
-          <Typography>
-            {attempt?.error_message ??
-              `Step failed${attempt?.exit_code !== null && attempt?.exit_code !== undefined ? ` with exit code ${attempt?.exit_code}` : ""}.`}
-          </Typography>
+          <Typography>{failureReason(attempt, "Step")}</Typography>
           {attempt?.provider_message && (
             <Typography sx={{ whiteSpace: "pre-wrap" }}>
               {attempt.provider_message}

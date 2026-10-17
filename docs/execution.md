@@ -12,17 +12,16 @@ admit explicit failure follow-ups; failed jobs do not cancel unrelated jobs.
 `continue-on-error` affects conclusions while retaining rejected evidence.
 Step conditions reconcile with recorded results, including failures before
 the executor starts. A timed-out step still honors `continue-on-error`.
-Historical snapshots keep their captured interpreter and the legacy node
-contracts described below where they differ.
+Only compiled jobs and steps execute.
 
 Relay runs each workflow from durable state in `relay.db`. Huey carries only an
 opaque claim token. A queue item is never the record of whether work ran.
 
-Launch resolves omitted workflow choices from project and global settings,
-then captures the resulting definitions, routes, and recovery policy in the
-snapshot. Settings changes affect future launches. Retries and later child
-jobs continue to use the captured choices; original YAML and prompts retain
-their exact bytes. See [Installation defaults](workflows.md#installation-defaults).
+Launch resolves omitted workflow choices from project and global settings, then
+captures the resulting definitions, routes, and recovery policy in the snapshot.
+Settings changes affect future launches. Retries and later child jobs continue
+to use the captured choices; original YAML and prompts retain their exact bytes.
+See [Installation defaults](workflows.md#installation-defaults).
 
 ## State transitions
 
@@ -72,6 +71,11 @@ attempts keep their failure details. An interrupted attempt in a canceling run
 settles as canceled instead of reopening its node. The run drains to `canceled`
 or `failed`; restart never reopens canceled nodes.
 
+After an owner answers a wait, resuming its enclosing job or nested scope
+also updates the run status. Once no waiting or failed nodes remain, the run
+returns to `running` before its next step finishes. A second pending wait
+keeps the run in `paused_wait`.
+
 ### Nodes
 
 <!-- relay-transitions:node:start -->
@@ -88,7 +92,6 @@ or `failed`; restart never reopens canceled nodes.
 | `waiting` | `interaction_answered` | `control_applied` | `running` | `node.running` |
 | `running` | `scope_waiting` | `child_wait_or_admission_deferred` | `waiting` | `node.waiting` |
 | `waiting` | `scope_ready` | `child_settled_or_admission_available` | `dispatched` | `node.dispatched` |
-| `waiting` | `timeout_routed` | `on_timeout_declared` | `succeeded` | `node.succeeded` |
 | `running` | `complete` | `outputs_and_commit_valid` | `succeeded` | `node.succeeded` |
 | `running` | `fail` | `attempt_failed` | `failed` | `node.failed` |
 | `waiting` | `fail` | `timeout_or_worker_lost` | `failed` | `node.failed` |
@@ -103,15 +106,12 @@ or `failed`; restart never reopens canceled nodes.
 | `canceled` | `recompute` | `canceled_only_by_fail_fast` | `pending` | `node.pending` |
 <!-- relay-transitions:node:end -->
 
-Loop-iteration rows such as `root.build#2` are structural summaries, not
-executable nodes. They own no attempt or dispatch and do not use the node
-transition table. Their status reflects the child scope. Rerunning a failed
-child marks its enclosing failed iteration summaries `running`, such as
-`root.repeat#1` for `root.repeat#1.check`. When that scope settles, its summary
-becomes `waiting`, `failed`, or `succeeded` again. Completed iterations retain
-their result. Canceling a retry before its loop coordinator starts marks its
-unfinished iteration summaries `canceled`; they have no attempt to drain.
-An active coordinator keeps its summary until the child scope settles.
+Every job, step, reusable-workflow invocation, and loop iteration uses the
+same durable attempt and dispatch rules. Current loop scopes use ordinary
+segments such as `root.build.repeat.iteration_2.check`; no structural `#2`
+records or separate iteration-summary state machine exist. Retrying a failed
+leaf reopens its enclosing current coordinators while completed steps retain
+their results.
 
 ### Human interactions
 
@@ -141,8 +141,8 @@ An active coordinator keeps its summary until the child scope settles.
 ## Dispatch durability
 
 Dispatch has two database files and no cross-database transaction. Relay first
-commits `ready` to `dispatched` with a new `DispatchClaim` in `relay.db`. It then
-enqueues only the claim token in `huey.db` and records `enqueued_at`.
+commits `ready` to `dispatched` with a new `DispatchClaim` in `relay.db`. It
+then enqueues only the claim token in `huey.db` and records `enqueued_at`.
 
 Launch, resume, and rerun HTTP handlers commit their state and events without
 scheduling. The worker follows those events and schedules eligible nodes. At
@@ -154,63 +154,55 @@ The consumer atomically claims a still-dispatched token, acquires admission, and
 creates one `NodeAttempt` in the same Relay transaction. Duplicate tokens exit
 without another attempt. A bounded reconciliation pass re-enqueues old,
 unclaimed dispatches. It never re-enqueues a claim once an attempt began.
-Concurrent scheduling passes recheck the node inside the Relay transaction.
-If another caller already started, finished, or canceled it, the stale dispatch
-does nothing. Duplicate deliveries of an existing claim still create one attempt.
-`run_node_attempt` is declared with `retries=0`. Queue delivery never retries an
-attempt. A confirmed provider usage reset can authorize a fresh failed-node
-recovery as described below. An explicitly enabled recovery policy also
-authorizes bounded retries for eligible agent failures.
+Concurrent scheduling passes recheck the node inside the Relay transaction. If
+another caller already started, finished, or canceled it, the stale dispatch
+does nothing. Duplicate deliveries of an existing claim still create one
+attempt. `run_node_attempt` is declared with `retries=0`. Queue delivery never
+retries an attempt. A confirmed provider usage reset can authorize a fresh
+failed-node recovery as described below. An explicitly enabled recovery policy
+also authorizes bounded retries for eligible agent failures.
 
-### Stage repair rules
+### Bounded workflow loops
 
-A stage's frozen repair policy adds a durable coordinator behind the source
-stage. An accepted initial verdict completes that coordinator without running
-its fixer or verifier. A rejection creates scoped fix and verify attempts for
-each configured round. Only an exactly matching typed verdict releases the
-source's dependent stages. The last rejected round fails with
-`repair_exhausted`; reports and successful writer commits remain retained.
-
-These attempts use the same dispatch claims, admission locks, process controls,
-and evidence preservation as other nodes. A waiting or paused coordinator
-resumes its existing round. Provider recovery targets the failed role and
-reopens its enclosing coordinator without repeating completed fixers or
-increasing the verdict budget. An exhausted verdict budget does not schedule
-automatic error recovery.
-
-Expressions and child exports expose the accepted verifier's outputs under
-the source stage's name. The original source row and each rejected report
-remain unchanged. Fix and verify agent prompts include the frozen role
-instruction, round number, previous rejected outputs, and retained evidence.
-See [Stage repair rules](workflows.md#stage-repair-rules) for configuration.
+Fix-and-check work is an explicit `relay/loop@v1` step calling a captured local
+reusable workflow. Each iteration retains its attempts and outputs. The loop
+stops when its declared condition passes or fails with `loop_exhausted` when
+its iteration limit is spent. Its source defines the agents, commands, and
+acceptance outputs for each iteration. See
+[Stage repair rules](workflows.md#stage-repair-rules).
 
 ### Automatic step recovery
 
-Automatic recovery is disabled by default. The workflow's `recovery` policy
-sets a budget of one or two additional attempts per agent step. The owner can
-enable or disable it on an existing run through the browser or recovery API,
-without modifying the captured workflow. `auto_retry: false` opts a step out.
+Automatic recovery is disabled by default. The workflow's `recovery` policy sets
+a budget of one or two additional attempts per agent step. The owner can enable
+or disable it on an existing run through the browser or recovery API, without
+modifying the captured workflow. The agent action input `auto-retry: false` opts
+a step out.
 
 Eligible error codes are `output_validation_error`, `commit_validation_error`,
-`dirty_repository_error`, `node_timeout`, and `agent_protocol_error`.
-Cancellation, interruption, permission refusal, unavailable models, unsafe
-paths, storage failures, preservation failures, and Git recovery failures
-never launch an automatic attempt. A standalone failed command stops; workflow
-checks that already route verdicts into a repair loop retain their own routing.
+`dirty_repository_error`, and `node_timeout`.
+Provider execution and protocol failures require an owner decision and create no
+automatic repair instruction or schedule. Cancellation, interruption,
+permission refusal, unavailable models, unsafe
+paths, storage failures, preservation failures, and Git recovery failures never
+launch an automatic attempt. A failed command does not receive an automatic
+agent retry. Explicit step conditions and loops retain their declared failure
+handling.
 
-`AutomaticRetry` records one decision for the initiating failed attempt. The
-run first completes its normal fail-fast drain. Reconciliation waits until all
-attempt admission locks are released, prepares the failed leaf's workspace,
-and reopens its failed loop or subworkflow parents. Completed nodes stay
-complete. Independent failed steps block recovery rather than selecting one.
+`AutomaticRetry` records one decision for the initiating failed attempt.
+Within a live job, the executor retries the failed agent step in the same
+workspace while retaining completed steps. After a terminal job failure,
+reconciliation waits for admission to be released, verifies the protected
+workspace and retained evidence, and reopens the failed leaf and its current
+coordinators. Independent failed steps block recovery.
 
-Preparing the retry preserves rejected reports, partial commits, diffs, and
-untracked files before reset. In a writer's primary worktree, verified
-successful upstream root reports and the failed step's rejected root report
-are restored from retained evidence. Readers keep their detached, clean
-checkout and read retained evidence through the recovery metadata.
-Only the existing report exemptions can be restored as untracked files.
-Conflicting files or invalid evidence stop recovery before another agent runs.
+Owner retries verify the evidence manifest, every retained file hash, and its
+Git reference. The primary workspace must still match its protected head with
+only the exact root-report exemptions. Relay preserves missing required
+evidence before verification; human-wait steps carry no evidence. Damaged
+evidence, dirty code, staged reports, or a changed head block recovery. Failed
+jobs retain their private continuation state for a safe retry; confirmed cleanup
+can remove it when the run is no longer needed.
 
 Relay appends the error and the following instruction as a separate prompt:
 
@@ -235,7 +227,7 @@ policy removes pending recovery. A manual retry supersedes it. Orderly
 shutdown suspends preparation and activation until restart.
 
 Provider quota schedules take precedence and keep their existing requirement
-for a structured, confirmed reset. A quota retry keeps any existing repair
+for a structured, confirmed reset. A quota retry keeps any existing recovery
 instruction and does not spend an additional error-recovery retry.
 
 ### Provider usage resets
@@ -246,29 +238,29 @@ authorizes automatic recovery. Warning windows, context-token counts, private
 thoughts, and reset times in prose never authorize it. An unknown or expired
 reset leaves the run visibly blocked for manual recovery.
 
-Relay stores the initiating attempt and UTC reset in `UsageRetry`. The run
-remains failed while waiting. The consumer's bounded reconciliation pass
-recovers that step at or after the reset, once the fail-fast drain is complete.
-The schedule survives process restarts. A fresh database connection reads the
-same due row; no browser tab or external chat scheduler is required. Another
-independent failed step or a workspace-preparation error blocks recovery and
-records its reason rather than repeatedly launching the provider.
+Relay stores the initiating attempt and UTC reset in `UsageRetry`. A current
+job yields while waiting for a confirmed future reset and keeps the run
+`running` unless a separate owner gate pauses it. Due reconciliation wakes
+that job once; the same job attempt continues with a new failed-step attempt.
+Completed steps and the accepted Git checkpoint remain intact. The schedule
+survives restart and does not require an open browser.
 
-Automatic and manual recovery share a kernel lock across web and worker
-processes. Recovery preserves partial evidence before reset and reuses the
-run's frozen prompts, routes, model, permissions, and current effort choice.
-An explicit owner retry can replace that step's effort as described below.
-Completed nodes, their outputs, and the protected writer head remain intact.
-A new attempt that
-hits another limit needs a new confirmed future reset. Owner cancellation
-removes the schedule, and an owner retry supersedes it. Shutdown suspends
-reconciliation without losing a pending schedule.
+Terminal failures use the same recovery lock and workspace checks as owner
+retries. Another independent failure or invalid evidence blocks recovery with
+its recorded reason. Unknown and expired resets are recorded as `blocked`
+and never authorize an automatic attempt.
+
+Recovery uses the frozen prompts, route, model, permissions, and current effort
+choice. Explicit owner retry settings may replace that step's route as
+explained below. Another usage failure needs another confirmed future reset.
+Canceling the run removes the schedule; owner retry supersedes it. Pausing new
+steps holds due work until the owner resumes. Shutdown retains the schedule.
 
 ## Controls and waits
 
 Permission answers, elicitation answers, wait answers, and cancels are durable
-`ControlRequest` rows tied to one attempt. The live worker may claim only its own
-attempt's request. It applies the request before recording the corresponding
+`ControlRequest` rows tied to one attempt. The live worker may claim only its
+own attempt's request. It applies the request before recording the corresponding
 answer event. An expired request or one for an older attempt becomes `stale`.
 Posting the same idempotency key again does not apply the answer twice.
 
@@ -284,15 +276,16 @@ control to `pending` only while the same attempt remains live. If its owner is
 gone, the request is stale and the attempt follows interruption or worker-loss
 handling. Pending interactions are discarded when their attempt is lost.
 
-Human-wait nodes have no subprocess. Their attempt stays durable while the run
-is paused. A deadline takes the declared `on_timeout` edge; without that edge,
-the node fails with `timeout`.
+The `relay/human-wait@v1` step has no subprocess. Its question and attempt
+remain durable while the job yields. A deadline fails the step with `timeout`;
+there is no alternate timeout edge. Step conditions and `continue-on-error`
+control the following work.
 
 One coordinator in the worker process renews all registered attempts and their
 admission locks once every five seconds, in one short transaction. Nested
 scopes share registrations; each attempt renews once per cycle. Registrations
 cover execution, command-output retention, Git validation, evidence
-preservation, and reader-worktree removal. Provider and command loops check
+preservation, and job checkpoint finalization. Provider and command loops check
 ownership through reads.
 
 Heartbeat renewal retries transient SQLite busy errors within a 30-second
@@ -307,20 +300,22 @@ database retry. Other database errors propagate unchanged.
 
 ## Node execution
 
+Only two node types are persisted and dispatched:
+
 | Type | Runtime behavior |
 | --- | --- |
-| `agent` | Starts one fresh routed agent session, sends the snapshotted prompts and declared context, and validates outputs after the session ends. |
-| `command` | Runs the captured argument vector with `shell=False`, merges captured command variables over the worker/resource environment, and records complete stdout, stderr, exit status, and elapsed time in bounded event chunks. |
-| `human_wait` | Creates a durable owner question with no subprocess. The current attempt completes after an answer, deadline, cancellation, or recovery decision. |
-| `condition` | Evaluates one restricted expression and records the target for the matching branch label. Unselected branch targets become `skipped`. |
-| `loop` | Executes its child graph in numbered scopes until `until` is true or `max_iterations` selects the `exhausted` target. |
-| `subworkflow` | Executes a captured child workflow in the same run, with only its declared inputs and outputs crossing the scope boundary. |
+| `actions_job` | Coordinates ordered steps, reusable calls, or matrix variants; owns the shared workspace and accepts one cumulative Git checkpoint after success. |
+| `actions_step` | Executes a script, local action, or builtin such as `relay/agent@v1`, `relay/command@v1`, `relay/human-wait@v1`, or `relay/loop@v1`. |
 
-Every declared `timeout` becomes one monotonic attempt deadline. A loop or
-subworkflow passes its remaining deadline into each nested attempt, so child
-work cannot outlive the enclosing node. A running timeout fails with stop
-reason `timeout`; a waiting `human_wait` may instead select its declared
-`on_timeout` edge.
+Agent steps start a fresh routed session using captured prompts and validated
+provider settings. Command steps execute the captured argument vector with
+`shell=False`; script steps use the selected interpreter through that same
+process adapter. Human waits create durable owner questions. Loops invoke a
+captured reusable workflow within their configured bound.
+
+Captured `timeout-minutes` and inherited timeout defaults produce durable
+attempt deadlines. Nested work cannot outlive its enclosing deadline.
+Reconciliation enforces suspended deadlines without holding the worker.
 
 Command output is retained while the process runs, using separate readers
 for stdout and stderr so reading cannot change the child's write offsets.
@@ -336,72 +331,73 @@ This preserves workflow-selected tools instead of allowing the launcher's
 application directory to take priority. Arguments stay separate, and the
 target starts only after the launcher joins its kill-on-close Job Object.
 
-Agent and command nodes extract every declared output before success. Files
-used by `label`, `json_path`, and `yaml_path` selectors are required artifacts;
-Relay copies them to central evidence storage with their SHA-256 hashes. An
-`exists` selector returns a boolean and does not make a missing file an error.
+Agent and validation actions extract every declared report output before
+success. Files used by `label`, `json_path`, and `yaml_path` selectors are
+required artifacts; Relay copies them to central evidence storage with their
+SHA-256 hashes. An `exists` selector returns a boolean and does not make a
+missing file an error.
 
-Loop and subworkflow child graphs execute inline in the enclosing consumer
-thread. This avoids an enqueue-and-wait deadlock when `relay up` uses its
-single worker. The shared coordinator keeps the child and enclosing attempts
-renewed together. When a child waits for the owner or for worktree admission,
-the parent scope yields its worker. A child settlement redispatches the same
-parent attempt, which reads the saved child rows and continues without repeating
-successful children. Suspended scopes retain their original durable deadline;
-reconciliation enforces it while no worker is held. Only the child human wait
-creates an owner interaction.
+Reusable jobs and loop iterations execute through the same consumer thread.
+The shared coordinator renews child and enclosing attempts together. When a
+child waits for the owner, quota, or job admission, its parent yields. A child
+settlement redispatches the same parent attempt, which reads its saved state
+and continues without repeating successful children. Only the declared human
+wait creates an owner question.
 
 ## Nested scope example
 
-Suppose loop `build_loop` reaches iteration 2. Its body invokes subworkflow
-`verify`, whose child node `check` produces output `ready`. Relay records these
-rows:
+Suppose job `build` has loop step `repeat`, which invokes a reusable workflow
+whose `verify` job contains step `check`. In iteration 2 the records are:
 
 | `scope_path` | `parent_scope_path` | Meaning |
 | --- | --- | --- |
-| `root.build_loop#2` | `root` | Structural record for loop iteration 2. |
-| `root.build_loop#2.verify` | `root.build_loop#2` | The subworkflow invocation in that iteration. |
-| `root.build_loop#2.verify.check` | `root.build_loop#2.verify` | The child node executed by `verify`. |
+| `root.build` | `root` | The owning job. |
+| `root.build.repeat` | `root.build` | The bounded loop step. |
+| `root.build.repeat.iteration_2` | `root.build.repeat` | The captured reusable invocation for iteration 2. |
+| `root.build.repeat.iteration_2.verify` | `root.build.repeat.iteration_2` | Its verification job. |
+| `root.build.repeat.iteration_2.verify.check` | `root.build.repeat.iteration_2.verify` | Its check step. |
 
-Inside the subworkflow, `check` reads its siblings within
-`root.build_loop#2.verify`. The subworkflow maps `check.ready` to its own
-`ready` output. The loop then reads that value as
-`needs.verify.outputs.ready`, scoped to `root.build_loop#2`; it cannot read an
-output from iteration 1 or 3.
+Each record has its own attempt. The reusable workflow maps its declared
+outputs back to the loop. Scope membership compares complete dot-separated
+segments, so iteration 2 cannot read a sibling iteration's private results.
 
 ## Failure, cancellation, and recovery
 
 When an executor raises a Relay error, its public description is saved in
-`failure_summary` and the `attempt.ended` event's `error_message`. The event also
-includes `error_code`; existing codes and terminal outcomes retain their
-meaning. Descriptions keep at most their first 4,096 characters. For example,
-a 5,000-character description retains its 4,096-character prefix. Unexpected
+`failure_summary` and the `attempt.ended` event's `error_message`. The event
+also includes `error_code`; existing codes and terminal outcomes retain their
+meaning. Descriptions keep at most their first 4,096 characters. For example, a
+5,000-character description retains its 4,096-character prefix. Unexpected
 exceptions expose a generic Relay description while their trace stays in the
 application log. The run monitor combines this diagnostic with the failed
 attempt's exit code and last public provider message. A rerun clears the run
 summary and shows only the new attempt's failure if it fails again.
 
-The first node failure moves the run to `canceling`, prevents pending work from
-starting, and sends one durable cancel request to each active sibling attempt.
-Agent cancellation asks the protocol session to stop, then Relay terminates the
-whole process tree after the fixed grace period. Command cancellation uses the
-same bounded process-tree stop: an isolated group receives a graceful signal,
-then `SIGKILL` on Linux or `taskkill /T /F` on Windows if needed. The force
-command and final exit wait are bounded. The
-[2026-10-03 Windows CI run](https://github.com/viseshrp/relay/actions/runs/37129432298)
-verified the force-stop fallback for an uncooperative subprocess on Python
-3.10 through 3.14. Live agent descendant-tree shutdown remains unverified.
-Evidence preservation precedes worktree removal
-and lock release.
+A failed step settles its raw outcome and effective conclusion. The owning
+job evaluates later step conditions and `continue-on-error`; other jobs retain
+their own dependency and failure rules. Owner cancellation prevents new work,
+sends durable requests to live attempts, and redispatches yielded scopes so
+their cleanup can finish. Agent and command processes use bounded owned-tree
+shutdown. Evidence preservation precedes workspace removal and admission
+release.
 
-An owner may rerun one failed node after Relay preserves its evidence and resets
-only that attempt's changes. For a nested failure, Relay reopens the failed leaf
-and its loop or subworkflow parents so the synchronous scope can reach that
-leaf. Successful nodes remain complete. Nodes canceled only by fail-fast return
-to `pending` and have eligibility recomputed. If a separate concurrent failure
-remains, the run returns to `failed` after the selected rerun settles. This is a
-new attempt initiated by the owner, an enabled recovery policy, or a confirmed
-provider usage reset.
+Before an unrelated job continues, Relay preserves missing evidence from the
+failed job's primary workspace and verifies it before moving that checkout
+aside. Each failed job and step attempt requires complete evidence; a
+preservation failure blocks continuation. Human-wait steps keep their evidence
+exemption. See
+[Actions job boundaries](git-and-artifacts.md#actions-job-boundaries).
+
+An owner may retry a failed current step or job after evidence and protected
+workspace checks. Job and step attempts require retained evidence, except
+human-wait steps. Relay preserves missing attempt evidence from the current
+workspace before a retry or confirmed cleanup, then verifies it; damaged
+evidence still blocks either operation. Relay reopens the failed leaf and its
+current enclosing coordinators, retaining completed steps, their outputs, and
+accepted commits.
+Fail-fast-only canceled work has eligibility recomputed. An independent
+remaining failure still prevents the run from succeeding. The retry creates a
+fresh attempt using the retained job state.
 
 An owner retry may explicitly change an agent step's effort to a value freshly
 advertised for its existing model, change its permission mode, or request the
@@ -426,7 +422,8 @@ Relay never changes providers automatically in response to an error.
 An owner can pause new steps while a provider session is running. The saved
 `dispatch_paused` flag blocks admission, including tokens already in Huey's
 queue. Existing attempts keep their sessions and can finish, retain outputs,
-and advance the committed head normally. This flag survives restart and does
+and finish normally. Changed code advances the protected head only at a
+successful job boundary. This flag survives restart and does
 not change the run's state-machine status or freeze its deadlines. Nested scopes
 yield while their children wait, releasing worker capacity.
 
@@ -434,12 +431,13 @@ Automatic error recovery and confirmed quota schedules wait while this flag is
 set; pausing does not cancel a schedule or reset its spent retry budget. Resume
 new steps explicitly to wake existing dispatch intent and advance successors.
 
-While paused, an agent node in `pending`, `ready`, or `dispatched` can receive
-new settings only if it has never started an attempt. Relay freshly proves the
-chosen tool/model and validates supported effort and permission choices before
-atomically rechecking the pause, admission, and previous settings. A concurrent
-resume, attempt start, or settings edit rejects a stale save. Saving settings
-keeps the run paused and does not reset its worktree or create an attempt.
+While paused, a materialized agent step in `pending`, `ready`, or `dispatched`
+can receive new settings only if it has never started an attempt. Relay freshly
+proves the chosen tool/model and validates supported effort and permission
+choices before atomically rechecking the pause, admission, and previous
+settings. A concurrent resume, attempt start, or settings edit rejects a stale
+save. Saving settings keeps the run paused and does not reset its worktree or
+create an attempt.
 
 The selection uses the same durable per-node override as retry settings.
 Completed work, frozen prompts, snapshot hashes, and other nodes' settings stay
@@ -504,42 +502,41 @@ children exit.
 
 Unrelated port occupants, missing or invalid ownership records, links, another
 host's record, and unverifiable process identities never authorize a stop.
-An older live attempt without a creation token blocks workspace recovery;
-stop that older worker normally first. Relay reports the reason and preserves
+A live attempt without a creation token blocks workspace recovery;
+stop that worker normally first. Relay reports the reason and preserves
 its worktree instead of guessing ownership.
 
 ## Scheduling and worktree admission
 
 Unstarted stale dispatches are repaired for both `running` and `paused_wait`
 runs. An unrelated human wait does not prevent a writer's delivery repair.
-A routed wait timeout resumes the run only when no waiting or failed node
-remains, using the same guard as an owner answer.
+A settled owner wait resumes the run only when no waiting or failed node
+remains, using the same guard for answers and deadline failures.
+If completing the wait wakes an enclosing scope, expiry reads the current run
+status so that the same resume transition is recorded only once.
 
 Consumer startup initializes each active run once in O(V+E). Compiled immutable
 graphs are cached in a bounded cache. Later committed node changes schedule
-only their run and direct data/control successors, loading candidate rows and
+only their run and direct dependency successors, loading candidate rows and
 their dependencies instead of walking every active graph. A terminal change
 starts with O(outdegree) candidates; skipped successors propagate through their
-own edges. Loop and subworkflow expansion is bounded before execution.
+own edges. Matrix, reusable-workflow, and loop expansion remain bounded.
 Eligibility changes apply only while the locked node is still `pending`. A
 concurrent pass uses the current status instead of applying an old decision;
 if the node already succeeded, it loads the committed outputs before considering
 successors. These checks do not add transitions to the tables above.
 
-Nodes that do not touch Git state need no worktree gate. Git-backed read-only
-nodes may run together, each in a detached ephemeral worktree at the run's
-recorded commit. A writer acquires the exclusive run lock and uses the primary
-worktree. A reader worktree is removed before its node advances. A writer lock
-is released only after commit validation, evidence preservation, and the new
-recorded HEAD are durable.
-A released gate immediately enqueues that run's deferred, unstarted tokens
-through the single consumer. Stale-dispatch reconciliation remains the repair
-path after enqueue loss or consumer restart. Nested admission waits yield their
-worker and remain bounded by the enclosing deadline.
+One durable installation-wide job lease admits current jobs serially. All
+steps in that job share the primary run workspace. A successful job commits its
+changed code once; a clean no-op is valid. The lease remains held until Git
+validation, preservation, and the protected head are durable.
+
+Released admission wakes deferred delivery through the consumer. Bounded
+stale-dispatch reconciliation repairs enqueue loss or consumer restart.
+Nested waits yield the worker and retain their captured deadlines.
 
 One Huey consumer process uses exactly one execution thread on Linux, Windows,
-and macOS. Legacy positive `workers` settings and `--workers` flags warn and use
-one. The settings UI omits this field; new API values above one return `422`.
+and macOS. Execution concurrency is fixed and has no configuration field.
 The reconciler and heartbeat coordinator remain separate background threads.
 SQLite transactions stay short, use WAL with FULL durability, and have bounded
 busy waiting.

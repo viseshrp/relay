@@ -15,7 +15,7 @@ from relay.vcs.artifacts import retained_attempt_ref
 from relay.vcs.git import git_stdout
 from relay.web.models import Artifact, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore
-from tests.support import PYTHON, InlineEngine, RelayProject, event_types, git
+from tests.support import PYTHON, InlineEngine, RelayProject, answer_wait, event_types, git
 
 
 def writer_workflow(project: RelayProject) -> None:
@@ -31,25 +31,98 @@ def writer_workflow(project: RelayProject) -> None:
         "writer",
         json.dumps(
             {
-                "version": 1,
                 "name": "Merge result",
-                "nodes": {
-                    "first": {"type": "command", "writes": True, "run": [PYTHON, "-c", scripts[0]]},
+                "jobs": {
+                    "first": {
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([PYTHON, "-c", scripts[0]])},
+                            }
+                        ]
+                    },
                     "second": {
-                        "type": "command",
-                        "writes": True,
                         "needs": ["first"],
-                        "run": [PYTHON, "-c", scripts[1]],
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps([PYTHON, "-c", scripts[1]])},
+                            }
+                        ],
                     },
                     "review": {
-                        "type": "command",
                         "needs": ["second"],
-                        "run": ["git", "status", "--short"],
+                        "steps": [
+                            {
+                                "id": "work",
+                                "uses": "relay/command@v1",
+                                "with": {"argv": json.dumps(["git", "status", "--short"])},
+                            }
+                        ],
                     },
                 },
             }
         ),
     )
+
+
+@pytest.mark.parametrize("dirty_target", [False, True], ids=["clean", "owner-edit"])
+def test_human_wait_keeps_job_evidence_and_strict_merge_cleanliness(
+    project: RelayProject, engine: InlineEngine, dirty_target: bool
+) -> None:
+    project.write_workflow(
+        "approval",
+        json.dumps(
+            {
+                "name": "Approved merge",
+                "jobs": {
+                    "review": {
+                        "steps": [
+                            {
+                                "id": "approve",
+                                "uses": "relay/human-wait@v1",
+                                "with": {"prompt": "Continue?"},
+                            },
+                            {
+                                "id": "write",
+                                "uses": "relay/command@v1",
+                                "with": {
+                                    "argv": json.dumps(
+                                        [
+                                            PYTHON,
+                                            "-c",
+                                            "from pathlib import Path; "
+                                            "Path('approved.txt').write_text('Approved')",
+                                        ]
+                                    )
+                                },
+                            },
+                        ]
+                    }
+                },
+            }
+        ),
+    )
+    run_id = engine.launch(project, "approval", cleanup_policy="merge_on_success")
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "paused_wait"
+    if dirty_target:
+        project.write("owner.txt", "Owner work")
+    assert answer_wait(engine, run_id) == "accepted"
+    run = Run.objects.get(pk=run_id)
+    if dirty_target:
+        assert (run.status, run.failure_code) == ("failed", "dirty_repository_error")
+        assert (project.repository / "owner.txt").read_text() == "Owner work"
+        assert Path(run.worktree_path).is_dir()
+        assert not (project.repository / "approved.txt").exists()
+    else:
+        assert run.status == "succeeded", run.failure_summary
+        assert (project.repository / "approved.txt").read_text() == "Approved"
+        assert not Path(run.worktree_path).exists()
+        assert run.merged_commit == run.recorded_head
+    assert Artifact.objects.filter(attempt__node_run__run_id=run_id).exists()
 
 
 def test_merge_all_writer_commits_then_remove_every_run_worktree(
@@ -202,8 +275,16 @@ def test_failed_job_does_not_merge_or_delete_the_workspace(
 ) -> None:
     project.write_workflow(
         "failure",
-        "version: 1\nname: Failure\nnodes:\n"
-        f'  fail: {{type: command, run: ["{PYTHON}", -c, "raise SystemExit(2)"]}}\n',
+        (
+            f"name: Failure\n"
+            f"jobs:\n"
+            f"  fail:\n"
+            f"    steps:\n"
+            f"    - id: work\n"
+            f"      uses: relay/command@v1\n"
+            f"      with:\n"
+            f'        argv: \'["{PYTHON}", "-c", "raise SystemExit(2)"]\'\n'
+        ),
     )
     head = git(project.repository, "rev-parse", "HEAD")
     run_id = engine.launch(project, "failure", cleanup_policy="merge_on_success")
