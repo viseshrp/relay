@@ -10,9 +10,11 @@ from typing import Any, cast
 import uuid
 
 from django.db import transaction
+from django.db.models import Q
 
-from relay.errors import PathSafetyError, PersistenceError
+from relay.errors import ArtifactPreservationError, PathSafetyError, PersistenceError
 from relay.execution.dispatch import release_serial_admission
+from relay.execution.recovery import preserve_missing_attempt_evidence
 from relay.execution.resources import AttemptResources, allocate_attempt_resources
 from relay.execution.runner import ExecutionOutcome
 from relay.execution.state import TERMINAL_NODE_STATUSES, EventSource, NodeType
@@ -111,10 +113,16 @@ def prepare_job_workspace(run_id: str) -> None:
     if not is_ancestor(repository, cast(str, record.source_commit), protected):
         message = "The accepted job checkpoint is no longer a descendant of launch."
         raise PersistenceError(message)
-    # Every failed job must already have complete evidence before moving its bytes.
     from relay.vcs.cleanliness import execution_changes
 
     from .models import Artifact
+    from .repositories import (
+        DjangoExecutionStore,
+        _attempt_requires_evidence,
+        _identifier,
+        _related,
+        _string,
+    )
 
     snapshot = RunSnapshot.objects.get(run=record)
     sources = cast(dict, snapshot.resolved_definition).get("sources", {})
@@ -139,42 +147,84 @@ def prepare_job_workspace(run_id: str) -> None:
         node_run__outcome__in=("failure", "cancelled"),
         status="terminal",
     )
+    attempt_ids = set(failures.values_list("pk", flat=True))
+    journal = state.get("continuation_journal")
+    if journal is None or not safe_resolve(worktrees_dir(), journal["retained"]).exists():
+        # Unarchived attempts still belong to the primary. Preserve them before
+        # moving it; journal replay after the move must not archive a new primary.
+        scopes = set(failures.values_list("node_run__scope_path", flat=True))
+        rejected_scopes = Q(node_run__scope_path__in=scopes)
+        for scope in scopes:
+            # Include root.b.write beneath root.b, without matching root.bc.
+            rejected_scopes |= Q(node_run__scope_path__startswith=scope + ".")
+        attempts = NodeAttempt.objects.select_related("node_run").filter(
+            rejected_scopes,
+            node_run__run=record,
+            node_run__node_type__in=(NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value),
+            status="terminal",
+        )
+        recorded_attempts = set(
+            Artifact.objects.filter(attempt__in=attempts).values_list("attempt_id", flat=True)
+        )
+        store = DjangoExecutionStore()
+        try:
+            for attempt in attempts:
+                if _attempt_requires_evidence(_related(attempt, "node_run", NodeRun)):
+                    attempt_ids.add(attempt.pk)
+                    # Recorded archives may use a runner-supplied root. Their
+                    # rows are validated below; never recreate an existing ref.
+                    if attempt.pk not in recorded_attempts:
+                        preserve_missing_attempt_evidence(
+                            store,
+                            repository,
+                            primary,
+                            run_id,
+                            _identifier(attempt),
+                            _string(attempt, "starting_head"),
+                        )
+        except ArtifactPreservationError:
+            message = "Incomplete job preservation blocks continuation."
+            raise PersistenceError(message) from None
     canceled_scopes = failures.filter(node_run__outcome="cancelled").values_list(
         "node_run__scope_path", flat=True
     )
-    attempt_ids = list(failures.values_list("pk", flat=True))
     for scope in canceled_scopes:
-        latest_child = (
-            NodeAttempt.objects.filter(
+        for child in (
+            NodeAttempt.objects.select_related("node_run")
+            .filter(
                 node_run__run=record,
                 node_run__scope_path__startswith=scope + ".",
                 status="terminal",
-                artifacts__preservation_state="preserved",
             )
             .order_by("-ended_at")
-            .first()
-        )
-        if latest_child is not None:
-            attempt_ids.append(latest_child.pk)
+        ):
+            # Human waits retain answers rather than workspace archives.
+            if _attempt_requires_evidence(_related(child, "node_run", NodeRun)):
+                attempt_ids.add(child.pk)
+                break
     from relay.execution.action_products import digest_file
     from relay.execution.resources import _linked
 
     evidence = list(
         Artifact.objects.filter(attempt_id__in=attempt_ids).values(
-            "retained_path", "preservation_state", "sha256", "bytes"
+            "attempt_id", "retained_path", "preservation_state", "sha256", "bytes"
         )
     )
-    if not evidence or any(
-        item["preservation_state"] != "preserved"
-        or _linked(Path(item["retained_path"]))
-        or not Path(item["retained_path"]).is_file()
-        or Path(item["retained_path"]).stat().st_size != item["bytes"]
-        or digest_file(Path(item["retained_path"])) != item["sha256"]
-        for item in evidence
+    missing_attempts = set(attempt_ids) - {item["attempt_id"] for item in evidence}
+    if (
+        missing_attempts
+        or not evidence
+        or any(
+            item["preservation_state"] != "preserved"
+            or _linked(Path(item["retained_path"]))
+            or not Path(item["retained_path"]).is_file()
+            or Path(item["retained_path"]).stat().st_size != item["bytes"]
+            or digest_file(Path(item["retained_path"])) != item["sha256"]
+            for item in evidence
+        )
     ):
         message = "Incomplete job preservation blocks continuation."
         raise PersistenceError(message)
-    journal = state.get("continuation_journal")
     if journal is None:
         require_project_worktree(repository, primary)
         journal = {

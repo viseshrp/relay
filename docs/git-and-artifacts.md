@@ -84,10 +84,13 @@ commit; a clean no-op is valid. Report exemptions remain unchanged.
 
 Accepted commits advance the protected run head cumulatively. Failed jobs
 retain commits, diffs, untracked bytes, and reports. Before another job
-continues, Relay verifies that evidence, records continuation intent, moves
-the rejected checkout into a retained detached worktree, and recreates the
-primary at the protected head. A journal resumes interrupted continuation
-without discarding rejected bytes or resetting the owner's checkout.
+continues, Relay preserves missing evidence from the rejected checkout and
+verifies that each failed job and step attempt it holds has complete evidence.
+A preservation failure blocks the next job. Only then does Relay record
+continuation intent, move the rejected checkout into a retained detached
+worktree, and recreate the primary at the protected head. A journal resumes
+interrupted continuation without discarding rejected bytes or resetting the
+owner's checkout.
 
 Matrix and reusable jobs use the same serial admission. Tolerating a failure
 changes dependency conclusions without accepting rejected code. Optional

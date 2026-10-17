@@ -381,6 +381,13 @@ their cleanup can finish. Agent and command processes use bounded owned-tree
 shutdown. Evidence preservation precedes workspace removal and admission
 release.
 
+Before an unrelated job continues, Relay preserves missing evidence from the
+failed job's primary workspace and verifies it before moving that checkout
+aside. Each failed job and step attempt requires complete evidence; a
+preservation failure blocks continuation. Human-wait steps keep their evidence
+exemption. See
+[Actions job boundaries](git-and-artifacts.md#actions-job-boundaries).
+
 An owner may retry a failed current step or job after evidence and protected
 workspace checks. Job and step attempts require retained evidence, except
 human-wait steps. Relay preserves missing attempt evidence from the current
