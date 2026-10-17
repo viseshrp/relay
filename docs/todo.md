@@ -1923,3 +1923,391 @@ visible but quiet.
 3. DT-13, DT-14, DT-15, FE-11: browser chrome and third-party theming.
 4. QA-16, BR-17, FE-09, FE-12: gates, single token source, and docs.
 5. QA-17, QA-18, QA-19, BR-12 to BR-15, DE-09 to DE-11, FE-10.
+
+## Workflow builder beginner audit
+
+This audit ran on 2026-10-17 against `main` at `62ac59e`. It asks one
+question: can someone new to Relay build or change a workflow, in the visual
+editor or in YAML, without already knowing Relay's schema? Starting a starter
+is in good shape. Building and editing are not. Items are grouped by category
+and carry a priority: **P0** strands or misleads a beginner, **P1** slows them
+down, **P2** is polish. Item numbers use the `WB` prefix.
+
+How it was run:
+
+- **Isolated instance only.** `tests/e2e_server.py` on port 8765 with scratch
+  storage and fake agents. The owner's instance and provider accounts were
+  not used.
+- **Validation matrix.** 51 sources (11 freshly added actions and 40 common
+  mistakes) were sent to `POST /api/workflow-language/validate`, which is the
+  endpoint the editor calls. Sources that validated were then saved,
+  committed, and launched through `POST /api/runs` to see where each mistake
+  is actually caught.
+- **Browser pass.** Playwright with Chromium at 1440, 768, and 375 pixels:
+  starter gallery, blank workflow, **Add job** for each type, every job tab,
+  **Workflow settings**, the right-click menu, YAML completion, hover, the
+  Tab key, and clearing the document. axe-core 4 ran on the editor and on
+  the open job drawer.
+- **Source and docs.** The editor components, `support_manifest()`, the
+  action contracts, `docs/getting-started.md`,
+  `docs/coming-from-github-actions.md`, and the authoring sections of
+  `docs/web-ui.md`.
+- **Not covered:** live providers, macOS and Windows, screen readers, dark
+  mode, and editing the nine-job **AI coding workflow** starter visually.
+
+What already works: seven starters with job sequences, required agents, and
+input types; a blank workflow that starts valid; line-anchored server errors
+with the canvas kept at the last valid version; tailored messages for GitHub
+Actions habits such as `runs-on`, `permissions`, and `services`; Split view
+that keeps comments; undo, redo, and draft autosave; no horizontal overflow
+at 375 pixels.
+
+### YAML editor
+
+- [ ] **WB-01. Make completion follow the cursor position.**
+  - **Priority:** P0.
+  - **Evidence:** `YamlEditor.tsx:61` merges every property of all 115
+    schema definitions, every action input, and every context property into
+    one list, whatever the cursor position. Typing `ru` under a job offers
+    `run`, `run-id`, `run-name`, `relay.run_id`, `workflow_run`, and
+    `relay.run_number`. Ctrl+Space after `- uses:` fills CodeMirror's
+    100-option list with field names, starting with `agent`, `agents`,
+    `argv`, and `artifacts`.
+  - **Fix:** Resolve the YAML path at the cursor from the parsed document.
+    Offer only the properties of that path's definition, action inputs only
+    inside the `with:` of a known `uses:`, and context names only inside
+    `${{ }}`.
+  - **Done when:** A browser test checks completion at the root, a job, a
+    step, an agent step's `with:`, and inside an expression, and each list
+    contains only fields valid there.
+
+- [ ] **WB-02. Suggest values, starting with action names.**
+  - **Priority:** P0.
+  - **Evidence:** Completion only offers keys. The 11 `relay/*@v1` actions in
+    `manifest.builtins` are never offered after `uses:`, so a beginner must
+    already know they exist. `shell`, input `type`, report `format`,
+    `cache-mode`, and agent IDs have fixed values that are not offered
+    either.
+  - **Fix:** Add value completion for those fields, with a one-line
+    description for each action. Selecting an action could insert a `with:`
+    block containing its required inputs (see WB-07).
+  - **Done when:** Ctrl+Space after `uses:` lists the 11 actions, and each
+    fixed-value field lists its values.
+
+- [ ] **WB-03. Give hover and completion real descriptions.**
+  - **Priority:** P0.
+  - **Evidence:** Only 6 of 115 definitions in the served manifest have a
+    `description` (`workflow-root`, `on`, `strategy`, `steps`,
+    `entrypoints`, `recovery`). Hover (`YamlEditor.tsx:103`) uses the first
+    definition that contains the key, then falls back to the parent's
+    description or to `key: type`. As a result:
+    - `needs` reads `needs: needs`, `if` reads `if: job-if`,
+      `timeout-minutes` reads `timeout-minutes: number-strategy-context`.
+    - A step's `run` reads `run: workflow-defaults-run`, the description of a
+      different field.
+    - `name` and `env` read "Relay workflow: local jobs and ordered steps."
+    - `agent`, `prompt`, `argv`, and every other action input have no hover.
+      Completion describes them only as "Local action input".
+  - **Fix:** Describe every definition a user can type in `schema.json`, and
+    every action input next to the contracts in `builtins.py`. Resolve hover
+    by YAML path, not by the first matching definition. Link each
+    description to its section in [Workflows](workflows.md).
+  - **Done when:** A test fails when a property reachable from
+    `workflow-root`, or an action input, has no description. A hover test
+    distinguishes a step's `run` from `defaults.run`.
+
+- [ ] **WB-04. Make Tab indent in the YAML editor.**
+  - **Priority:** P1.
+  - **Evidence:** The editor uses `basicSetup` without `indentWithTab`.
+    Pressing Tab in the YAML editor changes nothing, and focus leaves the
+    editor for the page body. YAML forbids tabs for indentation, so beginners
+    rely on an editor that indents for them.
+  - **Fix:** Bind `indentWithTab` with a two-space indent unit, following
+    CodeMirror's Tab example. CodeMirror's tab focus mode keeps a keyboard
+    exit: Escape then Tab within two seconds, or Ctrl+M (Shift+Alt+M on
+    macOS) to toggle. Document both in
+    [Keyboard shortcuts](keyboard-shortcuts.md).
+  - **Done when:** A browser test checks that Tab indents by two spaces,
+    Shift+Tab outdents, and Escape followed by Tab moves focus out of the
+    editor.
+
+- [ ] **WB-05. Explain an empty YAML document.**
+  - **Priority:** P1.
+  - **Evidence:** After selecting all and deleting, the page still shows
+    "Validating workflow…" 10 seconds later, and the canvas shows loading
+    placeholders. No error explains the state. The validation effect returns
+    early for empty text (`useActionsWorkflowWorkspace.tsx:331`), and the
+    endpoint rejects it anyway ("yaml must be a non-empty string.").
+  - **Fix:** Treat an empty draft as invalid with a message such as "This
+    workflow is empty. Restore the saved source or add a job." End the
+    loading state.
+  - **Done when:** A browser test clears the document and sees that message
+    in both Visual and YAML modes.
+
+### Visual editor
+
+- [ ] **WB-06. Keep the command form and the YAML in agreement.**
+  - **Priority:** P0.
+  - **Evidence:** `ActionCommandFields.tsx:40` displays
+    `inputs.argv ?? '["echo","Ready"]'` but never writes that value. Adding
+    a command job writes `with: {}`, so the form shows `echo` and `Ready`
+    while the banner says "relay/command@v1 requires exactly one of argv or
+    command." and the canvas falls back to "Showing the last valid version".
+    An `argv` that is not valid JSON is displayed as an empty list.
+  - **Fix:** Write the default into the document when the step is created,
+    or show empty fields with placeholder text. Show a parse error for an
+    unparsable `argv` instead of an empty list.
+  - **Done when:** A test adds a command job and checks that the form, the
+    YAML, and validation agree.
+
+- [ ] **WB-07. Make newly added jobs and steps valid.**
+  - **Priority:** P0.
+  - **Evidence:** **Add job** (`useActionsWorkflowWorkspace.tsx:547`) and the
+    **Step type** menu (`ActionJobSteps.tsx:84`) fill only an action's
+    required inputs, using empty strings. A fresh `command`, `loop`, or
+    `validate-report` step fails validation immediately. A fresh
+    `human-wait` step validates with an empty question. A fresh `agent` step
+    is `with: {}`.
+  - **Fix:** Give each action a valid starting configuration, or open a
+    short setup form that focuses the missing fields. `loop` needs a picker
+    for an existing reusable workflow rather than an empty path.
+  - **Done when:** For each of the 11 actions, **Add job** and **Step type**
+    produce a source that passes validation, or the form says which field to
+    fill.
+
+- [ ] **WB-08. Let Add step choose the step type.**
+  - **Priority:** P1.
+  - **Evidence:** **Add step** (`ActionJobSteps.tsx:263`) always appends
+    `run: echo Ready`; the user must then change its type. BX-07 promised
+    that built-in actions are exposed through **Add step**.
+  - **Fix:** Make **Add step** a menu: Agent, Script, Command, Approval,
+    Check a report, Upload artifact, and More.
+  - **Done when:** A browser test adds each listed type in one action.
+
+- [ ] **WB-09. Show a job's steps as a list.**
+  - **Priority:** P1.
+  - **Evidence:** The drawer edits one step at a time through an **Ordered
+    step** select (`ActionJobSteps.tsx:54`). Canvas cards show the job and a
+    single summary, for example "work · Agent · m1" or "relay/command@v1".
+    Six of the seven starters have one job, so their canvas shows one box
+    and none of the steps.
+  - **Fix:** Show an ordered step list with type icons, names, and drag or
+    move controls in the drawer, and list step names on each card.
+  - **Done when:** A user can see and reorder every step of a job without
+    opening a select.
+
+- [ ] **WB-10. Describe step types in plain words.**
+  - **Priority:** P1.
+  - **Evidence:** **New job type** and **Step type** list bare slugs:
+    `agent`, `cache`, `command`, `download-artifact`, `human-wait`, `loop`,
+    `restore-cache`, `save-cache`, `upload-artifact`, `validate-input`, and
+    `validate-report`. The **Action reference** field below **Step type**
+    (`ActionJobSteps.tsx:123`) repeats the same choice as raw text.
+  - **Fix:** Use labels from the vocabulary map (for example, **Approval**
+    for `human-wait`), add a one-line description, and group them: Agents,
+    Scripts and commands, Approvals, Reports, Artifacts and caches,
+    Advanced. Keep **Action reference** under Advanced for local `./`
+    actions.
+  - **Done when:** Every menu entry has a label and a description, and no
+    slug appears outside Advanced.
+
+- [ ] **WB-11. Lead with the basics in job and step forms.**
+  - **Priority:** P1.
+  - **Evidence:**
+    - The **General** tab, which opens first, shows the condition with its
+      expression builder, timeout, **Reusable workflow**, matrix axes and
+      include (each with **Advanced JSON**), and concurrency. Steps are on
+      the second tab.
+    - An agent step's first control is **Advanced JSON: Action inputs**
+      (`ActionBuiltinFields.tsx:78`).
+    - Command arguments show type selectors for every item ("Program and
+      arguments value type: List", "item 1 value type: Text or expression").
+  - **Fix:** Open new jobs on **Steps**. Move matrix, concurrency, reusable
+    workflow, **Advanced JSON**, and value-type selectors under an
+    **Advanced** section. Show a value-type selector only when the value is
+    not plain text.
+  - **Done when:** A new job's drawer shows only name, start after, and steps
+    until **Advanced** is opened.
+
+- [ ] **WB-12. Use one control for the agent choice.**
+  - **Priority:** P1.
+  - **Evidence:** The **Agent** select (`ActionBuiltinFields.tsx:88`) is blank
+    whenever a step uses an `agents` list, which six of the seven starters
+    do. The list itself is in **Agent order** (`ActionBuiltinFields.tsx:256`),
+    below the prompt editors.
+  - **Fix:** Replace both with one **Runs on** control that picks a single
+    agent or an ordered fallback list, and shows the effective choice,
+    including saved defaults.
+  - **Done when:** Opening any starter's agent step shows which agents it
+    will try, in order, in one place.
+
+### Validation and error messages
+
+- [ ] **WB-13. Name the field and suggest the closest match.**
+  - **Priority:** P0.
+  - **Evidence:**
+    - `prmpt:` in an agent step reports "relay/agent@v1 has missing
+      required or unknown action inputs." (`builtins.py:49`) without naming
+      `prmpt`.
+    - `stpes:` reports "steps: Required field is missing." before
+      "stpes: Unknown workflow field.". `rnu:` and `Jobs:` behave the same
+      way.
+  - **Fix:** Name each unknown and missing input. Suggest the nearest allowed
+    key ("Did you mean `steps`?"). Report the unknown key before the missing
+    key it causes.
+  - **Done when:** Tests cover a misspelled root, job, step, and action-input
+    key.
+
+- [ ] **WB-14. Explain JSON-string inputs, or accept YAML lists.**
+  - **Priority:** P0. Needs a schema decision.
+  - **Evidence:** `agents: [codex, claude]`, `argv: [git, status]`, and
+    `options: [yes, no]` each report "Expected a scalar string.". Starters
+    and docs write `'["codex", "claude"]'`, and
+    [Coming from GitHub Actions](coming-from-github-actions.md) shows
+    `options: '["Approve", "Reject"]'` without explaining why.
+  - **Fix:** Pick one, with owner approval for the first:
+    1. Accept YAML sequences for these inputs and normalize them, as BX-36
+       considered for other aliases.
+    2. Keep strings and say so: "Write this list as a JSON string, for
+       example `agents: '["codex", "claude"]'`."
+  - **Done when:** A YAML list either validates or produces that guidance,
+    with a test for each input.
+
+- [ ] **WB-15. Catch literal mistakes while editing, not mid-run.**
+  - **Priority:** P0.
+  - **Evidence:** Each source below validated, saved, and was committed on
+    the isolated server:
+    - `argv: git status` launched, then the step failed with "Command argv
+      must be a JSON argument vector." (`relay/execution/nodes/actions.py:900`).
+    - `shell: zsh` launched, then the step failed with "A custom shell must
+      contain exactly one {0} script placeholder."
+      (`relay/execution/action_files.py:263`).
+    - `prompt-files: prompts/missing.md` was refused at launch: "Local prompt
+      'prompts/missing.md' does not exist."
+    - `agent: chatgpt` was refused at launch: "Agent 'chatgpt' is outside
+      Relay's Phase 1 compatibility scope."
+  - **Fix:** In editor validation, parse a literal `argv` as JSON (as
+    `human_wait_options` already does for `options`), check a literal shell
+    name or `{0}` placeholder, check that literal local prompt files exist,
+    and check literal agent IDs against the supported providers. These are
+    read-only checks; keep the existing runtime checks.
+  - **Done when:** Each source above shows a line-anchored error in the
+    editor, and the runtime checks remain covered.
+
+- [ ] **WB-16. Warn about references to names that do not exist.**
+  - **Priority:** P1.
+  - **Evidence:** `${{ inputs.task }}` with no `task` input,
+    `${{ steps.nope.outputs.x }}`, and `${{ needs.b.outputs.x }}` without
+    `needs: b` all validate. The first two also launched and succeeded;
+    missing properties yield the empty value. An agent step with neither
+    `prompt` nor `prompt-files` also validated, and its run succeeded. BX-33
+    promised that invalid references show the server's error inline.
+  - **Fix:** Report these as warnings rather than errors, to keep GitHub
+    Actions' empty-value semantics. Add a warning severity to diagnostics;
+    `YamlEditor.tsx` currently marks everything as an error.
+  - **Done when:** Each case shows a warning in the editor and still
+    launches.
+
+- [ ] **WB-17. List the valid choices in errors.**
+  - **Priority:** P1.
+  - **Evidence:**
+    - `type: text` on a dispatch input reports "Expected one of string."
+      The schema allows string, boolean, number, environment, and choice,
+      but `language.py:269` reports only the first `one-of` branch.
+    - `uses: relay/agent`, `relay/agent@v2`, and `actions/checkout@v4` all
+      report "Only frozen local and versioned relay actions are supported."
+      without listing them.
+    - `if: inputs.x == "y"` reports "Unexpected expression symbol." without
+      saying that strings use single quotes.
+    - A step with both `run` and `uses` reports "run: Unknown workflow
+      field."; a step with neither reports "run: Required field is
+      missing."
+  - **Fix:** Merge the constants of `one-of` alternatives into one list.
+    List the actions and suggest the closest. Say "Use single quotes for
+    strings" for a double-quoted literal. Say "A step needs either run or
+    uses" for both step-shape errors.
+  - **Done when:** Tests assert each message above.
+
+- [ ] **WB-18. Give every diagnostic a location.**
+  - **Priority:** P2.
+  - **Evidence:** A duplicate YAML key and "with.workflow: Loop requires a
+    static reusable workflow." arrive without a line. `YamlEditor.tsx` then
+    underlines line 1 (`Number(item.context?.line) || 1`), which points at
+    the wrong place.
+  - **Fix:** Attach a line and column to these errors. When none is known,
+    show the banner without underlining line 1.
+  - **Done when:** No diagnostic in the WB validation matrix lacks a line,
+    and an unlocated diagnostic underlines nothing.
+
+### Help, docs, and vocabulary
+
+- [ ] **WB-19. Add help buttons to job and step controls.**
+  - **Priority:** P1.
+  - **Evidence:** In the job and step editor, only the agent effort select
+    (`AgentConfiguration.tsx:130`) has a help button. The **General**,
+    **Outputs**, **Environment**, and **When it fails** tabs, the step
+    fields, **Workflow settings**, and the canvas have none.
+    [Local web runtime](web-ui.md#get-started) says question-mark buttons
+    sit beside workflow controls.
+  - **Fix:** Add a help button to each field, reusing the descriptions from
+    WB-03, or correct the documentation.
+  - **Done when:** Every field in the job drawer and **Workflow settings**
+    has help, and a browser test checks a sample from each tab.
+
+- [ ] **WB-20. Write a "Build your first workflow" guide.**
+  - **Priority:** P1.
+  - **Evidence:** [Getting started](getting-started.md) (18 lines) covers
+    running a starter, not editing one. There is no reference table of the
+    11 actions with their purpose, required inputs, and outputs;
+    [Workflows](workflows.md) describes them in prose.
+  - **Fix:** Add a guide that adds a job, an agent step, and a test command,
+    connects them, saves, runs, and fixes one validation error. Add an
+    action table derived from the action contracts and checked by
+    `scripts/check_workflow_examples.py`. Link both from the Help menu.
+  - **Done when:** A new user can follow the guide end to end on a
+    disposable repository.
+
+- [ ] **WB-21. Use the YAML words in the gallery.**
+  - **Priority:** P2.
+  - **Evidence:** Gallery cards show inputs such as "test_runner (enum)" and
+    "agent (enum)", while the YAML says `type: choice`; `compiler.py:58`
+    maps `choice` to an internal `enum`. `docs/web-ui.md` says each card
+    shows a "job graph preview"; it is a line of job names joined by arrows.
+  - **Fix:** Show `choice` in gallery metadata, and describe the preview as
+    a job sequence.
+  - **Done when:** No gallery text uses an internal type name.
+
+- [ ] **WB-22. Preselect a starter a beginner can run.**
+  - **Priority:** P2. Needs an owner decision.
+  - **Evidence:** The gallery and the checklist preselect **AI coding
+    workflow**, which has nine jobs (six phases on its card) and four
+    inputs, and requires "A coding agent and Claude Code with an Opus
+    model". **Ask an agent** needs one agent and one input.
+  - **Fix:** Preselect the simplest starter that the detected agents can
+    run, and label starters by size, for example "1 job" and "9 jobs".
+  - **Done when:** A user with one agent installed sees a runnable starter
+    selected by default.
+
+### Accessibility
+
+- [ ] **WB-23. Name the job settings drawer.**
+  - **Priority:** P2.
+  - **Evidence:** axe-core 4 reports `aria-dialog-name` (serious) on the job
+    settings drawer, an MUI `role="dialog"` with no `aria-label` or
+    `aria-labelledby`. The editor page itself has no violations. BX-31
+    requires no serious axe issues.
+  - **Fix:** Point `aria-labelledby` at the **Job settings** heading and
+    include the job name.
+  - **Done when:** axe passes with the drawer open, and browser tests find
+    the drawer by its name.
+
+### Suggested order for these findings
+
+1. WB-06, WB-07, WB-15: the editor stops saying one thing while the
+   workflow does another.
+2. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
+   schema.
+3. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
+4. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
+   the guide.
+5. WB-18, WB-21, WB-22, WB-23.
