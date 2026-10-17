@@ -1956,6 +1956,14 @@ How it was run:
   `feature.py` and `test_feature.py`). The second built a two-job workflow
   from a blank one with forms only, then saved, launched, and watched it.
   Approval answers were read from the screen, not from test code.
+- **GitHub Actions comparison.** 37 sources written from GitHub Actions
+  habit, including a typical CI workflow pasted verbatim, went through the
+  validation endpoint; 16 validated. Five of them were launched to see
+  run-time behavior. GitHub behavior was checked against its
+  [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+  and [job variations](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations)
+  references and the `action.yml` files of `actions/upload-artifact` and
+  `actions/cache`.
 - **Source and docs.** The editor components, `support_manifest()`, the
   action contracts, `docs/getting-started.md`,
   `docs/coming-from-github-actions.md`, and the authoring sections of
@@ -2213,6 +2221,10 @@ at 375 pixels.
        considered for other aliases.
     2. Keep strings and say so: "Write this list as a JSON string, for
        example `agents: '["codex", "claude"]'`."
+    3. Accept one item per line, as Relay already does for `path`,
+       `prompt-files`, and `restore-keys`. GitHub Actions users already
+       write lists this way, because GitHub's grammar, which Relay's schema
+       copies, types `with` values as strings.
   - **Done when:** A YAML list either validates or produces that guidance,
     with a test for each input.
 
@@ -2439,6 +2451,137 @@ at 375 pixels.
   - **Done when:** A user can tell from the dialog alone whether to commit
     before running.
 
+### Coming from GitHub Actions
+
+Much carries over unchanged and validated as written: `jobs`, `steps`,
+`needs`, `if` with `success()`, `failure()`, and `always()`, `env`, job and
+step outputs, static matrices with `include` and `exclude`,
+`timeout-minutes`, `continue-on-error`, `defaults.run`, `workflow_dispatch`
+inputs including `choice`, `workflow_call`, `schedule`, `push` filters,
+`concurrency`, and `environment`. Default shells match GitHub's (`bash -e`,
+or `bash --noprofile --norc -eo pipefail` when named; `pwsh` on Windows),
+and expressions use GitHub's own grammar and fixtures. The gaps below are
+where that familiarity stops, usually without saying so.
+
+- [ ] **WB-34. Point `github` and `runner` expressions to their Relay
+  names.**
+  - **Priority:** P0.
+  - **Evidence:** `${{ github.sha }}`, `github.ref_name`, `github.event_name`,
+    `github.workspace`, `github.actor` in `run-name`, `github.workflow` in a
+    concurrency group, and `github.event.inputs.task` all report
+    "Unrecognized named-value: github."; `runner.os` reports the same for
+    `runner`. The replacements exist: `relay` offers `sha`, `ref_name`,
+    `event_name`, `workspace`, `actor`, and `workflow`, and `host` offers
+    `os`. Nearly every GitHub workflow uses at least one of these.
+  - **Fix:** Replace the bare error with the Relay name, for example "Use
+    `relay.sha`", and suggest `inputs.task` for `github.event.inputs.task`.
+    Add the mapping to completion (WB-01).
+  - **Done when:** Each `github.*` and `runner.*` property that has a Relay
+    equivalent produces a message naming it.
+
+- [ ] **WB-35. Catch `$GITHUB_OUTPUT` and the other GitHub file variables
+  before the run.**
+  - **Priority:** P0.
+  - **Evidence:** A job that sets an output with
+    `echo "version=1.2.3" >> "$GITHUB_OUTPUT"` validated, launched, and
+    failed with "script.sh: line 1: : No such file or directory"; the
+    dependent job was skipped. `$GITHUB_ENV` failed the same way. The same
+    workflow using `$RELAY_OUTPUT` succeeded. The
+    [language audit](workflow-language-compatibility.md) records that no
+    `GITHUB_*` alias is provided, but nothing tells the user.
+  - **Fix:** Warn in validation when a `run` script names `GITHUB_OUTPUT`,
+    `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STATE`, or `GITHUB_STEP_SUMMARY`,
+    naming the `RELAY_*` replacement. Whether to provide aliases is an owner
+    decision.
+  - **Done when:** Each of the five names produces a warning before launch.
+
+- [ ] **WB-36. Say what replaces each common GitHub action.**
+  - **Priority:** P1.
+  - **Evidence:** `actions/checkout@v4`, `actions/setup-python@v5`,
+    `actions/upload-artifact@v4`, `actions/cache@v4`, `docker://alpine:3.20`,
+    and `./.github/actions/setup` all report "Only frozen local and
+    versioned relay actions are supported.". Yet checkout is unnecessary,
+    because jobs already run in a copy of the repository.
+    `relay/upload-artifact@v1` and `relay/cache@v1` accept the same core
+    inputs (`name`, `path`, `retention-days`; `key`, `path`,
+    `restore-keys`), and local actions work under `./.relay/actions/`
+    (`language.py:388`). In a file with two rejected actions, both errors
+    name `steps[0]`; the second is `steps[1]` on the reported line.
+  - **Fix:** Give specific guidance: remove checkout, use the installed
+    toolchain instead of `setup-*`, switch to the matching `relay/*@v1`
+    action, or move local actions to `./.relay/actions/`. Otherwise list the
+    built-in actions (WB-17). Report each step's real index.
+  - **Done when:** Each action above produces its specific guidance with the
+    correct step path.
+
+- [ ] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
+  - **Priority:** P1.
+  - **Evidence:** A typical 15-line CI file (`push` and `pull_request`,
+    `runs-on`, checkout, `setup-python`, two `run` steps) produced four
+    errors. Removing those four things (six lines) made it valid; the `run`
+    steps needed no change. The `runs-on` message says "select an agent in the step",
+    which misleads for a job that only runs tests. Relay reads only
+    `.relay/workflows/`; nothing imports from `.github/workflows/`.
+  - **Fix:** Offer **Import from GitHub Actions**: copy a chosen
+    `.github/workflows` file, remove or translate the known fields, and show
+    what changed before saving. Reword `runs-on`: "Jobs run on this
+    computer. Remove `runs-on`. To have an AI agent do the work, add a
+    `relay/agent@v1` step."
+  - **Done when:** Importing the CI file above yields a valid workflow and a
+    list of every change made.
+
+- [ ] **WB-38. Answer every unsupported trigger the same way.**
+  - **Priority:** P2.
+  - **Evidence:** `on: pull_request_target` reports "Expected one of
+    workflow_dispatch, workflow_call, schedule, push, repository_dispatch,
+    workflow_run.", but `pull_request:` inside an `on:` mapping reports only
+    "workflow.on.pull_request: Unknown workflow field." on the line after
+    it.
+  - **Fix:** List the supported events for both forms, say that pull
+    request events have no local equivalent, and point at the key's own
+    line.
+  - **Done when:** The scalar, list, and mapping forms of an unsupported
+    event produce the same message on the right line.
+
+- [ ] **WB-39. Accept an expression for a single matrix axis.**
+  - **Priority:** P2.
+  - **Evidence:** `matrix: {v: ${{ fromJSON('["a","b"]') }}}` reports "A
+    matrix axis must be a nonempty sequence.". GitHub documents this form,
+    for example `color: ${{ fromJSON(needs.define-matrix.outputs.colors) }}`.
+    Relay documents only a whole-object dynamic matrix
+    ([Workflows](workflows.md#matrix-jobs)).
+  - **Fix:** Support expression axes, or say "Use a dynamic matrix as a
+    whole object: `matrix: ${{ fromJSON(...) }}`".
+  - **Done when:** The GitHub form validates, or its message shows the
+    accepted form.
+
+- [ ] **WB-40. Warn about secrets that are never bound, starting with
+  `GITHUB_TOKEN`.**
+  - **Priority:** P1.
+  - **Evidence:** `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` validated and ran.
+    The step printed "token length 0", and the run succeeded. Relay issues
+    no GitHub token
+    ([language audit](workflow-language-compatibility.md)), so a GitHub user
+    gets an empty credential with no warning.
+  - **Fix:** At launch, warn about each referenced secret without a binding,
+    and explain `GITHUB_TOKEN` specifically: bind a secret, or rely on the
+    tool's own sign-in.
+  - **Done when:** Launching with an unbound secret shows a warning naming
+    it.
+
+- [ ] **WB-41. Complete the GitHub Actions mapping in the guide.**
+  - **Priority:** P1.
+  - **Evidence:** [Coming from GitHub Actions](coming-from-github-actions.md)
+    maps eight concepts. It omits `github` to `relay`, `runner` to `host`,
+    the `GITHUB_*` files to `RELAY_*`, checkout and `setup-*`, the artifact
+    and cache actions, `.github/workflows` to `.relay/workflows`, local
+    action paths, unsupported pull request events, and list inputs.
+  - **Fix:** Add those rows, with a before-and-after version of the CI file
+    from WB-37. Check the examples with
+    `scripts/check_workflow_examples.py`.
+  - **Done when:** Every GitHub construct named in WB-34 to WB-40 appears in
+    the guide with its Relay equivalent or "not supported".
+
 ### Accessibility
 
 - [ ] **WB-23. Name the job settings drawer.**
@@ -2456,13 +2599,15 @@ at 375 pixels.
 
 1. WB-24, WB-25: a first run cannot fail on a typed word, and its result is
    visible.
-2. WB-06, WB-07, WB-15: the editor stops saying one thing while the
+2. WB-06, WB-07, WB-15, WB-35: the editor stops saying one thing while the
    workflow does another.
-3. WB-26, WB-27, WB-31: the user knows where the code is, what leaves their
+3. WB-34, WB-36, WB-37, WB-40, WB-41: a GitHub Actions user knows what to
+   change.
+4. WB-26, WB-27, WB-31: the user knows where the code is, what leaves their
    computer, and which job is which.
-4. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
+5. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
    schema.
-5. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
-6. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
+6. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
+7. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
    the guide.
-7. WB-18, WB-21 to WB-23, WB-28 to WB-30, WB-32, WB-33.
+8. WB-18, WB-21 to WB-23, WB-28 to WB-30, WB-32, WB-33, WB-38, WB-39.
