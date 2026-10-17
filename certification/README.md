@@ -85,7 +85,7 @@ denials. They record fixes found during those runs and authenticated Linux
 Copilot execution in a disposable WSL2 container. Linux Claude, Cursor, and
 Antigravity still need sign-in; Linux Codex is deferred at the owner's request.
 
-The [Windows provider checks](2026-10-16-orchestration-ownership.md)
+The [Windows provider checks](2026-10-16-windows-codex-antigravity.md)
 record a fresh successful Codex pipeline and Antigravity's `SUCCESS` result
 without its required report.
 Relay rejects that missing report without inferring an outcome from

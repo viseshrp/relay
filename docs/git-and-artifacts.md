@@ -155,9 +155,8 @@ An owner retry verifies the failed attempt's manifest, retained ref, file sizes,
 and SHA-256 hashes before reopening it, preserving missing evidence first for
 attempts that require it. Human-wait steps require no evidence. It also checks
 the primary worktree against the protected head. Root report handoffs retain
-the same exact
-exemptions used at job acceptance. Code changes, staged reports, nested report
-files, and an unrecorded head require an owner decision.
+the same exact exemptions used at job acceptance. Code changes, staged reports,
+nested report files, and an unrecorded head require an owner decision.
 
 Inline bounded agent recovery stays inside the current job. It retains rejected
 reports and partial work, checks preserved evidence, and continues the failed
