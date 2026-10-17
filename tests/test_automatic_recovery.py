@@ -304,6 +304,30 @@ def test_automatic_rerun_target_requires_an_eligible_pending_failure(
     assert store.automatic_rerun_target(run_id, "root.critique.review", "automatic") is None
 
 
+def test_automatic_rerun_target_rejects_a_replayed_owner_retry_key(
+    scheduled_recovery: tuple[InlineEngine, str],
+) -> None:
+    engine, run_id = scheduled_recovery
+    engine.executors = node_executors(agent_driver=ReportDriver(recover=False))
+    store = engine.store
+    assert (
+        rerun_failed_node(
+            store,
+            run_id,
+            "root.critique.review",
+            "K",
+            lambda target: prepare_recovery_workspace(target, store),
+        )
+        is ControlResult.ACCEPTED
+    )
+    engine.drain(run_id)
+    assert Run.objects.get(pk=run_id).status == "failed"
+    states = list(AutomaticRetry.objects.order_by("pk").values_list("pk", "state"))
+    assert states
+    assert store.automatic_rerun_target(run_id, "root.critique.review", "K") is None
+    assert list(AutomaticRetry.objects.order_by("pk").values_list("pk", "state")) == states
+
+
 def test_automatic_rerun_target_refuses_an_unrelated_failed_step(
     scheduled_recovery: tuple[InlineEngine, str],
 ) -> None:
