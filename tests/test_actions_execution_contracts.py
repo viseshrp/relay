@@ -242,8 +242,9 @@ def failed_job_without_preservation(
         return preserve(claim, worktree, outcome, artifact_root=artifact_root)
 
     monkeypatch.setattr(runner, "_preserve", fail_b_preservation)
+    # A short key keeps xdist's deeper temporary paths below Windows' 260 limit.
     project.write_workflow(
-        "missing-continuation-evidence",
+        "gap",
         r"""defaults: {run: {shell: python}}
 jobs:
   a:
@@ -265,7 +266,7 @@ jobs:
 """,
     )
     engine = InlineEngine(node_executors(), artifacts_dir())
-    return engine, engine.launch(project, "missing-continuation-evidence")
+    return engine, engine.launch(project, "gap")
 
 
 def test_continuation_preserves_each_failed_attempt_before_moving_its_bytes(
@@ -290,7 +291,7 @@ def test_continuation_preserves_each_failed_attempt_before_moving_its_bytes(
         assert retained.read_bytes() == b"b bytes\n"
         retained_files.append(retained)
     worktrees = [Path(path) for path in run.actions_state["continuations"]]
-    assert len(worktrees) == 2
+    assert [path.name for path in worktrees] == [f"{run_id}-failed-1", f"{run_id}-failed-2"]
     assert (worktrees[-1] / "b.txt").read_bytes() == b"b bytes\n"
     worktrees.append(Path(run.worktree_path))
     result = engine.store.clean_project_data(project.project_id, "worktrees", run_id=run_id)
@@ -343,6 +344,42 @@ def test_failed_continuation_preservation_keeps_the_primary_and_refuses_cleanup(
     assert primary.exists()
     assert (primary / "b.txt").read_bytes() == b"b bytes\n"
     assert all(Path(path).exists() for path in run.actions_state["continuations"])
+
+
+def test_partial_archive_without_rows_blocks_continuation(
+    project: RelayProject,
+    failed_job_without_preservation: tuple[InlineEngine, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from relay.execution import runner
+
+    engine, run_id = failed_job_without_preservation
+    preserve = runner._preserve
+
+    def crash_after_archive_directory(
+        claim: ClaimedAttempt,
+        worktree: Path,
+        outcome: ExecutionOutcome,
+        *,
+        artifact_root: Path | None,
+    ) -> PreservationResult:
+        if claim.scope_path == "root.b.write":
+            # The archive directory exists, so continuation must not replace it.
+            (artifacts_dir() / claim.run_id / claim.attempt_id).mkdir(parents=True)
+        return preserve(claim, worktree, outcome, artifact_root=artifact_root)
+
+    monkeypatch.setattr(runner, "_preserve", crash_after_archive_directory)
+    engine.drain(run_id)
+    run = Run.objects.get(pk=run_id)
+    followup = NodeRun.objects.get(run_id=run_id, scope_path="root.c")
+    assert followup.status == "failed"
+    event = RunEvent.objects.get(node_run=followup, type="attempt.ended")
+    assert event.payload["error_message"] == "Incomplete job preservation blocks continuation."
+    # Job a and job b's own attempt are archived; only the step has no rows.
+    assert Artifact.objects.filter(attempt__node_run__scope_path="root.b").exists()
+    assert not Artifact.objects.filter(attempt__node_run__scope_path="root.b.write").exists()
+    assert len(run.actions_state["continuations"]) == 1
+    assert (Path(run.worktree_path) / "b.txt").read_bytes() == b"b bytes\n"
 
 
 @pytest.mark.parametrize("expired_before_execution", [False, True])

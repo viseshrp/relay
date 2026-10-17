@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from typing import Any, cast
-import uuid
 
 from django.db import transaction
 from django.db.models import Q
@@ -227,8 +226,12 @@ def prepare_job_workspace(run_id: str) -> None:
         raise PersistenceError(message)
     if journal is None:
         require_project_worktree(repository, primary)
+        # Short sequential names keep retained paths within Windows' 260 limit.
+        number = len(state.get("continuations", [])) + 1
+        while (worktrees_dir() / f"{run_id}-failed-{number}").exists():
+            number += 1
         journal = {
-            "retained": str(worktrees_dir() / f"{run_id}-failed-{uuid.uuid4()}"),
+            "retained": str(worktrees_dir() / f"{run_id}-failed-{number}"),
             "head": current_head(primary),
             "protected": protected,
         }

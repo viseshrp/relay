@@ -88,9 +88,11 @@ continues, Relay preserves missing evidence from the rejected checkout and
 verifies that each failed job and step attempt it holds has complete evidence.
 A preservation failure blocks the next job. Only then does Relay record
 continuation intent, move the rejected checkout into a retained detached
-worktree, and recreate the primary at the protected head. A journal resumes
-interrupted continuation without discarding rejected bytes or resetting the
-owner's checkout.
+worktree, and recreate the primary at the protected head. Retained checkouts
+sit beside the primary as `<run-id>-failed-1`, `<run-id>-failed-2`, and so on;
+short names keep Windows paths within their 260-character limit. A journal
+resumes interrupted continuation without discarding rejected bytes or resetting
+the owner's checkout.
 
 Matrix and reusable jobs use the same serial admission. Tolerating a failure
 changes dependency conclusions without accepting rejected code. Optional
