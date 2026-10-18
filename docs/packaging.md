@@ -147,11 +147,18 @@ copy when the owner's checkout is serving an app.
 and validates the archive with `scripts/check_distribution_contents.py` before
 installing into `/opt/relay/venv`. The runtime stage copies only that virtual
 environment into `python:3.14-slim-trixie` alongside `git` and `procps`, runs
-as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm. When
-invoked with `up`, the container `relay` entrypoint keeps the Python server
-bound to `127.0.0.1` inside the container while bridging the container network
-interface to loopback so host port publishing (`-p 127.0.0.1:7845:7845`) works
-without `--network host`.
+as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm. It has
+no coding-agent CLIs, provider credentials, or desktop keyring, so agent steps
+cannot run inside it.
+
+The container `relay` command is
+[`scripts/container_entrypoint.py`](../scripts/container_entrypoint.py). For
+`up`, it keeps the Python server bound to the saved or requested loopback host
+and port, and bridges the container interface to that address so host port
+publishing (`-p 127.0.0.1:7845:7845`) works without `--network host`. The
+bridge accepts connections only from the container's default gateway, where
+Docker delivers published ports; other containers on the network are refused.
+It runs Relay in its own session and forwards `SIGINT` and `SIGTERM` once.
 
 `Makefile` and `scripts/docker.sh` provide shared targets for local container
 workflows and CI:
@@ -160,29 +167,43 @@ workflows and CI:
 make docker-build
 make docker-smoke
 make docker-up
-make docker-push
+make docker-push TAGS="0.1.0 latest"
 ```
 
 - `make docker-build` builds `DOCKER_IMAGE` (default
-  `ghcr.io/viseshrp/relay:local`) with version and Git revision labels.
+  `ghcr.io/viseshrp/relay:local`) with version and Git revision labels. Without
+  uv, the version label is `0.0.0.devYYYYMMDDHHMMSS`.
 - `make docker-smoke` verifies the image's CLI version, OCI labels, non-root
   user, absence of Node.js and npm, `relay init`, `relay up` readiness on
   `GET /api/auth` and `GET /` (both inside the container and across a
   host-published `-p 127.0.0.1::7845` port), and clean `SIGTERM` shutdown.
-- `make docker-up` (aliased as `make docker-run`) starts Relay in Docker on
-  `http://127.0.0.1:7845/` with the working tree mounted at `/workspace` and
-  named volumes for Relay configuration, data, and state.
-- `make docker-push` builds and pushes multi-architecture images to GHCR,
-  authenticating automatically through `GH_TOKEN` or `gh auth token`.
+  It rebuilds the default image first and pulls another `DOCKER_IMAGE` when
+  it is missing.
+- `make docker-up` (aliased as `make docker-run`) rebuilds the default image,
+  then starts Relay on `http://127.0.0.1:7845/`. It mounts `DOCKER_WORKTREE`
+  (default: the current directory) and Relay's data directory,
+  `DOCKER_DATA_HOME` (default `relay-docker` under `$XDG_DATA_HOME` or
+  `~/.local/share`), at their host paths. Each repository therefore keeps its
+  own project identity, and host Git can resolve the run worktrees registered
+  in the repository. Named
+  volumes keep Relay configuration and state. On Linux, the image user takes
+  the host UID and GID (when at least 1000) so it can write the mounted
+  repository.
+- `make docker-push` requires explicit `TAGS` and a clean checkout,
+  smoke-tests the native platform, then builds and pushes multi-architecture
+  images to GHCR. It authenticates through `GH_TOKEN` or `gh auth token`.
 - `make docker-push-digest` and `make docker-publish-manifest` publish
   per-architecture digests and assemble the verified multi-platform manifest.
 
-`.github/workflows/docker.yml` runs `make docker-build` and `make docker-smoke`
-on native `linux/amd64` and `linux/arm64` runners (including pull requests that
-touch container packaging), then runs `make docker-push-digest` and
-`make docker-publish-manifest` when publishing to `ghcr.io/viseshrp/relay`:
+`.github/workflows/docker.yml` builds on native `linux/amd64` and
+`linux/arm64` runners. Pull requests that touch container packaging run
+`make docker-build` and `make docker-smoke`. Publishing runs push each
+platform image untagged by digest, smoke-test that exact digest, and then
+`make docker-publish-manifest` tags `ghcr.io/viseshrp/relay` after both
+platforms pass:
 
 - Nightly builds at `07:17 UTC` (and `workflow_dispatch` on `main`) publish
-  `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`.
+  `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`. When `main` is exactly a
+  release tag, the nightly image carries that release version.
 - Published GitHub releases (`release: [published]`, created after the tag test
   suite succeeds) publish `:vX.Y.Z`, `:X.Y.Z`, and `:latest`.

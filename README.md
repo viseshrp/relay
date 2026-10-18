@@ -91,14 +91,17 @@ pipx install relay-app
 uv tool install relay-app
 ```
 
-Docker (`linux/amd64` and `linux/arm64` images on GHCR, or from a checkout):
+Docker (`linux/amd64` and `linux/arm64` images on GHCR): the image contains
+Relay only. Coding-agent CLIs and their sign-ins are not included, so agent
+steps cannot run inside it. From a Relay checkout, serve your repository with
+the published image:
 
 ```bash
-docker pull ghcr.io/viseshrp/relay:latest
-docker pull ghcr.io/viseshrp/relay:nightly
-make docker-up
+make docker-up DOCKER_IMAGE=ghcr.io/viseshrp/relay:latest \
+  DOCKER_WORKTREE=/path/to/your/git-repo
 ```
 
+Without `DOCKER_IMAGE`, `make docker-up` builds the image from the checkout.
 See [Container images](docs/packaging.md#container-images) for release tags,
 nightly tags, and `make` targets.
 
