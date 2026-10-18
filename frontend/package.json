@@ -16,7 +16,8 @@
     "capture:welcome": "playwright test --config playwright.capture.config.ts",
     "lint": "eslint src e2e captures unit *.ts scripts *.mjs --max-warnings 0",
     "format:check": "prettier --check src e2e captures unit scripts *.ts *.mjs *.json .prettierrc.json",
-    "test:unit": "playwright test --config playwright.unit.config.ts"
+    "test:unit": "playwright test --config playwright.unit.config.ts",
+    "test:container": "playwright test --config playwright.container.config.ts"
   },
   "dependencies": {
     "@actions/expressions": "0.3.61",
