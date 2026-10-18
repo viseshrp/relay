@@ -272,12 +272,19 @@ cmd_e2e() {
   elif ! docker image inspect "${image}" >/dev/null 2>&1; then
     docker pull "${image}"
   fi
+  local user_args=()
   if [[ "$(uname -s)" == "Linux" ]]; then
-    local image_uid
+    local host_uid image_uid
+    host_uid="$(id -u)"
     image_uid="$(docker run --rm --entrypoint id "${image}" -u)"
-    if [[ "${image_uid}" != "$(id -u)" ]]; then
-      echo "❌ ${image} runs as UID ${image_uid} and cannot write files owned by UID $(id -u)." >&2
-      echo "   Use the default image, which docker-e2e builds as the host user." >&2
+    if [[ "${host_uid}" == "0" ]]; then
+      # The image user cannot take UID 0, so root hosts, such as CI and
+      # development containers, run the disposable containers as root to
+      # write the root-owned mounts.
+      user_args=(--user 0:0)
+    elif [[ "${image_uid}" != "${host_uid}" ]]; then
+      echo "❌ ${image} runs as UID ${image_uid} and cannot write files owned by UID ${host_uid}." >&2
+      echo "   Use the default image, which docker-e2e builds as a host user from UID 1000." >&2
       return 1
     fi
   fi
@@ -307,7 +314,7 @@ cmd_e2e() {
 
   # Throwaway volumes keep the owner's relay-config and relay-state untouched.
   set_relay_mounts "${repo}" "${data_home}" "${name}-config" "${name}-state"
-  docker run --rm "${RELAY_MOUNTS[@]}" "${image}" init >/dev/null
+  docker run --rm ${user_args[@]+"${user_args[@]}"} "${RELAY_MOUNTS[@]}" "${image}" init >/dev/null
   git -C "${repo}" add .relay
   git -C "${repo}" commit -q -m "Initialize Relay"
 
@@ -319,6 +326,7 @@ cmd_e2e() {
     --init \
     --network "${name}" \
     -p 127.0.0.1::7845 \
+    ${user_args[@]+"${user_args[@]}"} \
     "${RELAY_MOUNTS[@]}" \
     "${image}" \
     up >/dev/null

@@ -37,7 +37,7 @@ case "$*" in
   *org.opencontainers.image.revision*) echo "abc123" ;;
   *org.opencontainers.image.version*) echo "1.0.0" ;;
   *.Config.User*) echo "relay:relay" ;;
-  *"--entrypoint id "*) id -u ;;
+  *"--entrypoint id "*) echo "${FAKE_IMAGE_UID:-$(id -u)}" ;;
   *" init")
     # `relay init` creates the blank project surface in the working directory.
     previous=""
@@ -182,13 +182,28 @@ def test_up_builds_the_local_image_as_the_linux_host_user(tmp_path: Path) -> Non
         assert passed == ([f"{argument}={value}"] if value >= 1000 else [])
 
 
+def _linux_host(tmp_path: Path, uid: int) -> dict[str, str]:
+    """Answer `uname -s` and `id` like a Linux host user, beside an image user 1000."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name, body in (("uname", "echo Linux"), ("id", 'echo "$FAKE_HOST_UID"')):
+        stub = bin_dir / name
+        stub.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
+        stub.chmod(0o755)
+    return {"FAKE_HOST_UID": str(uid), "FAKE_IMAGE_UID": "1000"}
+
+
 def _run_e2e_until_the_port_lookup_fails(
-    tmp_path: Path,
+    tmp_path: Path, host_uid: int = 1000
 ) -> tuple[subprocess.CompletedProcess[str], list[str], Path, str]:
     temporary = tmp_path / "tmp"
     temporary.mkdir()
     result, calls = _run(
-        tmp_path, "e2e", DOCKER_IMAGE="example.invalid/relay:test", TMPDIR=str(temporary)
+        tmp_path,
+        "e2e",
+        DOCKER_IMAGE="example.invalid/relay:test",
+        TMPDIR=str(temporary),
+        **_linux_host(tmp_path, host_uid),
     )
     lines = calls.splitlines()
     name = next(line.split()[-1] for line in lines if line.startswith("network create "))
@@ -229,6 +244,26 @@ def test_e2e_starts_relay_like_docker_up_with_throwaway_volumes(tmp_path: Path) 
     assert run.endswith("example.invalid/relay:test up")
     mounts = run.split(" -p 127.0.0.1::7845 ", 1)[1].removesuffix(" up")
     assert f"run --rm {mounts} init" in calls
+
+
+def test_e2e_runs_its_containers_as_root_on_a_root_linux_host(tmp_path: Path) -> None:
+    _result, calls, _temporary, _name = _run_e2e_until_the_port_lookup_fails(tmp_path, 0)
+
+    run = next(call for call in calls if call.startswith("run -d "))
+    init = next(call for call in calls if call.endswith(" init"))
+    # The image user cannot take UID 0, so only root can write root-owned mounts.
+    assert " -p 127.0.0.1::7845 --user 0:0 -v " in run
+    assert init.startswith("run --rm --user 0:0 -v ")
+
+
+def test_e2e_rejects_an_image_user_other_than_a_non_root_linux_host(tmp_path: Path) -> None:
+    result, calls = _run(
+        tmp_path, "e2e", DOCKER_IMAGE="example.invalid/relay:test", **_linux_host(tmp_path, 500)
+    )
+
+    assert result.returncode != 0
+    assert "runs as UID 1000 and cannot write files owned by UID 500" in result.stderr
+    assert not any(call.startswith("network create ") for call in calls.splitlines())
 
 
 def test_push_requires_explicit_tags(tmp_path: Path) -> None:

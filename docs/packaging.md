@@ -182,8 +182,10 @@ make docker-push TAGS="0.1.0 latest"
   it is missing.
 - `make docker-e2e` drives the browser app in the image through its published
   port. It selects the image like `make docker-smoke`; on Linux it builds the
-  default image as the host user, like `make docker-up`, and rejects an image
-  whose user does not match the host UID. It creates a disposable Git
+  default image as the host user, like `make docker-up`. The image user cannot
+  take UID 0, so a root host, such as a CI or development container, runs the
+  disposable containers as root. Another host UID that differs from the image
+  user is rejected. It creates a disposable Git
   repository and data directory under `TMPDIR`, then starts `relay up` with
   login required, `make docker-up`'s host-path mounts, throwaway configuration
   and state volumes, its own Docker network, and a random
