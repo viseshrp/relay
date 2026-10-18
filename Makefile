@@ -114,9 +114,36 @@ publish-test: ## Publish to TestPyPI (for dry runs)
 .PHONY: build-and-publish
 build-and-publish: build check-dist publish ## Build and publish in one step
 
+.PHONY: docker-build
+docker-build: ## 🐳 Build the Relay container image locally
+	$(BASH) scripts/docker.sh build
+
+.PHONY: docker-smoke
+docker-smoke: ## 🧪 Smoke-test the Relay container image
+	$(BASH) scripts/docker.sh smoke
+
+.PHONY: docker-up
+docker-up: ## ▶️ Start Relay in Docker on 127.0.0.1:7845
+	$(BASH) scripts/docker.sh up
+
+.PHONY: docker-run
+docker-run: docker-up ## ▶️ Alias for docker-up
+
+.PHONY: docker-push
+docker-push: ## 📤 Build and push multi-arch Relay container image to GHCR
+	$(BASH) scripts/docker.sh push
+
+.PHONY: docker-push-digest
+docker-push-digest: ## 📤 Push a single-platform container image by digest to GHCR
+	$(BASH) scripts/docker.sh push-digest
+
+.PHONY: docker-publish-manifest
+docker-publish-manifest: ## 📦 Publish multi-arch GHCR manifest from verified digests
+	$(BASH) scripts/docker.sh publish-manifest
+
 .PHONY: help
 help:
 	uv run python -c "import re; \
-	[[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
+	[[print(f'\033[36m{m[0]:<24}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
 
 .DEFAULT_GOAL := help

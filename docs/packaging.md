@@ -149,9 +149,33 @@ installing into `/opt/relay/venv`. The runtime stage copies only that virtual
 environment into `python:3.14-slim-trixie` alongside `git` and `procps`, runs
 as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm.
 
-`.github/workflows/docker.yml` builds and smoke-tests each architecture on
-native runners before publishing multi-platform manifests to
-`ghcr.io/viseshrp/relay`:
+`Makefile` and `scripts/docker.sh` provide shared targets for local container
+workflows and CI:
+
+```bash
+make docker-build
+make docker-smoke
+make docker-up
+make docker-push
+```
+
+- `make docker-build` builds `DOCKER_IMAGE` (default
+  `ghcr.io/viseshrp/relay:local`) with version and Git revision labels.
+- `make docker-smoke` verifies the image's CLI version, OCI labels, non-root
+  user, absence of Node.js and npm, `relay init`, `relay up` readiness on
+  `GET /api/auth` and `GET /`, and clean `SIGTERM` shutdown.
+- `make docker-up` (aliased as `make docker-run`) starts Relay in Docker on
+  `http://127.0.0.1:7845/` with the working tree mounted at `/workspace` and
+  named volumes for Relay configuration, data, and state.
+- `make docker-push` builds and pushes multi-architecture images to GHCR,
+  authenticating automatically through `GH_TOKEN` or `gh auth token`.
+- `make docker-push-digest` and `make docker-publish-manifest` publish
+  per-architecture digests and assemble the verified multi-platform manifest.
+
+`.github/workflows/docker.yml` runs `make docker-build` and `make docker-smoke`
+on native `linux/amd64` and `linux/arm64` runners (including pull requests that
+touch container packaging), then runs `make docker-push-digest` and
+`make docker-publish-manifest` when publishing to `ghcr.io/viseshrp/relay`:
 
 - Nightly builds at `07:17 UTC` (and `workflow_dispatch` on `main`) publish
   `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`.

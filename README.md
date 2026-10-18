@@ -52,15 +52,16 @@ pip install relay-app
 
 `pipx install relay-app` and `uv tool install relay-app` provide isolated CLI
 installations. Multi-platform (`linux/amd64` and `linux/arm64`) container
-images are published to GHCR:
+images are published to GHCR and can also be built and run with `make`:
 
 ```bash
 docker pull ghcr.io/viseshrp/relay:latest
 docker pull ghcr.io/viseshrp/relay:nightly
+make docker-up
 ```
 
 See [Container images](docs/packaging.md#container-images) for release and
-nightly tags.
+nightly tags and `make` targets.
 
 ## Administration
 

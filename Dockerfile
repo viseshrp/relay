@@ -147,6 +147,7 @@ EXPOSE 7845
 
 USER relay:relay
 WORKDIR /workspace
+RUN git config --global --add safe.directory /workspace
 
 STOPSIGNAL SIGTERM
 
