@@ -33,6 +33,13 @@ resolve_revision() {
   fi
 }
 
+expect_equal() {
+  if [[ "$2" != "$3" ]]; then
+    echo "❌ $1: expected '$3', got '$2'" >&2
+    return 1
+  fi
+}
+
 cmd_build() {
   local image="${DOCKER_IMAGE:-ghcr.io/viseshrp/relay:local}"
   local version
@@ -76,21 +83,21 @@ cmd_smoke() {
   echo "🧪 Smoke-testing ${image} (version=${expected_version})..."
   local actual_version
   actual_version="$(docker run --rm "${image}" --version)"
-  test "${actual_version}" = "relay, version ${expected_version}"
+  expect_equal "CLI version" "${actual_version}" "relay, version ${expected_version}"
 
   docker run --rm "${image}" --help >/dev/null
 
   local actual_revision
   actual_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}")"
-  test "${actual_revision}" = "${expected_revision}"
+  expect_equal "revision label" "${actual_revision}" "${expected_revision}"
 
   local label_version
   label_version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image}")"
-  test "${label_version}" = "${expected_version}"
+  expect_equal "version label" "${label_version}" "${expected_version}"
 
   local actual_user
   actual_user="$(docker image inspect --format '{{ .Config.User }}' "${image}")"
-  test "${actual_user}" = "relay:relay"
+  expect_equal "image user" "${actual_user}" "relay:relay"
 
   docker run --rm --entrypoint /bin/sh "${image}" -ec '
     test "$(id -u)" -ne 0
@@ -151,10 +158,8 @@ PY
         exec relay up --no-login
       '
   )"
-  cleanup_smoke_container() {
-    docker rm -f "${cid}" >/dev/null 2>&1 || true
-  }
-  trap cleanup_smoke_container RETURN
+  # An EXIT trap also runs when `set -e` aborts the script; a RETURN trap does not.
+  trap "docker rm -f $(printf '%q' "${cid}") >/dev/null 2>&1 || true" EXIT
 
   local host_addr
   host_addr="$(docker port "${cid}" 7845/tcp | head -n 1)"
@@ -177,7 +182,7 @@ else:
 PY
   docker stop --time 15 "${cid}" >/dev/null
   docker rm -f "${cid}" >/dev/null 2>&1 || true
-  trap - RETURN
+  trap - EXIT
 
   echo "✅ Smoke test passed: ${image}"
 }
@@ -252,7 +257,8 @@ cmd_push_digest() {
 
   local metadata_file
   metadata_file="$(mktemp)"
-  trap 'rm -f "${metadata_file}"' EXIT
+  # Expand now: the local is out of scope when the EXIT trap runs under `set -u`.
+  trap "rm -f -- $(printf '%q' "${metadata_file}")" EXIT
 
   echo "📤 Pushing verified ${platform} image by digest to ${repo}..."
   docker buildx build \
@@ -290,12 +296,9 @@ cmd_publish_manifest() {
   done
 
   docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
-  local manifest_file
-  manifest_file="$(mktemp)"
-  trap 'rm -f "${manifest_file}"' EXIT
-  docker buildx imagetools inspect "${repo}:${primary_tag}" --raw > "${manifest_file}"
-  jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]' \
-    "${manifest_file}" >/dev/null
+  docker buildx imagetools inspect "${repo}:${primary_tag}" --raw \
+    | jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]' \
+      >/dev/null
   echo "✅ Published multi-arch manifest for ${repo} (${tags})"
 }
 
