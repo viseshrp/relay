@@ -653,6 +653,15 @@ def test_a_step_written_as_text_asks_for_a_mapping() -> None:
         load(text)
 
 
+@pytest.mark.parametrize("reference", ["./.relay/actions/greet", "relay/command@v1"])
+def test_step_inputs_written_as_text_are_reported_once(reference: str) -> None:
+    text = f"jobs:\n  a:\n    steps:\n      - uses: {reference}\n        with: hello\n"
+    issues = workflow_diagnostics(text)
+    assert [(issue.message, issue.context["line"]) for issue in issues] == [
+        ("jobs.a.steps[0].with: Expected a mapping.", "5")
+    ]
+
+
 EVENTS_SENTENCE = (
     "Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, "
     "and workflow_run. Pull request and other hosted events have no local equivalent."

@@ -15,6 +15,7 @@ from functools import lru_cache
 import json
 import math
 from pathlib import Path
+import posixpath
 import re
 from typing import Any, cast
 
@@ -45,6 +46,7 @@ EVENTS = frozenset(
     }
 )
 CACHE_MODES = frozenset({"read", "write", "write-only", "none"})
+LOCAL_ACTIONS = "./.relay/actions/"
 EVENTS_HINT = (
     "Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, "
     "and workflow_run. Pull request and other hosted events have no local equivalent."
@@ -489,9 +491,22 @@ def resolve_inputs(
     return resolved
 
 
+def _unnormalized(reference: str) -> bool:
+    """True for a local path with ./, ../, or empty segments after its leading ./."""
+    segments = reference.removeprefix("./").rstrip("/").split("/")
+    return any(segment in {"", ".", ".."} for segment in segments)
+
+
 def _uses_guidance(reference: str) -> str:
     """What to write instead of an unsupported uses reference."""
     base = reference.partition("@")[0]
+    if reference.startswith(LOCAL_ACTIONS) and "${{" not in reference:
+        # Sources are frozen under their normalized path, so only that form is found.
+        written = posixpath.normpath(reference)
+        example = (
+            f"./{written}" if written.startswith(".relay/actions/") else f"{LOCAL_ACTIONS}<name>"
+        )
+        return f"Write the action path without ./ or ../ segments, such as {example}."
     replacements = {
         "actions/upload-artifact": ("upload-artifact", "name, path, and retention-days"),
         "actions/download-artifact": ("download-artifact", "name and path"),
@@ -557,7 +572,11 @@ def validate_steps(steps: object, path: str, start: int = 0) -> None:
         if (
             reference is not None
             and builtin(reference) is None
-            and (not str(reference).startswith("./.relay/actions/") or "${{" in str(reference))
+            and (
+                not str(reference).startswith(LOCAL_ACTIONS)
+                or "${{" in str(reference)
+                or _unnormalized(str(reference))
+            )
         ):
             message = f"{here}.uses"
             raise _issue(
@@ -958,7 +977,10 @@ def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[Workf
     unique: dict[tuple[str, str], WorkflowValidationError] = {}
     for issue in issues[:100]:
         _locate(issue, locations)
-        unique[(str(issue.context.get("field", "")), issue.message)] = issue
+        # The schema walk names fields from workflow.; the step checks do not.
+        field = str(issue.context.get("field", ""))
+        said = issue.message.removeprefix(f"{field}: ")
+        unique[(field.removeprefix("workflow."), said)] = issue
     return list(unique.values())
 
 
@@ -982,7 +1004,8 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
     stack: list[str] = []
     workflows = set()
 
-    def capture(reference: str, *, workflow: bool, depth: int) -> None:
+    def capture(reference: str, *, workflow: bool, depth: int) -> str:
+        """Freeze one source and what it references; return its key in the result."""
         if depth > 10:
             message = "uses"
             raise _issue(message, "Reusable workflows exceed 10 levels.")
@@ -1000,7 +1023,7 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
             message = "uses"
             raise _issue(message, "Local references contain a cycle.")
         if key in result:
-            return
+            return key
         if not path.is_file() or path.stat().st_size > MAX_YAML_BYTES:
             raise _issue(reference, "Local source is missing or exceeds 1 MiB.")
         try:
@@ -1041,6 +1064,7 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
                 message = "uses"
                 raise _issue(message, "Captured sources exceed 10 MiB.")
         stack.pop()
+        return key
 
     def visit(value: Mapping[str, Any], depth: int) -> None:
         for job_id, job in value.get("jobs", {}).items():
@@ -1052,15 +1076,10 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
                 reference = step.get("uses", "")
                 if reference.startswith("./"):
                     with _reported_at(f"{here}.uses"):
-                        capture(reference, workflow=False, depth=depth)
+                        key = capture(reference, workflow=False, depth=depth)
                         from .metadata import load_action, validate_action_inputs
 
-                        prefix = reference.removeprefix("./").rstrip("/")
-                        metadata = result.get(
-                            prefix + "/action.yml", result.get(prefix + "/action.yaml")
-                        )
-                        if metadata is not None:
-                            validate_action_inputs(load_action(metadata), step.get("with", {}))
+                        validate_action_inputs(load_action(result[key]), step.get("with", {}))
                 if is_builtin(reference, "loop"):
                     target = step.get("with", {}).get("workflow")
                     with _reported_at(f"{here}.with.workflow"):
