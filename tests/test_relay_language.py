@@ -467,8 +467,10 @@ def test_unknown_keys_suggest_the_nearest_field(text: str, expected: str, sugges
     "text",
     [
         "on: push\njobs:\n  a:\n    stpes:\n      - run: echo\n",
-        "on: push\njobs:\n  a:\n    need:\n      - b\n    steps: [{run: echo}]\n"
-        "  b:\n    steps: [{run: echo}]\n",
+        (
+            "on: push\njobs:\n  a:\n    need:\n      - b\n    steps: [{run: echo}]\n"
+            "  b:\n    steps: [{run: echo}]\n"
+        ),
     ],
 )
 def test_unknown_keys_point_at_the_key_when_the_value_is_on_the_next_line(text: str) -> None:
