@@ -561,15 +561,19 @@ def test_literal_default_shells_fail_validation(header: str, line: str) -> None:
     [
         'run: echo\n        shell: "bash -l {0}"',
         "run: echo\n        shell: python",
-        "uses: relay/command@v1\n        with:\n          argv: |\n"
-        "            git\n            status",
+        (
+            "uses: relay/command@v1\n        with:\n          argv: |\n"
+            "            git\n            status"
+        ),
         "uses: relay/command@v1\n        with:\n          argv: git",
         "uses: relay/command@v1\n        with:\n          argv: '[\"my program\"]'",
         "uses: relay/command@v1\n        with:\n          argv: ${{ inputs.argv }}",
         "uses: relay/agent@v1\n        with:\n          agent: ${{ inputs.agent }}",
         "uses: relay/agent@v1\n        with:\n          agent: ''",
-        "uses: relay/human-wait@v1\n        with:\n          prompt: Go?\n"
-        "          options: ${{ inputs.options }}",
+        (
+            "uses: relay/human-wait@v1\n        with:\n          prompt: Go?\n"
+            "          options: ${{ inputs.options }}"
+        ),
     ],
 )
 def test_literal_checks_accept_valid_and_runtime_values(step: str) -> None:
