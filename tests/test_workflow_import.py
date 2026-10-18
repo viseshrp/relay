@@ -286,7 +286,8 @@ def test_import_lists_workflow_files_directly_in_the_folder(
         ]
     }
     assert Client().get("/api/workflow-import").status_code == 401
-    assert owner.delete("/api/workflow-import").status_code == 405
+    wrong_method = owner.delete("/api/workflow-import")
+    assert wrong_method.status_code == 405
 
     for index in range(101):
         project.write(f".github/workflows/many-{index:03}.yml", "on: push\n")
