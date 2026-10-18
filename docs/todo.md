@@ -1934,6 +1934,10 @@ editing a workflow is harder still. Items are grouped by category
 and carry a priority: **P0** strands or misleads a beginner, **P1** slows them
 down, **P2** is polish. Item numbers use the `WB` prefix.
 
+The [implementation handoff](workflow-builder-handoff.md) specifies every
+item in full, records the owner's decisions (D1 to D4) and the defaults chosen
+for the rest, and gives the delivery order. Each item links to its section.
+
 How it was run:
 
 - **Isolated instance only.** `tests/e2e_server.py` on port 8765 with scratch
@@ -1982,6 +1986,7 @@ at 375 pixels.
 
 - [ ] **WB-01. Make completion follow the cursor position.**
   - **Priority:** P0.
+  - **Spec:** [WB-01 in the handoff](workflow-builder-handoff.md#wb-01-make-completion-follow-the-cursor-position)
   - **Evidence:** `YamlEditor.tsx:61` merges every property of all 115
     schema definitions, every action input, and every context property into
     one list, whatever the cursor position. Typing `ru` under a job offers
@@ -1999,6 +2004,7 @@ at 375 pixels.
 
 - [ ] **WB-02. Suggest values, starting with action names.**
   - **Priority:** P0.
+  - **Spec:** [WB-02 in the handoff](workflow-builder-handoff.md#wb-02-suggest-values-starting-with-action-names)
   - **Evidence:** Completion only offers keys. The 11 `relay/*@v1` actions in
     `manifest.builtins` are never offered after `uses:`, so a beginner must
     already know they exist. `shell`, input `type`, report `format`,
@@ -2012,6 +2018,7 @@ at 375 pixels.
 
 - [ ] **WB-03. Give hover and completion real descriptions.**
   - **Priority:** P0.
+  - **Spec:** [WB-03 in the handoff](workflow-builder-handoff.md#wb-03-give-hover-and-completion-real-descriptions)
   - **Evidence:** Only 6 of 115 definitions in the served manifest have a
     `description` (`workflow-root`, `on`, `strategy`, `steps`,
     `entrypoints`, `recovery`). Hover (`YamlEditor.tsx:103`) uses the first
@@ -2034,6 +2041,7 @@ at 375 pixels.
 
 - [ ] **WB-04. Make Tab indent in the YAML editor.**
   - **Priority:** P1.
+  - **Spec:** [WB-04 in the handoff](workflow-builder-handoff.md#wb-04-make-tab-indent-in-the-yaml-editor)
   - **Evidence:** The editor uses `basicSetup` without `indentWithTab`.
     Pressing Tab in the YAML editor changes nothing, and focus leaves the
     editor for the page body. YAML forbids tabs for indentation, so beginners
@@ -2049,6 +2057,7 @@ at 375 pixels.
 
 - [ ] **WB-05. Explain an empty YAML document.**
   - **Priority:** P1.
+  - **Spec:** [WB-05 in the handoff](workflow-builder-handoff.md#wb-05-explain-an-empty-yaml-document)
   - **Evidence:** After selecting all and deleting, the page still shows
     "Validating workflow…" 10 seconds later, and the canvas shows loading
     placeholders. No error explains the state. The validation effect returns
@@ -2064,6 +2073,7 @@ at 375 pixels.
 
 - [ ] **WB-06. Keep the command form and the YAML in agreement.**
   - **Priority:** P0.
+  - **Spec:** [WB-06 in the handoff](workflow-builder-handoff.md#wb-06-keep-the-command-form-and-the-yaml-in-agreement)
   - **Evidence:** `ActionCommandFields.tsx:40` displays
     `inputs.argv ?? '["echo","Ready"]'` but never writes that value. Adding
     a command job writes `with: {}`, so the form shows `echo` and `Ready`
@@ -2078,6 +2088,7 @@ at 375 pixels.
 
 - [ ] **WB-07. Make newly added jobs and steps valid.**
   - **Priority:** P0.
+  - **Spec:** [WB-07 in the handoff](workflow-builder-handoff.md#wb-07-make-newly-added-jobs-and-steps-valid)
   - **Evidence:** **Add job** (`useActionsWorkflowWorkspace.tsx:547`) and the
     **Step type** menu (`ActionJobSteps.tsx:84`) fill only an action's
     required inputs, using empty strings. A fresh `command`, `loop`, or
@@ -2093,6 +2104,7 @@ at 375 pixels.
 
 - [ ] **WB-08. Let Add step choose the step type.**
   - **Priority:** P1.
+  - **Spec:** [WB-08 in the handoff](workflow-builder-handoff.md#wb-08-let-add-step-choose-the-step-type)
   - **Evidence:** **Add step** (`ActionJobSteps.tsx:263`) always appends
     `run: echo Ready`; the user must then change its type. BX-07 promised
     that built-in actions are exposed through **Add step**.
@@ -2102,6 +2114,7 @@ at 375 pixels.
 
 - [ ] **WB-09. Show a job's steps as a list.**
   - **Priority:** P1.
+  - **Spec:** [WB-09 in the handoff](workflow-builder-handoff.md#wb-09-show-a-jobs-steps-as-a-list)
   - **Evidence:** The drawer edits one step at a time through an **Ordered
     step** select (`ActionJobSteps.tsx:54`). Canvas cards show the job and a
     single summary, for example "work · Agent · m1" or "relay/command@v1".
@@ -2114,6 +2127,7 @@ at 375 pixels.
 
 - [ ] **WB-10. Describe step types in plain words.**
   - **Priority:** P1.
+  - **Spec:** [WB-10 in the handoff](workflow-builder-handoff.md#wb-10-describe-step-types-in-plain-words)
   - **Evidence:** **New job type** and **Step type** list bare slugs:
     `agent`, `cache`, `command`, `download-artifact`, `human-wait`, `loop`,
     `restore-cache`, `save-cache`, `upload-artifact`, `validate-input`, and
@@ -2129,6 +2143,7 @@ at 375 pixels.
 
 - [ ] **WB-11. Lead with the basics in job and step forms.**
   - **Priority:** P1.
+  - **Spec:** [WB-11 in the handoff](workflow-builder-handoff.md#wb-11-lead-with-the-basics-in-job-and-step-forms)
   - **Evidence:**
     - The **General** tab, which opens first, shows the condition with its
       expression builder, timeout, **Reusable workflow**, matrix axes and
@@ -2147,6 +2162,7 @@ at 375 pixels.
 
 - [ ] **WB-12. Use one control for the agent choice.**
   - **Priority:** P1.
+  - **Spec:** [WB-12 in the handoff](workflow-builder-handoff.md#wb-12-use-one-control-for-the-agent-choice)
   - **Evidence:** The **Agent** select (`ActionBuiltinFields.tsx:88`) is blank
     whenever a step uses an `agents` list, which six of the seven starters
     do. The list itself is in **Agent order** (`ActionBuiltinFields.tsx:256`),
@@ -2159,6 +2175,7 @@ at 375 pixels.
 
 - [ ] **WB-31. Show job names, not only IDs, when connecting jobs.**
   - **Priority:** P1.
+  - **Spec:** [WB-31 in the handoff](workflow-builder-handoff.md#wb-31-show-job-names-not-only-ids-when-connecting-jobs)
   - **Evidence:** In the second journey the blank workflow's job was renamed
     **Review**, but **Start after** on the next job offered only `check`, its
     ID. The added job stayed `job_1` in the YAML after being named **Test**.
@@ -2172,6 +2189,7 @@ at 375 pixels.
 
 - [ ] **WB-32. Mark agents that are not installed.**
   - **Priority:** P2.
+  - **Spec:** [WB-32 in the handoff](workflow-builder-handoff.md#wb-32-mark-agents-that-are-not-installed)
   - **Evidence:** With only Codex installed, the agent step's **Agent** select
     listed Codex, Claude Code, GitHub Copilot CLI, Cursor CLI, and
     Antigravity with no status, although the **Get started** checklist marks
@@ -2183,6 +2201,7 @@ at 375 pixels.
 
 - [ ] **WB-33. Keep canvas cards in view after the drawer closes.**
   - **Priority:** P2.
+  - **Spec:** [WB-33 in the handoff](workflow-builder-handoff.md#wb-33-keep-canvas-cards-in-view-after-the-drawer-closes)
   - **Evidence:** After adding a second job and closing its drawer, both
     cards sat cut off at the left edge of the canvas with their labels
     hidden. The canvas follows the selected job while the drawer is open
@@ -2196,6 +2215,7 @@ at 375 pixels.
 
 - [ ] **WB-13. Name the field and suggest the closest match.**
   - **Priority:** P0.
+  - **Spec:** [WB-13 in the handoff](workflow-builder-handoff.md#wb-13-name-the-field-and-suggest-the-closest-match)
   - **Evidence:**
     - `prmpt:` in an agent step reports "relay/agent@v1 has missing
       required or unknown action inputs." (`builtins.py:49`) without naming
@@ -2209,27 +2229,26 @@ at 375 pixels.
   - **Done when:** Tests cover a misspelled root, job, step, and action-input
     key.
 
-- [ ] **WB-14. Explain JSON-string inputs, or accept YAML lists.**
-  - **Priority:** P0. Needs a schema decision.
+- [ ] **WB-14. Accept one value per line for list inputs.**
+  - **Priority:** P0. **Decided** (D1): accept a JSON array string or one value
+    per line; YAML sequences stay rejected.
+  - **Spec:** [WB-14 in the handoff](workflow-builder-handoff.md#wb-14-accept-one-value-per-line-for-list-inputs)
   - **Evidence:** `agents: [codex, claude]`, `argv: [git, status]`, and
     `options: [yes, no]` each report "Expected a scalar string.". Starters
     and docs write `'["codex", "claude"]'`, and
     [Coming from GitHub Actions](coming-from-github-actions.md) shows
     `options: '["Approve", "Reject"]'` without explaining why.
-  - **Fix:** Pick one, with owner approval for the first:
-    1. Accept YAML sequences for these inputs and normalize them, as BX-36
-       considered for other aliases.
-    2. Keep strings and say so: "Write this list as a JSON string, for
-       example `agents: '["codex", "claude"]'`."
-    3. Accept one item per line, as Relay already does for `path`,
-       `prompt-files`, and `restore-keys`. GitHub Actions users already
-       write lists this way, because GitHub's grammar, which Relay's schema
-       copies, types `with` values as strings.
-  - **Done when:** A YAML list either validates or produces that guidance,
-    with a test for each input.
+  - **Fix:** Accept one item per line, as Relay already does for `path`,
+    `prompt-files`, and `restore-keys`, while JSON array strings keep
+    working. GitHub Actions users already write lists this way, because
+    GitHub's grammar, which Relay's schema copies, types `with` values as
+    strings. A YAML sequence gets a message naming both accepted forms.
+  - **Done when:** Each of the three inputs works in both forms, and a YAML
+    list gets the new message, with a test for each input.
 
 - [ ] **WB-15. Catch literal mistakes while editing, not mid-run.**
   - **Priority:** P0.
+  - **Spec:** [WB-15 in the handoff](workflow-builder-handoff.md#wb-15-catch-literal-mistakes-while-editing-not-mid-run)
   - **Evidence:** Each source below validated, saved, and was committed on
     the isolated server:
     - `argv: git status` launched, then the step failed with "Command argv
@@ -2251,6 +2270,7 @@ at 375 pixels.
 
 - [ ] **WB-16. Warn about references to names that do not exist.**
   - **Priority:** P1.
+  - **Spec:** [WB-16 in the handoff](workflow-builder-handoff.md#wb-16-warn-about-references-to-names-that-do-not-exist)
   - **Evidence:** `${{ inputs.task }}` with no `task` input,
     `${{ steps.nope.outputs.x }}`, and `${{ needs.b.outputs.x }}` without
     `needs: b` all validate. The first two also launched and succeeded;
@@ -2265,6 +2285,7 @@ at 375 pixels.
 
 - [ ] **WB-17. List the valid choices in errors.**
   - **Priority:** P1.
+  - **Spec:** [WB-17 in the handoff](workflow-builder-handoff.md#wb-17-list-the-valid-choices-in-errors)
   - **Evidence:**
     - `type: text` on a dispatch input reports "Expected one of string."
       The schema allows string, boolean, number, environment, and choice,
@@ -2285,6 +2306,7 @@ at 375 pixels.
 
 - [ ] **WB-18. Give every diagnostic a location.**
   - **Priority:** P2.
+  - **Spec:** [WB-18 in the handoff](workflow-builder-handoff.md#wb-18-give-every-diagnostic-a-location)
   - **Evidence:** A duplicate YAML key and "with.workflow: Loop requires a
     static reusable workflow." arrive without a line. `YamlEditor.tsx` then
     underlines line 1 (`Number(item.context?.line) || 1`), which points at
@@ -2298,6 +2320,7 @@ at 375 pixels.
 
 - [ ] **WB-19. Add help buttons to job and step controls.**
   - **Priority:** P1.
+  - **Spec:** [WB-19 in the handoff](workflow-builder-handoff.md#wb-19-add-help-buttons-to-job-and-step-controls)
   - **Evidence:** In the job and step editor, only the agent effort select
     (`AgentConfiguration.tsx:130`) has a help button. The **General**,
     **Outputs**, **Environment**, and **When it fails** tabs, the step
@@ -2311,6 +2334,7 @@ at 375 pixels.
 
 - [ ] **WB-20. Write a "Build your first workflow" guide.**
   - **Priority:** P1.
+  - **Spec:** [WB-20 in the handoff](workflow-builder-handoff.md#wb-20-write-a-build-your-first-workflow-guide)
   - **Evidence:** [Getting started](getting-started.md) (18 lines) covers
     running a starter, not editing one. There is no reference table of the
     11 actions with their purpose, required inputs, and outputs;
@@ -2324,6 +2348,7 @@ at 375 pixels.
 
 - [ ] **WB-21. Use the YAML words in the gallery.**
   - **Priority:** P2.
+  - **Spec:** [WB-21 in the handoff](workflow-builder-handoff.md#wb-21-use-the-yaml-words-in-the-gallery)
   - **Evidence:** Gallery cards show inputs such as "test_runner (enum)" and
     "agent (enum)", while the YAML says `type: choice`; `compiler.py:58`
     maps `choice` to an internal `enum`. `docs/web-ui.md` says each card
@@ -2332,21 +2357,25 @@ at 375 pixels.
     a job sequence.
   - **Done when:** No gallery text uses an internal type name.
 
-- [ ] **WB-22. Preselect a starter a beginner can run.**
-  - **Priority:** P2. Needs an owner decision.
+- [ ] **WB-22. Label starter size and requirements.**
+  - **Priority:** P2. **Decided** (D3): keep **AI coding workflow**
+    preselected.
+  - **Spec:** [WB-22 in the handoff](workflow-builder-handoff.md#wb-22-label-starter-size-and-requirements)
   - **Evidence:** The gallery and the checklist preselect **AI coding
     workflow**, which has nine jobs (six phases on its card) and four
     inputs, and requires "A coding agent and Claude Code with an Opus
     model". **Ask an agent** needs one agent and one input.
-  - **Fix:** Preselect the simplest starter that the detected agents can
-    run, and label starters by size, for example "1 job" and "9 jobs".
-  - **Done when:** A user with one agent installed sees a runnable starter
-    selected by default.
+  - **Fix:** Label every starter with its job and approval counts, for
+    example "1 job" and "9 jobs · 3 approvals", and say under the default
+    card what it needs and which smaller starter to choose instead.
+  - **Done when:** Every card shows its size, and the default card says what
+    it needs.
 
 ### First run and results
 
 - [ ] **WB-24. Offer approval answers as buttons.**
   - **Priority:** P0.
+  - **Spec:** [WB-24 in the handoff](workflow-builder-handoff.md#wb-24-offer-approval-answers-as-buttons)
   - **Evidence:** The default starter's three approvals are free-text
     `relay/human-wait@v1` steps without `options`, each followed by a
     `relay/validate-input@v1` enum check (`ai-coding-workflow.yaml:71-83`).
@@ -2366,6 +2395,7 @@ at 375 pixels.
 
 - [ ] **WB-25. Show the code a finished run produced.**
   - **Priority:** P0.
+  - **Spec:** [WB-25 in the handoff](workflow-builder-handoff.md#wb-25-show-the-code-a-finished-run-produced)
   - **Evidence:** After the guided run succeeded, its summary said "Work is
     complete. Review the saved documents and code changes below.", but
     **Review material** offered only five early planning documents and no
@@ -2388,6 +2418,7 @@ at 375 pixels.
 
 - [ ] **WB-26. Say where the code is and how to take it.**
   - **Priority:** P1.
+  - **Spec:** [WB-26 in the handoff](workflow-builder-handoff.md#wb-26-say-where-the-code-is-and-how-to-take-it)
   - **Evidence:** The guided run committed `feature.py` and `test_feature.py`
     to `relay/run/<run id>`; `main` was unchanged, as Relay's rules require.
     The finished page names neither that branch nor the changed files, and
@@ -2401,6 +2432,7 @@ at 375 pixels.
 - [ ] **WB-27. Say plainly that the default starter pushes and opens a pull
   request.**
   - **Priority:** P1.
+  - **Spec:** [WB-27 in the handoff](workflow-builder-handoff.md#wb-27-say-plainly-that-the-default-starter-pushes-and-opens-a-pull-request)
   - **Evidence:** The starter's prompts tell the agent to push the branch and
     create a pull request with GitHub CLI when none exists
     (`01_initial_exploration_any_model.md:548-551`). The first approval
@@ -2417,6 +2449,7 @@ at 375 pixels.
 
 - [ ] **WB-28. Use display names in run views.**
   - **Priority:** P2.
+  - **Spec:** [WB-28 in the handoff](workflow-builder-handoff.md#wb-28-use-display-names-in-run-views)
   - **Evidence:** While queued, the guided run's sidebar listed `refine_plan`,
     `implement`, `review`, `refresh`, `human_review`, `tests`, and
     `final_review`, plus loop scopes labelled `iteration` and `cycle` ("Step
@@ -2431,7 +2464,8 @@ at 375 pixels.
   - **Done when:** No generated scope name appears in the default run view.
 
 - [ ] **WB-29. Keep the Get started prompt after the slides close.**
-  - **Priority:** P2. Needs an owner decision.
+  - **Priority:** P2. **Decided** (D4): keep the banner.
+  - **Spec:** [WB-29 in the handoff](workflow-builder-handoff.md#wb-29-keep-the-get-started-prompt-after-the-slides-close)
   - **Evidence:** Pressing Escape on the welcome slides also removed the
     **Get started** banner behind them, as
     [Local web runtime](web-ui.md#get-started) documents. The checklist then
@@ -2442,6 +2476,7 @@ at 375 pixels.
 
 - [ ] **WB-30. Explain the optional commit in the launch dialog.**
   - **Priority:** P2.
+  - **Spec:** [WB-30 in the handoff](workflow-builder-handoff.md#wb-30-explain-the-optional-commit-in-the-launch-dialog)
   - **Evidence:** For a new workflow the dialog said "Project files are ready
     to run. 1 allowed file" and still offered **Commit workflow files**,
     which opens a separate confirmation. Nothing says whether committing is
@@ -2466,6 +2501,7 @@ where that familiarity stops, usually without saying so.
 - [ ] **WB-34. Point `github` and `runner` expressions to their Relay
   names.**
   - **Priority:** P0.
+  - **Spec:** [WB-34 in the handoff](workflow-builder-handoff.md#wb-34-point-github-and-runner-expressions-to-their-relay-names)
   - **Evidence:** `${{ github.sha }}`, `github.ref_name`, `github.event_name`,
     `github.workspace`, `github.actor` in `run-name`, `github.workflow` in a
     concurrency group, and `github.event.inputs.task` all report
@@ -2479,9 +2515,10 @@ where that familiarity stops, usually without saying so.
   - **Done when:** Each `github.*` and `runner.*` property that has a Relay
     equivalent produces a message naming it.
 
-- [ ] **WB-35. Catch `$GITHUB_OUTPUT` and the other GitHub file variables
-  before the run.**
-  - **Priority:** P0.
+- [ ] **WB-35. Reject the GitHub file variables in scripts.**
+  - **Priority:** P0. **Decided** (D2): a hard validation error; no warning,
+    no alias, and messages name only the `RELAY_*` variable.
+  - **Spec:** [WB-35 in the handoff](workflow-builder-handoff.md#wb-35-reject-the-github-file-variables-in-scripts)
   - **Evidence:** A job that sets an output with
     `echo "version=1.2.3" >> "$GITHUB_OUTPUT"` validated, launched, and
     failed with "script.sh: line 1: : No such file or directory"; the
@@ -2489,14 +2526,16 @@ where that familiarity stops, usually without saying so.
     workflow using `$RELAY_OUTPUT` succeeded. The
     [language audit](workflow-language-compatibility.md) records that no
     `GITHUB_*` alias is provided, but nothing tells the user.
-  - **Fix:** Warn in validation when a `run` script names `GITHUB_OUTPUT`,
+  - **Fix:** Fail validation when a `run` script names `GITHUB_OUTPUT`,
     `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STATE`, or `GITHUB_STEP_SUMMARY`,
-    naming the `RELAY_*` replacement. Whether to provide aliases is an owner
-    decision.
-  - **Done when:** Each of the five names produces a warning before launch.
+    naming the `RELAY_*` variable to use. Treat `RELAY_*` as the only names
+    that have ever existed.
+  - **Done when:** Each of the five names is a validation error naming its
+    `RELAY_*` variable.
 
 - [ ] **WB-36. Say what replaces each common GitHub action.**
   - **Priority:** P1.
+  - **Spec:** [WB-36 in the handoff](workflow-builder-handoff.md#wb-36-say-what-replaces-each-common-github-action)
   - **Evidence:** `actions/checkout@v4`, `actions/setup-python@v5`,
     `actions/upload-artifact@v4`, `actions/cache@v4`, `docker://alpine:3.20`,
     and `./.github/actions/setup` all report "Only frozen local and
@@ -2516,6 +2555,7 @@ where that familiarity stops, usually without saying so.
 
 - [ ] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
   - **Priority:** P1.
+  - **Spec:** [WB-37 in the handoff](workflow-builder-handoff.md#wb-37-import-an-existing-github-workflow)
   - **Evidence:** A typical 15-line CI file (`push` and `pull_request`,
     `runs-on`, checkout, `setup-python`, two `run` steps) produced four
     errors. Removing those four things (six lines) made it valid; the `run`
@@ -2532,6 +2572,7 @@ where that familiarity stops, usually without saying so.
 
 - [ ] **WB-38. Answer every unsupported trigger the same way.**
   - **Priority:** P2.
+  - **Spec:** [WB-38 in the handoff](workflow-builder-handoff.md#wb-38-answer-every-unsupported-trigger-the-same-way)
   - **Evidence:** `on: pull_request_target` reports "Expected one of
     workflow_dispatch, workflow_call, schedule, push, repository_dispatch,
     workflow_run.", but `pull_request:` inside an `on:` mapping reports only
@@ -2543,37 +2584,38 @@ where that familiarity stops, usually without saying so.
   - **Done when:** The scalar, list, and mapping forms of an unsupported
     event produce the same message on the right line.
 
-- [ ] **WB-39. Accept an expression for a single matrix axis.**
-  - **Priority:** P2.
+- [ ] **WB-39. Explain how to build a matrix from an expression.**
+  - **Priority:** P2. Default (D5): message only.
+  - **Spec:** [WB-39 in the handoff](workflow-builder-handoff.md#wb-39-explain-how-to-build-a-matrix-from-an-expression)
   - **Evidence:** `matrix: {v: ${{ fromJSON('["a","b"]') }}}` reports "A
     matrix axis must be a nonempty sequence.". GitHub documents this form,
     for example `color: ${{ fromJSON(needs.define-matrix.outputs.colors) }}`.
     Relay documents only a whole-object dynamic matrix
     ([Workflows](workflows.md#matrix-jobs)).
-  - **Fix:** Support expression axes, or say "Use a dynamic matrix as a
-    whole object: `matrix: ${{ fromJSON(...) }}`".
-  - **Done when:** The GitHub form validates, or its message shows the
-    accepted form.
+  - **Fix:** Say "To build the matrix from an expression, set the whole
+    matrix: `matrix: ${{ fromJSON(...) }}`". Per-axis expressions are not
+    added.
+  - **Done when:** The message shows the accepted form.
 
-- [ ] **WB-40. Warn about secrets that are never bound, starting with
-  `GITHUB_TOKEN`.**
-  - **Priority:** P1.
+- [ ] **WB-40. Warn about secrets that are never bound.**
+  - **Priority:** P1. Default (D6): one generic warning for every name.
+  - **Spec:** [WB-40 in the handoff](workflow-builder-handoff.md#wb-40-warn-about-secrets-that-are-never-bound)
   - **Evidence:** `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` validated and ran.
     The step printed "token length 0", and the run succeeded. Relay issues
     no GitHub token
     ([language audit](workflow-language-compatibility.md)), so a GitHub user
     gets an empty credential with no warning.
   - **Fix:** At launch, warn about each referenced secret without a binding,
-    and explain `GITHUB_TOKEN` specifically: bind a secret, or rely on the
-    tool's own sign-in.
+    `GITHUB_TOKEN` included, and say where to add it.
   - **Done when:** Launching with an unbound secret shows a warning naming
     it.
 
 - [ ] **WB-41. Complete the GitHub Actions mapping in the guide.**
   - **Priority:** P1.
+  - **Spec:** [WB-41 in the handoff](workflow-builder-handoff.md#wb-41-complete-the-github-actions-mapping-in-the-guide)
   - **Evidence:** [Coming from GitHub Actions](coming-from-github-actions.md)
     maps eight concepts. It omits `github` to `relay`, `runner` to `host`,
-    the `GITHUB_*` files to `RELAY_*`, checkout and `setup-*`, the artifact
+    the `RELAY_*` file variables, checkout and `setup-*`, the artifact
     and cache actions, `.github/workflows` to `.relay/workflows`, local
     action paths, unsupported pull request events, and list inputs.
   - **Fix:** Add those rows, with a before-and-after version of the CI file
@@ -2586,6 +2628,7 @@ where that familiarity stops, usually without saying so.
 
 - [ ] **WB-23. Name the job settings drawer.**
   - **Priority:** P2.
+  - **Spec:** [WB-23 in the handoff](workflow-builder-handoff.md#wb-23-name-the-job-settings-drawer)
   - **Evidence:** axe-core 4 reports `aria-dialog-name` (serious) on the job
     settings drawer, an MUI `role="dialog"` with no `aria-label` or
     `aria-labelledby`. The editor page itself has no violations. BX-31
