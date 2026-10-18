@@ -2097,7 +2097,7 @@ at 375 pixels.
 
 ### Visual editor
 
-- [ ] **WB-06. Keep the command form and the YAML in agreement.**
+- [x] **WB-06. Keep the command form and the YAML in agreement.**
   - **Priority:** P0.
   - **Spec:** [WB-06 in the handoff](workflow-builder-handoff.md#wb-06-keep-the-command-form-and-the-yaml-in-agreement)
   - **Evidence:** `ActionCommandFields.tsx:40` displays
@@ -2111,8 +2111,11 @@ at 375 pixels.
     unparsable `argv` instead of an empty list.
   - **Done when:** A test adds a command job and checks that the form, the
     YAML, and validation agree.
+  - **Verified:** `workflow-authoring.spec.ts` "a new command job shows the
+    same arguments in the form and the YAML" and "a command step with
+    unreadable arguments says so instead of an empty list".
 
-- [ ] **WB-07. Make newly added jobs and steps valid.**
+- [x] **WB-07. Make newly added jobs and steps valid.**
   - **Priority:** P0.
   - **Spec:** [WB-07 in the handoff](workflow-builder-handoff.md#wb-07-make-newly-added-jobs-and-steps-valid)
   - **Evidence:** **Add job** (`useActionsWorkflowWorkspace.tsx:547`) and the
@@ -2127,8 +2130,13 @@ at 375 pixels.
   - **Done when:** For each of the 11 actions, **Add job** and **Step type**
     produce a source that passes validation, or the form says which field to
     fill.
+  - **Verified:** `workflow-authoring.spec.ts` "every new job type validates
+    as soon as it is added" and "a new loop job repeats the workflow chosen in
+    its dialog"; "new steps start with values that validate" in
+    `frontend/unit/visual-editor.spec.ts`. **Step type** and **Add step** use
+    the same `defaultStep`.
 
-- [ ] **WB-08. Let Add step choose the step type.**
+- [x] **WB-08. Let Add step choose the step type.**
   - **Priority:** P1.
   - **Spec:** [WB-08 in the handoff](workflow-builder-handoff.md#wb-08-let-add-step-choose-the-step-type)
   - **Evidence:** **Add step** (`ActionJobSteps.tsx:263`) always appends
@@ -2137,8 +2145,10 @@ at 375 pixels.
   - **Fix:** Make **Add step** a menu: Agent, Script, Command, Approval,
     Check a report, Upload artifact, and More.
   - **Done when:** A browser test adds each listed type in one action.
+  - **Verified:** `workflow-authoring.spec.ts` "Add step inserts each primary
+    step type"; the remaining types are listed under **More**.
 
-- [ ] **WB-09. Show a job's steps as a list.**
+- [x] **WB-09. Show a job's steps as a list.**
   - **Priority:** P1.
   - **Spec:** [WB-09 in the handoff](workflow-builder-handoff.md#wb-09-show-a-jobs-steps-as-a-list)
   - **Evidence:** The drawer edits one step at a time through an **Ordered
@@ -2150,8 +2160,13 @@ at 375 pixels.
     move controls in the drawer, and list step names on each card.
   - **Done when:** A user can see and reorder every step of a job without
     opening a select.
+  - **Verified:** `workflow-authoring.spec.ts` "a job's steps appear as a list
+    in the drawer and on the card"; "a step is labelled by name, ID, type, then
+    its first script line" and "canvas cards list five steps, then how many
+    more" in `frontend/unit/visual-editor.spec.ts`. Visual baselines are
+    regenerated in CI.
 
-- [ ] **WB-10. Describe step types in plain words.**
+- [x] **WB-10. Describe step types in plain words.**
   - **Priority:** P1.
   - **Spec:** [WB-10 in the handoff](workflow-builder-handoff.md#wb-10-describe-step-types-in-plain-words)
   - **Evidence:** **New job type** and **Step type** list bare slugs:
@@ -2166,8 +2181,11 @@ at 375 pixels.
     actions.
   - **Done when:** Every menu entry has a label and a description, and no
     slug appears outside Advanced.
+  - **Verified:** `workflow-authoring.spec.ts` "step type menus use plain
+    labels"; "every step type has one plain label for every version" in
+    `frontend/unit/visual-editor.spec.ts`.
 
-- [ ] **WB-11. Lead with the basics in job and step forms.**
+- [x] **WB-11. Lead with the basics in job and step forms.**
   - **Priority:** P1.
   - **Spec:** [WB-11 in the handoff](workflow-builder-handoff.md#wb-11-lead-with-the-basics-in-job-and-step-forms)
   - **Evidence:**
@@ -2185,8 +2203,16 @@ at 375 pixels.
     not plain text.
   - **Done when:** A new job's drawer shows only name, start after, and steps
     until **Advanced** is opened.
+  - **Verified:** `workflow-authoring.spec.ts` "new jobs open on Steps and
+    General shows the basics first", and "matrix, concurrency, comparisons,
+    and bounded retry controls round trip without JSON", which now opens
+    **Advanced**, **Change type**, and **Build a condition**. The condition
+    helpers offer only names that validate in their field: "condition helpers
+    offer only expressions that validate" in the same file, and "condition
+    helpers offer only names the field accepts" in
+    `frontend/unit/visual-editor.spec.ts`.
 
-- [ ] **WB-12. Use one control for the agent choice.**
+- [x] **WB-12. Use one control for the agent choice.**
   - **Priority:** P1.
   - **Spec:** [WB-12 in the handoff](workflow-builder-handoff.md#wb-12-use-one-control-for-the-agent-choice)
   - **Evidence:** The **Agent** select (`ActionBuiltinFields.tsx:88`) is blank
@@ -2198,8 +2224,10 @@ at 375 pixels.
     including saved defaults.
   - **Done when:** Opening any starter's agent step shows which agents it
     will try, in order, in one place.
+  - **Verified:** `agent-configuration.spec.ts` "Runs on shows the effective
+    agents in one place".
 
-- [ ] **WB-31. Show job names, not only IDs, when connecting jobs.**
+- [x] **WB-31. Show job names, not only IDs, when connecting jobs.**
   - **Priority:** P1.
   - **Spec:** [WB-31 in the handoff](workflow-builder-handoff.md#wb-31-show-job-names-not-only-ids-when-connecting-jobs)
   - **Evidence:** In the second journey the blank workflow's job was renamed
@@ -2212,8 +2240,13 @@ at 375 pixels.
     names in the artifact **Job** column.
   - **Done when:** A user who only types job names never sees a generated ID
     in the editor or the run's artifact table.
+  - **Verified:** `workflow-authoring.spec.ts` "dependencies show job names
+    and job IDs can be renamed safely"; "renaming a job moves every reference
+    to it in one edit" in `frontend/unit/visual-editor.spec.ts`. Job IDs never
+    change on their own (D10); the artifact table's job names came with
+    WB-28.
 
-- [ ] **WB-32. Mark agents that are not installed.**
+- [x] **WB-32. Mark agents that are not installed.**
   - **Priority:** P2.
   - **Spec:** [WB-32 in the handoff](workflow-builder-handoff.md#wb-32-mark-agents-that-are-not-installed)
   - **Evidence:** With only Codex installed, the agent step's **Agent** select
@@ -2224,8 +2257,11 @@ at 375 pixels.
     that are not installed, with a link to the checklist.
   - **Done when:** An agent that cannot run is visibly marked wherever it can
     be chosen.
+  - **Verified:** `agent-configuration.spec.ts` "agent choices show
+    installation status". **Open Get started** sits below the choices rather
+    than inside a disabled option, which could not hold a working link.
 
-- [ ] **WB-33. Keep canvas cards in view after the drawer closes.**
+- [x] **WB-33. Keep canvas cards in view after the drawer closes.**
   - **Priority:** P2.
   - **Spec:** [WB-33 in the handoff](workflow-builder-handoff.md#wb-33-keep-canvas-cards-in-view-after-the-drawer-closes)
   - **Evidence:** After adding a second job and closing its drawer, both
@@ -2236,6 +2272,8 @@ at 375 pixels.
     selected card centred in the uncovered area.
   - **Done when:** A browser test adds a job, closes the drawer, and finds
     every card fully inside the canvas.
+  - **Verified:** `workflow-authoring.spec.ts` "closing the drawer keeps
+    every card in view".
 
 ### Validation and error messages
 
@@ -2380,7 +2418,7 @@ at 375 pixels.
 
 ### Help, docs, and vocabulary
 
-- [ ] **WB-19. Add help buttons to job and step controls.**
+- [x] **WB-19. Add help buttons to job and step controls.**
   - **Priority:** P1.
   - **Spec:** [WB-19 in the handoff](workflow-builder-handoff.md#wb-19-add-help-buttons-to-job-and-step-controls)
   - **Evidence:** In the job and step editor, only the agent effort select
@@ -2393,6 +2431,10 @@ at 375 pixels.
     WB-03, or correct the documentation.
   - **Done when:** Every field in the job drawer and **Workflow settings**
     has help, and a browser test checks a sample from each tab.
+  - **Verified:** `help-layout.spec.ts` "every job and step field has help"
+    (every tab, with a sample checked against the manifest description) and
+    "every workflow settings field has help" (both **Workflow settings**
+    dialogs).
 
 - [ ] **WB-20. Write a "Build your first workflow" guide.**
   - **Priority:** P1.
@@ -2759,7 +2801,7 @@ where that familiarity stops, usually without saying so.
 
 ### Accessibility
 
-- [ ] **WB-23. Name the job settings drawer.**
+- [x] **WB-23. Name the job settings drawer.**
   - **Priority:** P2.
   - **Spec:** [WB-23 in the handoff](workflow-builder-handoff.md#wb-23-name-the-job-settings-drawer)
   - **Evidence:** axe-core 4 reports `aria-dialog-name` (serious) on the job
@@ -2770,6 +2812,9 @@ where that familiarity stops, usually without saying so.
     include the job name.
   - **Done when:** axe passes with the drawer open, and browser tests find
     the drawer by its name.
+  - **Verified:** `accessibility.spec.ts` "the job settings drawer has an
+    accessible name"; `openJobSettings` in `frontend/e2e/setup-helpers.ts`
+    finds the drawer by that name.
 
 ### Suggested order for these findings
 
