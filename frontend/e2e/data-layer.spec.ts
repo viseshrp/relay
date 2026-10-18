@@ -158,10 +158,17 @@ test("Home reads once under StrictMode and hidden tabs make no polling requests"
     if (request.url().includes("/api/dashboard?limit=10")) dashboards += 1;
     if (request.url().includes("/api/attention")) attention += 1;
   });
+  const initial = page.waitForResponse((response) =>
+    response.url().includes("/api/dashboard?limit=10"),
+  );
   await page.goto("/?view=home");
   await expect(
     page.getByRole("heading", { name: "Your work at a glance" }),
   ).toBeVisible();
+  // Hide the tab only after the first read settles and leaves the shared cache.
+  await (await initial).finished();
+  await expect(page.locator(".dashboard .view-skeleton")).toHaveCount(0);
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(dashboards).toBe(1);
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", {
