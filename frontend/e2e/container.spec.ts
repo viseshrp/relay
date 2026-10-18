@@ -50,9 +50,12 @@ async function signIn(page: Page, button: string): Promise<void> {
 }
 
 async function createWorkflow(page: Page, key: string, yaml: string) {
-  const holder = await page.evaluate(() =>
-    sessionStorage.getItem("relay.editor-holder"),
-  );
+  // The workflow workspace creates this tab's editor holder once it mounts.
+  const holder = await (
+    await page.waitForFunction(() =>
+      sessionStorage.getItem("relay.editor-holder"),
+    )
+  ).jsonValue();
   const created = await post(page, "/api/workflows", { key, holder, yaml });
   expect(created.status(), await created.text()).toBe(201);
 }
