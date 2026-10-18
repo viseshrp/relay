@@ -176,6 +176,7 @@ export function ActionJobEditorView({
         {tab === "When it fails" && (
           <JobFailureEditor
             job={job}
+            manifest={manifest}
             change={(value) => change(["jobs", jobId], value)}
           />
         )}

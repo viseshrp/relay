@@ -148,6 +148,10 @@ distribution contains workflow or prompt templates.
 - Preserve Relay-owned errors at CLI, HTTP, SSE, and browser boundaries.
 - Use argument vectors for Git, coding-agent, and command-node subprocesses.
 - Keep Linux, Windows, and macOS behavior equivalent.
+- Name built-in actions only through the registry in
+  `relay/workflows/actions/builtins.py`. A breaking change to a built-in
+  action adds the next major version beside the current one; see
+  [Built-in action versions](docs/workflows.md#built-in-action-versions).
 
 Every changed Python function and method needs accurate parameter and return
 types. Every changed mutable or optional attribute needs an explicit type.

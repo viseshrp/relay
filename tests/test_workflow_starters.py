@@ -12,6 +12,7 @@ import pytest
 from relay.errors import PathSafetyError, PermissionFlowError, WorkflowValidationError
 from relay.web.repositories import DjangoWorkflowStore
 from relay.workflows import starters
+from relay.workflows.actions.builtins import builtin, parse_builtin
 from relay.workflows.loader import load_workflow
 from relay.workflows.starters import (
     STARTER_ROOT,
@@ -53,6 +54,34 @@ def test_starter_copies_exact_sources_and_validates(
         DjangoWorkflowStore(), project.relay_root, project.project_id, f"second-{key}", starter.id
     )
     assert second.yaml == document.yaml
+
+
+def test_starters_use_current_builtin_versions() -> None:
+    from ruamel.yaml import YAML
+
+    def uses(value: object) -> list[object]:
+        if isinstance(value, dict):
+            found = [value["uses"]] if "uses" in value else []
+            return found + [item for child in value.values() for item in uses(child)]
+        if isinstance(value, list):
+            return [item for child in value for item in uses(child)]
+        return []
+
+    root = Path(starters.__file__).parent / "starters"
+    sources = sorted([*root.rglob("*.yaml"), *root.rglob("*.yml")])
+    references = {
+        str(reference): path.relative_to(root).as_posix()
+        for path in sources
+        for reference in uses(YAML(typ="safe").load(path.read_text("utf-8")))
+        if parse_builtin(reference) is not None
+    }
+    assert references
+    stale = {
+        reference: path
+        for reference, path in references.items()
+        if (action := builtin(reference)) is None or action.status != "current"
+    }
+    assert not stale
 
 
 def test_gallery_has_seven_templates_and_schema_defined_inputs() -> None:

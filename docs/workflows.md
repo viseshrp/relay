@@ -470,6 +470,18 @@ A failed post hook fails its job. Post file commands, declared artifacts, and
 summaries use the same validation and masking as main scripts. Cache filesystem
 restore/save failures emit warnings; ownership or integrity failures stop the job.
 
+## Built-in action versions
+
+Built-in actions are named `relay/<name>@v<major>`. Each has one current
+major version, which the editor offers. A version changes only in compatible
+ways: a new optional input that keeps the old behavior when omitted, a new
+output, a clearer message, or a fix that restores documented behavior. Any
+other change ships as the next major version.
+
+The support manifest lists every registered version under `builtin_versions`,
+with its action name, major version, and status, and its inputs under
+`builtin_inputs`. `builtins` lists the current references.
+
 ## Variables, secrets, and environments
 
 Workflow settings manage installation, project, and environment bindings.

@@ -26,6 +26,7 @@ from relay.workflows.schema import (
 )
 
 from . import expressions
+from .builtins import is_builtin
 from .language import (
     ActionsDocument,
     expand_matrix,
@@ -252,9 +253,9 @@ def bind_routes(workflow: ValidatedWorkflow, values: Mapping[str, Any]) -> Valid
             step_id = str(step.get("id") or f"step_{index + 1}")
             scope = f"{prefix}.{step_id}" if prefix else step_id
             reference = step.get("uses", "")
-            if reference == "relay/agent@v1":
+            if is_builtin(reference, "agent"):
                 bindings[scope] = bind_agent(step, context)
-            elif reference == "relay/loop@v1":
+            elif is_builtin(reference, "loop"):
                 raw = step.get("with", {})
                 child = load(sources[str(raw["workflow"]).removeprefix("./")])
                 deferred = dynamic(raw.get("inputs", "{}"), context)
@@ -383,7 +384,7 @@ def validate_commands(
             for step in job.get("steps", []):
                 name = step.get("with", {}).get("command")
                 if (
-                    step.get("uses") == "relay/command@v1"
+                    is_builtin(step.get("uses"), "command")
                     and isinstance(name, str)
                     and "${{" not in name
                     and name not in commands

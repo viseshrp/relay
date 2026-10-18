@@ -2668,7 +2668,7 @@ The [implementation handoff](workflow-builder-handoff.md#built-in-action-version
 specifies each item. Its delivery plan builds AV-01 before the builder work
 (PR R) and leaves the others to PRs V and W.
 
-- [ ] **AV-01. Keep every built-in action in one versioned registry.**
+- [x] **AV-01. Keep every built-in action in one versioned registry.**
   - **Priority:** P1.
   - **Spec:** [AV-01 in the handoff](workflow-builder-handoff.md#av-01-keep-every-built-in-action-in-one-versioned-registry)
   - **Evidence:** The 11 built-in actions are spelled as literal
@@ -2685,6 +2685,15 @@ specifies each item. Its delivery plan builds AV-01 before the builder work
     counts as a breaking change.
   - **Done when:** No `@v1` string remains outside the registry, starters,
     tests, and docs, and every existing test passes unchanged.
+  - **Verified:** `test_registry_holds_one_current_version_per_action`,
+    `test_builtin_reference_helpers`,
+    `test_no_builtin_reference_is_spelled_outside_the_registry`, and
+    `test_an_unregistered_version_never_runs` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_starters_use_current_builtin_versions` in
+    `tests/test_workflow_starters.py`;
+    `test_manifest_describes_builtin_versions` in
+    `tests/test_relay_language.py`; and `frontend/unit/builtin-actions.spec.ts`.
 
 - [ ] **AV-02. Run two versions of a built-in action side by side.**
   - **Priority:** P2 until triggered. **Trigger:** the first breaking change

@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import type { ActionStep, ActionWorkflow } from "../actions-workflow";
 import type { AgentRecord, ProviderDefaults } from "../types";
+import { parseBuiltin } from "../builtin-actions";
 import type { LanguageManifest } from "../workflow-language";
 import { ModelPicker } from "./ModelPicker";
 import { AgentConfiguration } from "./AgentConfiguration";
@@ -50,6 +51,7 @@ export function ActionBuiltinFields({
   onChange: (field: string, value: unknown) => void;
 }) {
   const inputs = step.with ?? {};
+  const action = parseBuiltin(step.uses)?.name;
   const agentId = String(inputs.agent ?? "");
   const agent = agents.find((item) => item.id === agentId);
   const model = String(
@@ -57,7 +59,7 @@ export function ActionBuiltinFields({
   );
   const fields = manifest.builtin_inputs[step.uses ?? ""];
   const special =
-    step.uses === "relay/agent@v1"
+    action === "agent"
       ? [
           "agent",
           "agents",
@@ -68,9 +70,9 @@ export function ActionBuiltinFields({
           "auto-retry",
           "retry-limit",
         ]
-      : step.uses === "relay/command@v1"
+      : action === "command"
         ? ["argv", "command"]
-        : step.uses === "relay/human-wait@v1"
+        : action === "human-wait"
           ? ["options"]
           : [];
   return (
@@ -81,7 +83,7 @@ export function ActionBuiltinFields({
         value={inputs}
         onChange={(value) => onChange("__all__", value)}
       />
-      {step.uses === "relay/agent@v1" && (
+      {action === "agent" && (
         <>
           <TextField
             select
@@ -176,10 +178,10 @@ export function ActionBuiltinFields({
           </Accordion>
         </>
       )}
-      {step.uses === "relay/command@v1" && (
+      {action === "command" && (
         <ActionCommandFields inputs={inputs} onChange={onChange} />
       )}
-      {step.uses === "relay/human-wait@v1" && (
+      {action === "human-wait" && (
         <>
           <Typography>
             Choose a question, optional answer buttons, and a response timeout.
@@ -223,7 +225,7 @@ export function ActionBuiltinFields({
           }}
         />
       )}
-      {step.uses === "relay/agent@v1" && (
+      {action === "agent" && (
         <>
           <Autocomplete
             multiple
@@ -260,7 +262,7 @@ export function ActionBuiltinFields({
           />
         </>
       )}
-      {step.uses === "relay/loop@v1" && Boolean(inputs.workflow) && (
+      {action === "loop" && Boolean(inputs.workflow) && (
         <ReusableWorkflowPreview
           reference={String(inputs.workflow)}
           project={project}

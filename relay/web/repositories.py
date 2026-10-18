@@ -141,6 +141,7 @@ from relay.vcs.worktree import (
 )
 from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
+from relay.workflows.actions.builtins import builtin_references, is_builtin, parse_builtin
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
@@ -572,7 +573,7 @@ def _attempt_requires_evidence(node: NodeRun) -> bool:
     return not (
         _string(node, "node_type") == NodeType.ACTIONS_STEP.value
         and isinstance(step, Mapping)
-        and step.get("uses") == "relay/human-wait@v1"
+        and is_builtin(step.get("uses"), "human-wait")
     )
 
 
@@ -1849,14 +1850,15 @@ class DjangoReadStore:
                 step = frozen.get("step", {})
                 activity_type = _string(node, "node_type")
                 if activity_type == NodeType.ACTIONS_STEP.value and isinstance(step, dict):
+                    parsed = parse_builtin(step.get("uses"))
                     activity_type = (
                         "command"
                         if "run" in step
                         else {
-                            "relay/command@v1": "command",
-                            "relay/agent@v1": "agent",
-                            "relay/human-wait@v1": "human_wait",
-                        }.get(step.get("uses"), activity_type)
+                            "command": "command",
+                            "agent": "agent",
+                            "human-wait": "human_wait",
+                        }.get(parsed[0] if parsed is not None else "", activity_type)
                     )
                 instructions: list[dict[str, object]] = []
                 remaining = API_MAX_PAGE_BYTES // 4
@@ -2349,7 +2351,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ~Q(status=AttemptStatus.WAITING.value)
                 | Q(
                     node_run__node_type=NodeType.ACTIONS_STEP.value,
-                    node_run__frozen_def__step__uses="relay/agent@v1",
+                    node_run__frozen_def__step__uses__in=builtin_references("agent"),
                 )
             )
         attempt_ids = list(attempts.order_by("started_at", "pk").values_list("pk", flat=True))
@@ -3968,8 +3970,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     NodeType.ACTIONS_JOB.value,
                     *(
                         [NodeType.ACTIONS_STEP.value]
-                        if cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
-                        != "relay/human-wait@v1"
+                        if not is_builtin(
+                            cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses"),
+                            "human-wait",
+                        )
                         else []
                     ),
                 }
@@ -4914,8 +4918,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     _string(node, "node_type") == NodeType.ACTIONS_JOB.value
                     or (
                         _string(node, "node_type") == NodeType.ACTIONS_STEP.value
-                        and cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
-                        != "relay/human-wait@v1"
+                        and not is_builtin(
+                            cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses"),
+                            "human-wait",
+                        )
                     )
                 ):
                     # The exact yielded attempt resumes after its child settles;

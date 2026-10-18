@@ -12,6 +12,7 @@ from ruamel.yaml import YAML
 
 from relay.errors import PermissionFlowError, RelayError, WorkflowValidationError
 
+from .actions.builtins import is_builtin
 from .actions.language import load
 from .editor import (
     WorkflowEditorStore,
@@ -33,7 +34,7 @@ def _reject_references(relay_root: Path, key: str) -> None:
             continue
         for job in document.value["jobs"].values():
             if job.get("uses") == reference or any(
-                step.get("uses") == "relay/loop@v1"
+                is_builtin(step.get("uses"), "loop")
                 and step.get("with", {}).get("workflow") == reference
                 for step in job.get("steps", [])
             ):

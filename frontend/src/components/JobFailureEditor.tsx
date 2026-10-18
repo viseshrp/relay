@@ -10,16 +10,20 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import type { ActionJob } from "../actions-workflow";
+import { currentBuiltin, isBuiltin } from "../builtin-actions";
+import type { LanguageManifest } from "../workflow-language";
 
 export function JobFailureEditor({
   job,
+  manifest,
   change,
 }: {
   job: ActionJob;
+  manifest: LanguageManifest;
   change: (value: ActionJob) => void;
 }) {
-  const agents = (job.steps ?? []).filter(
-    (step) => step.uses === "relay/agent@v1",
+  const agents = (job.steps ?? []).filter((step) =>
+    isBuiltin(step.uses, "agent"),
   );
   const [repair, setRepair] = useState("");
   const policy =
@@ -41,7 +45,7 @@ export function JobFailureEditor({
     change({
       ...job,
       steps: job.steps?.map((step) =>
-        step.uses === "relay/agent@v1"
+        isBuiltin(step.uses, "agent")
           ? {
               ...step,
               with: {
@@ -70,7 +74,7 @@ export function JobFailureEditor({
                     const inputs = { ...step.with };
                     delete inputs["auto-retry"];
                     delete inputs["retry-limit"];
-                    return step.uses === "relay/agent@v1"
+                    return isBuiltin(step.uses, "agent")
                       ? { ...step, with: inputs }
                       : step;
                   }),
@@ -137,7 +141,7 @@ export function JobFailureEditor({
               ...(job.steps ?? []),
               {
                 id: "fix_and_check",
-                uses: "relay/loop@v1",
+                uses: currentBuiltin(manifest, "loop"),
                 if: "${{ failure() }}",
                 with: {
                   workflow: repair,

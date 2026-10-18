@@ -1,7 +1,10 @@
 """Versioned builtins execute through durable attempts and real job state."""
 
+from collections.abc import Callable
 import json
 from pathlib import Path
+import re
+import sys
 from typing import Any
 
 import pytest
@@ -9,7 +12,53 @@ from ruamel.yaml import YAML
 
 from relay.execution.nodes import node_executors
 from relay.web.models import NodeRun, Run, RunEvent
-from tests.support import InlineEngine, RelayProject
+from relay.workflows.actions import builtins
+from relay.workflows.actions.builtins import (
+    BUILTIN_ACTIONS,
+    builtin,
+    builtin_references,
+    current_builtin,
+    is_builtin,
+    parse_builtin,
+)
+from tests.support import InlineEngine, RelayProject, answer_wait
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# The input contracts every built-in accepted before the registry existed.
+CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
+    "relay/agent@v1": (
+        {
+            "agent",
+            "agents",
+            "model",
+            "effort",
+            "prompt-files",
+            "prompt",
+            "report",
+            "selector",
+            "format",
+            "field",
+            "label",
+            "auto-retry",
+            "retry-limit",
+        },
+        set(),
+    ),
+    "relay/command@v1": ({"argv", "command"}, set()),
+    "relay/human-wait@v1": ({"prompt", "timeout-minutes", "options"}, {"prompt"}),
+    "relay/loop@v1": (
+        {"workflow", "inputs", "max-iterations", "until-output", "equals"},
+        {"workflow", "max-iterations"},
+    ),
+    "relay/validate-report@v1": ({"path", "report", "selector", "format", "field", "label"}, set()),
+    "relay/validate-input@v1": ({"value", "type", "constraints"}, {"value", "type"}),
+    "relay/upload-artifact@v1": ({"name", "path", "retention-days"}, {"path"}),
+    "relay/download-artifact@v1": ({"name", "path", "run-id"}, {"name"}),
+    "relay/cache@v1": ({"key", "path", "restore-keys"}, {"key", "path"}),
+    "relay/restore-cache@v1": ({"key", "path", "restore-keys"}, {"key", "path"}),
+    "relay/save-cache@v1": ({"key", "path"}, {"key", "path"}),
+}
 
 
 def workflow(
@@ -184,3 +233,96 @@ def test_loop_terminates_on_declared_output_or_exhausts_its_bound(
         ).values_list("scope_path", flat=True)
     )
     assert len(scopes) == iterations
+
+
+def test_registry_holds_one_current_version_per_action() -> None:
+    references = [action.reference for action in BUILTIN_ACTIONS]
+    assert references == list(CONTRACTS)
+    assert len(set(references)) == len(references) == 11
+    for name in {action.name for action in BUILTIN_ACTIONS}:
+        current = [a for a in BUILTIN_ACTIONS if a.name == name and a.status == "current"]
+        assert len(current) == 1, name
+    for action in BUILTIN_ACTIONS:
+        allowed, required = CONTRACTS[action.reference]
+        assert (set(action.allowed), set(action.required)) == (allowed, required)
+
+
+@pytest.mark.parametrize(
+    "call,expected",
+    [
+        pytest.param(lambda: builtin("relay/agent@v1").name, "agent", id="builtin-agent"),
+        pytest.param(lambda: builtin("relay/agent@v9"), None, id="builtin-unregistered"),
+        pytest.param(lambda: builtin(None), None, id="builtin-none"),
+        pytest.param(
+            lambda: parse_builtin("relay/save-cache@v1"), ("save-cache", 1), id="parse-save-cache"
+        ),
+        pytest.param(lambda: parse_builtin("relay/agent@v0"), None, id="parse-major-zero"),
+        pytest.param(lambda: parse_builtin("relay/agent"), None, id="parse-no-version"),
+        pytest.param(lambda: parse_builtin("./.relay/actions/agent"), None, id="parse-local"),
+        pytest.param(lambda: is_builtin("relay/agent@v9", "agent"), True, id="is-unregistered"),
+        pytest.param(lambda: is_builtin("relay/agent@v1", "loop"), False, id="is-other-name"),
+        pytest.param(lambda: is_builtin(None, "agent"), False, id="is-none"),
+        pytest.param(
+            lambda: builtin_references("agent"), ("relay/agent@v1",), id="references-agent"
+        ),
+        pytest.param(lambda: current_builtin("loop").reference, "relay/loop@v1", id="current-loop"),
+        pytest.param(lambda: current_builtin("missing"), KeyError, id="current-missing"),
+    ],
+)
+def test_builtin_reference_helpers(call: Callable[[], object], expected: object) -> None:
+    if expected is KeyError:
+        with pytest.raises(KeyError):
+            call()
+    else:
+        assert call() == expected
+
+
+def test_no_builtin_reference_is_spelled_outside_the_registry() -> None:
+    spelled = re.compile(r"@v[0-9]")
+    registry = ROOT / "relay" / "workflows" / "actions" / "builtins.py"
+    sources = [path for path in (ROOT / "relay").rglob("*.py") if path != registry]
+    sources += [
+        path for pattern in ("*.ts", "*.tsx") for path in (ROOT / "frontend" / "src").rglob(pattern)
+    ]
+    found = [
+        f"{path.relative_to(ROOT).as_posix()}:{number}: {line.strip()}"
+        for path in sorted(sources)
+        for number, line in enumerate(path.read_text("utf-8").splitlines(), 1)
+        if spelled.search(line)
+    ]
+    assert not found, "Name built-in actions through the registry:\n" + "\n".join(found)
+
+
+def test_an_unregistered_version_never_runs(
+    project: RelayProject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "ran"
+    argv = [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]
+    project.write_workflow(
+        "unregistered",
+        f"""on: workflow_dispatch
+jobs:
+  main:
+    steps:
+      - uses: relay/human-wait@v1
+        with:
+          prompt: Go?
+      - id: touch
+        uses: relay/command@v1
+        with:
+          argv: {json.dumps(json.dumps(argv))}
+""",
+    )
+    engine = InlineEngine(node_executors(), tmp_path / "artifacts")
+    run_id = engine.launch(project, "unregistered")
+    engine.drain(run_id)
+    monkeypatch.delitem(builtins._BY_REFERENCE, "relay/command@v1")
+    answer_wait(engine, run_id)
+    step = NodeRun.objects.get(run_id=run_id, scope_path="root.main.touch")
+    assert step.status == "failed"
+    assert Run.objects.get(pk=run_id).status == "failed"
+    events = json.dumps(
+        list(RunEvent.objects.filter(run_id=run_id).values_list("payload", flat=True))
+    )
+    assert "relay/command@v1 is not included in this Relay version." in events
+    assert not marker.exists()

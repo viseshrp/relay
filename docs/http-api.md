@@ -64,7 +64,7 @@ accept workflow jobs and ordered steps.
 
 | Method and path | Purpose and body |
 | --- | --- |
-| `GET /api/workflow-language` | Relay schema, local contexts/properties, supported fields, and limits |
+| `GET /api/workflow-language` | Relay schema, built-in action versions and inputs, local contexts/properties, supported fields, and limits |
 | `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |

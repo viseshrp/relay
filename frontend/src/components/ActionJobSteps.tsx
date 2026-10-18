@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 
 import { ActionBuiltinFields } from "./ActionBuiltinFields";
+import { builtinLabel } from "../builtin-actions";
 
 import { StructuredValueField } from "./StructuredValueField";
 
@@ -112,7 +113,7 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                 <MenuItem value="script">Run a script</MenuItem>
                 {manifest.builtins.map((reference) => (
                   <MenuItem key={reference} value={reference}>
-                    {reference.replace("relay/", "").replace("@v1", "")}
+                    {builtinLabel(reference)}
                   </MenuItem>
                 ))}
                 {step.uses?.startsWith("./") && (

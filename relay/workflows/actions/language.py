@@ -24,6 +24,7 @@ from relay.errors import WorkflowValidationError
 from relay.paths import safe_resolve
 
 from . import expressions
+from .builtins import BUILTIN_ACTIONS, builtin, is_builtin
 
 DIALECT = "relay-local-1"
 UPSTREAM = "4043eda158e16579cc5fb1b0b07a4bce2a76f0b5"
@@ -42,21 +43,6 @@ EVENTS = frozenset(
     }
 )
 CACHE_MODES = frozenset({"read", "write", "write-only", "none"})
-BUILTINS = frozenset(
-    {
-        "relay/agent@v1",
-        "relay/command@v1",
-        "relay/human-wait@v1",
-        "relay/loop@v1",
-        "relay/validate-report@v1",
-        "relay/validate-input@v1",
-        "relay/upload-artifact@v1",
-        "relay/download-artifact@v1",
-        "relay/cache@v1",
-        "relay/restore-cache@v1",
-        "relay/save-cache@v1",
-    }
-)
 _PURE_FUNCTIONS = tuple(
     name
     for name in expressions.FUNCTIONS
@@ -384,7 +370,7 @@ def validate_steps(steps: object, path: str) -> None:
         reference = step.get("uses")
         if (
             reference is not None
-            and reference not in BUILTINS
+            and builtin(reference) is None
             and (not str(reference).startswith("./.relay/actions/") or "${{" in str(reference))
         ):
             message = f"{path}[{index}].uses"
@@ -394,10 +380,10 @@ def validate_steps(steps: object, path: str) -> None:
                 unsupported=True,
             )
         _validate_timeout(step.get("timeout-minutes"), f"{path}[{index}]")
-        if reference in BUILTINS:
+        if builtin(reference) is not None:
             from .builtins import validate_inputs
 
-            validate_inputs(reference, _mapping(step.get("with", {}), f"{path}[{index}].with"))
+            validate_inputs(str(reference), _mapping(step.get("with", {}), f"{path}[{index}].with"))
         elif "with" in step:
             _mapping(step["with"], f"{path}[{index}].with")
 
@@ -834,7 +820,7 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
                     )
                     if metadata is not None:
                         validate_action_inputs(load_action(metadata), step.get("with", {}))
-                if reference == "relay/loop@v1":
+                if is_builtin(reference, "loop"):
                     target = step.get("with", {}).get("workflow")
                     if not isinstance(target, str) or not target.startswith("./.relay/workflows/"):
                         message = "with.workflow"
@@ -877,18 +863,29 @@ def source_bytes(content: str) -> tuple[bytes, int]:
 
 
 def support_manifest() -> dict[str, Any]:
-    from .builtins import CONTRACTS
-
     return {
         "dialect": DIALECT,
         "upstream_commit": UPSTREAM,
         "workflow_directory": ".relay/workflows",
         "job_execution": "serial",
         "definitions": language_definitions(),
-        "builtins": sorted(BUILTINS),
+        "builtins": sorted(
+            action.reference for action in BUILTIN_ACTIONS if action.status == "current"
+        ),
         "builtin_inputs": {
-            name: {"allowed": sorted(allowed), "required": sorted(required)}
-            for name, (allowed, required) in CONTRACTS.items()
+            action.reference: {
+                "allowed": sorted(action.allowed),
+                "required": sorted(action.required),
+            }
+            for action in BUILTIN_ACTIONS
+        },
+        "builtin_versions": {
+            action.reference: {
+                "name": action.name,
+                "major": action.major,
+                "status": action.status,
+            }
+            for action in BUILTIN_ACTIONS
         },
         "events": sorted(EVENTS),
         "cache_modes": sorted(CACHE_MODES),

@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 
 import { editActions, parseActions } from "../actions-workflow";
+import { builtinLabel } from "../builtin-actions";
 
 import { FlowCanvas } from "./FlowCanvas";
 import { YamlEditor } from "./YamlEditor";
@@ -196,7 +197,7 @@ export function WorkflowCanvas({
               <MenuItem value="script">Run a script</MenuItem>
               {manifest?.builtins.map((kind) => (
                 <MenuItem value={kind} key={kind}>
-                  {kind.replace("relay/", "").replace("@v1", "")}
+                  {builtinLabel(kind)}
                 </MenuItem>
               ))}
             </TextField>

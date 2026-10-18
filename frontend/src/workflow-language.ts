@@ -1,4 +1,5 @@
 import type { ActionWorkflow } from "./actions-workflow";
+import { isBuiltin } from "./builtin-actions";
 import { isRecord } from "./workflow";
 
 export interface LanguageDefinition {
@@ -21,6 +22,10 @@ export interface LanguageManifest {
   definitions: Record<string, LanguageDefinition>;
   builtins: string[];
   builtin_inputs: Record<string, { allowed: string[]; required: string[] }>;
+  builtin_versions: Record<
+    string,
+    { name: string; major: number; status: "current" | "deprecated" }
+  >;
   contexts: string[];
   context_properties: Record<string, string[]>;
 }
@@ -71,7 +76,7 @@ export function expressionSuggestions(
         .flatMap((step) => [
           `\${{ steps.${step.id}.outcome }}`,
           `\${{ steps.${step.id}.conclusion }}`,
-          ...(step.uses === "relay/human-wait@v1"
+          ...(isBuiltin(step.uses, "human-wait")
             ? [`\${{ steps.${step.id}.outputs.answer }}`]
             : []),
         ]),

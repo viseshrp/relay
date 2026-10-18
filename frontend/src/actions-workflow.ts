@@ -1,6 +1,7 @@
 import { Lexer, Parser } from "@actions/expressions";
 import { isAlias, isSeq, parseDocument } from "yaml";
 import type { Edge, Node } from "@xyflow/react";
+import { isBuiltin } from "./builtin-actions";
 import { arrangeGraph } from "./graph";
 import {
   isRecord,
@@ -218,15 +219,14 @@ export function actionsGraph(value: ActionWorkflow | null): {
       kind: "actions_job",
       childWorkflow:
         job.uses ??
-        job.steps?.find((step) => step.uses === "relay/loop@v1")?.with
-          ?.workflow,
+        job.steps?.find((step) => isBuiltin(step.uses, "loop"))?.with?.workflow,
       loopBody:
-        job.steps?.some((step) => step.uses === "relay/loop@v1") ?? false,
+        job.steps?.some((step) => isBuiltin(step.uses, "loop")) ?? false,
       detail:
         job.uses ||
         job.steps
           ?.map((step) =>
-            step.uses === "relay/agent@v1"
+            isBuiltin(step.uses, "agent")
               ? `${String(step.with?.agent ?? "Agent")} · ${String(step.with?.model ?? "Saved model")}`
               : (step.uses ?? step.run?.split("\n")[0] ?? "Step"),
           )
