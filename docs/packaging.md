@@ -138,3 +138,22 @@ absolute directory before `npm run build` or `make test-frontend`. Set
 that build. This keeps a running editable app's assets in place. Distribution
 builds use their normal clean output and should run from a disposable source
 copy when the owner's checkout is serving an app.
+
+## Container images
+
+`Dockerfile` builds a multi-stage Linux image (`linux/amd64` and
+`linux/arm64`). The builder stage exports locked runtime dependencies from
+`uv.lock` with SHA-256 hashes, compiles the wheel through `hatch_build.py`,
+and validates the archive with `scripts/check_distribution_contents.py` before
+installing into `/opt/relay/venv`. The runtime stage copies only that virtual
+environment into `python:3.14-slim-trixie` alongside `git` and `procps`, runs
+as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm.
+
+`.github/workflows/docker.yml` builds and smoke-tests each architecture on
+native runners before publishing multi-platform manifests to
+`ghcr.io/viseshrp/relay`:
+
+- Nightly builds at `07:17 UTC` (and `workflow_dispatch` on `main`) publish
+  `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`.
+- Release tags (`v*`) and published releases publish `:vX.Y.Z`, `:X.Y.Z`, and
+  `:latest`.

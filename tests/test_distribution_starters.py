@@ -83,3 +83,38 @@ def test_sdist_requires_the_guides_imported_by_the_frontend(
     else:
         with pytest.raises(RuntimeError, match=missing):
             check_distribution(archive)
+
+
+def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
+    from ruamel.yaml import YAML
+
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    workflow = YAML(typ="safe").load((root / ".github/workflows/docker.yml").read_text("utf-8"))
+
+    assert "scripts/check_distribution_contents.py /dist/relay_app-*.whl" in dockerfile
+    assert "--require-hashes -r /dist/requirements.txt" in dockerfile
+    assert "USER relay:relay" in dockerfile
+    assert 'ENTRYPOINT ["relay"]' in dockerfile
+
+    assert dockerignore[0] == "*"
+    for required_rule in (
+        "!pyproject.toml",
+        "!uv.lock",
+        "!hatch_build.py",
+        "!frontend/package-lock.json",
+        "!scripts/check_distribution_contents.py",
+        "relay/static/**",
+    ):
+        assert required_rule in dockerignore
+
+    assert workflow["env"]["IMAGE"] == "ghcr.io/viseshrp/relay"
+    triggers = workflow["on"]
+    assert triggers["schedule"] == [{"cron": "17 7 * * *"}]
+    assert triggers["push"]["tags"] == ["v*"]
+    assert triggers["release"]["types"] == ["published"]
+    platforms = [
+        item["platform"] for item in workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
+    ]
+    assert platforms == ["linux/amd64", "linux/arm64"]
