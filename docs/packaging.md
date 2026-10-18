@@ -166,6 +166,7 @@ workflows and CI:
 ```bash
 make docker-build
 make docker-smoke
+make docker-e2e
 make docker-up
 make docker-push TAGS="0.1.0 latest"
 ```
@@ -179,6 +180,33 @@ make docker-push TAGS="0.1.0 latest"
   host-published `-p 127.0.0.1::7845` port), and clean `SIGTERM` shutdown.
   It rebuilds the default image first and pulls another `DOCKER_IMAGE` when
   it is missing.
+- `make docker-e2e` drives the browser app in the image through its published
+  port. It selects the image like `make docker-smoke`; on Linux it builds the
+  default image as the host user, like `make docker-up`. The image user cannot
+  take UID 0, so a root host, such as a CI or development container, runs the
+  disposable containers as root. Another host UID that differs from the image
+  user is rejected. It creates a disposable Git
+  repository and data directory under `TMPDIR`, then starts `relay up` with
+  login required, `make docker-up`'s host-path mounts, throwaway configuration
+  and state volumes, its own Docker network, and a random
+  `-p 127.0.0.1::7845` port. Playwright then runs
+  [`frontend/e2e/container.spec.ts`](../frontend/e2e/container.spec.ts) with
+  `playwright.container.config.ts`, which has no default address. It requires
+  `npm --prefix frontend ci` and Chromium from
+  `npm --prefix frontend exec playwright install chromium`.
+- The browser flows cover only what the bridge and mounts can change. A new
+  owner creates the password and keeps the session across a reload. The owner
+  launches a workflow from the Run workflow panel and receives the run's event
+  stream. The page shows the human wait without a reload, and the owner
+  approves it. Host Git then finds the job commit on the run ref, resolves the
+  retained run worktree, and has nothing to prune. The project's
+  `canonical_path` is the host path. A returning owner signs in and cancels a
+  running command, and its process leaves the container.
+  `scripts/docker.sh` then checks that the installed `relay` leads its own
+  session, that the bridge refuses a sibling container on the network, and
+  that `docker stop` ends with `Relay stopped cleanly.` An `EXIT` trap removes
+  the containers, volumes, network, and temporary files, including after a
+  failure.
 - `make docker-up` (aliased as `make docker-run`) rebuilds the default image,
   then starts Relay on `http://127.0.0.1:7845/`. It mounts `DOCKER_WORKTREE`
   (default: the current directory) and Relay's data directory,
@@ -197,10 +225,12 @@ make docker-push TAGS="0.1.0 latest"
 
 `.github/workflows/docker.yml` builds on native `linux/amd64` and
 `linux/arm64` runners. Pull requests that touch container packaging run
-`make docker-build` and `make docker-smoke`. Publishing runs push each
-platform image untagged by digest, smoke-test that exact digest, and then
-`make docker-publish-manifest` tags `ghcr.io/viseshrp/relay` after both
-platforms pass:
+`make docker-build`, `make docker-smoke`, and `make docker-e2e`. Publishing
+runs push each platform image untagged by digest, smoke-test that exact
+digest, and run `make docker-e2e`. Because those runs write a mounted
+repository, they cover a rebuild of the same revision as the runner's user
+rather than the pushed digest. `make docker-publish-manifest` then tags
+`ghcr.io/viseshrp/relay` after both platforms pass:
 
 - Nightly builds at `07:17 UTC` (and `workflow_dispatch` on `main`) publish
   `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`. When `main` is exactly a

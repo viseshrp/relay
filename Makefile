@@ -122,6 +122,10 @@ docker-build: ## 🐳 Build the Relay container image locally
 docker-smoke: ## 🧪 Smoke-test the Relay container image
 	$(BASH) scripts/docker.sh smoke
 
+.PHONY: docker-e2e
+docker-e2e: ## 🔁 Run a workflow in the Relay container image and check host Git
+	$(BASH) scripts/docker.sh e2e
+
 .PHONY: docker-up
 docker-up: ## ▶️ Start Relay in Docker on 127.0.0.1:7845
 	$(BASH) scripts/docker.sh up

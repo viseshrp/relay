@@ -255,6 +255,7 @@ change and task contract. Commands below run from the repository root.
 | Browser behavior, including login and no-login configurations | `make test-frontend` |
 | Distribution build and content validation | `make build`, followed by `make check-dist` |
 | Container build and runtime smoke check | `make docker-build`, followed by `make docker-smoke` |
+| Container browser flows checked by host Git (requires Docker and Chromium) | `make docker-e2e` |
 
 Install Chromium once when browser tests need it:
 

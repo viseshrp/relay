@@ -117,6 +117,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     for target in (
         "docker-build:",
         "docker-smoke:",
+        "docker-e2e:",
         "docker-up:",
         "docker-run:",
         "docker-push:",
@@ -128,6 +129,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     for subcommand in (
         "cmd_build()",
         "cmd_smoke()",
+        "cmd_e2e()",
         "cmd_up()",
         "cmd_push()",
         "cmd_push_digest()",
@@ -148,6 +150,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     for make_cmd in (
         "make docker-build",
         "make docker-smoke",
+        "make docker-e2e",
         "make docker-push-digest",
         "make docker-publish-manifest",
     ):
