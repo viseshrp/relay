@@ -15,6 +15,7 @@ import {
 import type { ActionStep, ActionWorkflow } from "../actions-workflow";
 import type { AgentRecord, ProviderDefaults } from "../types";
 import { parseBuiltin } from "../builtin-actions";
+import { parseListInput } from "../list-input";
 import type { LanguageManifest } from "../workflow-language";
 import { ModelPicker } from "./ModelPicker";
 import { AgentConfiguration } from "./AgentConfiguration";
@@ -188,13 +189,7 @@ export function ActionBuiltinFields({
           </Typography>
           <StructuredValueField
             label="Answer buttons"
-            value={(() => {
-              try {
-                return JSON.parse(String(inputs.options ?? "[]"));
-              } catch {
-                return [];
-              }
-            })()}
+            value={parseListInput(inputs.options) ?? []}
             onChange={(value) =>
               onChange(
                 "options",
@@ -230,18 +225,7 @@ export function ActionBuiltinFields({
           <Autocomplete
             multiple
             options={agents.map((item) => item.id)}
-            value={(() => {
-              try {
-                const value = JSON.parse(String(inputs.agents ?? "[]"));
-                return Array.isArray(value)
-                  ? value.filter(
-                      (item): item is string => typeof item === "string",
-                    )
-                  : [];
-              } catch {
-                return [];
-              }
-            })()}
+            value={parseListInput(inputs.agents) ?? []}
             getOptionLabel={(id) =>
               agents.find((item) => item.id === id)?.display_name ?? id
             }

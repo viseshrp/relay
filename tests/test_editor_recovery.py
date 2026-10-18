@@ -177,3 +177,47 @@ def test_common_yaml_mistakes_include_a_reason_and_location(text: str) -> None:
     assert issues
     assert issues[0].message != "Invalid YAML document."
     assert issues[0].context.get("line") or "Duplicate YAML key" in issues[0].message
+
+
+def test_validate_reports_missing_prompt_files(owner: Client, project: RelayProject) -> None:
+    from relay.paths import global_prompts_dir
+
+    project.write(".relay/prompts/present.md", "Review the code.\n")
+    shared = global_prompts_dir(create=True) / "shared.md"
+    shared.write_text("Shared instructions.\n", encoding="utf-8")
+    text = (
+        "jobs:\n  ask:\n    steps:\n      - uses: relay/agent@v1\n        with:\n"
+        "          agent: codex\n"
+        "          prompt-files: |\n"
+        "            prompts/present.md\n"
+        "            .relay/prompts/present.md\n"
+        "            global:shared.md\n"
+        "            prompts/missing.md\n"
+        "            global:absent.md\n"
+        "            ${{ inputs.prompt }}\n"
+    )
+    result = post(owner, "/api/workflow-language/validate", {"yaml": text}).json()
+    assert result["valid"] is False
+    assert [
+        (item["message"], item["context"]["field"], item["context"]["line"])
+        for item in result["diagnostics"]
+    ] == [
+        (
+            "Prompt file prompts/missing.md does not exist.",
+            "jobs.ask.steps[0].with.prompt-files",
+            "7",
+        ),
+        (
+            "Prompt file global:absent.md does not exist.",
+            "jobs.ask.steps[0].with.prompt-files",
+            "7",
+        ),
+    ]
+    # An unsaved prompt in the open draft counts as present.
+    drafts = {"yaml": text, "prompts": ["prompts/missing.md"]}
+    [remaining] = post(owner, "/api/workflow-language/validate", drafts).json()["diagnostics"]
+    assert remaining["message"] == "Prompt file global:absent.md does not exist."
+    (global_prompts_dir() / "absent.md").write_text("Now present.\n", encoding="utf-8")
+    assert post(owner, "/api/workflow-language/validate", drafts).json()["valid"] is True
+    rejected = post(owner, "/api/workflow-language/validate", {"yaml": text, "prompts": "x"})
+    assert rejected.status_code == 422

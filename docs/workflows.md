@@ -78,10 +78,11 @@ administration settings.
 `run` accepts a string or block scalar. Relay writes a private script file and
 starts the interpreter with an argument vector and `shell=False`. Shells are
 `bash`, `sh`, `pwsh`, `powershell`, `cmd`, `python`, or an installed custom
-interpreter command containing `{0}` for the script path. The default is the
-platform's ordinary script shell. Workflow and job `defaults.run` provide a
-shell and working directory; step values override them. Working directories
-must resolve inside the run workspace.
+interpreter command containing exactly one `{0}` for the script path, such as
+`bash -l {0}`. Validation rejects any other literal shell, such as `zsh`. The
+default is the platform's ordinary script shell. Workflow and job
+`defaults.run` provide a shell and working directory; step values override
+them. Working directories must resolve inside the run workspace.
 
 The built-in `python` shell uses Relay's interpreter with `-X utf8`, so
 redirected output and default text-file encoding support Unicode on Windows.
@@ -89,10 +90,14 @@ An inherited `PYTHONIOENCODING` still overrides its standard-stream encoding.
 Custom interpreter commands and explicit command argument vectors retain
 their requested arguments.
 
-`relay/command@v1` requires exactly one of `argv` (a JSON string containing a
-nonempty argument vector) or `command` (an owner-configured command name).
-Arguments are never reinterpreted as shell syntax. Relay owns process groups
-or Windows Job Objects and performs bounded shutdown on cancellation/timeout.
+`relay/command@v1` requires exactly one of `argv` (a nonempty argument
+vector) or `command` (an owner-configured command name). Write `argv` as a
+JSON array string, such as `'["python", "-m", "pytest"]'`, or as one argument
+per line under `|`. A YAML sequence is rejected, because every `with` value is
+a string. Arguments are never reinterpreted as shell syntax, so
+`argv: git status` is one argument and fails validation. Relay owns process
+groups or Windows Job Objects and performs bounded shutdown on
+cancellation/timeout.
 
 <!-- relay-example: valid explicit-command -->
 ```yaml
@@ -212,11 +217,14 @@ remaining job deadline. `continue-on-error` applies to this failure too.
 
 ## Agent nodes
 
-`relay/agent@v1` accepts `agent` or ordered JSON `agents`, `model`, `effort`,
+`relay/agent@v1` accepts `agent` or ordered `agents`, `model`, `effort`,
 newline-separated `prompt-files`, `prompt`, and optional `report`, `selector`,
-`format`, `field`, `label`, and `auto-retry`. Local prompt paths resolve under
-`.relay/`; `global:NAME` resolves in the owner's global prompt directory.
-A runtime `prompt` follows the frozen ordered prompt files.
+`format`, `field`, `label`, and `auto-retry`. Write `agents` as a JSON array
+string or one agent ID per line under `|`; a YAML sequence is rejected. Agent
+IDs are `antigravity`, `claude`, `codex`, `copilot`, and `cursor`. Local prompt
+paths resolve under `.relay/`; `global:NAME` resolves in the owner's global
+prompt directory. The editor reports a literal prompt file that does not exist
+before you save. A runtime `prompt` follows the frozen ordered prompt files.
 
 <!-- relay-example: valid local-agent -->
 ```yaml
@@ -238,6 +246,20 @@ jobs:
           format: label
           label: Ready
           auto-retry: false
+```
+
+<!-- relay-example: valid agent-list-lines -->
+```yaml
+jobs:
+  ask:
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agents: |
+            codex
+            claude
+          model: exact-model-value
+          prompt: Explain the main module.
 ```
 
 Routes, exact model/effort values, and prompt references must resolve from
@@ -283,10 +305,11 @@ scope. Exhausting the budget fails the loop.
 ## Human waits
 
 `relay/human-wait@v1` accepts a rendered `prompt` and optional
-`timeout-minutes` and `options`. Supply `options` as a JSON string array of
-1–10 distinct strings, each at most 256 characters. Omitting it allows a free
-text answer. It creates one durable interaction on the current step
-attempt and exports `steps.ID.outputs.answer`. Restart preserves that request
+`timeout-minutes` and `options`. Supply `options` as a JSON array string or one
+answer per line under `|`, with 1–10 distinct answers, each at most 256
+characters. A YAML sequence is rejected. Omitting it allows a free text
+answer. It creates one durable interaction on the current step attempt and
+exports `steps.ID.outputs.answer`. Restart preserves that request
 and completed steps. Duplicate, stale, expired, or mismatched responses cannot
 resume another attempt.
 
@@ -673,10 +696,10 @@ run titles allow 1000 characters, including the resolved expression result.
 
 ### Answer buttons at approval steps
 
-`relay/human-wait@v1` accepts optional `options`, a JSON list of 1–10 unique
-answer strings, each at most 256 characters. For example,
-`options: '["Approve", "Reject"]'` adds explicit answer buttons beside the
-free-text response. Clicking a button sends that exact value to the current
+`relay/human-wait@v1` accepts optional `options`, 1–10 unique answer strings,
+each at most 256 characters, as a JSON array string or one per line. For
+example, `options: '["Approve", "Reject"]'` adds explicit answer buttons beside
+the free-text response. Clicking a button sends that exact value to the current
 interaction; it does not approve another request. The response remains available
 as `steps.<id>.outputs.answer`. The request explains whether its expiry comes
 from an approval, step, job, or default job timeout.

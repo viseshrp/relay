@@ -25,7 +25,7 @@ from relay.errors import WorkflowValidationError
 from relay.paths import safe_resolve
 
 from . import expressions
-from .builtins import BUILTIN_ACTIONS, builtin, current_builtin, is_builtin
+from .builtins import BUILTIN_ACTIONS, SHELL_HINT, SHELLS, builtin, current_builtin, is_builtin
 from .suggest import closest
 
 DIALECT = "relay-local-1"
@@ -359,7 +359,12 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         ]
     if "string" in base:
         if isinstance(value, (list, Mapping)):
-            raise _issue(path, "Expected a scalar string.")
+            hint = (
+                ' Write a list as one value per line under "|", or as a JSON array string.'
+                if isinstance(value, list) and ".with." in path
+                else ""
+            )
+            raise _issue(path, f"Expected a scalar string.{hint}")
         result = expressions.string(value)
         descriptor = cast(dict[str, Any], base["string"])
         maximum = descriptor.get("max-length")
@@ -503,6 +508,25 @@ def _uses_guidance(reference: str) -> str:
     return f"Use one of {', '.join(current)}, or a local action under ./.relay/actions/."
 
 
+def _validate_shell(shell: object, path: str) -> None:
+    """A literal shell is a named shell or a command with one {0} placeholder."""
+    if (
+        isinstance(shell, str)
+        and "${{" not in shell
+        and shell not in SHELLS
+        and shell.count("{0}") != 1
+    ):
+        message = f"shell: {SHELL_HINT}"
+        raise WorkflowValidationError(message, context={"field": path})
+
+
+def _validate_default_shell(scope: Mapping[str, Any], path: str) -> None:
+    defaults = scope.get("defaults")
+    run = defaults.get("run") if isinstance(defaults, Mapping) else None
+    if isinstance(run, Mapping) and "shell" in run:
+        _validate_shell(run["shell"], f"{path}defaults.run.shell")
+
+
 def validate_steps(steps: object, path: str, start: int = 0) -> None:
     """Every ordered-step container uses the same local execution contract."""
     if not isinstance(steps, list) or not steps:
@@ -540,6 +564,8 @@ def validate_steps(steps: object, path: str, start: int = 0) -> None:
                 f"{found[0]} is not a Relay variable. {FILE_VARIABLE_GUIDANCE[found[1]]}",
             )
         _validate_timeout(step.get("timeout-minutes"), here)
+        if "run" in step and "shell" in step:
+            _validate_shell(step["shell"], f"{here}.shell")
         if builtin(reference) is not None:
             from .builtins import validate_inputs
 
@@ -547,7 +573,9 @@ def validate_steps(steps: object, path: str, start: int = 0) -> None:
             try:
                 validate_inputs(str(reference), inputs)
             except WorkflowValidationError as error:
-                error.context.setdefault("field", here)
+                # Errors about one input name it relative to the step.
+                field = error.context.get("field")
+                error.context["field"] = f"{here}.{field}" if field else here
                 raise
         elif "with" in step:
             _mapping(step["with"], f"{here}.with")
@@ -611,11 +639,13 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
     if not jobs:
         message = "jobs"
         raise _issue(message, "A workflow must contain at least one job.")
+    _validate_default_shell(workflow, "")
     for job_id, raw in jobs.items():
         if IDENTIFIER.fullmatch(job_id) is None:
             message = f"jobs.{job_id}"
             raise _issue(message, "Invalid job identifier.")
         job = _mapping(raw, f"jobs.{job_id}")
+        _validate_default_shell(job, f"jobs.{job_id}.")
         for scope, label in ((workflow, "workflow"), (job, f"jobs.{job_id}")):
             if "env" in scope:
                 _mapping(scope["env"], f"{label}.env")
@@ -1028,6 +1058,46 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
 
     visit(document.value, 1)
     return result
+
+
+def missing_prompt_files(
+    document: ActionsDocument, relay_root: Path, drafts: Iterable[Path] = ()
+) -> list[WorkflowValidationError]:
+    """Report literal agent prompt files that neither exist nor are unsaved drafts.
+
+    References resolve exactly as launch resolves them: local paths under the
+    project's .relay folder and global:NAME in the owner's prompt folder.
+    """
+    from relay.errors import PathSafetyError
+    from relay.paths import global_prompts_dir
+
+    pending = {path.resolve() for path in drafts}
+    issues = []
+    for job_id, job in document.value.get("jobs", {}).items():
+        for index, step in enumerate(job.get("steps", [])):
+            references = step.get("with", {}).get("prompt-files")
+            if not is_builtin(step.get("uses"), "agent") or not isinstance(references, str):
+                continue
+            for reference in references.splitlines():
+                if not reference.strip() or "${{" in reference:
+                    continue
+                if reference.startswith("global:"):
+                    root, value = global_prompts_dir(), reference[7:]
+                else:
+                    root, value = relay_root, reference.strip().removeprefix(".relay/")
+                try:
+                    path = safe_resolve(root, value)
+                except PathSafetyError:
+                    continue  # Launch reports a reference that leaves its folder.
+                if path.is_file() or path in pending:
+                    continue
+                error = WorkflowValidationError(
+                    f"Prompt file {reference.strip()} does not exist.",
+                    context={"field": f"jobs.{job_id}.steps[{index}].with.prompt-files"},
+                )
+                _locate(error, document.locations)
+                issues.append(error)
+    return issues
 
 
 def capture_script(path: Path, project_root: Path, result: dict[str, str]) -> None:

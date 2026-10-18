@@ -1,4 +1,5 @@
 import { MenuItem, Stack, TextField } from "@mui/material";
+import { parseListInput } from "../list-input";
 import { StructuredValueField } from "./StructuredValueField";
 export function ActionCommandFields({
   inputs,
@@ -35,13 +36,7 @@ export function ActionCommandFields({
       ) : (
         <StructuredValueField
           label="Program and arguments"
-          value={(() => {
-            try {
-              return JSON.parse(String(inputs.argv ?? '["echo","Ready"]'));
-            } catch {
-              return [];
-            }
-          })()}
+          value={parseListInput(inputs.argv ?? '["echo","Ready"]') ?? []}
           onChange={(value) =>
             onChange("__all__", {
               ...inputs,

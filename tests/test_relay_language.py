@@ -272,10 +272,18 @@ def test_local_filters_and_queue_enums_have_exact_semantics() -> None:
 
 
 @pytest.mark.parametrize(
-    "options",
-    ['["Approve","Reject"]', '["", "Approve"]', '["Same","Same"]', "[1]", '{"Approve":true}'],
+    "options, error",
+    [
+        ('["Approve","Reject"]', None),
+        ("Approve\nReject\n", None),
+        ('["", "Approve"]', "answer strings"),
+        ('["Same","Same"]', "answer strings"),
+        ("Same\nSame", "answer strings"),
+        ("\n".join(f"Answer {index}" for index in range(11)), "answer strings"),
+        ("[1]", "options: Write a JSON array of strings or one value per line."),
+    ],
 )
-def test_human_wait_answer_buttons_are_bounded(options: str) -> None:
+def test_human_wait_answer_buttons_are_bounded(options: str, error: str | None) -> None:
     value = {
         "jobs": {
             "main": {
@@ -288,10 +296,10 @@ def test_human_wait_answer_buttons_are_bounded(options: str) -> None:
             }
         }
     }
-    if options == '["Approve","Reject"]':
+    if error is None:
         assert load(source(value)).value["jobs"]
     else:
-        with pytest.raises(WorkflowValidationError, match="answer strings"):
+        with pytest.raises(WorkflowValidationError, match=re.escape(error)):
             load(source(value))
 
 
@@ -626,3 +634,35 @@ def test_expression_axis_explains_the_whole_matrix_form() -> None:
     assert plain.value.message == (
         "jobs.a.strategy.matrix.v: A matrix axis must be a nonempty sequence."
     )
+
+
+@pytest.mark.parametrize(
+    "uses, field, line",
+    [
+        ("relay/agent@v1", "agents: [codex, claude]", "6"),
+        ("relay/command@v1", "argv: [git, status]", "6"),
+        ("relay/human-wait@v1", "options: [yes, no]", "6"),
+    ],
+)
+def test_with_lists_explain_the_accepted_forms(uses: str, field: str, line: str) -> None:
+    extra = "\n          prompt: Go?" if uses == "relay/human-wait@v1" else ""
+    text = (
+        f"jobs:\n  ask:\n    steps:\n      - uses: {uses}\n        with:\n"
+        f"          {field}{extra}\n"
+    )
+    name = field.partition(":")[0]
+    expected = (
+        f"workflow.jobs.ask.steps[0].with.{name}: Expected a scalar string. "
+        'Write a list as one value per line under "|", or as a JSON array string.'
+    )
+    issues = workflow_diagnostics(text)
+    assert [(issue.message, issue.context["line"]) for issue in issues] == [(expected, line)]
+    with pytest.raises(WorkflowValidationError, match=re.escape(expected.partition(": ")[2])):
+        load(text)
+
+
+def test_lists_outside_with_keep_the_plain_message() -> None:
+    issues = workflow_diagnostics("jobs: {main: {steps: [{run: [echo]}]}}\n")
+    assert [issue.message for issue in issues] == [
+        "workflow.jobs.main.steps[0].run: Expected a scalar string."
+    ]

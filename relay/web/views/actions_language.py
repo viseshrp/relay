@@ -9,11 +9,13 @@ from typing import Any, cast
 from django.http import FileResponse, HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
-from relay.errors import ConfigError, RelayError, WorkflowValidationError
+from relay.errors import ConfigError, PathSafetyError, RelayError, WorkflowValidationError
+from relay.paths import safe_resolve
 from relay.workflows.actions.language import (
     _locate,
     capture_sources,
     load,
+    missing_prompt_files,
     support_manifest,
     workflow_diagnostics,
 )
@@ -106,6 +108,14 @@ def validate(request: HttpRequest) -> JsonResponse:
     root, _ = current_project(request)
     text = required_text(body, "yaml")
     source = Path(str(body.get("source", "workflow.yml")))
+    drafts = body.get("prompts", [])
+    if (
+        not isinstance(drafts, list)
+        or len(drafts) > 32
+        or any(not isinstance(item, str) for item in drafts)
+    ):
+        message = "prompts must list at most 32 unsaved local prompt file names."
+        raise WorkflowValidationError(message)
     diagnostics = workflow_diagnostics(text, source=source)
     if diagnostics:
         return JsonResponse(
@@ -118,6 +128,17 @@ def validate(request: HttpRequest) -> JsonResponse:
         except WorkflowValidationError as error:
             _locate(error, document.locations)
             raise
+        pending = []
+        for reference in drafts:
+            try:
+                pending.append(safe_resolve(root, reference))
+            except PathSafetyError:
+                continue
+        missing = missing_prompt_files(document, root, pending)
+        if missing:
+            return JsonResponse(
+                {"valid": False, "diagnostics": [item.to_envelope() for item in missing]}
+            )
         return JsonResponse(
             {
                 "valid": True,

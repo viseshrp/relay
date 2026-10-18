@@ -10,17 +10,26 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
+from relay.errors import WorkflowValidationError
 from relay.execution.nodes import node_executors
-from relay.web.models import NodeRun, Run, RunEvent
+from relay.execution.nodes.command import CommandExecutor
+from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
+from relay.web.actions_repository import human_wait_result
+from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.workflows.actions import builtins
 from relay.workflows.actions.builtins import (
     BUILTIN_ACTIONS,
     builtin,
     builtin_references,
     current_builtin,
+    human_wait_options,
     is_builtin,
     parse_builtin,
+    parse_list_input,
 )
+from relay.workflows.actions.compiler import bind_agent
+from relay.workflows.actions.language import load, workflow_diagnostics
+from relay.workflows.schema import CommandNode
 from tests.support import InlineEngine, RelayProject, answer_wait
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,9 +88,10 @@ def workflow(
 @pytest.mark.parametrize(
     "reference,inputs,reason",
     [
-        ("relay/command@v1", {"argv": "not JSON"}, "JSON argument vector"),
-        ("relay/command@v1", {"argv": "[]"}, "configured named command"),
-        ("relay/command@v1", {"argv": '["git", 1]'}, "configured named command"),
+        # Expressions reach the runtime checks that literals now fail in validation.
+        ("relay/command@v1", {"argv": "${{ '[\"git\",' }}"}, "argv: Write a JSON array"),
+        ("relay/command@v1", {"argv": "${{ '[]' }}"}, "configured named command"),
+        ("relay/command@v1", {"argv": "${{ '[\"git\", 1]' }}"}, "argv: Write a JSON array"),
         ("relay/command@v1", {"command": "${{ 'unconfigured' }}"}, "configured named command"),
         ("relay/human-wait@v1", {"prompt": "Continue?", "timeout-minutes": "0"}, "360 minutes"),
         ("relay/human-wait@v1", {"prompt": "Continue?", "timeout-minutes": "361"}, "360 minutes"),
@@ -354,8 +364,213 @@ jobs:
 def test_action_input_errors_name_the_inputs(
     reference: str, inputs: dict[str, str], message: str
 ) -> None:
-    from relay.errors import WorkflowValidationError
-
     with pytest.raises(WorkflowValidationError) as caught:
         builtins.validate_inputs(reference, inputs)
     assert caught.value.message == message
+
+
+@pytest.mark.parametrize(
+    "reference, inputs, message",
+    [
+        ("relay/command@v1", {}, "relay/command@v1 requires exactly one of argv or command."),
+        (
+            "relay/command@v1",
+            {"argv": "git", "command": "check"},
+            "relay/command@v1 requires exactly one of argv or command.",
+        ),
+        (
+            "relay/validate-report@v1",
+            {"format": "exists"},
+            "relay/validate-report@v1 requires path, report, or selector.",
+        ),
+        (
+            "relay/loop@v1",
+            {"workflow": "./.relay/workflows/child.yaml", "max-iterations": "101"},
+            "Loop max-iterations must be a literal integer between 1 and 100.",
+        ),
+        (
+            "relay/agent@v1",
+            {"retry-limit": "3"},
+            "Agent retry-limit must be a literal integer between 1 and 2.",
+        ),
+        (
+            "relay/agent@v1",
+            {"format": "xml"},
+            "Report format must be exists, label, json, or yaml.",
+        ),
+    ],
+)
+def test_builtin_input_rules_reject_invalid_literals(
+    reference: str, inputs: dict[str, str], message: str
+) -> None:
+    with pytest.raises(WorkflowValidationError) as caught:
+        builtins.validate_inputs(reference, inputs)
+    assert caught.value.message == message
+
+
+def test_validate_inputs_refuses_an_unregistered_version() -> None:
+    with pytest.raises(KeyError):
+        builtins.validate_inputs("relay/agent@v9", {})
+
+
+def test_human_wait_result_ignores_other_steps(project: RelayProject, tmp_path: Path) -> None:
+    run_id, _ = workflow(project, [{"id": "say", "run": "echo ready"}], tmp_path)
+    attempt = NodeAttempt.objects.get(node_run__run_id=run_id, node_run__scope_path="root.main.say")
+    # The finished job's state is gone, so reaching it would raise.
+    assert human_wait_result(str(attempt.pk), {"value": "go"}) == {}
+
+
+LIST_FORMS = [
+    ('["codex", "claude"]', ["codex", "claude"]),
+    ("codex\nclaude\n", ["codex", "claude"]),
+    ("codex", ["codex"]),
+]
+
+
+def _step_source(uses: str, inputs: dict[str, str]) -> str:
+    from io import StringIO
+
+    stream = StringIO()
+    YAML().dump({"jobs": {"main": {"steps": [{"uses": uses, "with": inputs}]}}}, stream)
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize("value, expected", LIST_FORMS)
+@pytest.mark.parametrize("field", ["agents", "argv", "options"])
+def test_list_inputs_accept_json_or_one_value_per_line(
+    project: RelayProject,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+    expected: list[str],
+) -> None:
+    assert parse_list_input(value, field) == expected
+    if field == "agents":
+        uses = current_builtin("agent").reference
+        document = load(_step_source(uses, {"agents": value, "model": "m1"}))
+        step = document.value["jobs"]["main"]["steps"][0]
+        assert bind_agent(step, {}).agents == expected
+        return
+    if field == "argv":
+        ran: list[list[str]] = []
+
+        def record(self: CommandExecutor, context: AttemptContext) -> ExecutionOutcome:
+            ran.append(CommandNode.model_validate(context.attempt.frozen_def).run)
+            return ExecutionOutcome(OutcomeKind.SUCCEEDED)
+
+        monkeypatch.setattr(CommandExecutor, "execute", record)
+        steps = [{"uses": current_builtin("command").reference, "with": {"argv": value}}]
+        run_id, _ = workflow(project, steps, tmp_path)
+        assert Run.objects.get(pk=run_id).status == "succeeded"
+        assert ran == [expected]
+        return
+    assert human_wait_options(value) == expected
+    steps = [
+        {
+            "uses": current_builtin("human-wait").reference,
+            "with": {"prompt": "Go?", "options": value},
+        }
+    ]
+    run_id, _ = workflow(project, steps, tmp_path)
+    interaction = HumanInteraction.objects.get(run_id=run_id, kind="wait")
+    assert interaction.request_payload["options"] == expected
+
+
+@pytest.mark.parametrize("value", ['["codex",', "[1, 2]"])
+@pytest.mark.parametrize("field", ["agents", "argv", "options"])
+def test_list_inputs_reject_a_malformed_json_array(field: str, value: str) -> None:
+    message = f"{field}: Write a JSON array of strings or one value per line."
+    with pytest.raises(WorkflowValidationError) as caught:
+        parse_list_input(value, field)
+    assert caught.value.message == message
+    name = {"agents": "agent", "argv": "command", "options": "human-wait"}[field]
+    inputs = {field: value, **({"prompt": "Go?"} if field == "options" else {})}
+    [issue] = workflow_diagnostics(_step_source(current_builtin(name).reference, inputs))
+    assert (issue.message, issue.context["line"]) == (message, "6")
+    if field == "agents":
+        with pytest.raises(WorkflowValidationError, match=re.escape(message)):
+            bind_agent({"with": {"agents": value}}, {})
+    if field == "options":
+        with pytest.raises(WorkflowValidationError, match=re.escape(message)):
+            human_wait_options(value)
+
+
+def _diagnose(step: str) -> list[WorkflowValidationError]:
+    return workflow_diagnostics(f"jobs:\n  main:\n    steps:\n      - {step}\n")
+
+
+@pytest.mark.parametrize(
+    "step, line, message",
+    [
+        (
+            "uses: relay/command@v1\n        with:\n          argv: git status",
+            "6",
+            'argv: "git status" is a single argument. Put each argument on its own line, '
+            "or use a JSON array.",
+        ),
+        (
+            "uses: relay/command@v1\n        with:\n          argv: ''",
+            "6",
+            "argv: Add the program to run.",
+        ),
+        (
+            "run: echo\n        shell: zsh",
+            "5",
+            "shell: Use bash, sh, pwsh, powershell, cmd, or python, or a command that "
+            "contains {0} for the script path.",
+        ),
+        (
+            "uses: relay/agent@v1\n        with:\n          agent: chatgpt",
+            "6",
+            "agent: Unknown agent chatgpt. Use one of antigravity, claude, codex, copilot, cursor.",
+        ),
+        (
+            "uses: relay/agent@v1\n        with:\n          agents: |\n            codex\n"
+            "            chatgpt",
+            "6",
+            "agents: Unknown agent chatgpt. Use one of antigravity, claude, codex, copilot, "
+            "cursor.",
+        ),
+    ],
+)
+def test_literal_mistakes_fail_validation(step: str, line: str, message: str) -> None:
+    issues = _diagnose(step)
+    assert [(issue.message, issue.context["line"]) for issue in issues] == [(message, line)]
+    with pytest.raises(WorkflowValidationError, match=re.escape(message)):
+        load(f"jobs:\n  main:\n    steps:\n      - {step}\n")
+
+
+@pytest.mark.parametrize(
+    "header, line",
+    [
+        ("defaults: {run: {shell: zsh}}\n", "1"),
+        ("", "3"),
+    ],
+)
+def test_literal_default_shells_fail_validation(header: str, line: str) -> None:
+    job = "    defaults: {run: {shell: zsh}}\n" if not header else ""
+    text = f"{header}jobs:\n  main:\n{job}    steps:\n      - run: echo\n"
+    [issue] = workflow_diagnostics(text)
+    assert issue.message.startswith("shell: Use bash, sh, pwsh")
+    assert issue.context["line"] == line
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        'run: echo\n        shell: "bash -l {0}"',
+        "run: echo\n        shell: python",
+        "uses: relay/command@v1\n        with:\n          argv: |\n"
+        "            git\n            status",
+        "uses: relay/command@v1\n        with:\n          argv: git",
+        "uses: relay/command@v1\n        with:\n          argv: '[\"my program\"]'",
+        "uses: relay/command@v1\n        with:\n          argv: ${{ inputs.argv }}",
+        "uses: relay/agent@v1\n        with:\n          agent: ${{ inputs.agent }}",
+        "uses: relay/agent@v1\n        with:\n          agent: ''",
+        "uses: relay/human-wait@v1\n        with:\n          prompt: Go?\n"
+        "          options: ${{ inputs.options }}",
+    ],
+)
+def test_literal_checks_accept_valid_and_runtime_values(step: str) -> None:
+    assert _diagnose(step) == []

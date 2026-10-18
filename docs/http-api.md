@@ -65,7 +65,7 @@ accept workflow jobs and ordered steps.
 | Method and path | Purpose and body |
 | --- | --- |
 | `GET /api/workflow-language` | Relay schema, built-in action versions and inputs, local contexts/properties, supported fields, and limits |
-| `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
+| `POST /api/workflow-language/validate` | `{yaml, source?, prompts?}`; pure validation returns `{valid, diagnostics, definition?, sources?}`. A literal agent `prompt-files` entry that does not exist is a diagnostic unless `prompts` lists it as an unsaved draft (at most 32 local names) |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
 | `POST /api/attempts/<id>/environment` | Approve the exact waiting environment attempt |
@@ -883,10 +883,10 @@ unchanged until restart, including when the saved setting differs.
 `workflow_defaults`; `preferences` reflects project overrides.
 An omitted launch `cleanup_policy` uses the project's resolved setting.
 Current `relay/command@v1` steps select a saved command through `with.command`
-or supply a JSON argument vector through `with.argv`. Workflow, job, and step
-`env` mappings follow Actions precedence. Launch freezes command maps and
-source bytes. An unresolved command name returns `422 workflow_validation_error`
-without creating a run.
+or supply an argument vector through `with.argv`, as a JSON array string or one
+argument per line. Workflow, job, and step `env` mappings follow Actions
+precedence. Launch freezes command maps and source bytes. An unresolved command
+name returns `422 workflow_validation_error` without creating a run.
 
 Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 `attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,

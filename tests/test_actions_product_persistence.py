@@ -172,6 +172,31 @@ def test_cache_exact_prefix_restore_and_filesystem_warning(
     assert RunEvent.objects.filter(run_id=context.attempt.run_id, type="actions.warning").exists()
 
 
+@pytest.mark.parametrize("reference", ["relay/save-cache@v1", "relay/upload-artifact@v1"])
+def test_storage_faults_skip_caches_but_fail_artifacts(
+    product_context: tuple[AttemptContext, ActionsStepNode], reference: str
+) -> None:
+    from relay.execution.action_products import execute_product as execute_step_product
+    from relay.paths import data_dir
+
+    context, node = product_context
+    # A file where the product folder belongs makes every write fail.
+    blocked = data_dir() / "actions" / ("caches" if "cache" in reference else "artifacts")
+    blocked.parent.mkdir(parents=True, exist_ok=True)
+    blocked.write_text("not a folder", encoding="utf-8")
+    inputs = {"key": "deps", "path": "result.txt"}
+    if "cache" not in reference:
+        with pytest.raises(OSError):
+            execute_step_product(context, reference, {"path": "result.txt"}, {}, node)
+        assert not ActionsArtifact.objects.exists()
+        return
+    outcome = execute_step_product(context, reference, inputs, {}, node)
+    assert outcome.outputs == {"cache-hit": "false"}
+    warning = RunEvent.objects.get(run_id=context.attempt.run_id, type="actions.warning")
+    assert "continuing without a cache hit" in warning.payload["message"]
+    assert not ActionsCache.objects.exists()
+
+
 def test_cache_quota_evicts_oldest_verified_entry(
     product_context: tuple[AttemptContext, ActionsStepNode], monkeypatch: pytest.MonkeyPatch
 ) -> None:

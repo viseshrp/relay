@@ -325,6 +325,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     }, 600);
     return () => window.clearTimeout(timer);
   }, [flush, loadedDocument]);
+  // Unsaved prompt files count as present; Save writes them with the YAML.
+  const draftPrompts = Object.keys(promptEdits).sort().join("\n");
   useEffect(() => {
     setValid(false);
     setDiagnostics([]);
@@ -336,7 +338,11 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
         {
           method: "POST",
           signal: abort.signal,
-          body: JSON.stringify({ yaml: text, source: key }),
+          body: JSON.stringify({
+            yaml: text,
+            source: key,
+            prompts: draftPrompts ? draftPrompts.split("\n") : [],
+          }),
         },
       )
         .then((result) => {
@@ -353,7 +359,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       abort.abort();
       window.clearTimeout(timer);
     };
-  }, [text, key, requestProject, loadedDocument, path]);
+  }, [text, key, requestProject, loadedDocument, path, draftPrompts]);
   useEffect(() => {
     setJobId((current) =>
       parsed.value?.jobs[current]

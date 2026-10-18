@@ -15,7 +15,7 @@ import time
 from typing import Any, cast
 import uuid
 
-from relay.errors import NodeExecutionError, RelayError
+from relay.errors import NodeExecutionError, RelayError, WorkflowValidationError
 from relay.execution.action_commands import ActionRuntime, CommandLog
 from relay.execution.action_files import (
     MAX_FILE,
@@ -40,7 +40,12 @@ from relay.execution.runner import (
 from relay.execution.state import AttemptStopReason, EventSource
 from relay.paths import safe_resolve
 from relay.workflows.actions import expressions
-from relay.workflows.actions.builtins import builtin, current_builtin, parse_builtin
+from relay.workflows.actions.builtins import (
+    builtin,
+    current_builtin,
+    parse_builtin,
+    parse_list_input,
+)
 from relay.workflows.actions.compiler import _timeout
 from relay.workflows.actions.compiler import definition as compile_definition
 from relay.workflows.actions.language import (
@@ -901,10 +906,9 @@ class ActionsStepExecutor:
         if name == "command":
             if "argv" in inputs:
                 try:
-                    argv = json.loads(str(inputs["argv"]))
-                except ValueError:
-                    message = "Command argv must be a JSON argument vector."
-                    raise NodeExecutionError(message) from None
+                    argv = parse_list_input(inputs["argv"], "argv")
+                except WorkflowValidationError as error:
+                    raise NodeExecutionError(error.message) from None
             else:
                 launch = _repository().execution_context(context.attempt.attempt_id)["_launch"]
                 argv = (

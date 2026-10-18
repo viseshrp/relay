@@ -13,6 +13,12 @@ from relay.errors import WorkflowValidationError
 from .suggest import closest
 
 BUILTIN_REFERENCE = re.compile(r"relay/([a-z][a-z-]*)@v([1-9][0-9]*)")
+# The named shells a run step can choose; any other shell is a command with {0}.
+SHELLS = ("bash", "sh", "pwsh", "powershell", "cmd", "python")
+SHELL_HINT = (
+    f"Use {', '.join(SHELLS[:-1])}, or {SHELLS[-1]}, "
+    "or a command that contains {0} for the script path."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +136,45 @@ def current_builtin(name: str) -> BuiltinAction:
     raise KeyError(name)
 
 
+def parse_list_input(value: object, field: str) -> list[str]:
+    """Read a JSON array of strings or one non-blank value per line."""
+    text = str(value).strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except ValueError:
+            items = None
+        if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+            message = f"{field}: Write a JSON array of strings or one value per line."
+            raise WorkflowValidationError(message)
+        return items
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _literal_list(inputs: Mapping[str, Any], field: str) -> list[str] | None:
+    """A list input written literally; None when absent or an expression."""
+    value = inputs.get(field)
+    if not isinstance(value, str) or "${{" in value:
+        return None
+    try:
+        return parse_list_input(value, field)
+    except WorkflowValidationError as error:
+        error.context.setdefault("field", f"with.{field}")
+        raise
+
+
+def _input_error(field: str, message: str) -> WorkflowValidationError:
+    return WorkflowValidationError(f"{field}: {message}", context={"field": f"with.{field}"})
+
+
 def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
+    """Check one built-in step's inputs; literal values are checked as they will run.
+
+    An error about one input carries its field relative to the step, such as
+    with.argv, so the step validator can point at that line.
+    """
     action = builtin(reference)
     if action is None:
         raise KeyError(reference)
@@ -150,6 +194,21 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     if action.name == "command" and len({"argv", "command"} & inputs.keys()) != 1:
         message = f"{reference} requires exactly one of argv or command."
         raise WorkflowValidationError(message)
+    if action.name == "command" and (argv := _literal_list(inputs, "argv")) is not None:
+        text = str(inputs["argv"]).strip()
+        if not argv:
+            raise _input_error("argv", "Add the program to run.")
+        if (
+            len(argv) == 1
+            and not text.startswith("[")
+            and len(text.splitlines()) == 1
+            and any(character.isspace() for character in argv[0])
+        ):
+            raise _input_error(
+                "argv",
+                f'"{argv[0]}" is a single argument. Put each argument on its own line, '
+                "or use a JSON array.",
+            )
     if action.name == "validate-report" and not ({"path", "report", "selector"} & inputs.keys()):
         message = f"{reference} requires path, report, or selector."
         raise WorkflowValidationError(message)
@@ -167,10 +226,23 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "Agent retry-limit must be a literal integer between 1 and 2."
         raise WorkflowValidationError(message)
+    if action.name == "agent":
+        from relay.agents.profiles import PROFILES
+
+        for field in ("agent", "agents"):
+            unknown = [item for item in _literal_list(inputs, field) or [] if item not in PROFILES]
+            if unknown:
+                raise _input_error(
+                    field, f"Unknown agent {unknown[0]}. Use one of {', '.join(sorted(PROFILES))}."
+                )
     if action.name == "human-wait" and "options" in inputs:
         value = inputs["options"]
         if "${{" not in str(value):
-            human_wait_options(value)
+            try:
+                human_wait_options(value)
+            except WorkflowValidationError as error:
+                error.context.setdefault("field", "with.options")
+                raise
     format_name = inputs.get("format")
     if (
         format_name is not None
@@ -184,10 +256,7 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
 def human_wait_options(value: object) -> list[str]:
     """Validate bounded answer labels without interpreting the owner's prose."""
     if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except ValueError:
-            value = None
+        value = parse_list_input(value, "options")
     if (
         not isinstance(value, list)
         or not 1 <= len(value) <= 10

@@ -27,7 +27,7 @@ from relay.workflows.actions.language import load
             "dynamic matrix",
         ),
         ("agents", "${{ true }}", {}, "JSON list"),
-        ("agents", '["codex", 1]', {}, "JSON list"),
+        ("agents", '["codex", 1]', {}, "agents: Write a JSON array of strings"),
         ("model", "${{ true }}", {}, "nonempty model"),
         ("model", "", {}, "nonempty model"),
         ("effort", "${{ 3 }}", {}, "provider value"),

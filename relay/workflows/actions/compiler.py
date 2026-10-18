@@ -26,7 +26,7 @@ from relay.workflows.schema import (
 )
 
 from . import expressions
-from .builtins import is_builtin
+from .builtins import is_builtin, parse_list_input
 from .language import (
     ActionsDocument,
     expand_matrix,
@@ -149,7 +149,7 @@ def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
             route[field] = expressions.interpolate(raw[field], route_values)
     agents = route.get("agents", route.get("agent", []))
     if isinstance(agents, str):
-        agents = json.loads(agents) if agents.startswith("[") else [agents] if agents else []
+        agents = parse_list_input(agents, "agents" if "agents" in route else "agent")
     if not isinstance(agents, list) or any(not isinstance(item, str) for item in agents):
         message = "relay/agent agents must be a JSON list of exact provider ids."
         raise WorkflowValidationError(message)

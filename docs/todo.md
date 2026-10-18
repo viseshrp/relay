@@ -2233,7 +2233,7 @@ at 375 pixels.
     `tests/test_relay_language.py`; `test_action_input_errors_name_the_inputs`
     in `tests/test_actions_builtin_contracts.py`.
 
-- [ ] **WB-14. Accept one value per line for list inputs.**
+- [x] **WB-14. Accept one value per line for list inputs.**
   - **Priority:** P0. **Decided** (D1): accept a JSON array string or one value
     per line; YAML sequences stay rejected.
   - **Spec:** [WB-14 in the handoff](workflow-builder-handoff.md#wb-14-accept-one-value-per-line-for-list-inputs)
@@ -2249,8 +2249,13 @@ at 375 pixels.
     strings. A YAML sequence gets a message naming both accepted forms.
   - **Done when:** Each of the three inputs works in both forms, and a YAML
     list gets the new message, with a test for each input.
+  - **Verified:** `test_list_inputs_accept_json_or_one_value_per_line` and
+    `test_list_inputs_reject_a_malformed_json_array` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_with_lists_explain_the_accepted_forms` in
+    `tests/test_relay_language.py`; `frontend/unit/list-input.spec.ts`.
 
-- [ ] **WB-15. Catch literal mistakes while editing, not mid-run.**
+- [x] **WB-15. Catch literal mistakes while editing, not mid-run.**
   - **Priority:** P0.
   - **Spec:** [WB-15 in the handoff](workflow-builder-handoff.md#wb-15-catch-literal-mistakes-while-editing-not-mid-run)
   - **Evidence:** Each source below validated, saved, and was committed on
@@ -2271,6 +2276,14 @@ at 375 pixels.
     read-only checks; keep the existing runtime checks.
   - **Done when:** Each source above shows a line-anchored error in the
     editor, and the runtime checks remain covered.
+  - **Verified:** `test_literal_mistakes_fail_validation`,
+    `test_literal_default_shells_fail_validation`, and
+    `test_literal_checks_accept_valid_and_runtime_values` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_validate_reports_missing_prompt_files` in
+    `tests/test_editor_recovery.py`. Runtime checks stay covered by
+    `test_builtin_runtime_errors_settle_the_step_and_keep_failure_evidence`
+    and `test_custom_shell_requires_exactly_one_placeholder`.
 
 - [ ] **WB-16. Warn about references to names that do not exist.**
   - **Priority:** P1.
