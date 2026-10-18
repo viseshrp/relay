@@ -26,7 +26,8 @@ resolve_version() {
   elif command -v uv >/dev/null 2>&1; then
     uv run hatch version
   else
-    python3 -c 'import pathlib, re; print(re.search(r"^version = \"([^\"]+)\"", pathlib.Path("pyproject.toml").read_text(), re.M).group(1))'
+    # The package version comes from Git tags through hatch; label a dev build without it.
+    printf '0.0.0.dev%s\n' "$(date -u +%Y%m%d%H%M%S)"
   fi
 }
 
