@@ -33,6 +33,7 @@ relay/static/**
 !scripts/
 scripts/*
 !scripts/check_distribution_contents.py
+!scripts/container_entrypoint.py
 
 **/__pycache__/
 **/*.pyc

@@ -12,6 +12,7 @@ on:
       - 'Makefile'
       - 'scripts/docker.sh'
       - 'scripts/check_distribution_contents.py'
+      - 'scripts/container_entrypoint.py'
       - 'hatch_build.py'
       - 'pyproject.toml'
       - 'uv.lock'

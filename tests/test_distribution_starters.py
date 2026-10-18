@@ -98,7 +98,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
 
     assert "scripts/check_distribution_contents.py /dist/relay_app-*.whl" in dockerfile
     assert "--require-hashes -r /dist/requirements.txt" in dockerfile
-    assert "/usr/local/bin/relay" in dockerfile
+    assert "scripts/container_entrypoint.py /usr/local/bin/relay" in dockerfile
     assert "USER relay:relay" in dockerfile
     assert 'ENTRYPOINT ["relay"]' in dockerfile
 
@@ -109,6 +109,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
         "!hatch_build.py",
         "!frontend/package-lock.json",
         "!scripts/check_distribution_contents.py",
+        "!scripts/container_entrypoint.py",
         "relay/static/**",
     ):
         assert required_rule in dockerignore
