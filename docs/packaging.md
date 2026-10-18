@@ -147,7 +147,11 @@ copy when the owner's checkout is serving an app.
 and validates the archive with `scripts/check_distribution_contents.py` before
 installing into `/opt/relay/venv`. The runtime stage copies only that virtual
 environment into `python:3.14-slim-trixie` alongside `git` and `procps`, runs
-as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm.
+as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm. When
+invoked with `up`, the container `relay` entrypoint keeps the Python server
+bound to `127.0.0.1` inside the container while bridging the container network
+interface to loopback so host port publishing (`-p 127.0.0.1:7845:7845`) works
+without `--network host`.
 
 `Makefile` and `scripts/docker.sh` provide shared targets for local container
 workflows and CI:
@@ -163,7 +167,8 @@ make docker-push
   `ghcr.io/viseshrp/relay:local`) with version and Git revision labels.
 - `make docker-smoke` verifies the image's CLI version, OCI labels, non-root
   user, absence of Node.js and npm, `relay init`, `relay up` readiness on
-  `GET /api/auth` and `GET /`, and clean `SIGTERM` shutdown.
+  `GET /api/auth` and `GET /` (both inside the container and across a
+  host-published `-p 127.0.0.1::7845` port), and clean `SIGTERM` shutdown.
 - `make docker-up` (aliased as `make docker-run`) starts Relay in Docker on
   `http://127.0.0.1:7845/` with the working tree mounted at `/workspace` and
   named volumes for Relay configuration, data, and state.
@@ -179,5 +184,5 @@ touch container packaging), then runs `make docker-push-digest` and
 
 - Nightly builds at `07:17 UTC` (and `workflow_dispatch` on `main`) publish
   `:nightly` and `:nightly-YYYYMMDD-RUN-ATTEMPT`.
-- Release tags (`v*`) and published releases publish `:vX.Y.Z`, `:X.Y.Z`, and
-  `:latest`.
+- Published GitHub releases (`release: [published]`, created after the tag test
+  suite succeeds) publish `:vX.Y.Z`, `:X.Y.Z`, and `:latest`.

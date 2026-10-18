@@ -136,6 +136,49 @@ PY
     grep -F "Relay stopped cleanly." "$repo/up.log" >/dev/null
   ' sh "${expected_arch}"
 
+  local cid
+  cid="$(
+    docker run -d \
+      --init \
+      -p 127.0.0.1::7845 \
+      --entrypoint /bin/sh \
+      "${image}" \
+      -ec '
+        git init -q /workspace
+        git -C /workspace config user.name "Relay Container Smoke"
+        git -C /workspace config user.email "smoke@example.invalid"
+        git -C /workspace commit --allow-empty -q -m "initial"
+        exec relay up --no-login
+      '
+  )"
+  cleanup_smoke_container() {
+    docker rm -f "${cid}" >/dev/null 2>&1 || true
+  }
+  trap cleanup_smoke_container RETURN
+
+  local host_addr
+  host_addr="$(docker port "${cid}" 7845/tcp | head -n 1)"
+  python3 - "${host_addr}" <<'PY'
+import sys
+import time
+import urllib.request
+
+addr = sys.argv[1].strip()
+deadline = time.monotonic() + 20.0
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(f"http://{addr}/api/auth", timeout=1.0) as auth:
+            if auth.status == 200:
+                break
+    except Exception:
+        time.sleep(0.1)
+else:
+    raise SystemExit(f"Published container port {addr} did not become ready")
+PY
+  docker stop --time 15 "${cid}" >/dev/null
+  docker rm -f "${cid}" >/dev/null 2>&1 || true
+  trap - RETURN
+
   echo "✅ Smoke test passed: ${image}"
 }
 
@@ -161,69 +204,8 @@ cmd_up() {
     -v relay-config:/home/relay/.config/relay \
     -v relay-data:/home/relay/.local/share/relay \
     -v relay-state:/home/relay/.local/state/relay \
-    --entrypoint python \
     "${image}" \
-    -u -c '
-import asyncio
-import contextlib
-import signal
-import socket
-import subprocess
-import sys
-
-port = int(sys.argv[1])
-extra_args = sys.argv[2:]
-
-
-async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    try:
-        while chunk := await reader.read(65536):
-            writer.write(chunk)
-            await writer.drain()
-    except OSError:
-        pass
-    finally:
-        with contextlib.suppress(Exception):
-            writer.close()
-            await writer.wait_closed()
-
-
-async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> None:
-    try:
-        upstream_reader, upstream_writer = await asyncio.open_connection("127.0.0.1", port)
-    except OSError:
-        client_writer.close()
-        with contextlib.suppress(Exception):
-            await client_writer.wait_closed()
-        return
-    await asyncio.gather(
-        pipe(client_reader, upstream_writer),
-        pipe(upstream_reader, client_writer),
-    )
-
-
-async def main() -> int:
-    subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/workspace"], check=False)
-    process = subprocess.Popen(["relay", "up", "--host", "127.0.0.1", "--port", str(port), "--no-browser", *extra_args])
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda s=sig: process.send_signal(s) if process.poll() is None else None)
-
-    server = None
-    container_ip = socket.gethostbyname(socket.gethostname())
-    if container_ip and not container_ip.startswith("127."):
-        server = await asyncio.start_server(handle, host=container_ip, port=port)
-
-    try:
-        return await asyncio.to_thread(process.wait)
-    finally:
-        if server is not None:
-            server.close()
-            await server.wait_closed()
-
-
-raise SystemExit(asyncio.run(main()))
-' "${port}" ${DOCKER_UP_ARGS:-}
+    up --port "${port}" ${DOCKER_UP_ARGS:-}
 }
 
 cmd_push() {

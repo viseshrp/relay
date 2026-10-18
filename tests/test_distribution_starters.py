@@ -98,6 +98,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
 
     assert "scripts/check_distribution_contents.py /dist/relay_app-*.whl" in dockerfile
     assert "--require-hashes -r /dist/requirements.txt" in dockerfile
+    assert "/usr/local/bin/relay" in dockerfile
     assert "USER relay:relay" in dockerfile
     assert 'ENTRYPOINT ["relay"]' in dockerfile
 
@@ -137,7 +138,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     triggers = workflow["on"]
     assert triggers["schedule"] == [{"cron": "17 7 * * *"}]
     assert "pull_request" in triggers
-    assert triggers["push"]["tags"] == ["v*"]
+    assert "push" not in triggers
     assert triggers["release"]["types"] == ["published"]
     platforms = [
         item["platform"] for item in workflow["jobs"]["build"]["strategy"]["matrix"]["include"]

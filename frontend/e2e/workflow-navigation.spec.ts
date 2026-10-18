@@ -108,6 +108,25 @@ test("a workflow URL without a view opens the selected workflow editor", async (
   ).toBeVisible();
 });
 
+async function selectWorkflow(page: Page, name: string) {
+  const combobox = page.getByRole("combobox", {
+    name: "Workflow",
+    exact: true,
+  });
+  await combobox.click();
+  const option = page.getByRole("option", { name, exact: true });
+  await expect(option).toBeVisible();
+  await option.evaluate((element) =>
+    Promise.all(
+      (element.closest(".MuiPaper-root")?.getAnimations() ?? []).map(
+        (animation) => animation.finished.catch(() => undefined),
+      ),
+    ),
+  );
+  await option.click();
+  await expect(combobox).toContainText(name);
+}
+
 test("switching workflows resets the canvas and shows the first stage at a readable scale", async ({
   page,
 }) => {
@@ -128,8 +147,7 @@ test("switching workflows resets the canvas and shows the first stage at a reada
   await page.goto("/?view=workflows&workflow=canvas-short.yaml");
   await expectCenteredStage(page, "prepare");
   await page.getByRole("button", { name: "Zoom In" }).click();
-  await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
-  await page.getByRole("option", { name: "Canvas long", exact: true }).click();
+  await selectWorkflow(page, "Canvas long");
   await expect(page.locator(".react-flow__node")).toHaveCount(23);
   await expectCenteredStage(page, "prepare");
   const navigation = page.getByRole("navigation", {
@@ -139,8 +157,7 @@ test("switching workflows resets the canvas and shows the first stage at a reada
   await expectCenteredStage(page, "review");
   await closeJobSettings(page);
   await page.getByLabel("Find a job", { exact: true }).fill("REVIEW");
-  await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
-  await page.getByRole("option", { name: "Canvas short", exact: true }).click();
+  await selectWorkflow(page, "Canvas short");
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
   await expectCenteredStage(page, "prepare");
   await expect(page.getByLabel("Find a job", { exact: true })).toHaveValue("");
@@ -217,10 +234,7 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
     .getByLabel("Agent prompt", { exact: true })
     .fill("Keep these instructions in this workflow.");
   await closeJobSettings(page);
-  await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
-  await page
-    .getByRole("option", { name: "Configuration", exact: true })
-    .click();
+  await selectWorkflow(page, "Configuration");
   await expect
     .poll(
       async () =>
@@ -231,10 +245,7 @@ test("unsaved agent instructions persist as a draft across workflow navigation",
         ).draft?.yaml,
     )
     .toContain("Keep these instructions");
-  await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
-  await page
-    .getByRole("option", { name: "Navigation agent", exact: true })
-    .click();
+  await selectWorkflow(page, "Navigation agent");
   await openJobSettings(page);
   await expect(page.getByLabel("Agent prompt", { exact: true })).toContainText(
     "Keep these instructions in this workflow.",
