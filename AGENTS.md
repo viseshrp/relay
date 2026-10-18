@@ -41,7 +41,7 @@ in a checkout with unrelated work. Do not reset or stash owner changes.
 | Project identity, settings, paths, durable storage | [relay/projects/](relay/projects/), [config.py](relay/config.py), [paths.py](relay/paths.py), [models.py](relay/web/models.py), [repositories.py](relay/web/repositories.py) | [docs/projects-and-storage.md](docs/projects-and-storage.md) |
 | CLI, HTTP, authentication, SSE, supervision | [cli.py](relay/cli.py), [relay/web/](relay/web/) | [docs/http-api.md](docs/http-api.md), [docs/web-ui.md](docs/web-ui.md) |
 | Browser authoring, run views, API types | [frontend/src/](frontend/src/) | [docs/web-ui.md](docs/web-ui.md) |
-| Packaging and repository gates | [hatch_build.py](hatch_build.py), [scripts/](scripts/), [Makefile](Makefile), [pyproject.toml](pyproject.toml) | [docs/packaging.md](docs/packaging.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Packaging and repository gates | [Dockerfile](Dockerfile), [.dockerignore](.dockerignore), [hatch_build.py](hatch_build.py), [scripts/](scripts/), [Makefile](Makefile), [pyproject.toml](pyproject.toml) | [docs/packaging.md](docs/packaging.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 Python tests live in [tests/](tests/); browser tests live in
 [frontend/e2e/](frontend/e2e/). Reuse the fixtures in
@@ -52,7 +52,21 @@ Python tests live in [tests/](tests/); browser tests live in
 
 ## Set up the checkout
 
-Python supports 3.10 through 3.14. Use the locked uv environment:
+Running the application via Docker is the most preferred way to run and verify
+Relay locally. It builds the production wheel (including compiled frontend
+assets) in an isolated multi-stage image and serves the app at
+`http://127.0.0.1:7845/` with persistent volumes:
+
+```bash
+make docker-up
+```
+
+Use `make docker-build` and `make docker-smoke` to build and smoke-test the
+container image directly, or pull prebuilt images from
+`ghcr.io/viseshrp/relay:latest` and `ghcr.io/viseshrp/relay:nightly`.
+
+For local Python development and test suites, Python supports 3.10 through
+3.14. Use the locked uv environment:
 
 ```bash
 uv sync --frozen
@@ -237,6 +251,7 @@ change and task contract. Commands below run from the repository root.
 | Frontend types and compiled assets | `npm --prefix frontend run build` |
 | Browser behavior, including login and no-login configurations | `make test-frontend` |
 | Distribution build and content validation | `make build`, followed by `make check-dist` |
+| Container build and runtime smoke check | `make docker-build`, followed by `make docker-smoke` |
 
 Install Chromium once when browser tests need it:
 
