@@ -198,13 +198,11 @@ export function expressionSuggestions(
   const inputs = isRecord(dispatch.inputs) ? dispatch.inputs : {};
   const needs = jobId ? workflow?.jobs[jobId]?.needs : undefined;
   const upstream = typeof needs === "string" ? [needs] : needs;
+  // Run metadata names come from the manifest; see fieldExpressions.
   return [
     "${{ success() }}",
     "${{ failure() }}",
     "${{ always() }}",
-    "${{ relay.run_id }}",
-    "${{ relay.project_id }}",
-    "${{ job.status }}",
     ...Object.keys(workflow?.env ?? {}).map((key) => `\${{ env.${key} }}`),
     ...Object.keys(jobId ? (workflow?.jobs[jobId]?.env ?? {}) : {}).map(
       (key) => `\${{ env.${key} }}`,
@@ -241,6 +239,67 @@ export function expressionSuggestions(
         ]),
     ),
   ];
+}
+
+/**
+ * Whether validation accepts an expression name, such as `relay.sha` or
+ * `success()`, where these contexts and functions are available.
+ */
+export function expressionAllowed(
+  name: string,
+  available: ReadonlySet<string>,
+  manifest: LanguageManifest,
+): boolean {
+  const [context, property] = name.split(".");
+  const known = manifest.context_properties[context];
+  return (
+    available.has(name.split(/[.(]/)[0].toLowerCase()) &&
+    !(known && property !== undefined && !known.includes(property))
+  );
+}
+
+/** The contexts and function names usable in the value of `key` at a path. */
+export function availableContexts(
+  path: YamlSegment[],
+  key: string | null,
+  manifest: LanguageManifest,
+  scopes: ReadonlyArray<Record<string, unknown>> = [],
+): Set<string> {
+  return new Set(
+    contextsAt(path, key, manifest, scopes).map((item) =>
+      item.replace(/\(.*$/, "").toLowerCase(),
+    ),
+  );
+}
+
+/**
+ * Every expression, as `${{ name }}`, that validation accepts in the value of
+ * `key` at a path: names from this workflow and the manifest's run metadata.
+ */
+export function fieldExpressions(
+  workflow: ActionWorkflow | null,
+  path: YamlSegment[],
+  key: string,
+  manifest: LanguageManifest,
+  scopes: ReadonlyArray<Record<string, unknown>> = [],
+): string[] {
+  const job =
+    path[0] === "jobs" && typeof path[1] === "string" ? path[1] : undefined;
+  const available = availableContexts(path, key, manifest, scopes);
+  const names = [
+    ...expressionSuggestions(workflow, job).map((item) =>
+      item.replace(/^\$\{\{\s*/, "").replace(/\s*\}\}$/, ""),
+    ),
+    ...Object.entries(manifest.context_properties).flatMap(
+      ([context, properties]) =>
+        properties.map((property) => `${context}.${property}`),
+    ),
+  ];
+  return [
+    ...new Set(
+      names.filter((name) => expressionAllowed(name, available, manifest)),
+    ),
+  ].map((name) => `\${{ ${name} }}`);
 }
 
 export function schemaKind(

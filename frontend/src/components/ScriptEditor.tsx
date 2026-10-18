@@ -11,17 +11,20 @@ import { useTheme } from "@mui/material/styles";
 import { useEffect, useRef } from "react";
 import { createCodeMirrorTheme } from "../theme";
 import type { LanguageManifest } from "../workflow-language";
+import { HelpLabel, type HelpSource } from "./HelpTip";
 
 export function ScriptEditor({
   value,
   shell,
   manifest,
   onChange,
+  help,
 }: {
   value: string;
   shell?: string;
   manifest: LanguageManifest;
   onChange: (value: string) => void;
+  help?: HelpSource;
 }) {
   const muiTheme = useTheme();
   const isDark = muiTheme.palette.mode === "dark";
@@ -96,7 +99,14 @@ export function ScriptEditor({
   }, [value]);
   return (
     <Box>
-      <Typography component="label">Script</Typography>
+      {help ? (
+        // A label element would hand its clicks to the help button.
+        <Typography component="div">
+          <HelpLabel topic={help}>Script</HelpLabel>
+        </Typography>
+      ) : (
+        <Typography component="label">Script</Typography>
+      )}
       <div className="script-editor" ref={parent} />
       {plan && (
         <Box component="details">

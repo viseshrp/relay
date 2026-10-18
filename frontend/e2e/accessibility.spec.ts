@@ -125,3 +125,17 @@ test("Tab indents in the YAML editor and Escape then Tab leaves it", async ({
   ).toBe(true);
   expect(await text()).toBe(before);
 });
+
+test("the job settings drawer has an accessible name", async ({ page }) => {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Workflow job navigation" })
+    .getByRole("button", { name: "Work", exact: true })
+    .click();
+  const drawer = page.getByRole("dialog", { name: /^Job settings/ });
+  await expect(drawer).toHaveAccessibleName("Job settings: work");
+  await assertAccessible(page);
+  await drawer.getByRole("tab", { name: "Steps", exact: true }).click();
+  await assertAccessible(page);
+});

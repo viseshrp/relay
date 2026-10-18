@@ -3,7 +3,11 @@ import { stageLabel, statusLabel } from "./navigation";
 import type { RunNode } from "./types";
 import type { WorkflowNodeData } from "./workflow";
 
-export function arrangeGraph(nodes: Node<WorkflowNodeData>[], edges: Edge[]) {
+export function arrangeGraph(
+  nodes: Node<WorkflowNodeData>[],
+  edges: Edge[],
+  height: (node: Node<WorkflowNodeData>) => number = () => 104,
+) {
   // Each stage follows its longest dependency path. Independent branches occupy separate columns.
   // A -> B -> C becomes rows 0, 1, 2; A -> D puts B and D next to each other in row 1.
   const outgoing = new Map<string, string[]>(
@@ -30,12 +34,23 @@ export function arrangeGraph(nodes: Node<WorkflowNodeData>[], edges: Edge[]) {
       if (incoming.get(target) === 0) ready.push(target);
     }
   }
+  // Each row starts below the tallest card of the row above it.
+  const tallest = new Map<number, number>();
+  for (const node of nodes) {
+    const row = ranks.get(node.id) ?? 0;
+    tallest.set(row, Math.max(tallest.get(row) ?? 0, height(node)));
+  }
+  const tops = new Map<number, number>();
+  for (let row = 0, top = 0; row <= Math.max(0, ...tallest.keys()); row++) {
+    tops.set(row, top);
+    top += (tallest.get(row) ?? 104) + 41;
+  }
   const columns = new Map<number, number>();
   return nodes.map((node) => {
     const row = ranks.get(node.id) ?? 0;
     const column = columns.get(row) ?? 0;
     columns.set(row, column + 1);
-    return { ...node, position: { x: column * 290, y: row * 145 } };
+    return { ...node, position: { x: column * 290, y: tops.get(row) ?? 0 } };
   });
 }
 

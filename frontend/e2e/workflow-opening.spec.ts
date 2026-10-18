@@ -77,8 +77,10 @@ test("new workflows and added jobs use the local language without runner fields"
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   await expect(page.locator(".cm-content")).not.toContainText("runs-on");
   await page.getByRole("button", { name: "Add job", exact: true }).click();
-  await expect(page.locator(".cm-content")).toContainText("job_1:");
-  await expect(page.locator(".cm-content")).not.toContainText("runs-on");
+  // A new job's drawer opens on its steps, whose script editor is CodeMirror too.
+  const yaml = page.getByLabel("Workflow YAML", { exact: true });
+  await expect(yaml).toContainText("job_1:");
+  await expect(yaml).not.toContainText("runs-on");
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeEnabled();

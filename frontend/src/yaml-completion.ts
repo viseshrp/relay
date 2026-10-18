@@ -6,8 +6,9 @@ import { snippet, type Completion } from "@codemirror/autocomplete";
 import { parseActions } from "./actions-workflow";
 import { parseBuiltin } from "./builtin-actions";
 import {
-  contextsAt,
+  availableContexts,
   definitionAt,
+  expressionAllowed,
   expressionSuggestions,
   mappingProperties,
   propertyType,
@@ -103,19 +104,13 @@ function expressionOptions(
   ];
   // Offer only what validation accepts in this field: its contexts and
   // functions, and properties its context has.
-  const available = new Set(
-    contextsAt(cursor.path, cursor.key, manifest, cursor.scopes).map((item) =>
-      item.replace(/\(.*$/, "").toLowerCase(),
-    ),
+  const available = availableContexts(
+    cursor.path,
+    cursor.key,
+    manifest,
+    cursor.scopes,
   );
-  const valid = (name: string) => {
-    const [context, property] = name.split(".");
-    const known = manifest.context_properties[context];
-    return (
-      available.has(name.split(/[.(]/)[0].toLowerCase()) &&
-      !(known && property !== undefined && !known.includes(property))
-    );
-  };
+  const valid = (name: string) => expressionAllowed(name, available, manifest);
   const options = new Map<string, Completion>();
   for (const name of names)
     if (valid(name) && startsWith(name, cursor.prefix) && !options.has(name))

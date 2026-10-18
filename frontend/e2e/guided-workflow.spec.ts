@@ -1,4 +1,5 @@
 import {
+  actionReference,
   advancedField,
   openJobSettings,
   closeJobSettings,
@@ -66,9 +67,11 @@ test("create a workflow, inspect connected progress, reload its review, and expl
   await page
     .getByRole("combobox", { name: "Start after", exact: true })
     .click();
-  await page.getByRole("option", { name: "check", exact: true }).click();
+  await page
+    .getByRole("option", { name: "Check project (check)", exact: true })
+    .click();
   await openJobSettings(page);
-  await page.getByLabel("Action reference").fill("relay/human-wait@v1");
+  await (await actionReference(page)).fill("relay/human-wait@v1");
   const input = await advancedField(page, "Action inputs");
   await input.fill(
     JSON.stringify({
@@ -265,9 +268,9 @@ test("report handoffs explain retention and review material is readable beside t
   expect(created.ok(), await created.text()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=retained-review.yaml");
   await openJobSettings(page);
-  await expect(
-    page.getByLabel("Action reference", { exact: true }),
-  ).toHaveValue("relay/validate-report@v1");
+  await expect(await actionReference(page)).toHaveValue(
+    "relay/validate-report@v1",
+  );
   await expect(await advancedField(page, "Action inputs")).toContainText(
     "REVIEW.md",
   );

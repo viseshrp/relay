@@ -2,31 +2,30 @@ import { BuiltinInputFields } from "./BuiltinInputFields";
 import { ActionCommandFields } from "./ActionCommandFields";
 import { ReusableWorkflowPreview } from "./ReusableWorkflowPreview";
 import {
-  Autocomplete,
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Button,
-  MenuItem,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 import type { ActionStep, ActionWorkflow } from "../actions-workflow";
 import type { AgentRecord, ProviderDefaults } from "../types";
 import { parseBuiltin } from "../builtin-actions";
+import { inputHelp, propertyHelp } from "../field-help";
 import { parseListInput } from "../list-input";
 import type { LanguageManifest } from "../workflow-language";
 import { ModelPicker } from "./ModelPicker";
 import { AgentConfiguration } from "./AgentConfiguration";
+import { AgentRouteField } from "./AgentRouteField";
+import { HelpLabel } from "./HelpTip";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PromptFilesEditor, type PromptEdits } from "./PromptFilesEditor";
 import { StructuredValueField } from "./StructuredValueField";
-import { AdvancedJsonField } from "./AdvancedJsonField";
 
 export function ActionBuiltinFields({
   step,
   agents,
+  preferences,
   defaults,
   defaultModel,
   manifest,
@@ -37,9 +36,12 @@ export function ActionBuiltinFields({
   edits,
   onEdits,
   onChange,
+  onEditYaml,
+  onOpenGetStarted,
 }: {
   step: ActionStep;
   agents: AgentRecord[];
+  preferences: string[];
   defaults: Record<string, ProviderDefaults>;
   defaultModel: string;
   manifest: LanguageManifest;
@@ -50,6 +52,8 @@ export function ActionBuiltinFields({
   edits: PromptEdits;
   onEdits: (reference: string, edit: PromptEdits[string]) => void;
   onChange: (field: string, value: unknown) => void;
+  onEditYaml: () => void;
+  onOpenGetStarted?: () => void;
 }) {
   const inputs = step.with ?? {};
   const action = parseBuiltin(step.uses)?.name;
@@ -59,6 +63,8 @@ export function ActionBuiltinFields({
     inputs.model ?? defaults[agentId]?.model ?? defaultModel,
   );
   const fields = manifest.builtin_inputs[step.uses ?? ""];
+  const help = (input: string, title: string) =>
+    inputHelp(manifest, step.uses, input, title);
   const special =
     action === "agent"
       ? [
@@ -78,38 +84,24 @@ export function ActionBuiltinFields({
           : [];
   return (
     <Stack spacing={2}>
-      <AdvancedJsonField
-        label="Action inputs"
-        object
-        value={inputs}
-        onChange={(value) => onChange("__all__", value)}
-      />
       {action === "agent" && (
         <>
-          <TextField
-            select
-            label="Agent"
-            value={agentId}
-            onChange={(event) =>
-              onChange("__all__", {
-                ...inputs,
-                agent: event.target.value || undefined,
-                agents: undefined,
-                effort: undefined,
-              })
-            }
-          >
-            <MenuItem value="">Use saved agent order</MenuItem>
-            {agents.map((item) => (
-              <MenuItem key={item.id} value={item.id}>
-                {item.display_name}
-              </MenuItem>
-            ))}
-          </TextField>
+          <AgentRouteField
+            inputs={inputs}
+            agents={agents}
+            preferences={preferences}
+            help={help("agents", "Runs on")}
+            agentHelp={help("agent", "Agent")}
+            orderHelp={help("agents", "Add an agent")}
+            onChange={(next) => onChange("__all__", next)}
+            onEditYaml={onEditYaml}
+            onOpenGetStarted={onOpenGetStarted}
+          />
           <ModelPicker
             agents={agent ? [agent] : agents}
             value={String(inputs.model ?? "")}
             project={project}
+            help={help("model", "Model")}
             defaultLabel={model || "Use saved default"}
             onChange={(value) => {
               onChange("__all__", {
@@ -137,7 +129,9 @@ export function ActionBuiltinFields({
             />
           )}
           <Typography component="h3" variant="subtitle1">
-            Agent prompt
+            <HelpLabel topic={help("prompt", "Agent prompt")}>
+              Agent prompt
+            </HelpLabel>
           </Typography>
           <MarkdownEditor
             label="Agent prompt"
@@ -145,6 +139,7 @@ export function ActionBuiltinFields({
             onChange={(value) => onChange("prompt", value || undefined)}
           />
           <PromptFilesEditor
+            help={help("prompt-files", "Ordered prompt files")}
             references={String(inputs["prompt-files"] ?? "")}
             workflowKey={workflowKey}
             project={project}
@@ -180,7 +175,12 @@ export function ActionBuiltinFields({
         </>
       )}
       {action === "command" && (
-        <ActionCommandFields inputs={inputs} onChange={onChange} />
+        <ActionCommandFields
+          inputs={inputs}
+          reference={step.uses}
+          manifest={manifest}
+          onChange={onChange}
+        />
       )}
       {action === "human-wait" && (
         <>
@@ -189,6 +189,8 @@ export function ActionBuiltinFields({
           </Typography>
           <StructuredValueField
             label="Answer buttons"
+            help={help("options", "Answer buttons")}
+            textItems
             value={parseListInput(inputs.options) ?? []}
             onChange={(value) =>
               onChange(
@@ -206,11 +208,18 @@ export function ActionBuiltinFields({
           fields={fields}
           special={special}
           inputs={inputs}
+          help={help}
           onChange={onChange}
         />
       ) : (
         <StructuredValueField
           label="Action inputs"
+          help={propertyHelp(
+            manifest,
+            "regular-step.with",
+            "Action inputs",
+            "reusable-workflows-and-local-actions",
+          )}
           advanced={false}
           object
           value={inputs}
@@ -219,32 +228,6 @@ export function ActionBuiltinFields({
             onChange("__all__", next);
           }}
         />
-      )}
-      {action === "agent" && (
-        <>
-          <Autocomplete
-            multiple
-            options={agents.map((item) => item.id)}
-            value={parseListInput(inputs.agents) ?? []}
-            getOptionLabel={(id) =>
-              agents.find((item) => item.id === id)?.display_name ?? id
-            }
-            onChange={(_, order) =>
-              onChange("__all__", {
-                ...inputs,
-                agent: undefined,
-                agents: order.length ? JSON.stringify(order) : undefined,
-              })
-            }
-            renderInput={(parameters) => (
-              <TextField
-                {...parameters}
-                label="Agent order"
-                helperText="Ordered exact provider IDs; the first available tool runs."
-              />
-            )}
-          />
-        </>
       )}
       {action === "loop" && Boolean(inputs.workflow) && (
         <ReusableWorkflowPreview

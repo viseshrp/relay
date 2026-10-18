@@ -1,20 +1,21 @@
-import {
-  Checkbox,
-  FormControlLabel,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
+import { GUIDE, propertyHelp } from "../field-help";
 import { isRecord } from "../workflow";
+import type { LanguageManifest } from "../workflow-language";
+import { HelpControl, HelpTextField } from "./HelpTip";
 import { StructuredValueField } from "./StructuredValueField";
 
 export function MatrixEditor({
   value,
+  manifest,
   onChange,
 }: {
   value: unknown;
+  manifest: LanguageManifest;
   onChange: (value: unknown) => void;
 }) {
+  const help = (key: string, title: string) =>
+    propertyHelp(manifest, key, title, GUIDE.matrix);
   const strategy = isRecord(value) ? value : {};
   const matrix = isRecord(strategy.matrix) ? strategy.matrix : {};
   const axes = Object.fromEntries(
@@ -30,6 +31,7 @@ export function MatrixEditor({
       </Typography>
       <StructuredValueField
         label="Matrix axes"
+        help={help("strategy.matrix", "Matrix axes")}
         object
         value={axes}
         onChange={(next) =>
@@ -51,24 +53,38 @@ export function MatrixEditor({
         <StructuredValueField
           key={name}
           label={`Matrix ${name}`}
+          help={help(`matrix.${name}`, `Matrix ${name}`)}
           value={matrix[name] ?? []}
           onChange={(next) =>
             onChange({ ...strategy, matrix: { ...matrix, [name]: next } })
           }
         />
       ))}
-      <FormControlLabel
-        label="Stop other matrix jobs when one fails"
-        control={
-          <Checkbox
-            checked={strategy["fail-fast"] !== false}
-            onChange={(event) =>
-              onChange({ ...strategy, "fail-fast": event.target.checked })
-            }
-          />
-        }
-      />
-      <TextField
+      <HelpControl
+        topic={help(
+          "strategy.fail-fast",
+          "Stop other matrix jobs when one fails",
+        )}
+      >
+        <FormControlLabel
+          label="Stop other matrix jobs when one fails"
+          control={
+            <Checkbox
+              checked={strategy["fail-fast"] !== false}
+              onChange={(event) =>
+                onChange({ ...strategy, "fail-fast": event.target.checked })
+              }
+            />
+          }
+        />
+      </HelpControl>
+      <HelpTextField
+        topic={{
+          title: "Maximum parallel matrix jobs",
+          description:
+            "Relay runs matrix jobs one at a time on this computer, so leave this blank.",
+          guide: GUIDE.matrix,
+        }}
         label="Maximum parallel matrix jobs"
         type="number"
         slotProps={{ htmlInput: { min: 1 } }}

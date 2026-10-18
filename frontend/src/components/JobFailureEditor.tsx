@@ -5,13 +5,14 @@ import {
   FormControlLabel,
   MenuItem,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 import { useState } from "react";
 import type { ActionJob } from "../actions-workflow";
 import { currentBuiltin, isBuiltin } from "../builtin-actions";
+import { GUIDE, inputHelp, propertyHelp } from "../field-help";
 import type { LanguageManifest } from "../workflow-language";
+import { HelpControl, HelpSelectField, HelpTextField } from "./HelpTip";
 
 export function JobFailureEditor({
   job,
@@ -26,6 +27,7 @@ export function JobFailureEditor({
     isBuiltin(step.uses, "agent"),
   );
   const [repair, setRepair] = useState("");
+  const agent = currentBuiltin(manifest, "agent");
   const policy =
     agents.length &&
     agents.every(
@@ -62,9 +64,15 @@ export function JobFailureEditor({
     <Stack spacing={2}>
       {agents.length > 0 ? (
         <>
-          <TextField
-            select
+          <HelpSelectField
+            topic={inputHelp(
+              manifest,
+              agent,
+              "auto-retry",
+              "When this job fails",
+            )}
             label="When this job fails"
+            width="wide"
             value={policy}
             onChange={(event) => {
               if (event.target.value === "inherit")
@@ -87,17 +95,23 @@ export function JobFailureEditor({
             </MenuItem>
             <MenuItem value="stop">Stop and tell me</MenuItem>
             <MenuItem value="retry">Retry up to N times</MenuItem>
-          </TextField>
+          </HelpSelectField>
           {policy === "retry" && (
-            <TextField
-              select
+            <HelpSelectField
+              topic={inputHelp(
+                manifest,
+                agent,
+                "retry-limit",
+                "Maximum automatic retries per agent step",
+              )}
               label="Maximum automatic retries per agent step"
+              width="wide"
               value={String(agents[0].with?.["retry-limit"] ?? 2)}
               onChange={(event) => configure(true, Number(event.target.value))}
             >
               <MenuItem value="1">1</MenuItem>
               <MenuItem value="2">2</MenuItem>
-            </TextField>
+            </HelpSelectField>
           )}
         </>
       ) : (
@@ -111,22 +125,37 @@ export function JobFailureEditor({
         budget. Usage limits require a confirmed reset; human waits remain your
         decision.
       </Typography>
-      <FormControlLabel
-        label="Continue after this job fails"
-        control={
-          <Checkbox
-            checked={job["continue-on-error"] === true}
-            onChange={(event) =>
-              change({ ...job, "continue-on-error": event.target.checked })
-            }
-          />
-        }
-      />
+      <HelpControl
+        topic={propertyHelp(
+          manifest,
+          "job-factory.continue-on-error",
+          "Continue after this job fails",
+        )}
+      >
+        <FormControlLabel
+          label="Continue after this job fails"
+          control={
+            <Checkbox
+              checked={job["continue-on-error"] === true}
+              onChange={(event) =>
+                change({ ...job, "continue-on-error": event.target.checked })
+              }
+            />
+          }
+        />
+      </HelpControl>
       <Typography component="h3" variant="subtitle1">
         Ask a fixer agent and re-check
       </Typography>
-      <TextField
+      <HelpTextField
+        topic={{
+          title: "Fix-and-check workflow file",
+          description:
+            "A reusable workflow under ./.relay/workflows/ that runs a fixer and a verifier. Its passed output decides whether another round runs, up to three rounds.",
+          guide: GUIDE.recovery,
+        }}
         label="Fix-and-check workflow file"
+        width="wide"
         value={repair}
         onChange={(event) => setRepair(event.target.value)}
         placeholder="./.relay/workflows/fix-and-check.yaml"

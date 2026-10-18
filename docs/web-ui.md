@@ -263,13 +263,32 @@ Choose a saved workflow or **Create workflow**. New sources use `jobs` and
 ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
 seven-starter gallery copies selected sources without overwriting owner files.
 
-**Add job** adds a local job. Select its graph node to edit its name,
-dependencies, condition, timeout, environment, matrix, outputs, concurrency,
-cache mode, and failure tolerance. **Ordered step** selects a step. Steps can
-be added, moved, or removed. Scripts expose shell and working-directory fields;
-action steps expose their local action reference and input mapping. Agent steps
-provide an exact model override, prompt files, runtime prompt, and the selected
-provider's current effort choices. Permission modes are owner settings.
+**Add job** adds a local job of the chosen **New job type**, and **Add step**
+adds a step of the type chosen from its menu. Both use plain names, such as
+**Approval** and **Check a report**, each with a one-line description, and
+every new job or step starts with values that validate. **Repeat a workflow**
+first asks which of the project's other workflows to repeat. Select a graph
+node to edit its job. A job added in this session opens on **Steps**; other
+jobs open on **General**, which shows the name, job ID, **Start after**,
+condition, and timeout. Its **Advanced** section holds the reusable workflow,
+matrix, concurrency, and remaining job fields, and starts open when one of them
+has a value. **Start after** lists jobs as "name (ID)". Job IDs never change on
+their own: **Rename job ID** changes the ID, every `needs` entry, and its
+`needs` and `jobs` expression references in one undoable edit.
+
+**Steps in this job** lists the steps in order, with buttons that move each
+one, and each canvas card lists up to five of its steps. Select a step to edit
+it. Scripts expose shell and working-directory fields. A step's **Advanced**
+section holds its raw action reference, the way to name a local action under
+`./.relay/actions/`, and its inputs as JSON. An agent step chooses where it
+runs under **Runs on**: the saved order from Settings, one agent, or agents to
+try in order. Agents that are not installed are marked **Not installed** and
+cannot be newly chosen; **Open Get started** opens the checklist. Agent steps
+also provide an exact model override, prompt files, runtime prompt, and the
+selected provider's current effort choices. Permission modes are owner
+settings. Every field in job settings and **Workflow settings** has a
+question-mark button; workflow, job, and action input fields show their
+description from the language manifest.
 
 Choose **Visual**, **YAML**, or **Split**. Form edits and YAML edits share one
 CST document. Comments and unrelated fields survive edits; editing an alias
@@ -1131,7 +1150,10 @@ changes offers Keep editing or Discard changes. Restart-only settings retain
 their restart notices.
 
 Job settings use key/value tables, matrix axes, a concurrency group with a
-cancel-in-progress switch, and searchable expression helpers. The failure
+cancel-in-progress switch, and searchable expression helpers. **Build a
+condition** opens a condition's helper, which offers only the names that field
+accepts. A value-type select appears for values that are not plain text, and
+**Change type** reveals it for text. The failure
 tab selects the saved workflow recovery default, Stop and tell me, or a
 literal limit of one or two automatic retries per agent step. The smaller
 of the step limit and captured workflow limit applies; retries never reset
@@ -1154,7 +1176,8 @@ explicit shell. Named shared commands and exact argv remain separate choices.
 
 Loop and reusable-workflow cards expand a read-only child graph and link to the
 child source for editing. The initial editor viewport fits its nodes; selecting
-a job explicitly focuses it. Small graphs omit the minimap. Job deletion removes
+a job explicitly focuses it, and closing job settings fits every card in view
+again. Small graphs omit the minimap. Job deletion removes
 inbound dependencies in the same undoable source edit.
 
 Structured environment, output and input controls include an **Advanced JSON**

@@ -68,9 +68,7 @@ export async function openJobSettings(page: Page, tab = "Steps") {
       .getByRole("button")
       .first()
       .click();
-  const dialog = page.getByRole("dialog").filter({
-    has: page.getByRole("heading", { name: "Job settings", exact: true }),
-  });
+  const dialog = page.getByRole("dialog", { name: /^Job settings: / });
   // Target the tab after the drawer reaches its final position.
   await dialog.evaluate(async (element) => {
     await Promise.all(
@@ -89,12 +87,41 @@ export async function openJobSettings(page: Page, tab = "Steps") {
   ).toBeVisible();
 }
 
+/** Expand the open job tab's Advanced section, where rarer fields live. */
+export async function openAdvanced(page: Page) {
+  const toggle = page
+    .getByRole("tabpanel")
+    .getByRole("button", { name: "Advanced", exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true")
+    await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+/** The step's raw action reference, under Advanced. */
+export async function actionReference(page: Page) {
+  await openAdvanced(page);
+  return page.getByLabel("Action reference", { exact: true });
+}
+
+/** Run the open agent step on one agent. */
+export async function chooseAgent(page: Page, name: string) {
+  const one = page.getByRole("button", { name: "One agent", exact: true });
+  if ((await one.getAttribute("aria-pressed")) !== "true") await one.click();
+  const agent = page.getByRole("combobox", { name: "Agent", exact: true });
+  if ((await agent.textContent()) !== name) {
+    await agent.click();
+    await page.getByRole("option", { name: new RegExp(`^${name} `) }).click();
+  }
+  await expect(agent).toHaveText(name);
+}
+
 export async function advancedField(page: Page, label: string, tab = "Steps") {
   await openJobSettings(page, tab);
   const toggle = page.getByRole("button", {
     name: `Advanced JSON: ${label}`,
     exact: true,
   });
+  if (!(await toggle.isVisible())) await openAdvanced(page);
   const accordion = toggle.locator(
     "xpath=ancestor::*[contains(@class, 'MuiAccordion-root')][1]",
   );

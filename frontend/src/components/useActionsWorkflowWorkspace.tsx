@@ -15,8 +15,11 @@ import {
   editorYaml,
   editActions,
   parseActions,
+  renameJob,
   type ActionWorkflow,
 } from "../actions-workflow";
+import { defaultStep } from "../action-defaults";
+import { typeReference } from "./StepTypeOptions";
 import type {
   AgentRecord,
   AgentsResponse,
@@ -75,6 +78,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [notice, setNotice] = useState("");
   const [inventoryWarning, setInventoryWarning] = useState("");
   const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [preferences, setPreferences] = useState<string[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [providerDefaults, setProviderDefaults] = useState<
     Record<string, ProviderDefaults>
@@ -110,6 +114,13 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   } | null>(null);
   const [startJob, setStartJob] = useState("");
   const [newKind, setNewKind] = useState("script");
+  // Jobs added with Add job in this editor session open on their steps.
+  const [createdJobs, setCreatedJobs] = useState<string[]>([]);
+  // A new loop job waits here while its workflow is chosen.
+  const [pendingLoop, setPendingLoop] = useState<{
+    source?: string;
+    target?: string;
+  } | null>(null);
   const [settings, setSettings] = useState(false);
   const [environments, setEnvironments] = useState<string[]>([]);
   const holder = useRef(editorHolder());
@@ -143,6 +154,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       .then(([inventory, defaults]) => {
         if (!abort.signal.aborted) {
           setAgents(inventory.agents);
+          setPreferences(inventory.preferences ?? []);
           setDefaultModel(defaults.effective.workflow_defaults.model || "");
           setProviderDefaults(defaults.effective.workflow_defaults.providers);
         }
@@ -220,6 +232,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setPromptEdits({});
     setLoadedDocument("");
     setLastValid(null);
+    setCreatedJobs([]);
     const endpoint = projectPath(
       `/api/workflows/${encoded(key)}`,
       requestProject,
@@ -583,21 +596,19 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setContextMenu(null);
     setDrawer(false);
   }
-  function addJob(source?: string, target?: string) {
+  function addJob(source?: string, target?: string, workflow?: string) {
+    if (newKind === "loop" && !workflow) {
+      setPendingLoop({ source, target });
+      return;
+    }
+    if (newKind !== "script" && !manifest) return;
     let number = 1;
     while (parsed.value?.jobs[`job_${number}`]) number++;
     const id = `job_${number}`;
-    const step =
-      newKind === "script"
-        ? { run: "echo Ready" }
-        : {
-            uses: newKind,
-            with: Object.fromEntries(
-              (manifest?.builtin_inputs[newKind]?.required ?? []).map(
-                (field) => [field, field === "max-iterations" ? "3" : ""],
-              ),
-            ),
-          };
+    const step = defaultStep(
+      manifest ? typeReference(manifest, newKind) : "",
+      workflow,
+    );
     let next = editActions(text, ["jobs", id], {
       ...(source ? { needs: [source] } : {}),
       steps: [step],
@@ -613,9 +624,28 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       );
     }
     setText(next);
+    setCreatedJobs((current) => [...current, id]);
     setJobId(id);
     setDrawer(true);
   }
+  /** Rename a job and every reference to it in one undoable edit. */
+  function renameJobId(from: string, to: string) {
+    try {
+      setText(renameJob(text, from, to));
+      // The drawer reopens on General, where the rename was made.
+      setJobId(to);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  /** Show the YAML, for values the forms cannot edit. */
+  function editYaml() {
+    setDrawer(false);
+    setMode("YAML");
+  }
+  const loopTargets = inventory
+    .filter((item) => item.key !== key)
+    .map((item) => ({ key: item.key, name: item.name }));
   async function runFromJob(id: string) {
     const point = `root.${id}`;
     const entries = parsed.value?.entrypoints ?? [];
@@ -721,6 +751,13 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setFocusRequest,
     newKind,
     setNewKind,
+    createdJobs,
+    pendingLoop,
+    setPendingLoop,
+    loopTargets,
+    renameJobId,
+    editYaml,
+    preferences,
     events,
     triggerRows,
     toggleTrigger,

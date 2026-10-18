@@ -14,6 +14,7 @@ import {
   Typography,
 } from "@mui/material";
 
+import { useId } from "react";
 import { moveActionStep, launchView } from "../actions-workflow";
 
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
@@ -74,7 +75,13 @@ export function WorkflowEditorDialogs({
     save,
     lease,
     valid,
+    preferences,
+    createdJobs,
+    loopTargets,
+    renameJobId,
+    editYaml,
   } = state;
+  const heading = useId();
   return (
     <>
       <Drawer
@@ -83,13 +90,19 @@ export function WorkflowEditorDialogs({
         onClose={() => setDrawer(false)}
         slotProps={{
           paper: {
+            "aria-labelledby": heading,
             sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw", p: 2 },
           },
         }}
       >
         <Stack spacing={2}>
-          <Typography component="h2" variant="h6">
-            Job settings
+          <Typography
+            component="h2"
+            variant="h6"
+            id={heading}
+            sx={{ overflowWrap: "anywhere" }}
+          >
+            Job settings: {job?.name || jobId}
           </Typography>
           <Stack direction="row">
             <Button onClick={() => setDrawer(false)}>Close job settings</Button>
@@ -110,6 +123,13 @@ export function WorkflowEditorDialogs({
           </Stack>
           {job && parsed.value && manifest && (
             <ActionJobEditor
+              key={jobId}
+              initialTab={createdJobs.includes(jobId) ? "Steps" : "General"}
+              preferences={preferences}
+              loopTargets={loopTargets}
+              onRename={(id) => renameJobId(jobId, id)}
+              onEditYaml={editYaml}
+              onOpenGetStarted={props.onOpenGetStarted}
               workflow={parsed.value}
               jobId={jobId}
               index={index}
