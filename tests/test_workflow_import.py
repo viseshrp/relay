@@ -387,3 +387,105 @@ def test_suggested_keys_are_free_and_portable(
         (tmp_path / name).write_text("on: push\n", encoding="utf-8")
 
     assert _suggested_key(file_name, tmp_path) == expected
+
+
+def test_a_single_hosted_trigger_becomes_a_manual_trigger() -> None:
+    result = convert_github_workflow(
+        "on: pull_request\njobs:\n  a:\n    steps:\n      - run: echo\n"
+    )
+
+    assert result.changes == (
+        "Removed the pull_request trigger; it has no local equivalent.",
+        "Added workflow_dispatch so the workflow can be run by hand.",
+    )
+    assert result.yaml.startswith("on: workflow_dispatch\n")
+    assert workflow_diagnostics(result.yaml) == []
+
+
+def test_jobs_that_are_not_a_mapping_are_left_to_validation() -> None:
+    result = convert_github_workflow("on: push\njobs: []\n")
+
+    assert result.changes == ()
+    assert result.yaml == "on: push\njobs: []\n"
+    assert result.unresolved
+
+
+def test_a_replaced_action_without_inputs_gets_no_with_block() -> None:
+    source = (
+        "on: push\n"
+        "jobs:\n"
+        "  a:\n"
+        "    timeout-minutes: 5\n"
+        "    steps:\n"
+        "      - uses: actions/upload-artifact@v4\n"
+    )
+
+    result = convert_github_workflow(source)
+
+    assert result.changes == (
+        "Replaced actions/upload-artifact@v4 with relay/upload-artifact@v1 in job a.",
+    )
+    assert "      - uses: relay/upload-artifact@v1\n" in result.yaml
+    assert "with:" not in result.yaml
+    assert "timeout-minutes: 5" in result.yaml
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "on: push\njobs:\n  a:\n    runs-on: x\n    # Run the tests.\n"
+            "    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:\n    # Run the tests.\n    steps:\n      - run: pytest\n",
+        ),
+        (
+            "on: push\njobs:\n  a:\n    runs-on: x\n    # One.\n    permissions: {}\n"
+            "    # Two.\n    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:\n    # One.\n    # Two.\n    steps:\n      - run: pytest\n",
+        ),
+        (
+            "on: push\njobs:\n  a:\n    name: A\n    runs-on: x\n    # Next.\n"
+            "    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:\n    name: A\n    # Next.\n    steps:\n      - run: pytest\n",
+        ),
+        (
+            "on: push\njobs:\n  a:\n    name: A  # Label.\n    runs-on: x\n    # Next.\n"
+            "    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:\n    name: A  # Label.\n    # Next.\n"
+            "    steps:\n      - run: pytest\n",
+        ),
+        (
+            "on: push\njobs:\n  a:\n    # Hosted.\n    runs-on: x\n    # Next.\n"
+            "    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:\n    # Hosted.\n    # Next.\n    steps:\n      - run: pytest\n",
+        ),
+        (
+            "on: push\njobs:\n  a:  # Job a.\n    runs-on: x\n    # Next.\n"
+            "    steps:\n      - run: pytest\n",
+            "on: push\njobs:\n  a:  # Job a.\n    # Next.\n    steps:\n      - run: pytest\n",
+        ),
+    ],
+)
+def test_comments_after_a_removed_key_move_up(source: str, expected: str) -> None:
+    assert convert_github_workflow(source).yaml == expected
+
+
+def test_listing_names_an_unreadable_workflow_by_its_file_name(
+    owner: Client, project: RelayProject
+) -> None:
+    project.write(".github/workflows/broken.yml", "name: [unclosed\n")
+
+    files = owner.get("/api/workflow-import").json()["files"]
+
+    assert {"path": ".github/workflows/broken.yml", "name": "broken.yml"} in files
+
+
+def test_import_refuses_a_file_that_is_not_utf8(owner: Client, project: RelayProject) -> None:
+    folder = project.repository / ".github" / "workflows"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "latin.yml").write_bytes(b"name: \xff\non: push\n")
+
+    response = post(owner, "/api/workflow-import", {"path": ".github/workflows/latin.yml"})
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "The workflow file is not UTF-8 text."

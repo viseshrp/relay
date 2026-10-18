@@ -322,12 +322,14 @@ def _remove(container: Any, key: Any) -> None:
         return
     if position == 0:
         # The parent shares this list for the comments above the first entry.
-        if container.ca.comment is None:
-            container.ca.comment = [None, [_comment(tail)]]
-        elif container.ca.comment[1] is None:
-            container.ca.comment[1] = [_comment(tail)]
+        comment = container.ca.comment
+        if comment is not None and comment[1] is not None:
+            comment[1].append(_comment(tail))
+        elif comment is not None and comment[0] is not None:
+            # The parent key's end-of-line comment is emitted in place of the list.
+            comment[0].value += tail
         else:
-            container.ca.comment[1].append(_comment(tail))
+            container.ca.comment = [None, [_comment(tail)]]
         return
     holder, slot, index = _last_slot(container, keys[position - 1])
     comments = holder.ca.items.setdefault(slot, [None, None, None, None])
