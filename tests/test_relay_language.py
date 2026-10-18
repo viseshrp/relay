@@ -61,6 +61,16 @@ def test_all_runner_selector_forms_are_removed(selector: object) -> None:
         load(source({"jobs": {"check": {"runs-on": selector, "steps": [{"run": "echo"}]}}}))
 
 
+def test_runner_selector_points_to_the_agent_action() -> None:
+    with pytest.raises(WorkflowValidationError) as caught:
+        load("jobs: {check: {runs-on: ubuntu-latest, steps: [{run: echo}]}}\n")
+
+    assert caught.value.message == (
+        "workflow.jobs.check.runs-on: Unknown workflow field. Jobs run on this computer. "
+        "Remove runs-on. To have an AI agent do the work, add a relay/agent@v1 step."
+    )
+
+
 @pytest.mark.parametrize(
     "field", ["permissions", "container", "services", "snapshot", "cancel-timeout-minutes"]
 )

@@ -112,7 +112,10 @@ def _warning(path: str, message: str) -> WorkflowValidationError:
 
 
 FIELD_HINTS = {
-    "runs-on": "Relay runs on this computer. Remove runs-on; select an agent in the step.",
+    "runs-on": (
+        "Jobs run on this computer. Remove runs-on. To have an AI agent do the work, "
+        f"add a {current_builtin('agent').reference} step."
+    ),
     "permissions": "Authentication belongs to your installed tools. Remove permissions.",
     "container": "Use a local script or command instead of a container.",
     "services": "Start required services outside Relay before running this workflow.",

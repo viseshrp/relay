@@ -2739,7 +2739,10 @@ where that familiarity stops, usually without saying so.
     `test_every_rule_reports_its_change_once`, the path-safety tests
     `test_import_refuses_paths_that_leave_the_folder` and
     `test_import_refuses_a_symlinked_file` in `tests/test_workflow_import.py`,
-    and `frontend/e2e/workflow-import.spec.ts`.
+    and `frontend/e2e/workflow-import.spec.ts`. The `runs-on` message now
+    reads as the Fix asks, checked by
+    `test_runner_selector_points_to_the_agent_action` in
+    `tests/test_relay_language.py`.
 
 - [x] **WB-38. Answer every unsupported trigger the same way.**
   - **Priority:** P2.

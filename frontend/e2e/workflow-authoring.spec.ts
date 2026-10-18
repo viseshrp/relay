@@ -380,6 +380,9 @@ test("matrix, concurrency, comparisons, and bounded retry controls round trip wi
     .getByRole("button", { name: "Work", exact: true })
     .click();
   await openAdvanced(page);
+  // Matrix jobs run one at a time, so the form offers no max-parallel field.
+  await expect(page.getByText("Relay runs them one at a time")).toBeVisible();
+  await expect(page.getByLabel(/parallel/i)).toHaveCount(0);
   await page
     .getByRole("textbox", { name: "Concurrency group", exact: true })
     .fill("local-build");
