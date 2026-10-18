@@ -46,8 +46,8 @@ Verification:
 - Browser shard 2 passed 90 of 91 tests. "Home reads once under StrictMode
   and hidden tabs make no polling requests" in `data-layer.spec.ts` failed
   once because the test hides the tab before the first dashboard read
-  settles. That code is unchanged by this work. Pushing the merge with `main`
-  cancelled its re-run; CI on `ebdc7da` and later heads runs the shard again.
+  settles. That code is unchanged by this work. It passed on `a5758fe`, and
+  `b7ced0a` (pull request #29) now settles that read before hiding the tab.
 - The complete browser suite (`make test-frontend`) passed on `9399b5a` in
   the Main workflow's baseline run.
 - Locally, `uv run pytest tests -q` and `make check` passed, except four
@@ -70,10 +70,6 @@ Known follow-ups found during implementation, outside the items:
 - Rewriting a document with ruamel (the importer and **Update to current
   versions**) turns a one-key flow mapping inside a flow list, such as
   `[{uses: x}]`, into `[uses: x]`. The YAML means the same.
-- The hidden-tab test in `frontend/e2e/data-layer.spec.ts` should wait for
-  the first `/api/dashboard` response to finish before it hides the tab.
-  Otherwise the read can settle after `page.clock.install()`, stay in the
-  shared read cache, and answer the refresh without a request.
 
 ## How to use this document
 
