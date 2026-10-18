@@ -55,6 +55,43 @@ host_path() {
   fi
 }
 
+use_host_ids() {
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    # Linux bind mounts keep host ownership, so the container user must match it.
+    local uid gid
+    uid="$(id -u)"
+    gid="$(id -g)"
+    if ((uid >= 1000)); then
+      export DOCKER_UID="${DOCKER_UID:-${uid}}"
+    fi
+    if ((gid >= 1000)); then
+      export DOCKER_GID="${DOCKER_GID:-${gid}}"
+    fi
+  fi
+}
+
+set_relay_mounts() {
+  local worktree="$1" data_home="$2" config_volume="$3" state_volume="$4"
+  local worktree_source data_source
+  worktree_source="$(host_path "${worktree}")"
+  data_source="$(host_path "${data_home}")"
+  # The repository and Relay's data keep their host paths in the container, so each
+  # repository keeps its own project identity and host Git can still resolve the run
+  # worktrees that Relay registers in the repository. Docker Desktop reports the
+  # mount root as root-owned, so Git needs that path marked safe.
+  RELAY_MOUNTS=(
+    -v "${worktree_source}:${worktree}"
+    -w "${worktree}"
+    -e GIT_CONFIG_COUNT=1
+    -e GIT_CONFIG_KEY_0=safe.directory
+    -e "GIT_CONFIG_VALUE_0=${worktree}"
+    -v "${data_source}:${data_home}"
+    -e "XDG_DATA_HOME=${data_home}"
+    -v "${config_volume}:/home/relay/.config/relay"
+    -v "${state_volume}:/home/relay/.local/state/relay"
+  )
+}
+
 cmd_build() {
   local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local version
@@ -221,25 +258,12 @@ cmd_up() {
   data_home="$(cd "${data_home}" && pwd)"
 
   if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
-    if [[ "$(uname -s)" == "Linux" ]]; then
-      # Linux bind mounts keep host ownership, so the container user must match it.
-      local uid gid
-      uid="$(id -u)"
-      gid="$(id -g)"
-      if ((uid >= 1000)); then
-        export DOCKER_UID="${DOCKER_UID:-${uid}}"
-      fi
-      if ((gid >= 1000)); then
-        export DOCKER_GID="${DOCKER_GID:-${gid}}"
-      fi
-    fi
+    use_host_ids
     # Rebuild so the container serves the current sources; unchanged layers are cached.
     cmd_build
   fi
 
-  local worktree_source data_source
-  worktree_source="$(host_path "${worktree}")"
-  data_source="$(host_path "${data_home}")"
+  set_relay_mounts "${worktree}" "${data_home}" relay-config relay-state
 
   local tty_flags=()
   if [[ -t 0 && -t 1 ]]; then
@@ -247,22 +271,10 @@ cmd_up() {
   fi
 
   echo "▶️ Starting Relay container at http://127.0.0.1:${port}/ for ${worktree}..."
-  # The repository and Relay's data keep their host paths in the container, so each
-  # repository keeps its own project identity and host Git can still resolve the run
-  # worktrees that Relay registers in the repository. Docker Desktop reports the
-  # mount root as root-owned, so Git needs that path marked safe.
   exec docker run --rm ${tty_flags[@]+"${tty_flags[@]}"} \
     --init \
     -p "127.0.0.1:${port}:${port}" \
-    -v "${worktree_source}:${worktree}" \
-    -w "${worktree}" \
-    -e GIT_CONFIG_COUNT=1 \
-    -e GIT_CONFIG_KEY_0=safe.directory \
-    -e "GIT_CONFIG_VALUE_0=${worktree}" \
-    -v "${data_source}:${data_home}" \
-    -e "XDG_DATA_HOME=${data_home}" \
-    -v relay-config:/home/relay/.config/relay \
-    -v relay-state:/home/relay/.local/state/relay \
+    "${RELAY_MOUNTS[@]}" \
     "${image}" \
     up --port "${port}" ${DOCKER_UP_ARGS:-}
 }
