@@ -41,9 +41,15 @@ export interface LanguageManifest {
   property_descriptions: Record<string, string>;
   builtins: string[];
   builtin_inputs: Record<string, BuiltinInputs>;
+  /** Every registered version; deprecated_in names the release that deprecated it. */
   builtin_versions: Record<
     string,
-    { name: string; major: number; status: "current" | "deprecated" }
+    {
+      name: string;
+      major: number;
+      status: "current" | "deprecated";
+      deprecated_in: string;
+    }
   >;
   cache_modes: string[];
   value_hints: { shell: string[] };

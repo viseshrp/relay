@@ -5,12 +5,15 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Alert,
+  Button,
   Stack,
   Typography,
 } from "@mui/material";
+import { actionLabel } from "../action-labels";
 import type { ActionStep, ActionWorkflow } from "../actions-workflow";
 import type { AgentRecord, ProviderDefaults } from "../types";
-import { parseBuiltin } from "../builtin-actions";
+import { isDeprecatedBuiltin, parseBuiltin } from "../builtin-actions";
 import { inputHelp, propertyHelp } from "../field-help";
 import { parseListInput } from "../list-input";
 import type { LanguageManifest } from "../workflow-language";
@@ -37,6 +40,7 @@ export function ActionBuiltinFields({
   onEdits,
   onChange,
   onEditYaml,
+  onUpgrade,
   onOpenGetStarted,
 }: {
   step: ActionStep;
@@ -53,6 +57,8 @@ export function ActionBuiltinFields({
   onEdits: (reference: string, edit: PromptEdits[string]) => void;
   onChange: (field: string, value: unknown) => void;
   onEditYaml: () => void;
+  /** Move the workflow's deprecated steps to the current version. */
+  onUpgrade?: () => void;
   onOpenGetStarted?: () => void;
 }) {
   const inputs = step.with ?? {};
@@ -84,6 +90,18 @@ export function ActionBuiltinFields({
           : [];
   return (
     <Stack spacing={2}>
+      {isDeprecatedBuiltin(manifest, step.uses) && (
+        <Alert
+          severity="info"
+          action={
+            onUpgrade ? (
+              <Button onClick={onUpgrade}>Update to current versions</Button>
+            ) : undefined
+          }
+        >
+          This step uses an older version of {actionLabel(step.uses)}.
+        </Alert>
+      )}
       {action === "agent" && (
         <>
           <AgentRouteField

@@ -64,7 +64,14 @@ export async function createImportedWorkflow(
   return created.key;
 }
 
-function Sentences({ label, items }: { label: string; items: string[] }) {
+/** A headed list of sentences, such as the changes a conversion made. */
+export function Sentences({
+  label,
+  items,
+}: {
+  label: string;
+  items: string[];
+}) {
   return (
     <>
       <Typography variant="subtitle1" component="h3">

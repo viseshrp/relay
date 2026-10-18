@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import json
 import re
@@ -43,9 +43,19 @@ _RESTORE_KEYS = (
 )
 
 
+# Converts the previous major version's `with` inputs to this version's. It
+# returns the new inputs and one sentence per input it changed or dropped, and
+# raises WorkflowValidationError when it cannot convert them safely.
+Upgrade = Callable[[Mapping[str, object]], tuple[dict[str, object], tuple[str, ...]]]
+
+
 @dataclass(frozen=True, slots=True)
 class BuiltinAction:
-    """One major version of a built-in action, its inputs, and their help text."""
+    """One major version of a built-in action, its inputs, and their help text.
+
+    A deprecated version names the Relay release that deprecated it in
+    deprecated_in. The version after it sets upgrade.
+    """
 
     name: str
     major: int
@@ -55,6 +65,8 @@ class BuiltinAction:
     summary: str = ""
     descriptions: Mapping[str, str] = field(default_factory=dict)
     values: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    deprecated_in: str = ""
+    upgrade: Upgrade | None = None
 
     @property
     def reference(self) -> str:
@@ -334,6 +346,15 @@ BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (
     ),
 )
 _BY_REFERENCE: dict[str, BuiltinAction] = {action.reference: action for action in BUILTIN_ACTIONS}
+# Versions removed after their deprecation period: reference -> (the Relay
+# release that removed it, its replacement). Relay never runs the replacement
+# in their place.
+REMOVED_BUILTINS: dict[str, tuple[str, str]] = {}
+
+
+def registered_builtins() -> tuple[BuiltinAction, ...]:
+    """Every registered version, current and deprecated, in registry order."""
+    return BUILTIN_ACTIONS
 
 
 def parse_builtin(reference: object) -> tuple[str, int] | None:
@@ -358,12 +379,17 @@ def is_builtin(reference: object, name: str) -> bool:
 
 
 def builtin_references(name: str) -> tuple[str, ...]:
-    """Every registered version of one action, oldest first."""
-    versions = sorted(
-        (action for action in BUILTIN_ACTIONS if action.name == name),
-        key=lambda action: action.major,
-    )
-    return tuple(action.reference for action in versions)
+    """Every registered or removed version of one action, oldest first.
+
+    Removed versions stay listed so persisted rows from older runs keep their
+    meaning; builtin() still returns None for them.
+    """
+    majors = {action.major: action.reference for action in BUILTIN_ACTIONS if action.name == name}
+    for reference in REMOVED_BUILTINS:
+        parsed = parse_builtin(reference)
+        if parsed is not None and parsed[0] == name:
+            majors.setdefault(parsed[1], reference)
+    return tuple(majors[major] for major in sorted(majors))
 
 
 def current_builtin(name: str) -> BuiltinAction:
@@ -372,6 +398,36 @@ def current_builtin(name: str) -> BuiltinAction:
         if action.name == name and action.status == "current":
             return action
     raise KeyError(name)
+
+
+def removed_builtin(reference: object) -> tuple[str, str] | None:
+    """The release that removed a reference and its replacement, if it was removed."""
+    return REMOVED_BUILTINS.get(reference) if isinstance(reference, str) else None
+
+
+def newer_versions(reference: object) -> tuple[BuiltinAction, ...]:
+    """The versions after a deprecated or removed reference, up to the current one.
+
+    Each one's upgrade converts the inputs of the version before it. A current,
+    unknown, or local reference has none.
+    """
+    parsed = parse_builtin(reference)
+    action = builtin(reference)
+    older = (
+        action.status == "deprecated"
+        if action is not None
+        else removed_builtin(reference) is not None
+    )
+    if parsed is None or not older:
+        return ()
+    name, major = parsed
+    last = current_builtin(name).major
+    return tuple(
+        sorted(
+            (item for item in BUILTIN_ACTIONS if item.name == name and major < item.major <= last),
+            key=lambda item: item.major,
+        )
+    )
 
 
 def parse_list_input(value: object, field: str) -> list[str]:

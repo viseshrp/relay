@@ -26,7 +26,15 @@ from relay.errors import WorkflowValidationError
 from relay.paths import safe_resolve
 
 from . import expressions
-from .builtins import BUILTIN_ACTIONS, SHELL_HINT, SHELLS, builtin, current_builtin, is_builtin
+from .builtins import (
+    SHELL_HINT,
+    SHELLS,
+    builtin,
+    current_builtin,
+    is_builtin,
+    registered_builtins,
+    removed_builtin,
+)
 from .suggest import closest
 
 DIALECT = "relay-local-1"
@@ -500,6 +508,10 @@ def _unnormalized(reference: str) -> bool:
 def _uses_guidance(reference: str) -> str:
     """What to write instead of an unsupported uses reference."""
     base = reference.partition("@")[0]
+    removed = removed_builtin(reference)
+    if removed is not None:
+        # The replacement is the suggestion; Relay never runs it in this one's place.
+        return f"{reference} was removed in Relay {removed[0]}; use {removed[1]}."
     if reference.startswith(LOCAL_ACTIONS) and "${{" not in reference:
         # Sources are frozen under their normalized path, so only that form is found.
         written = posixpath.normpath(reference)
@@ -527,7 +539,9 @@ def _uses_guidance(reference: str) -> str:
     if reference.startswith("./.github/actions/"):
         name = base.removeprefix("./.github/actions/").strip("/") or "<name>"
         return f"Move the action to ./.relay/actions/{name} and use that path."
-    current = sorted(action.reference for action in BUILTIN_ACTIONS if action.status == "current")
+    current = sorted(
+        action.reference for action in registered_builtins() if action.status == "current"
+    )
     suggestion = closest(reference, current) if reference.startswith("relay/") else None
     if suggestion:
         return f"Did you mean {suggestion}?"
@@ -579,12 +593,16 @@ def validate_steps(steps: object, path: str, start: int = 0) -> None:
             )
         ):
             message = f"{here}.uses"
-            raise _issue(
+            issue = _issue(
                 message,
                 "Only frozen local and versioned relay actions are supported. "
                 + _uses_guidance(str(reference)),
                 unsupported=True,
             )
+            if removed_builtin(reference) is not None:
+                # The editor offers its one-click update for this error.
+                issue.context["removed"] = str(reference)
+            raise issue
         script = step.get("run")
         found = FILE_VARIABLES.search(script) if isinstance(script, str) else None
         if found:
@@ -989,17 +1007,28 @@ def _reported_at(field: str) -> Iterator[None]:
     """Attribute a source error to the step or job that names the source.
 
     Nested sources report at the outermost reference, which is the one the
-    open document contains.
+    open document contains. A removed built-in in a nested source is fixed in
+    that file, so the error no longer offers the open document's update.
     """
     try:
         yield
     except WorkflowValidationError as error:
         error.context["field"] = field
+        error.context.pop("removed", None)
         raise
 
 
-def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, str]:
-    """Freeze transitive local workflows, action metadata, and JavaScript bytes."""
+def capture_sources(
+    document: ActionsDocument,
+    project_root: Path,
+    *,
+    documents: set[str] | None = None,
+) -> dict[str, str]:
+    """Freeze transitive local workflows, action metadata, and JavaScript bytes.
+
+    With documents, also collect the keys of the reusable workflows and action
+    metadata, as opposed to scripts and other action files.
+    """
     result = {}
     stack: list[str] = []
     workflows = set()
@@ -1031,6 +1060,8 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
         except (OSError, UnicodeError):
             raise _issue(reference, "Local source cannot be read as UTF-8.") from None
         result[key] = text
+        if documents is not None:
+            documents.add(key)
         if sum(len(item.encode()) for item in result.values()) > 10 * MAX_YAML_BYTES:
             message = "uses"
             raise _issue(message, "Captured sources exceed 10 MiB.")
@@ -1234,15 +1265,52 @@ def _expression_references(text: str, *, bare: bool) -> Iterator[tuple[str, str]
         yield from _named_properties(tree)
 
 
+def deprecated_builtin_warnings(
+    value: Mapping[str, Any], prefix: str
+) -> list[WorkflowValidationError]:
+    """One warning per step that uses a deprecated built-in version.
+
+    It visits jobs.<id>.steps[<n>] in a workflow and runs.steps[<n>] in action
+    metadata. Each field starts with prefix, such as the key of a captured
+    source and ": ", and context["deprecated"] holds the old reference.
+    """
+    containers: list[tuple[str, object]] = []
+    jobs = value.get("jobs")
+    if isinstance(jobs, Mapping):
+        containers.extend(
+            (f"jobs.{job_id}.steps", job.get("steps"))
+            for job_id, job in jobs.items()
+            if isinstance(job, Mapping)
+        )
+    runs = value.get("runs")
+    if isinstance(runs, Mapping):
+        containers.append(("runs.steps", runs.get("steps")))
+    found = []
+    for path, steps in containers:
+        for index, step in enumerate(steps if isinstance(steps, list) else []):
+            action = builtin(step.get("uses")) if isinstance(step, Mapping) else None
+            if action is None or action.status != "deprecated":
+                continue
+            replacement = current_builtin(action.name).reference
+            issue = _warning(
+                f"{prefix}{path}[{index}].uses",
+                f"{action.reference} is deprecated and will be removed in a later Relay "
+                f"release. Use {replacement}.",
+            )
+            issue.context["deprecated"] = action.reference
+            found.append(issue)
+    return found
+
+
 def workflow_warnings(
     document: ActionsDocument,
 ) -> list[WorkflowValidationError]:
     """Non-blocking findings for a source that already validates.
 
     Each warning names an input, earlier step, or needed job that cannot supply
-    a value, or an agent step without instructions. Warnings appear in source
-    order; callers locate them with _locate. Nothing here reads files or
-    credentials.
+    a value, an agent step without instructions, or a step on a deprecated
+    built-in version. Warnings appear in source order; callers locate them
+    with _locate. Nothing here reads files or credentials.
     """
     workflow = document.value
     jobs = cast(Mapping[str, Mapping[str, Any]], workflow["jobs"])
@@ -1262,6 +1330,8 @@ def workflow_warnings(
         if len(found) < MAX_WARNINGS:
             found.setdefault((path, message), _warning(path, message))
 
+    for issue in deprecated_builtin_warnings(workflow, "")[:MAX_WARNINGS]:
+        found[(str(issue.context["field"]), issue.message)] = issue
     for job_id, job in jobs.items():
         for index, step in enumerate(job.get("steps", [])):
             if not is_builtin(step.get("uses"), "agent"):
@@ -1352,7 +1422,7 @@ def support_manifest() -> dict[str, Any]:
         "job_execution": "serial",
         "definitions": language_definitions(),
         "builtins": sorted(
-            action.reference for action in BUILTIN_ACTIONS if action.status == "current"
+            action.reference for action in registered_builtins() if action.status == "current"
         ),
         "property_descriptions": language_property_descriptions(),
         "builtin_inputs": {
@@ -1363,15 +1433,16 @@ def support_manifest() -> dict[str, Any]:
                 "descriptions": dict(action.descriptions),
                 "values": {key: list(values) for key, values in action.values.items()},
             }
-            for action in BUILTIN_ACTIONS
+            for action in registered_builtins()
         },
         "builtin_versions": {
             action.reference: {
                 "name": action.name,
                 "major": action.major,
                 "status": action.status,
+                "deprecated_in": action.deprecated_in,
             }
-            for action in BUILTIN_ACTIONS
+            for action in registered_builtins()
         },
         "events": sorted(EVENTS),
         "cache_modes": sorted(CACHE_MODES),

@@ -18,6 +18,7 @@ import { useId } from "react";
 import { moveActionStep, launchView } from "../actions-workflow";
 
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
+import { Sentences } from "./GitHubImportPanel";
 import { LaunchPanel } from "./LaunchPanel";
 
 import { ActionJobEditor } from "./ActionJobEditor";
@@ -80,6 +81,10 @@ export function WorkflowEditorDialogs({
     loopTargets,
     renameJobId,
     editYaml,
+    upgrade,
+    upgradeOpen,
+    setUpgradeOpen,
+    upgradeVersions,
   } = state;
   const heading = useId();
   return (
@@ -129,6 +134,7 @@ export function WorkflowEditorDialogs({
               loopTargets={loopTargets}
               onRename={(id) => renameJobId(jobId, id)}
               onEditYaml={editYaml}
+              onUpgrade={() => void upgradeVersions()}
               onOpenGetStarted={props.onOpenGetStarted}
               workflow={parsed.value}
               jobId={jobId}
@@ -211,6 +217,34 @@ export function WorkflowEditorDialogs({
           >
             Apply formatting
           </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Updated to current versions</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1}>
+            {upgrade?.changes.length ? (
+              <Sentences label="Changes" items={upgrade.changes} />
+            ) : (
+              <Typography variant="body2">
+                This workflow needed no changes.
+              </Typography>
+            )}
+            {Boolean(upgrade?.unresolved.length) && (
+              <Sentences
+                label="Check by hand"
+                items={upgrade?.unresolved ?? []}
+              />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUpgradeOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
       <CreateWorkflowDialog

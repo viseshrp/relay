@@ -507,9 +507,47 @@ output, a clearer message, or a fix that restores documented behavior. Any
 other change ships as the next major version.
 
 The support manifest lists every registered version under `builtin_versions`,
-with its action name, major version, and status, and its inputs under
-`builtin_inputs`, with a one-line summary, a description of each input, and
-the fixed values an input accepts. `builtins` lists the current references.
+with its action name, major version, status, and `deprecated_in`, and its
+inputs under `builtin_inputs`, with a one-line summary, a description of each
+input, and the fixed values an input accepts. `builtins` lists the current
+references.
+
+When a breaking change ships, the next major version becomes current and the
+previous one is deprecated. A deprecated version still validates, launches,
+and runs exactly as before; validation adds a warning such as
+`relay/<name>@v1 is deprecated and will be removed in a later Relay release.
+Use relay/<name>@v2.`. The warning also names a reusable workflow or local
+action that uses the old version, with that file's path and no line. A run
+keeps the version it launched with, including a run that waits for an
+approval while Relay is upgraded.
+
+In the editor, **Update to current versions** moves each deprecated step in
+the open workflow to the current version and converts its inputs. The result
+is an unsaved draft that **Undo** reverts. It lists one change per updated
+step, and lists under **Check by hand** each step it could not convert and
+each problem the result still has. Nothing is updated on save or in the
+background.
+
+A deprecated version stays in the Relay release that deprecates it and in the
+next minor release. It may be removed from the minor release after that at the
+earliest: a version deprecated in 0.4.0 may be removed in 0.6.0.
+
+| Deprecated reference | Replacement | Deprecated in | Removable from |
+| --- | --- | --- | --- |
+| None yet | | | |
+
+A removed version is a validation error that names its replacement:
+`Only frozen local and versioned relay actions are supported.
+relay/<name>@v1 was removed in Relay 0.6.0; use relay/<name>@v2.`.
+**Update to current versions** fixes it. Relay never runs the replacement in
+its place. A run that launched on the removed version fails at its next step
+on that version and says to cancel the run and launch the workflow again.
+Finish or cancel runs that use a deprecated version before upgrading to the
+release that removes it.
+
+| Removed reference | Replacement | Removed in |
+| --- | --- | --- |
+| None yet | | |
 
 ## Variables, secrets, and environments
 

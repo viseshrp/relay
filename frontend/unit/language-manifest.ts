@@ -65,6 +65,7 @@ export const manifest: LanguageManifest = {
         name: reference.slice("relay/".length, reference.indexOf("@")),
         major: 1,
         status: "current" as const,
+        deprecated_in: "",
       },
     ]),
   ),

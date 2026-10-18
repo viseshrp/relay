@@ -100,6 +100,8 @@ export function ActionsWorkflowWorkspaceView({
     draft,
     diagnostics,
     warnings,
+    outdated,
+    upgradeVersions,
     setJobId,
     setDrawer,
   } = state;
@@ -256,6 +258,13 @@ export function ActionsWorkflowWorkspaceView({
               </Typography>
             </Box>
           </Alert>
+        )}
+        {outdated && (
+          <Box>
+            <Button variant="outlined" onClick={() => void upgradeVersions()}>
+              Update to current versions
+            </Button>
+          </Box>
         )}
         {/* An empty source explains itself beside its fixes, below. */}
         {validation !== "empty" &&

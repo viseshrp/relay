@@ -30,6 +30,8 @@ export interface ActionJobEditorProps {
   loopTargets: LoopTarget[];
   onRename: (id: string) => void;
   onEditYaml: () => void;
+  /** Move this workflow's deprecated built-in steps to the current version. */
+  onUpgrade?: () => void;
   onOpenGetStarted?: () => void;
 }
 
@@ -53,6 +55,7 @@ export function useActionJobEditor({
   loopTargets,
   onRename,
   onEditYaml,
+  onUpgrade,
   onOpenGetStarted,
 }: ActionJobEditorProps) {
   const [tab, setTab] = useState<string>(initialTab);
@@ -127,6 +130,7 @@ export function useActionJobEditor({
     loopTargets,
     onRename,
     onEditYaml,
+    onUpgrade,
     onOpenGetStarted,
   };
 }

@@ -3,6 +3,7 @@ import {
   builtinLabel,
   currentBuiltin,
   isBuiltin,
+  isDeprecatedBuiltin,
   parseBuiltin,
 } from "../src/builtin-actions";
 import type { LanguageManifest } from "../src/workflow-language";
@@ -37,15 +38,39 @@ test("builtinLabel names the action and keeps other references", () => {
   expect(builtinLabel("./.relay/actions/lint")).toBe("./.relay/actions/lint");
 });
 
-test("currentBuiltin returns the current reference for an action", () => {
-  const manifest = {
-    builtin_versions: {
-      "relay/command@v1": { name: "command", major: 1, status: "deprecated" },
-      "relay/command@v2": { name: "command", major: 2, status: "current" },
+// A stand-in pair: Relay ships one version of each built-in.
+const twoVersions = {
+  builtin_versions: {
+    "relay/command@v1": {
+      name: "command",
+      major: 1,
+      status: "deprecated",
+      deprecated_in: "0.0.0",
     },
-  } as unknown as LanguageManifest;
-  expect(currentBuiltin(manifest, "command")).toBe("relay/command@v2");
-  expect(() => currentBuiltin(manifest, "loop")).toThrow(
+    "relay/command@v2": {
+      name: "command",
+      major: 2,
+      status: "current",
+      deprecated_in: "",
+    },
+  },
+} as unknown as LanguageManifest;
+
+test("currentBuiltin returns the current reference for an action", () => {
+  expect(currentBuiltin(twoVersions, "command")).toBe("relay/command@v2");
+  expect(() => currentBuiltin(twoVersions, "loop")).toThrow(
     "Unknown built-in action loop",
   );
+});
+
+test("isDeprecatedBuiltin marks only registered older versions", () => {
+  expect(isDeprecatedBuiltin(twoVersions, "relay/command@v1")).toBe(true);
+  for (const uses of [
+    "relay/command@v2",
+    "relay/command@v9",
+    "./.relay/actions/command",
+    undefined,
+  ]) {
+    expect(isDeprecatedBuiltin(twoVersions, uses)).toBe(false);
+  }
 });

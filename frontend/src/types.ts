@@ -56,6 +56,13 @@ export interface GitHubWorkflowImport {
   suggested_key: string;
 }
 
+/** `POST /api/workflow-language/upgrade`: the updated text; the server writes nothing. */
+export interface WorkflowUpgradeResult {
+  yaml: string;
+  changes: string[];
+  unresolved: string[];
+}
+
 export interface ProjectRecord {
   id: string;
   canonical_path: string;

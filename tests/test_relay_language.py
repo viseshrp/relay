@@ -191,6 +191,7 @@ def test_manifest_describes_builtin_versions() -> None:
     versions = manifest["builtin_versions"]
     assert len(versions) == 11
     assert all(version["status"] == "current" for version in versions.values())
+    assert all(version["deprecated_in"] == "" for version in versions.values())
     assert all(
         reference == f"relay/{version['name']}@v{version['major']}"
         for reference, version in versions.items()

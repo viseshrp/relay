@@ -414,6 +414,18 @@ a reference that will be empty at run time, appear after errors and underline
 their line without disabling **Save**. A diagnostic or warning inside a job
 offers **Open job**.
 
+A step on a deprecated built-in version shows a warning, and its step form
+says, for example, **This step uses an older version of Command.** **Step
+type** shows **Command (older version)**, while new steps and completion
+offer only the current version. A removed version is an
+error that names its replacement. Either one offers **Update to current
+versions**, which rewrites every such step in the open workflow as an unsaved
+draft and lists the result under **Changes** and **Check by hand**. **Undo**
+reverts it, and only **Save** writes it. A reusable workflow or local action
+that uses a deprecated version is named in its warning; edit that file
+directly. See
+[Built-in action versions](workflows.md#built-in-action-versions).
+
 ## Launch a run
 
 Choose **Run workflow** in the workflow header or its run history. The

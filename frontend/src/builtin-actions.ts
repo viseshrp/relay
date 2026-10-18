@@ -13,6 +13,17 @@ export function isBuiltin(uses: unknown, name: string): boolean {
   return parseBuiltin(uses)?.name === name;
 }
 
+/** True for a version that still runs but has a newer current version. */
+export function isDeprecatedBuiltin(
+  manifest: LanguageManifest,
+  uses: unknown,
+): boolean {
+  return (
+    typeof uses === "string" &&
+    manifest.builtin_versions[uses]?.status === "deprecated"
+  );
+}
+
 export function builtinLabel(reference: string): string {
   return parseBuiltin(reference)?.name ?? reference;
 }

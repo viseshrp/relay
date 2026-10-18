@@ -2844,8 +2844,9 @@ Raised on 2026-10-18 while reviewing whether built-in actions need versions.
 Every built-in action is still `@v1`, so Relay has nothing to run side by
 side yet. The owner decided (D11 in the handoff) to make a second version
 cheap now and to build side-by-side support at the first breaking change.
-Item numbers use the `AV` prefix. AV-01 is ready to build; AV-02 to AV-04
-wait for their triggers.
+Item numbers use the `AV` prefix. All four are built. AV-02 to AV-04 are
+proven with a stand-in second version in the tests and wait for the first real
+breaking change to a built-in.
 
 The [implementation handoff](workflow-builder-handoff.md#built-in-action-version-items)
 specifies each item. Its delivery plan builds AV-01 before the builder work
@@ -2878,7 +2879,7 @@ specifies each item. Its delivery plan builds AV-01 before the builder work
     `test_manifest_describes_builtin_versions` in
     `tests/test_relay_language.py`; and `frontend/unit/builtin-actions.spec.ts`.
 
-- [ ] **AV-02. Run two versions of a built-in action side by side.**
+- [x] **AV-02. Run two versions of a built-in action side by side.**
   - **Priority:** P2 until triggered. **Trigger:** the first breaking change
     to a built-in action.
   - **Spec:** [AV-02 in the handoff](workflow-builder-handoff.md#av-02-run-two-versions-of-a-built-in-action-side-by-side)
@@ -2892,8 +2893,24 @@ specifies each item. Its delivery plan builds AV-01 before the builder work
   - **Done when:** A workflow on the old version validates with a warning
     and runs, and a run paused across the upgrade finishes on its launch
     version.
+  - **Status:** The mechanism is built and proven with a stand-in
+    `relay/command@v2` that only the tests register. No shipped action has a
+    second version yet, so the step that moves starters and examples to a new
+    version waits for the first real breaking change.
+  - **Verified:** `test_a_deprecated_version_validates_with_a_warning`,
+    `test_deprecated_steps_in_action_metadata_name_their_file`,
+    `test_the_manifest_offers_only_the_current_version`,
+    `test_a_deprecated_version_launches_and_runs`, and
+    `test_a_run_paused_before_an_upgrade_finishes_on_its_version` in
+    `tests/test_actions_builtin_versions.py`;
+    `test_validate_reports_deprecated_builtins_in_captured_sources` in
+    `tests/test_editor_recovery.py`; `isDeprecatedBuiltin` in
+    `frontend/unit/builtin-actions.spec.ts`; and
+    `a deprecated step shows the older-version notice` in
+    `frontend/e2e/workflow-authoring.spec.ts`, which registers the stand-in
+    through `/__test__/builtin-versions`.
 
-- [ ] **AV-03. Update a workflow to the current version in one click.**
+- [x] **AV-03. Update a workflow to the current version in one click.**
   - **Priority:** P2 until triggered. **Trigger:** ships with AV-02.
   - **Spec:** [AV-03 in the handoff](workflow-builder-handoff.md#av-03-update-a-workflow-to-the-current-version-in-one-click)
   - **Evidence:** Fixing each deprecation warning by hand means knowing
@@ -2903,8 +2920,23 @@ specifies each item. Its delivery plan builds AV-01 before the builder work
     unsaved draft and lists every change and every step left for the owner.
   - **Done when:** One click moves every deprecated step, Undo reverts it,
     and nothing is saved automatically.
+  - **Status:** The mechanism is built and proven with the stand-in
+    `relay/command@v2` and its test conversions. The first real new version
+    supplies its own `upgrade`.
+  - **Verified:** `test_upgrade_moves_deprecated_steps_and_keeps_comments`,
+    `test_upgrade_applies_each_conversion_and_lists_what_it_changed`,
+    `test_upgrade_leaves_a_step_it_cannot_convert`,
+    `test_upgrade_needs_a_conversion_into_every_newer_version`, and
+    `test_upgrade_returns_an_up_to_date_source_unchanged` in
+    `tests/test_actions_builtin_versions.py`;
+    `test_registry_holds_one_current_version_per_action` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_actions_owner_endpoints_keep_csrf_in_both_login_modes` in
+    `tests/test_web_api.py`; and
+    `update to current versions rewrites the draft` in
+    `frontend/e2e/workflow-authoring.spec.ts`.
 
-- [ ] **AV-04. Remove a deprecated version safely.**
+- [x] **AV-04. Remove a deprecated version safely.**
   - **Priority:** P2 until triggered. **Trigger:** the deprecation period
     has passed: the release that deprecated the version and the next minor
     release (D13).
@@ -2918,3 +2950,14 @@ specifies each item. Its delivery plan builds AV-01 before the builder work
     replacement in its place.
   - **Done when:** Both failures name the replacement, and nothing runs in
     place of the removed version.
+  - **Status:** The mechanism is built and proven with the stand-in
+    `relay/command@v2` replacing a removed `relay/command@v1`.
+    `REMOVED_BUILTINS` is empty until a real version completes its D13
+    deprecation period.
+  - **Verified:** `test_a_removed_version_names_its_replacement`,
+    `test_a_paused_run_fails_clearly_when_its_version_was_removed`,
+    `test_the_upgrader_converts_a_removed_version`, and
+    `test_removed_references_still_classify_persisted_rows` in
+    `tests/test_actions_builtin_versions.py`; and
+    `a removed version names its replacement and updates in one click` in
+    `frontend/e2e/workflow-authoring.spec.ts`.
