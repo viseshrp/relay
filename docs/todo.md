@@ -1938,6 +1938,10 @@ The [implementation handoff](workflow-builder-handoff.md) specifies every
 item in full, records the owner's decisions (D1 to D4) and the defaults chosen
 for the rest, and gives the delivery order. Each item links to its section.
 
+**Status:** all 41 items are implemented on pull request #26. The handoff's
+[Implementation status](workflow-builder-handoff.md#implementation-status)
+lists the commits for each delivery step and the follow-ups found on the way.
+
 How it was run:
 
 - **Isolated instance only.** `tests/e2e_server.py` on port 8765 with scratch
@@ -2872,6 +2876,10 @@ breaking change to a built-in.
 The [implementation handoff](workflow-builder-handoff.md#built-in-action-version-items)
 specifies each item. Its delivery plan builds AV-01 before the builder work
 (PR R) and leaves the others to PRs V and W.
+
+**Status:** all four items are implemented on pull request #26. AV-02 to
+AV-04 were built ahead of their trigger at the owner's request and are proven
+with a stand-in version that only tests register.
 
 - [x] **AV-01. Keep every built-in action in one versioned registry.**
   - **Priority:** P1.

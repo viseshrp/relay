@@ -9,6 +9,43 @@ document says exactly what to change, where, with which wording, and how to
 prove it. Work through it in the order given in
 [Delivery plan](#delivery-plan).
 
+## Implementation status
+
+As of 2026-10-18, every item in this document is implemented on branch
+`claude/workflow-builder-beginner-ux-1kfot4` (pull request #26), and each
+backlog entry in [todo.md](todo.md) is checked with a **Verified** bullet
+that names its tests. Deviations from a spec are recorded in that item's
+backlog entry.
+
+| PR | Items | Commits |
+| --- | --- | --- |
+| R | AV-01 | `67825d3` |
+| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 | `a96366f`, `9399b5a` (WB-18 key positions) |
+| B | F5, WB-14, WB-15 | `2e9b2d2`, `2e0f381` |
+| C | F1, WB-16, WB-40 | `d34234d` |
+| D | F2, F3, WB-01 to WB-05 | `c83f724` |
+| E | WB-06 to WB-12, WB-19, WB-23, WB-31 to WB-33 | `f32e485`, `a378d54` |
+| F | WB-21, WB-22, WB-24 to WB-30 | `633e3ca`, merged in `8546ac4`; `12eedf5`, `2631666`, `d5f3c67` (gallery size module) |
+| G | WB-37 | `95d581e`, merged in `3a8e228`; `f498ea5`, `7c7a6d9` (tests and comment fix) |
+| H | WB-20, WB-41 | `669a98f` (runs-on hint, matrix field), `a10f5eb` |
+| V, W | AV-02 to AV-04 | `4c8f429`, `2fb896d`, merged in `70e0a88` |
+
+PRs V and W were built ahead of their trigger at the owner's request. They
+are proven with a stand-in `relay/command@v2` that only tests register; no
+shipped action has a second version yet. When the first breaking change
+lands, follow AV-02 step 3 (move starters and examples to the new version)
+and add the browser tests against the real pair.
+
+Known follow-ups found during implementation, outside the items:
+
+- A local action whose folder under `.relay/actions/` is a symbolic link
+  passes validation but fails at run time with "Local action metadata was
+  not frozen": validation captures it under the link target's path, and the
+  run looks it up by the path as written.
+- Rewriting a document with ruamel (the importer and **Update to current
+  versions**) turns a one-key flow mapping inside a flow list, such as
+  `[{uses: x}]`, into `[uses: x]`. The YAML means the same.
+
 ## How to use this document
 
 1. Read [Ground rules](#ground-rules) and [Owner decisions](#owner-decisions)
