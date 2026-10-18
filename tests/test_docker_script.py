@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -41,12 +42,10 @@ case "$*" in
 esac
 """
 
-pytestmark = [
-    pytest.mark.skipif(
-        os.name == "nt" or BASH is None, reason="the Docker helper runs under POSIX bash"
-    ),
-    pytest.mark.skipif(shutil.which("jq") is None, reason="the Docker helper parses JSON with jq"),
-]
+pytestmark = pytest.mark.skipif(
+    os.name == "nt" or BASH is None, reason="the Docker helper runs under POSIX bash"
+)
+needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="the helper parses JSON with jq")
 
 
 def _run(tmp_path: Path, command: str, **env: str) -> tuple[subprocess.CompletedProcess[str], str]:
@@ -77,6 +76,7 @@ def _run(tmp_path: Path, command: str, **env: str) -> tuple[subprocess.Completed
     return result, log.read_text(encoding="utf-8") if log.exists() else ""
 
 
+@needs_jq
 def test_push_digest_succeeds_after_recording_the_digest(tmp_path: Path) -> None:
     digests = tmp_path / "digests"
 
@@ -89,6 +89,7 @@ def test_push_digest_succeeds_after_recording_the_digest(tmp_path: Path) -> None
     assert [path.name for path in digests.iterdir()] == [DIGEST]
 
 
+@needs_jq
 def test_publish_manifest_succeeds_after_verifying_both_platforms(tmp_path: Path) -> None:
     digests = tmp_path / "digests"
     digests.mkdir()
@@ -144,6 +145,29 @@ def test_up_mounts_the_repository_and_data_at_their_host_paths(tmp_path: Path) -
     assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
     assert "/workspace" not in run
     assert run.endswith("example.invalid/relay:test up --port 7845")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="only Linux bind mounts keep host ownership")
+def test_up_builds_the_local_image_as_the_linux_host_user(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    result, calls = _run(
+        tmp_path,
+        "up",
+        DOCKER_IMAGE="",
+        DOCKER_UID="",
+        DOCKER_GID="",
+        DOCKER_WORKTREE=str(repository),
+        DOCKER_DATA_HOME=str(tmp_path / "data"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    build = calls.splitlines()[0].split()
+    # The image's useradd accepts only IDs from 1000; lower IDs keep its defaults.
+    for argument, value in (("RELAY_UID", os.getuid()), ("RELAY_GID", os.getgid())):
+        passed = [token for token in build if token.startswith(f"{argument}=")]
+        assert passed == ([f"{argument}={value}"] if value >= 1000 else [])
 
 
 def test_push_requires_explicit_tags(tmp_path: Path) -> None:
