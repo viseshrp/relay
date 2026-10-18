@@ -37,6 +37,18 @@ case "$*" in
   *org.opencontainers.image.revision*) echo "abc123" ;;
   *org.opencontainers.image.version*) echo "1.0.0" ;;
   *.Config.User*) echo "relay:relay" ;;
+  *"--entrypoint id "*) id -u ;;
+  *" init")
+    # `relay init` creates the blank project surface in the working directory.
+    previous=""
+    for argument in "$@"; do
+      if [[ "$previous" == "-w" ]]; then
+        mkdir -p "$argument/.relay/workflows"
+        printf 'jobs: {}\n' > "$argument/.relay/workflows/workflow.yaml"
+      fi
+      previous="$argument"
+    done
+    ;;
   "run -d"*) echo "smoke-container" ;;
   "port "*) exit 1 ;;
 esac
@@ -168,6 +180,55 @@ def test_up_builds_the_local_image_as_the_linux_host_user(tmp_path: Path) -> Non
     for argument, value in (("RELAY_UID", os.getuid()), ("RELAY_GID", os.getgid())):
         passed = [token for token in build if token.startswith(f"{argument}=")]
         assert passed == ([f"{argument}={value}"] if value >= 1000 else [])
+
+
+def _run_e2e_until_the_port_lookup_fails(
+    tmp_path: Path,
+) -> tuple[subprocess.CompletedProcess[str], list[str], Path, str]:
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    result, calls = _run(
+        tmp_path, "e2e", DOCKER_IMAGE="example.invalid/relay:test", TMPDIR=str(temporary)
+    )
+    lines = calls.splitlines()
+    name = next(line.split()[-1] for line in lines if line.startswith("network create "))
+    return result, lines, temporary, name
+
+
+def test_e2e_removes_its_containers_volumes_network_and_files_after_failure(
+    tmp_path: Path,
+) -> None:
+    result, calls, temporary, name = _run_e2e_until_the_port_lookup_fails(tmp_path)
+
+    assert result.returncode != 0
+    assert calls[-4:] == [
+        f"rm -f -v {name}-sibling",
+        f"rm -f -v {name}",
+        f"volume rm -f {name}-config {name}-state",
+        f"network rm {name}",
+    ]
+    assert list(temporary.iterdir()) == []
+
+
+def test_e2e_starts_relay_like_docker_up_with_throwaway_volumes(tmp_path: Path) -> None:
+    _result, calls, temporary, name = _run_e2e_until_the_port_lookup_fails(tmp_path)
+
+    run = next(call for call in calls if call.startswith("run -d "))
+    repository = Path(run.split(" -w ", 1)[1].split()[0])
+    data_home = repository.parent / "data"
+    assert repository.parent.parent == temporary.resolve()
+    assert f"-v {repository}:{repository} -w {repository}" in run
+    assert f"GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0={repository}" in run
+    assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
+    words = run.split()
+    sources = {words[index + 1].split(":")[0] for index, word in enumerate(words) if word == "-v"}
+    # The owner's relay-config and relay-state volumes are never mounted.
+    assert sources == {str(repository), str(data_home), f"{name}-config", f"{name}-state"}
+    assert f"--network {name} -p 127.0.0.1::7845 -v " in run
+    # Login stays required, as it is by default.
+    assert run.endswith("example.invalid/relay:test up")
+    mounts = run.split(" -p 127.0.0.1::7845 ", 1)[1].removesuffix(" up")
+    assert f"run --rm {mounts} init" in calls
 
 
 def test_push_requires_explicit_tags(tmp_path: Path) -> None:

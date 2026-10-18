@@ -5,6 +5,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 DEFAULT_IMAGE="ghcr.io/viseshrp/relay:local"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'EOF'
@@ -13,6 +14,7 @@ Usage: scripts/docker.sh <command>
 Commands:
   build             Build the Relay container image locally
   smoke             Run end-to-end smoke checks against DOCKER_IMAGE
+  e2e               Run browser flows against DOCKER_IMAGE and check host Git
   up                Start Relay in Docker on 127.0.0.1:DOCKER_PORT
   push              Smoke-test, then push a multi-arch image to GHCR as TAGS
   push-digest       Push a single-platform image by digest to GHCR
@@ -248,6 +250,152 @@ PY
   echo "✅ Smoke test passed: ${image}"
 }
 
+e2e_cleanup() {
+  local status="$1" name="$2" root="$3"
+  if [[ "${status}" != "0" ]] && docker container inspect "${name}" >/dev/null 2>&1; then
+    echo "Container log for ${name}:" >&2
+    docker logs --tail 200 "${name}" >&2 || true
+  fi
+  docker rm -f -v "${name}-sibling" >/dev/null 2>&1 || true
+  docker rm -f -v "${name}" >/dev/null 2>&1 || true
+  docker volume rm -f "${name}-config" "${name}-state" >/dev/null 2>&1 || true
+  docker network rm "${name}" >/dev/null 2>&1 || true
+  rm -rf -- "${root}"
+}
+
+cmd_e2e() {
+  local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
+  if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
+    use_host_ids
+    # Rebuild so the run covers the current sources; unchanged layers are cached.
+    cmd_build
+  elif ! docker image inspect "${image}" >/dev/null 2>&1; then
+    docker pull "${image}"
+  fi
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    local image_uid
+    image_uid="$(docker run --rm --entrypoint id "${image}" -u)"
+    if [[ "${image_uid}" != "$(id -u)" ]]; then
+      echo "❌ ${image} runs as UID ${image_uid} and cannot write files owned by UID $(id -u)." >&2
+      echo "   Use the default image, which docker-e2e builds as the host user." >&2
+      return 1
+    fi
+  fi
+
+  local name="relay-e2e-$$-${RANDOM}"
+  local temporary="${TMPDIR:-/tmp}"
+  local root
+  # BSD mktemp ignores TMPDIR without a template.
+  root="$(mktemp -d "${temporary%/}/relay-e2e.XXXXXXXX")"
+  # An EXIT trap also runs when `set -e` aborts the script; a RETURN trap does not.
+  # Expand now: the locals are out of scope when the trap runs under `set -u`.
+  trap "e2e_cleanup \$? $(printf '%q ' "${name}" "${root}")" EXIT
+  # Mount the resolved path; macOS temporary directories sit behind a symlink.
+  root="$(cd "${root}" && pwd -P)"
+  local repo="${root}/repository"
+  local data_home="${root}/data"
+  mkdir "${data_home}"
+
+  # Host Git ignores the owner's global and system settings, such as hooks and signing.
+  local -x GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  git init -q -b main "${repo}"
+  git -C "${repo}" config user.name "Relay Container E2E"
+  git -C "${repo}" config user.email "e2e@example.invalid"
+  printf '# Relay container end-to-end\n' >"${repo}/README.md"
+  git -C "${repo}" add README.md
+  git -C "${repo}" commit -q -m "initial"
+
+  # Throwaway volumes keep the owner's relay-config and relay-state untouched.
+  set_relay_mounts "${repo}" "${data_home}" "${name}-config" "${name}-state"
+  docker run --rm "${RELAY_MOUNTS[@]}" "${image}" init >/dev/null
+  git -C "${repo}" add .relay
+  git -C "${repo}" commit -q -m "Initialize Relay"
+
+  echo "🧪 Running browser flows against ${image}..."
+  docker network create "${name}" >/dev/null
+  # Login stays required, as it is by default, so sign-in crosses the bridge.
+  docker run -d \
+    --name "${name}" \
+    --init \
+    --network "${name}" \
+    -p 127.0.0.1::7845 \
+    "${RELAY_MOUNTS[@]}" \
+    "${image}" \
+    up >/dev/null
+
+  local host_addr
+  host_addr="$(docker port "${name}" 7845/tcp | head -n 1)"
+  local frontend="${SCRIPT_DIR}/../frontend"
+  if [[ ! -d "${frontend}/node_modules/@playwright/test" ]]; then
+    echo "❌ docker-e2e drives a browser. Run: npm --prefix frontend ci" >&2
+    echo "   and: npm --prefix frontend exec playwright install chromium" >&2
+    return 1
+  fi
+  RELAY_CONTAINER_URL="http://${host_addr}" \
+    RELAY_CONTAINER_NAME="${name}" \
+    RELAY_CONTAINER_REPOSITORY="${repo}" \
+    RELAY_CONTAINER_DATA_HOME="${data_home}" \
+    npm --prefix "${frontend}" run test:container
+
+  # The entrypoint starts the installed relay in a new session, so only the
+  # signal it forwards reaches Relay during shutdown.
+  local processes
+  processes="$(docker exec "${name}" ps -eo pid=,sid=,args=)"
+  local relay_process bridge_process
+  relay_process="$(awk '$3 == "/opt/relay/venv/bin/python" && $4 == "/opt/relay/venv/bin/relay" && $5 == "up"' <<<"${processes}")"
+  bridge_process="$(awk '$4 == "/usr/local/bin/relay" && $5 == "up"' <<<"${processes}")"
+  if [[ -z "${relay_process}" || -z "${bridge_process}" ]]; then
+    echo "❌ Expected the bridge and installed relay up processes in:" >&2
+    printf '%s\n' "${processes}" >&2
+    return 1
+  fi
+  local relay_pid relay_sid bridge_sid
+  read -r relay_pid relay_sid _ <<<"${relay_process}"
+  read -r _ bridge_sid _ <<<"${bridge_process}"
+  expect_equal "installed relay up session" "${relay_sid}" "${relay_pid}"
+  if [[ "${bridge_sid}" == "${relay_sid}" ]]; then
+    echo "❌ The installed relay up shares the bridge's session ${bridge_sid}." >&2
+    return 1
+  fi
+
+  # A sibling reaches the bridge on the container interface, which closes every
+  # connection that does not come from the gateway carrying the published port.
+  docker run --rm -i \
+    --name "${name}-sibling" \
+    --network "${name}" \
+    --entrypoint python \
+    "${image}" - "${name}" <<'PY'
+import socket
+import sys
+
+reply = b""
+with socket.create_connection((sys.argv[1], 7845), timeout=5.0) as connection:
+    try:
+        connection.sendall(b"GET /api/auth HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        reply = connection.recv(1)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+if reply:
+    raise SystemExit("A sibling container reached Relay through the published-port bridge.")
+PY
+
+  docker stop --time 15 "${name}" >/dev/null
+  local logs
+  # Capture first: `grep -q` can close the pipe early and fail it under pipefail.
+  logs="$(docker logs "${name}" 2>&1)"
+  if ! grep -Fq "Relay stopped cleanly." <<<"${logs}"; then
+    echo "❌ docker stop did not stop Relay cleanly." >&2
+    return 1
+  fi
+  local exit_code
+  exit_code="$(docker inspect --format '{{ .State.ExitCode }}' "${name}")"
+  expect_equal "container exit code" "${exit_code}" "0"
+
+  e2e_cleanup 0 "${name}" "${root}"
+  trap - EXIT
+  echo "✅ End-to-end test passed: ${image}"
+}
+
 cmd_up() {
   local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local port="${DOCKER_PORT:-7845}"
@@ -390,6 +538,9 @@ case "${command_name}" in
     ;;
   smoke)
     cmd_smoke
+    ;;
+  e2e)
+    cmd_e2e
     ;;
   up|run)
     cmd_up
