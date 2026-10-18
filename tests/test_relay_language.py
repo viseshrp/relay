@@ -202,6 +202,7 @@ def test_manifest_describes_builtin_versions() -> None:
     versions = manifest["builtin_versions"]
     assert len(versions) == 11
     assert all(version["status"] == "current" for version in versions.values())
+    assert all(version["deprecated_in"] == "" for version in versions.values())
     assert all(
         reference == f"relay/{version['name']}@v{version['major']}"
         for reference, version in versions.items()
@@ -709,6 +710,15 @@ def test_a_step_written_as_text_asks_for_a_mapping() -> None:
     ]
     with pytest.raises(WorkflowValidationError, match="Expected a mapping"):
         load(text)
+
+
+@pytest.mark.parametrize("reference", ["./.relay/actions/greet", "relay/command@v1"])
+def test_step_inputs_written_as_text_are_reported_once(reference: str) -> None:
+    text = f"jobs:\n  a:\n    steps:\n      - uses: {reference}\n        with: hello\n"
+    issues = workflow_diagnostics(text)
+    assert [(issue.message, issue.context["line"]) for issue in issues] == [
+        ("jobs.a.steps[0].with: Expected a mapping.", "5")
+    ]
 
 
 EVENTS_SENTENCE = (

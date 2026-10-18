@@ -247,6 +247,45 @@ def test_validate_reports_warnings_without_invalidating(
     assert invalid["warnings"] == []
 
 
+@pytest.mark.parametrize(
+    "key, source, uses",
+    [
+        pytest.param(
+            ".relay/actions/x/action.yaml",
+            "name: X\ndescription: Local\nruns:\n  using: composite\n  steps:\n"
+            "    - uses: relay/command@v1\n      with: {argv: '[\"true\"]'}\n",
+            "steps: [{uses: ./.relay/actions/x}]",
+            id="action",
+        ),
+        pytest.param(
+            ".relay/workflows/child.yaml",
+            "on: workflow_call\njobs:\n  inner:\n    steps:\n"
+            "      - uses: relay/command@v1\n        with: {argv: '[\"true\"]'}\n",
+            "uses: ./.relay/workflows/child.yaml",
+            id="reusable-workflow",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("deprecated_command")
+def test_validate_reports_deprecated_builtins_in_captured_sources(
+    owner: Client, project: RelayProject, key: str, source: str, uses: str
+) -> None:
+    project.write(key, source)
+    result = post(
+        owner, "/api/workflow-language/validate", {"yaml": f"jobs: {{check: {{{uses}}}}}\n"}
+    ).json()
+    assert result["valid"] is True
+    [warning] = result["warnings"]
+    assert warning["message"].startswith(f"{key}: ")
+    assert warning["message"].endswith(
+        "relay/command@v1 is deprecated and will be removed in a later Relay release. "
+        "Use relay/command@v2."
+    )
+    assert warning["context"]["source"] == key
+    assert warning["context"]["deprecated"] == "relay/command@v1"
+    assert "line" not in warning["context"]
+
+
 def test_validate_leaves_prompt_paths_outside_their_folder_to_launch(owner: Client) -> None:
     text = (
         "jobs:\n  ask:\n    steps:\n      - uses: relay/agent@v1\n        with:\n"

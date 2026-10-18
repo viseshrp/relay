@@ -13,6 +13,7 @@ import { useState } from "react";
 import { ActionBuiltinFields } from "./ActionBuiltinFields";
 import { actionLabel, actionName, actionType } from "../action-labels";
 import { defaultStep } from "../action-defaults";
+import { isDeprecatedBuiltin } from "../builtin-actions";
 import { propertyHelp, stepHelp } from "../field-help";
 import { HelpControl, HelpSelectField, HelpTextField } from "./HelpTip";
 import { LoopWorkflowDialog } from "./LoopWorkflowDialog";
@@ -48,6 +49,7 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
     onMove,
     loopTargets,
     onEditYaml,
+    onUpgrade,
     onOpenGetStarted,
   } = state;
   // Where a chosen loop goes: in place of the current step, or at the end.
@@ -55,6 +57,11 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
   const steps = job.steps ?? [];
   const current = Math.min(index, steps.length - 1);
   const uses = step?.uses;
+  // An older version keeps its own item, so the select shows what the step runs.
+  const older = isDeprecatedBuiltin(manifest, uses);
+  const stepType = older
+    ? `${actionLabel(uses)} (older version)`
+    : actionLabel(uses);
   const help = (property: string, title: string) =>
     stepHelp(manifest, uses, property, title);
   function replaceStep(reference: string, workflow?: string): void {
@@ -123,15 +130,24 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                 topic={propertyHelp(manifest, "regular-step.uses", "Step type")}
                 label="Step type"
                 width="wide"
-                value={actionName(step.uses)}
-                renderValue={() => actionLabel(step.uses)}
+                value={older ? step.uses : actionName(step.uses)}
+                renderValue={() => stepType}
                 onChange={(event) => {
                   const name = String(event.target.value);
+                  if (name === step.uses) return;
                   if (name === "loop") setLoop("replace");
                   else replaceStep(typeReference(manifest, name));
                 }}
               >
                 {groupedTypeOptions(manifest, loopTargets.length > 0)}
+                {older && (
+                  <MenuItem value={step.uses}>
+                    <ListItemText
+                      primary={stepType}
+                      secondary={actionType(step.uses)?.description}
+                    />
+                  </MenuItem>
+                )}
                 {actionName(step.uses) === "local" && (
                   <MenuItem value="local">
                     <ListItemText
@@ -157,6 +173,7 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                   onEdits={onEdits}
                   onChange={input}
                   onEditYaml={onEditYaml}
+                  onUpgrade={onUpgrade}
                   onOpenGetStarted={onOpenGetStarted}
                 />
               ) : (

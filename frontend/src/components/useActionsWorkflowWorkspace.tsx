@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { api, csrfToken, errorMessage } from "../api";
+import { api, csrfToken, errorMessage, upgradeWorkflowLanguage } from "../api";
 import { projectPath } from "../navigation";
 import { editorHolder } from "../editor-session";
 import { stringify } from "yaml";
@@ -27,6 +27,7 @@ import type {
   ProviderDefaults,
   WorkflowDocumentResponse,
   WorkflowDraft,
+  WorkflowUpgradeResult,
 } from "../types";
 import type { WorkflowWorkspaceProps } from "./WorkflowWorkspace";
 
@@ -96,6 +97,9 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   // Warnings never block saving; the server sends them only for valid sources.
   const [warnings, setWarnings] = useState<Diagnostic[]>([]);
+  // The last version update, listed in a dialog until it is closed.
+  const [upgrade, setUpgrade] = useState<WorkflowUpgradeResult | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [validation, setValidation] = useState<Validation>("checking");
   const valid = validation === "valid";
   const [triggerRows, setTriggerRows] = useState<Trigger[]>([]);
@@ -233,6 +237,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setLoadedDocument("");
     setLastValid(null);
     setCreatedJobs([]);
+    setUpgradeOpen(false);
     const endpoint = projectPath(
       `/api/workflows/${encoded(key)}`,
       requestProject,
@@ -683,6 +688,24 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       }),
     );
   }
+  // Captured files are not open here, so only this source's steps can update.
+  const outdated =
+    warnings.some((item) => item.context?.deprecated && !item.context.source) ||
+    diagnostics.some((item) => item.context?.removed);
+  /** Move deprecated built-in steps to the current version as an unsaved draft. */
+  async function upgradeVersions(): Promise<void> {
+    const target = path("");
+    try {
+      const result = await upgradeWorkflowLanguage(text);
+      if (currentDocument.current !== target) return;
+      // Like any other edit, Undo reverts it and only Save writes it.
+      setText(result.yaml);
+      setUpgrade(result);
+      setUpgradeOpen(true);
+    } catch (e) {
+      if (currentDocument.current === target) setError(errorMessage(e));
+    }
+  }
   const disabled =
     inventory.find((item) => item.key === key)?.disabled === true;
 
@@ -736,6 +759,11 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     draft,
     diagnostics,
     warnings,
+    outdated,
+    upgrade,
+    upgradeOpen,
+    setUpgradeOpen,
+    upgradeVersions,
     setJobId,
     setDrawer,
     lastValid,

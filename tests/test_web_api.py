@@ -2409,6 +2409,22 @@ def test_actions_owner_endpoints_keep_csrf_in_both_login_modes(
         )
         assert response.status_code == 200
         assert response.json()["valid"]
+        assert (
+            strict.post(
+                "/api/workflow-language/upgrade",
+                data=json.dumps(body),
+                content_type="application/json",
+            ).status_code
+            == 403
+        )
+        response = strict.post(
+            "/api/workflow-language/upgrade",
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        assert response.status_code == 200
+        assert response.json() == {"yaml": body["yaml"], "changes": [], "unresolved": []}
         anonymous = Client()
         assert anonymous.get("/api/workflow-bindings").status_code == (
             401 if login_required else 200

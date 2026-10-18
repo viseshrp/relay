@@ -30,7 +30,7 @@ from relay.workflows.actions.builtins import (
 from relay.workflows.actions.compiler import bind_agent
 from relay.workflows.actions.language import load, workflow_diagnostics
 from relay.workflows.schema import CommandNode
-from tests.support import InlineEngine, RelayProject, answer_wait
+from tests.support import InlineEngine, RelayProject, answer_wait, registry_problems
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -255,6 +255,8 @@ def test_registry_holds_one_current_version_per_action() -> None:
     for action in BUILTIN_ACTIONS:
         allowed, required = CONTRACTS[action.reference]
         assert (set(action.allowed), set(action.required)) == (allowed, required)
+    # Every deprecated or removed version can be updated to the current one.
+    assert registry_problems() == []
 
 
 @pytest.mark.parametrize(

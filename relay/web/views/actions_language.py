@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,7 @@ from relay.workflows.actions.language import (
     _locate,
     _read_document,
     capture_sources,
+    deprecated_builtin_warnings,
     load,
     missing_prompt_files,
     support_manifest,
@@ -106,6 +108,24 @@ def library(request: HttpRequest) -> JsonResponse:
     return JsonResponse(export_template(identity) if identity else {"templates": inventory()})
 
 
+def _captured_warnings(
+    sources: Mapping[str, str], documents: Iterable[str]
+) -> list[WorkflowValidationError]:
+    """Deprecated built-in steps in the reusable workflows and actions a source uses.
+
+    The editor does not open these files, so each warning names its file in the
+    message and in context["source"], and has no line.
+    """
+    found = []
+    for key in sorted(documents):
+        # Capture already validated these files, so they read as mappings.
+        value, _ = _read_document(sources[key])
+        for warning in deprecated_builtin_warnings(value, f"{key}: "):
+            warning.context["source"] = key
+            found.append(warning)
+    return found
+
+
 @api_errors
 @owner_required
 @require_POST
@@ -133,8 +153,9 @@ def validate(request: HttpRequest) -> JsonResponse:
         )
     try:
         document = load(text, source=source)
+        documents: set[str] = set()
         try:
-            sources = capture_sources(document, root.parent)
+            sources = capture_sources(document, root.parent, documents=documents)
         except WorkflowValidationError as error:
             _locate(error, document.locations)
             raise
@@ -157,6 +178,7 @@ def validate(request: HttpRequest) -> JsonResponse:
         warnings = workflow_warnings(document)
         for warning in warnings:
             _locate(warning, document.locations)
+        warnings.extend(_captured_warnings(sources, documents))
         return JsonResponse(
             {
                 "valid": True,
@@ -168,6 +190,26 @@ def validate(request: HttpRequest) -> JsonResponse:
         )
     except RelayError as error:
         return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()], "warnings": []})
+
+
+@api_errors
+@owner_required
+@require_POST
+def upgrade(request: HttpRequest) -> JsonResponse:
+    """Move deprecated built-in steps to the current version; this writes nothing."""
+    from relay.workflows.actions.upgrade import upgrade_builtins
+
+    body = json_body(request)
+    result = upgrade_builtins(
+        required_text(body, "yaml"), source=Path(str(body.get("source", "workflow.yml")))
+    )
+    return JsonResponse(
+        {
+            "yaml": result.yaml,
+            "changes": list(result.changes),
+            "unresolved": list(result.unresolved),
+        }
+    )
 
 
 _GITHUB_WORKFLOWS = ".github/workflows"

@@ -169,6 +169,139 @@ test("warnings appear beside the editor without blocking save", async ({
   expect(source.yaml).toContain("${{ inputs.missing }}");
 });
 
+// Relay ships one command version; the browser-test server registers a
+// stand-in relay/command@v2 beside it until the next reset.
+const OLDER_COMMAND =
+  "name: Versions\non: workflow_dispatch\njobs:\n  check:\n    steps:\n" +
+  "      # Print a greeting.\n      - uses: relay/command@v1\n" +
+  '        with:\n          argv: \'["echo","Ready"]\'\n';
+const UPDATED_STEP =
+  "Updated step 1 in job check from relay/command@v1 to relay/command@v2.";
+
+test("a deprecated step shows the older-version notice", async ({ page }) => {
+  await post(page, "/__test__/builtin-versions", { mode: "deprecated" });
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  const editor = page.locator(".cm-content");
+  await editor.fill(OLDER_COMMAND);
+  const warning = page.locator(".MuiAlert-colorWarning");
+  await expect(warning).toHaveCount(1);
+  await expect(warning).toHaveText(
+    /Line 7: jobs\.check\.steps\[0\]\.uses: relay\/command@v1 is deprecated and will be removed in a later Relay release\. Use relay\/command@v2\./,
+  );
+  await expect(page.locator(".MuiAlert-colorError")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeEnabled();
+  await openJobSettings(page);
+  const drawer = page.getByRole("dialog", { name: /^Job settings: / });
+  const notice = drawer.locator(".MuiAlert-colorInfo").filter({
+    hasText: "This step uses an older version of Command.",
+  });
+  await expect(notice).toBeVisible();
+  await expect(
+    notice.getByRole("button", { name: "Update to current versions" }),
+  ).toBeVisible();
+  const stepType = drawer.getByRole("combobox", {
+    name: "Step type",
+    exact: true,
+  });
+  await expect(stepType).toHaveText("Command (older version)");
+  await stepType.click();
+  await expect(
+    page.getByRole("option").filter({ hasText: "Command (older version)" }),
+  ).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  // New steps use only the current version.
+  await drawer.getByRole("button", { name: "Add step", exact: true }).click();
+  await page
+    .getByRole("menu")
+    .getByRole("menuitem")
+    .filter({ has: page.getByText("Command", { exact: true }) })
+    .click();
+  await expect(editor).toContainText("uses: relay/command@v2");
+  await closeJobSettings(page);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+});
+
+test("update to current versions rewrites the draft", async ({ page }) => {
+  await post(page, "/__test__/builtin-versions", { mode: "deprecated" });
+  const read = async () =>
+    (
+      (await (
+        await page.request.get("/api/workflows/workflow.yaml")
+      ).json()) as {
+        yaml: string;
+      }
+    ).yaml;
+  const saved = await read();
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  const editor = page.locator(".cm-content");
+  await editor.fill(OLDER_COMMAND);
+  await expect(page.locator(".MuiAlert-colorWarning")).toHaveCount(1);
+  const update = page.getByRole("button", {
+    name: "Update to current versions",
+    exact: true,
+  });
+  await update.click();
+  const dialog = page.getByRole("dialog", {
+    name: "Updated to current versions",
+  });
+  await expect(dialog.getByRole("list", { name: "Changes" })).toHaveText(
+    UPDATED_STEP,
+  );
+  await expect(dialog.getByRole("list", { name: "Check by hand" })).toHaveCount(
+    0,
+  );
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(editor).toContainText("uses: relay/command@v2");
+  await expect(editor).toContainText("# Print a greeting.");
+  await expect(page.locator(".MuiAlert-colorWarning")).toHaveCount(0);
+  await expect(update).toHaveCount(0);
+  // The update is an unsaved draft: the saved source is unchanged.
+  expect(await read()).toBe(saved);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(editor).toContainText("uses: relay/command@v1");
+  await expect(page.locator(".MuiAlert-colorWarning")).toHaveCount(1);
+  expect(await read()).toBe(saved);
+});
+
+test("a removed version names its replacement and updates in one click", async ({
+  page,
+}) => {
+  await post(page, "/__test__/builtin-versions", { mode: "removed" });
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  const editor = page.locator(".cm-content");
+  await editor.fill(OLDER_COMMAND);
+  const error = page.locator(".MuiAlert-colorError");
+  await expect(error).toHaveCount(1);
+  await expect(error).toHaveText(
+    /Line 7: jobs\.check\.steps\[0\]\.uses: Only frozen local and versioned relay actions are supported\. relay\/command@v1 was removed in Relay 0\.0\.0; use relay\/command@v2\./,
+  );
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expect(save).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Update to current versions", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Updated to current versions",
+  });
+  await expect(dialog.getByRole("list", { name: "Changes" })).toHaveText(
+    UPDATED_STEP,
+  );
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(editor).toContainText("uses: relay/command@v2");
+  await expect(error).toHaveCount(0);
+  await expect(save).toBeEnabled();
+});
+
 async function openYamlEditor(page: Page) {
   await page.goto("/?view=workflows&workflow=workflow.yaml");
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();

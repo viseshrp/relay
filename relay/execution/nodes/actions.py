@@ -45,6 +45,7 @@ from relay.workflows.actions.builtins import (
     current_builtin,
     parse_builtin,
     parse_list_input,
+    removed_builtin,
 )
 from relay.workflows.actions.compiler import _timeout
 from relay.workflows.actions.compiler import definition as compile_definition
@@ -900,7 +901,15 @@ class ActionsStepExecutor:
         )
         action = builtin(reference)
         if action is None and parse_builtin(reference) is not None:
-            message = f"{reference} is not included in this Relay version."
+            # A run that launched before an upgrade keeps its reference; it never
+            # runs the replacement in its place.
+            removed = removed_builtin(reference)
+            message = (
+                f"{reference} was removed in Relay {removed[0]}. This run started on an "
+                "earlier Relay version; cancel it and launch the workflow again."
+                if removed is not None
+                else f"{reference} is not included in this Relay version."
+            )
             raise NodeExecutionError(message)
         name = action.name if action is not None else None
         if name == "command":

@@ -5,6 +5,12 @@ type Diagnostic = {
     line?: string;
     column?: string;
     severity?: "error" | "warning";
+    /** The deprecated built-in reference a warning is about. */
+    deprecated?: string;
+    /** The removed built-in reference an error is about. */
+    removed?: string;
+    /** The captured file a warning is about, when it is not the open source. */
+    source?: string;
   };
 };
 type Trigger = { workflow_key: string; event: string; enabled: boolean };

@@ -6,6 +6,7 @@ import type {
   DashboardSection,
   GitHubWorkflowFilesResponse,
   GitHubWorkflowImport,
+  WorkflowUpgradeResult,
 } from "./types";
 
 export class RelayApiError extends Error {
@@ -124,4 +125,14 @@ export function importGitHubWorkflow(
     projectPath("/api/workflow-import", project),
     { method: "POST", body: JSON.stringify({ path }) },
   );
+}
+
+/** Move deprecated built-in steps to the current version; nothing is saved. */
+export function upgradeWorkflowLanguage(
+  yaml: string,
+): Promise<WorkflowUpgradeResult> {
+  return api<WorkflowUpgradeResult>("/api/workflow-language/upgrade", {
+    method: "POST",
+    body: JSON.stringify({ yaml }),
+  });
 }
