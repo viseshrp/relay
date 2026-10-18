@@ -164,6 +164,19 @@ def test_a_job_commits_its_changed_code(repository: Path) -> None:
     assert status_porcelain(repository) == ()
 
 
+@pytest.mark.parametrize(
+    ("display_name", "subject"),
+    [(None, "Relay: complete job cycle"), ("Plan round", "Relay: complete job Plan round (cycle)")],
+)
+def test_a_job_commit_names_the_job(
+    repository: Path, display_name: str | None, subject: str
+) -> None:
+    start = current_head(repository)
+    (repository / "loose.txt").write_text("x", encoding="utf-8")
+    accept_job_result(repository, start, job_id="cycle", display_name=display_name)
+    assert run_git(repository, ["log", "-1", "--format=%s"]).stdout.strip() == subject
+
+
 def test_a_clean_job_noop_keeps_the_same_head(repository: Path) -> None:
     head = current_head(repository)
     result = accept_job_result(repository, head, job_id="build")

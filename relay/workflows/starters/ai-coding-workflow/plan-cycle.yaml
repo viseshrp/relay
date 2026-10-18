@@ -11,6 +11,7 @@ on:
 
 jobs:
   cycle:
+    name: Plan round
     outputs:
       ready: ${{ steps.verify.outputs.value }}
     steps:

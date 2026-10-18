@@ -51,6 +51,7 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
     cancelRun,
     artifactCursor,
     loadMoreArtifacts,
+    loadAllArtifacts,
     eventCursor,
     loadEvents,
   } = state;
@@ -69,6 +70,8 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
           requests={pendingInteractions}
           runId={detail.id}
           artifacts={artifacts}
+          hasChanges={detail.has_committed_changes}
+          onLoadAll={loadAllArtifacts}
           selected={selectedInteraction}
           hasMore={interactionCursor !== null}
           onMore={() => void loadMoreInteractions()}
@@ -155,7 +158,15 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
             <Box className="graph-heading">
               <Typography variant="h6">{detail.workflow_key}</Typography>
               <Typography variant="body2" color="text.secondary">
-                Started manually · {countLabel(visibleStages.length, "job")}
+                Started manually ·{" "}
+                {countLabel(
+                  // Loop rounds and called workflows are not workflow jobs.
+                  visibleStages.filter(
+                    (node) =>
+                      !node.parent_scope || node.parent_scope === "root",
+                  ).length,
+                  "job",
+                )}
               </Typography>
             </Box>
             {!detail.nodes.length && (
@@ -245,6 +256,7 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
           <RunArtifacts
             runId={detail.id}
             artifacts={artifacts}
+            nodes={detail.nodes}
             more={artifactCursor !== null}
             onMore={() => void loadMoreArtifacts()}
           />
@@ -271,7 +283,12 @@ export function RunMain({ state }: { state: RunWorkspaceState }) {
 
           {pendingInteractions.length === 0 && (
             <Paper variant="outlined" className="section-card">
-              <ReviewEvidence runId={detail.id} artifacts={artifacts} />
+              <ReviewEvidence
+                runId={detail.id}
+                artifacts={artifacts}
+                hasChanges={detail.has_committed_changes}
+                onLoadAll={loadAllArtifacts}
+              />
             </Paper>
           )}
 

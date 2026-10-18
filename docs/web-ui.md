@@ -170,8 +170,8 @@ login, can replay either introduction.
 **Reset onboarding**, which makes both appear on the next opening or reload.
 When browser storage is blocked, dismissal lasts for the current app session;
 reset reports the storage limitation instead of claiming it was saved.
-Closing the welcome slides also hides the setup welcome prompt; the
-agent checklist remains available from **Help > Get started**.
+Closing the welcome slides leaves the setup welcome prompt in place until you
+open the checklist or choose **Dismiss welcome**.
 
 When the project inventory is empty, the workspace shows a **Start using
 Relay** homepage with setup steps and **Open your first project**. Global
@@ -212,8 +212,11 @@ commands to copy; Relay never installs an agent or signs it in.
 Choose **Start from a template** to open the gallery with **AI coding workflow**
 selected. Create it, enter your task once, and choose the coding agent's exact
 model and a Claude Opus model from fresh connection results. The workflow
-follows its phase instruction files and pauses for human approvals. Both
-models must be available before **Run workflow** becomes enabled. Smaller
+follows its phase instruction files and pauses for human approvals. Each
+approval is answered with a button, such as **IMPLEMENT**, so a mistyped
+answer cannot fail the run. Approving lets the agent commit, push its branch,
+and open a pull request if the repository has a remote; nothing is merged.
+Both models must be available before **Run workflow** becomes enabled. Smaller
 starters use one exact model and show their sample inputs instead.
 Launch uses the existing validation and preflight services. With no working
 agent, the checklist explains the fix and disables the run button.
@@ -245,7 +248,11 @@ Internal IDs and provider JSON are under advanced views. Cleanup controls live
 in **Settings > Storage**.
 
 **New workflow** opens the same seven-starter gallery as the checklist. Each
-card shows its purpose, job graph preview, required agent, and input types.
+card shows its purpose, job sequence, size in jobs and approvals, required
+agent, and input types, using the YAML type names such as `choice`. The
+preselected **AI coding workflow** card also says that it needs Claude Code
+with an Opus model and one other coding agent, and suggests **Ask an agent**
+for a smaller first run.
 Selection copies workflow, prompt, and local action sources into `.relay/` without
 overwriting owner files. The editor and launch use those copies. A blank
 workflow accepts a name and opens with one safe echo job.
@@ -379,8 +386,9 @@ Launch failures appear in the panel, and the owner can retry after fixing them.
 
 When the saved workflow is ready, **Project files** checks launch cleanliness
 before enabling **Run workflow**. It lists blocking files with their Git
-reasons and puts permitted changes under **Allowed files**, explaining each
-exemption. A bounded preview shows full counts when the file list is truncated.
+reasons and lists permitted changes under a count such as **2 new workflow
+files can stay uncommitted**, explaining each exemption. A bounded preview
+shows full counts when the file list is truncated.
 **Check files again** refreshes the file check and current branch.
 
 Blocked previews offer **Copy** for `git commit` and `git stash -u`. Relay
@@ -392,7 +400,10 @@ server's launch check and appears as an error in the panel.
 
 **Commit workflow files** opens a bounded preview of validated untracked
 workflow sources and their complete contents. The action is available even
-when the selected workflow is the only untracked source.
+when the selected workflow is the only untracked source. When nothing blocks
+the run, the panel marks it optional: commit the workflow only to save it in
+your Git history. When files block the run, it says **Commit these workflow
+files to run.**
 It includes the selected workflow when untracked, plus its captured prompt
 files. An explicit confirmation commits exactly those reviewed paths.
 Changed bytes, a changed Git head, or a nonempty index reject the operation.
@@ -613,8 +624,27 @@ The first attention read after opening Relay establishes a baseline, so old
 completions do not produce notifications.
 
 When an approval is pending, its response form includes review instructions
-and retained material. At other times the panel is titled
+and retained material. A wait that declares answer `options` shows one button
+per answer and no text box. At other times the panel is titled
 **Changes and documents** and does not ask for a response.
+
+**Review material** lists **Committed code changes** whenever the run's
+protected head differs from its source commit, even before that evidence is
+on a loaded artifact page. Opening the list loads the remaining artifact
+pages, at most 20. A pending approval first shows a document that its
+instructions name; otherwise the run shows its committed changes, or else its
+newest document. The summary's artifact count is the server's total.
+
+A finished, unmerged run with committed changes names its run branch and up to
+ten changed files, with copyable `git switch` and `git merge --ff-only`
+commands to bring the code into the launch branch. It also points to the merge
+choice under **Advanced options** for the next run. A merged run shows its
+merge commit instead.
+
+Run views use each job's declared `name` from launch, even while it is queued.
+Loop iterations appear as **Round 1**, **Round 2**, and so on, inside their
+job, and the job count includes only the workflow's top-level jobs. Commits
+made at a named job's boundary read `Relay: complete job <name> (<job id>)`.
 
 When a step fails, Summary annotations show its name, the failure description
 or exit code, and the provider's last public message when available.
@@ -906,7 +936,10 @@ readable scale; **Fit View** remains available for the whole graph. Refreshes
 do not reset a manually chosen viewport. Skipped or canceled jobs that never
 started show no elapsed duration. **Artifacts** is a visible summary section,
 with job, attempt, readable size, authenticated downloads, and expandable
-file hashes. Each download has a distinct accessible name. **Workflow file**
+file hashes. Copies of one working-copy file show as one row for the newest
+copy, with older copies under a disclosure such as **2 earlier copies**. Each
+download has a
+distinct accessible name. **Workflow file**
 opens the immutable captured YAML in a read-only dialog. **Edit current
 workflow** opens the saved source editor separately. Annotations link to
 failed jobs. Agent messages, approvals, loop results, and code review stay in the

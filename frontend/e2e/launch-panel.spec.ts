@@ -521,6 +521,34 @@ test("file blockers and exemptions appear before launch and copied fixes leave G
   ).toBeEnabled();
 });
 
+test("a new workflow can run without committing and says the commit is optional", async ({
+  page,
+}) => {
+  await create(page, "optional-commit");
+  const panel = await open(page);
+  const files = panel.getByRole("region", { name: "Launch file check" });
+  await expect(files).toContainText("Project files are ready to run.");
+  await expect(files).toContainText("1 new workflow file can stay uncommitted");
+  await expect(files).toContainText(
+    "Optional. Commit this workflow so it is saved in your Git history.",
+  );
+  await expect(files).not.toContainText("Commit these workflow files to run.");
+  await expect(
+    files.getByRole("button", { name: "Commit workflow files", exact: true }),
+  ).toBeVisible();
+  const launched = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/runs") &&
+      response.request().method() === "POST",
+  );
+  await panel
+    .getByRole("button", { name: "Run workflow", exact: true })
+    .click();
+  const response = await launched;
+  expect(response.status(), await response.text()).toBe(201);
+  await expectRunStatus(page, (await response.json()).run_id, "succeeded");
+});
+
 test("file check failures can be refreshed and later changes still block the launch", async ({
   page,
 }) => {

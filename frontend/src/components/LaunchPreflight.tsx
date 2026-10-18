@@ -65,8 +65,9 @@ export function LaunchPreflight({
           {result.allowed_count > 0 && (
             <Box component="details">
               <Box component="summary">
-                {result.allowed_count} allowed{" "}
-                {result.allowed_count === 1 ? "file" : "files"}
+                {result.allowed_count} new workflow{" "}
+                {result.allowed_count === 1 ? "file" : "files"} can stay
+                uncommitted
               </Box>
               {result.files
                 .filter((file) => file.allowed)
@@ -100,11 +101,18 @@ export function LaunchPreflight({
                 file.status === "??" &&
                 /(?:^|\/)\.relay\/(workflows|prompts)\//.test(file.path),
             ) && (
-              <CommitWorkflowFiles
-                workflowKey={workflowKey}
-                project={project}
-                onCommitted={onCheck}
-              />
+              <Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+                <Typography variant="body2" color="text.secondary">
+                  {result.clean
+                    ? "Optional. Commit this workflow so it is saved in your Git history."
+                    : "Commit these workflow files to run."}
+                </Typography>
+                <CommitWorkflowFiles
+                  workflowKey={workflowKey}
+                  project={project}
+                  onCommitted={onCheck}
+                />
+              </Stack>
             )}
           {!result.clean && (
             <Box component="details" className="launch-guidance">

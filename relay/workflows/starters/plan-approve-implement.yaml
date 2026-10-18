@@ -15,11 +15,16 @@ jobs:
         agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
         prompt-files: prompts/plan.md
         prompt: ${{ inputs.task }}
-    - uses: relay/human-wait@v1
+    - id: approval
+      uses: relay/human-wait@v1
       with:
         prompt: Review the plan, then approve implementation.
-    - uses: relay/agent@v1
+        options: '["Approve", "Stop"]'
+    - if: steps.approval.outputs.answer == 'Approve'
+      uses: relay/agent@v1
       with:
         agents: '["codex", "claude", "copilot", "cursor", "antigravity"]'
         prompt-files: prompts/implement.md
         prompt: ${{ inputs.task }}
+    - if: steps.approval.outputs.answer == 'Stop'
+      run: echo Stopped at plan review.

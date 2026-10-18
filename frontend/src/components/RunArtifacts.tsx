@@ -16,12 +16,12 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api";
-import { visibleArtifacts } from "../artifacts";
+import { artifactPath, visibleArtifacts } from "../artifacts";
 import { countLabel } from "../count";
-import { stageLabel } from "../navigation";
-import type { ArtifactRecord } from "../types";
+import { jobScopeLabel } from "../job-list";
+import type { ArtifactRecord, RunNode } from "../types";
 import { SafeMarkdown } from "./SafeMarkdown";
 
 function sizeLabel(bytes: number): string {
@@ -98,19 +98,40 @@ function ArtifactPreview({
   );
 }
 
+/** One file in the working copy: its newest copy first, then older ones. */
+function artifactGroups(
+  runId: string,
+  artifacts: ArtifactRecord[],
+): ArtifactRecord[][] {
+  const groups = new Map<string, ArtifactRecord[]>();
+  for (const artifact of visibleArtifacts(artifacts)) {
+    const key = `${artifact.name}\u0000${artifactPath(runId, artifact)}`;
+    groups.set(key, [...(groups.get(key) ?? []), artifact]);
+  }
+  return Array.from(groups.values(), (copies) =>
+    copies.sort((left, right) => Number(right.id) - Number(left.id)),
+  );
+}
+
 export function RunArtifacts({
   runId,
   artifacts,
+  nodes,
   more,
   onMore,
 }: {
   runId: string;
   artifacts: ArtifactRecord[];
+  nodes: RunNode[];
   more: boolean;
   onMore: () => void;
 }) {
   const [selected, setSelected] = useState<ArtifactRecord | null>(null);
-  const visible = visibleArtifacts(artifacts);
+  const groups = useMemo(
+    () => artifactGroups(runId, artifacts),
+    [runId, artifacts],
+  );
+  const jobLabel = useMemo(() => jobScopeLabel(nodes), [nodes]);
   return (
     <Paper
       variant="outlined"
@@ -135,7 +156,7 @@ export function RunArtifacts({
           </Button>
         }
       </Stack>
-      {visible.length ? (
+      {groups.length ? (
         <TableContainer>
           <Table size="small" aria-label="Retained artifacts">
             <TableHead>
@@ -148,7 +169,7 @@ export function RunArtifacts({
               </TableRow>
             </TableHead>
             <TableBody>
-              {visible.map((artifact) => (
+              {groups.map(([artifact, ...earlier]) => (
                 <TableRow key={artifact.id}>
                   <TableCell data-label="Name">
                     <Typography variant="body2">{artifact.name}</Typography>
@@ -161,9 +182,37 @@ export function RunArtifacts({
                         {artifact.sha256}
                       </Typography>
                     </Box>
+                    {earlier.length > 0 && (
+                      <Box component="details" sx={{ mt: 1 }}>
+                        <Box component="summary" sx={{ minHeight: 24 }}>
+                          {countLabel(
+                            earlier.length,
+                            "earlier copy",
+                            "earlier copies",
+                          )}
+                        </Box>
+                        <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+                          {earlier.map((copy) => (
+                            <li key={copy.id}>
+                              <Typography variant="caption">
+                                {jobLabel(copy.scope_path)} · Attempt{" "}
+                                {copy.attempt_number} · {sizeLabel(copy.bytes)}
+                              </Typography>{" "}
+                              <Button
+                                size="small"
+                                onClick={() => setSelected(copy)}
+                                aria-label={`Preview earlier ${copy.name}, ${jobLabel(copy.scope_path)}, attempt ${copy.attempt_number}`}
+                              >
+                                Preview
+                              </Button>
+                            </li>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
                   </TableCell>
                   <TableCell data-label="Job">
-                    {stageLabel(artifact.scope_path)}
+                    {jobLabel(artifact.scope_path)}
                   </TableCell>
                   <TableCell data-label="Created">
                     {artifact.created_at
@@ -187,7 +236,7 @@ export function RunArtifacts({
                       component="a"
                       href={`/api/artifacts/${artifact.id}`}
                       download
-                      aria-label={`Download ${artifact.name}, ${stageLabel(artifact.scope_path)}, attempt ${artifact.attempt_number}`}
+                      aria-label={`Download ${artifact.name}, ${jobLabel(artifact.scope_path)}, attempt ${artifact.attempt_number}`}
                     >
                       Download
                     </Button>

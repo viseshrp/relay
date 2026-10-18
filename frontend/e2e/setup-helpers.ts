@@ -121,7 +121,8 @@ export async function runStarter(
   name: string,
   testInfo: TestInfo,
   freshOwner = false,
-) {
+  approval = "Approve",
+): Promise<string> {
   expect(
     (
       await post(page, "/__test__/starter-project", { fresh_owner: freshOwner })
@@ -196,10 +197,12 @@ export async function runStarter(
     await expect(
       page.getByRole("heading", { name: "Your review is needed" }),
     ).toBeVisible();
-    await page.getByLabel("Your response", { exact: true }).fill("Approved");
-    await page
-      .getByRole("button", { name: "Send response and continue", exact: true })
-      .click();
+    const request = page.locator(".interaction-card");
+    // Declared answers are buttons; no free-text answer can fail the run.
+    await expect(
+      request.getByLabel("Your response", { exact: true }),
+    ).toHaveCount(0);
+    await request.getByRole("button", { name: approval, exact: true }).click();
   }
   await expectRunStatus(page, runId, "succeeded");
   await expect(
@@ -230,4 +233,5 @@ export async function runStarter(
     .getByRole("button", { name: "Close checklist", exact: true })
     .click();
   await expect(setup).toHaveCount(0);
+  return runId;
 }

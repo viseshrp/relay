@@ -2373,7 +2373,7 @@ at 375 pixels.
   - **Done when:** A new user can follow the guide end to end on a
     disposable repository.
 
-- [ ] **WB-21. Use the YAML words in the gallery.**
+- [x] **WB-21. Use the YAML words in the gallery.**
   - **Priority:** P2.
   - **Spec:** [WB-21 in the handoff](workflow-builder-handoff.md#wb-21-use-the-yaml-words-in-the-gallery)
   - **Evidence:** Gallery cards show inputs such as "test_runner (enum)" and
@@ -2383,8 +2383,11 @@ at 375 pixels.
   - **Fix:** Show `choice` in gallery metadata, and describe the preview as
     a job sequence.
   - **Done when:** No gallery text uses an internal type name.
+  - **Verified:** `get-started.spec.ts` test `gallery cards show their size,
+    needs, and YAML input types` reads `Inputs: task (string), test_runner
+    (choice)` on **Implement and test** and finds no `(enum)` in the gallery.
 
-- [ ] **WB-22. Label starter size and requirements.**
+- [x] **WB-22. Label starter size and requirements.**
   - **Priority:** P2. **Decided** (D3): keep **AI coding workflow**
     preselected.
   - **Spec:** [WB-22 in the handoff](workflow-builder-handoff.md#wb-22-label-starter-size-and-requirements)
@@ -2397,10 +2400,16 @@ at 375 pixels.
     card what it needs and which smaller starter to choose instead.
   - **Done when:** Every card shows its size, and the default card says what
     it needs.
+  - **Verified:**
+    `test_gallery_has_seven_templates_and_schema_defined_inputs` checks 9 jobs
+    and 3 approvals for **AI coding workflow** and 1 and 0 for **Ask an
+    agent**. `get-started.spec.ts` test `gallery cards show their size, needs,
+    and YAML input types` checks each card's size line and the default card's
+    requirement note.
 
 ### First run and results
 
-- [ ] **WB-24. Offer approval answers as buttons.**
+- [x] **WB-24. Offer approval answers as buttons.**
   - **Priority:** P0.
   - **Spec:** [WB-24 in the handoff](workflow-builder-handoff.md#wb-24-offer-approval-answers-as-buttons)
   - **Evidence:** The default starter's three approvals are free-text
@@ -2419,8 +2428,18 @@ at 375 pixels.
     later failure.
   - **Done when:** Each starter approval offers buttons, and a browser test
     shows that no answer can fail the run.
+  - **Verified:** `get-started.spec.ts` test `the full AI coding workflow is
+    preselected and runs from one task` answers with the **IMPLEMENT**,
+    **TESTS**, and **ACCEPT** buttons and finds no **Your response** box.
+    `Plan, approve, implement stops without implementing when Stop is chosen`
+    shows the implementation step skipped and `Stopped at plan review.` in the
+    log; `runStarter` approves with **Approve**.
+    `test_ai_starter_says_it_pushes_and_offers_approval_buttons`,
+    `test_plan_starter_offers_approve_and_stop`, and
+    `test_a_rejected_choice_names_the_allowed_values` cover the sources and the
+    new `must be one of <values>` message.
 
-- [ ] **WB-25. Show the code a finished run produced.**
+- [x] **WB-25. Show the code a finished run produced.**
   - **Priority:** P0.
   - **Spec:** [WB-25 in the handoff](workflow-builder-handoff.md#wb-25-show-the-code-a-finished-run-produced)
   - **Evidence:** After the guided run succeeded, its summary said "Work is
@@ -2442,8 +2461,15 @@ at 375 pixels.
     request names or else the newest.
   - **Done when:** A run with more than 50 artifacts shows **Committed code
     changes** and its true artifact count without **Load more artifacts**.
+  - **Verified:** `test_monitor_reports_artifact_total_and_committed_changes`
+    checks `artifact_count`, `recorded_head`, and `has_committed_changes`.
+    `get-started.spec.ts` test `the full AI coding workflow is preselected and
+    runs from one task` finds more than 50 visible artifacts, a summary count
+    equal to the API total, and **Committed code changes** selected with a
+    diff naming `feature.py`. `unit/run-results.spec.ts` covers the default
+    selection order.
 
-- [ ] **WB-26. Say where the code is and how to take it.**
+- [x] **WB-26. Say where the code is and how to take it.**
   - **Priority:** P1.
   - **Spec:** [WB-26 in the handoff](workflow-builder-handoff.md#wb-26-say-where-the-code-is-and-how-to-take-it)
   - **Evidence:** The guided run committed `feature.py` and `test_feature.py`
@@ -2455,8 +2481,12 @@ at 375 pixels.
     the **merge on success** option for the next run.
   - **Done when:** A user can bring a finished run's code into their branch
     without reading the docs.
+  - **Verified:** `test_run_changes_lists_changed_files` checks `files` and
+    `files_truncated`. The full AI coding workflow browser test reads
+    `2 files changed on branch relay/run/…`, lists `feature.py` and
+    `test_feature.py`, and shows both commands and the merge hint.
 
-- [ ] **WB-27. Say plainly that the default starter pushes and opens a pull
+- [x] **WB-27. Say plainly that the default starter pushes and opens a pull
   request.**
   - **Priority:** P1.
   - **Spec:** [WB-27 in the handoff](workflow-builder-handoff.md#wb-27-say-plainly-that-the-default-starter-pushes-and-opens-a-pull-request)
@@ -2473,8 +2503,12 @@ at 375 pixels.
     input.
   - **Done when:** A beginner can tell before approving what will leave
     their computer.
+  - **Verified:** `test_ai_starter_says_it_pushes_and_offers_approval_buttons`
+    checks the new description and that every approval prompt says `Choose`
+    and never `Reply`; `test_ai_starter_preserves_upstream_prompt_bytes` still
+    passes.
 
-- [ ] **WB-28. Use display names in run views.**
+- [x] **WB-28. Use display names in run views.**
   - **Priority:** P2.
   - **Spec:** [WB-28 in the handoff](workflow-builder-handoff.md#wb-28-use-display-names-in-run-views)
   - **Evidence:** While queued, the guided run's sidebar listed `refine_plan`,
@@ -2489,8 +2523,16 @@ at 375 pixels.
     under their job, count jobs consistently, and collapse repeated
     artifacts to the latest copy, with the others under details.
   - **Done when:** No generated scope name appears in the default run view.
+  - **Verified:** `test_queued_jobs_use_their_declared_names` covers queued
+    names, interpolated names, and `Round <n>`;
+    `test_a_job_commit_names_the_job` covers the commit subject, and
+    `unit/run-results.spec.ts` covers job list context names.
+    `run-presentation.spec.ts` test `run views show names, rounds, and one row
+    per file` keeps `Started manually · 9 jobs` throughout the full starter,
+    shows no `iteration` or `cycle`, and collapses
+    `INITIAL_OPUS_PLANNING_PROMPT.md` into one row with earlier copies.
 
-- [ ] **WB-29. Keep the Get started prompt after the slides close.**
+- [x] **WB-29. Keep the Get started prompt after the slides close.**
   - **Priority:** P2. **Decided** (D4): keep the banner.
   - **Spec:** [WB-29 in the handoff](workflow-builder-handoff.md#wb-29-keep-the-get-started-prompt-after-the-slides-close)
   - **Evidence:** Pressing Escape on the welcome slides also removed the
@@ -2500,8 +2542,12 @@ at 375 pixels.
   - **Fix:** Keep the banner until the checklist is opened or the banner is
     dismissed on its own.
   - **Done when:** Skipping the slides still leaves one visible next step.
+  - **Verified:** `onboarding.spec.ts` test `welcome navigation and keyboard
+    controls introduce features, then a skipped tour stays dismissed` finds the
+    **Welcome to Relay** prompt after the slides close and a reload, and finds
+    it gone after **Dismiss welcome** and another reload.
 
-- [ ] **WB-30. Explain the optional commit in the launch dialog.**
+- [x] **WB-30. Explain the optional commit in the launch dialog.**
   - **Priority:** P2.
   - **Spec:** [WB-30 in the handoff](workflow-builder-handoff.md#wb-30-explain-the-optional-commit-in-the-launch-dialog)
   - **Evidence:** For a new workflow the dialog said "Project files are ready
@@ -2512,6 +2558,10 @@ at 375 pixels.
     hide the button when the run can start without it.
   - **Done when:** A user can tell from the dialog alone whether to commit
     before running.
+  - **Verified:** `launch-panel.spec.ts` test `a new workflow can run without
+    committing and says the commit is optional` reads `1 new workflow file can
+    stay uncommitted` and the optional-commit text, then launches the run
+    without committing.
 
 ### Coming from GitHub Actions
 

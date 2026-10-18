@@ -228,7 +228,10 @@ export function useRunWorkspace({
   );
 
   const loadArtifacts = useCallback(
-    async (since: number, _mode: PageMode): Promise<void> => {
+    async (
+      since: number,
+      _mode: PageMode,
+    ): Promise<number | null | undefined> => {
       const owner = queueOwner.current;
       if (!selectedRun || owner?.id !== selectedRun) return;
       return owner.queue.read("artifacts", async (signal) => {
@@ -253,7 +256,7 @@ export function useRunWorkspace({
           setArtifactCursor(response.next);
           // Coalescing must not consume an artifact event that arrived while
           // an older page was in flight. Append-only records remain visible.
-          if (observed === artifactAfter.current) return;
+          if (observed === artifactAfter.current) return response.next;
         }
         if (!signal.aborted) throw new SnapshotChangedError();
       });
@@ -718,6 +721,17 @@ export function useRunWorkspace({
     }
   }
 
+  /** Append the remaining artifact pages, bounded to 20 requests. */
+  async function loadAllArtifacts() {
+    let cursor: number | null | undefined = artifactCursor;
+    try {
+      for (let page = 0; page < 20 && typeof cursor === "number"; page += 1)
+        cursor = await loadArtifacts(cursor, "append");
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
   const now = useClock(Boolean(detail && !TERMINAL_RUNS.has(detail.status)));
   const graph = useMemo(
     () => runSummaryGraph(detail?.nodes ?? [], now),
@@ -859,6 +873,7 @@ export function useRunWorkspace({
     recovery,
     artifactCursor,
     loadMoreArtifacts,
+    loadAllArtifacts,
     eventCursor,
     loadEvents,
     streamState,

@@ -13,7 +13,7 @@ from relay.errors import PathSafetyError, PermissionFlowError, WorkflowValidatio
 from relay.web.repositories import DjangoWorkflowStore
 from relay.workflows import starters
 from relay.workflows.actions.builtins import builtin, parse_builtin
-from relay.workflows.loader import load_workflow
+from relay.workflows.loader import load_workflow, load_workflow_text
 from relay.workflows.starters import (
     STARTER_ROOT,
     STARTERS,
@@ -89,6 +89,9 @@ def test_gallery_has_seven_templates_and_schema_defined_inputs() -> None:
     assert len(inventory) == 7
     assert all(item["jobs"] and item["required_agents"] for item in inventory)
     assert [item["id"] for item in inventory if item["default"]] == ["ai-coding-workflow"]
+    sizes = {item["id"]: (item["job_count"], item["approval_count"]) for item in inventory}
+    assert sizes["ai-coding-workflow"] == (9, 3)
+    assert sizes["ask-agent"] == (1, 0)
     assert next(item for item in inventory if item["id"] == "ask-agent")["inputs"] == {
         "task": {
             "type": "string",
@@ -97,6 +100,48 @@ def test_gallery_has_seven_templates_and_schema_defined_inputs() -> None:
             "required": True,
             "constraints": {"min_length": None, "max_length": None, "pattern": None},
         },
+    }
+
+
+def test_ai_starter_says_it_pushes_and_offers_approval_buttons() -> None:
+    starter = next(item for item in STARTERS if item.id == "ai-coding-workflow")
+    assert starter.description == (
+        "Enter a task once. Agents explore, plan, implement, review, and test, with your"
+        " approval at three points. Approving lets the agent commit, push its branch, and"
+        " open a pull request if the repository has a remote."
+    )
+    source = STARTER_ROOT / "ai-coding-workflow.yaml"
+    definition = load_workflow_text(source.read_text(encoding="utf-8"), source=source).definition
+    waits = {
+        name: step["with"]
+        for name, node in definition.nodes.items()
+        for step in node.job["steps"]
+        if step.get("uses") == "relay/human-wait@v1"
+    }
+    assert {name: json.loads(inputs["options"]) for name, inputs in waits.items()} == {
+        "implement": ["IMPLEMENT"],
+        "human_review": ["FOLLOWUP", "TESTS"],
+        "final_review": ["ACCEPT"],
+    }
+    for inputs in waits.values():
+        assert "Choose" in inputs["prompt"]
+        assert "Reply" not in inputs["prompt"]
+    assert "push its branch, and open a pull request" in waits["implement"]["prompt"]
+
+
+def test_plan_starter_offers_approve_and_stop() -> None:
+    source = STARTER_ROOT / "plan-approve-implement.yaml"
+    steps = (
+        load_workflow_text(source.read_text(encoding="utf-8"), source=source)
+        .definition.nodes["main"]
+        .job["steps"]
+    )
+    assert steps[1]["id"] == "approval"
+    assert json.loads(steps[1]["with"]["options"]) == ["Approve", "Stop"]
+    assert steps[2]["if"] == "steps.approval.outputs.answer == 'Approve'"
+    assert steps[3] == {
+        "if": "steps.approval.outputs.answer == 'Stop'",
+        "run": "echo Stopped at plan review.",
     }
 
 

@@ -22,6 +22,10 @@ test.afterEach(async ({ page }) => {
 test("welcome navigation and keyboard controls introduce features, then a skipped tour stays dismissed", async ({
   page,
 }, testInfo) => {
+  // Earlier specs' successful runs would hide the Get started prompt.
+  await page.route("**/api/runs?*status=succeeded*", (route) =>
+    route.fulfill({ json: { runs: [], next: null } }),
+  );
   await page.setViewportSize({ width: 1100, height: 800 });
   await page.goto("/");
   const welcome = page.getByRole("dialog", {
@@ -75,9 +79,21 @@ test("welcome navigation and keyboard controls introduce features, then a skippe
   ).toBeVisible();
   await expect(welcome).toHaveCount(0);
   await expect(tour).toHaveCount(0);
+  // Skipping the slides leaves the Get started prompt as the next step.
+  const prompt = page.getByRole("region", {
+    name: "Welcome to Relay",
+    exact: true,
+  });
+  await expect(prompt).toBeVisible();
+  await prompt
+    .getByRole("button", { name: "Dismiss welcome", exact: true })
+    .click();
+  await expect(prompt).toHaveCount(0);
+  await page.reload();
   await expect(
-    page.getByRole("region", { name: "Welcome to Relay", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("main", { name: "Relay home", exact: true }),
+  ).toBeVisible();
+  await expect(prompt).toHaveCount(0);
 });
 
 test("the full spotlight tour reaches each settings control without changing saved defaults", async ({
