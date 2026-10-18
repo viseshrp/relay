@@ -9,6 +9,7 @@ import {
 import { api, csrfToken, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import { editorHolder } from "../editor-session";
+import { stringify } from "yaml";
 import {
   actionsGraph,
   editorYaml,
@@ -31,7 +32,13 @@ import type { PromptEdits } from "./PromptFilesEditor";
 import { useUndoDocument } from "../useUndoDocument";
 
 import { type WorkflowEntry } from "./WorkflowSidebar";
-import { Diagnostic, Trigger, encoded } from "./ActionsWorkflowWorkspaceShared";
+import {
+  Diagnostic,
+  EMPTY_WORKFLOW,
+  Trigger,
+  Validation,
+  encoded,
+} from "./ActionsWorkflowWorkspaceShared";
 type ReadResponse1 = { workflows: WorkflowEntry[] };
 type ReadResponse2 = {
   lease: unknown;
@@ -85,7 +92,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   // Warnings never block saving; the server sends them only for valid sources.
   const [warnings, setWarnings] = useState<Diagnostic[]>([]);
-  const [valid, setValid] = useState(false);
+  const [validation, setValidation] = useState<Validation>("checking");
+  const valid = validation === "valid";
   const [triggerRows, setTriggerRows] = useState<Trigger[]>([]);
   const [activation, setActivation] = useState<string | null>(null);
   const [authorize, setAuthorize] = useState(false);
@@ -334,10 +342,24 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   // Unsaved prompt files count as present; Save writes them with the YAML.
   const draftPrompts = Object.keys(promptEdits).sort().join("\n");
   useEffect(() => {
-    setValid(false);
     setDiagnostics([]);
     setWarnings([]);
-    if (!text || loadedDocument !== path("")) return;
+    if (loadedDocument !== path("")) {
+      setValidation("checking");
+      return;
+    }
+    // The server rejects an empty source; say so here instead of waiting on it.
+    if (!text.trim()) {
+      setValidation("empty");
+      setDiagnostics([
+        {
+          message: EMPTY_WORKFLOW,
+          context: { field: "workflow", line: "1", column: "1" },
+        },
+      ]);
+      return;
+    }
+    setValidation("checking");
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
       void api<ReadResponse4>(
@@ -354,13 +376,16 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       )
         .then((result) => {
           if (!abort.signal.aborted) {
-            setValid(result.valid);
+            setValidation(result.valid ? "valid" : "invalid");
             setDiagnostics(result.diagnostics);
             setWarnings(result.warnings ?? []);
           }
         })
         .catch((e) => {
-          if (!abort.signal.aborted) setError(errorMessage(e));
+          if (!abort.signal.aborted) {
+            setValidation("invalid");
+            setError(errorMessage(e));
+          }
         });
     }, 300);
     return () => {
@@ -613,6 +638,21 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setContextMenu(null);
     setDrawer(true);
   }
+  /** Replace an empty source with a named workflow that has one job. */
+  function addFirstJob() {
+    const savedName = savedParsed.value?.name;
+    const name =
+      typeof savedName === "string" && savedName.trim()
+        ? savedName
+        : (key.split("/").at(-1) ?? key).replace(/\.ya?ml$/i, "");
+    setText(
+      stringify({
+        name,
+        on: "workflow_dispatch",
+        jobs: { job_1: { steps: [{ run: "echo Ready" }] } },
+      }),
+    );
+  }
   const disabled =
     inventory.find((item) => item.key === key)?.disabled === true;
 
@@ -633,6 +673,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     disabled,
     lease,
     valid,
+    validation,
+    addFirstJob,
     text,
     saved,
     promptEdits,

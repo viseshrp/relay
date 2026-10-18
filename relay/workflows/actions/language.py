@@ -186,11 +186,18 @@ def _inspect_tree(
 
 
 @lru_cache(maxsize=1)
+def _language_schema() -> dict[str, Any]:
+    return json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))
+
+
 def language_definitions() -> dict[str, Any]:
     """The same curated schema is authoritative for validation and discovery."""
-    return json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))[
-        "definitions"
-    ]
+    return _language_schema()["definitions"]
+
+
+def language_property_descriptions() -> dict[str, str]:
+    """Help text for each "<definition>.<property>" pair, shown by the editor."""
+    return _language_schema()["property_descriptions"]
 
 
 def _mapping(value: object, path: str) -> dict[str, Any]:
@@ -1328,10 +1335,14 @@ def support_manifest() -> dict[str, Any]:
         "builtins": sorted(
             action.reference for action in BUILTIN_ACTIONS if action.status == "current"
         ),
+        "property_descriptions": language_property_descriptions(),
         "builtin_inputs": {
             action.reference: {
                 "allowed": sorted(action.allowed),
                 "required": sorted(action.required),
+                "summary": action.summary,
+                "descriptions": dict(action.descriptions),
+                "values": {key: list(values) for key, values in action.values.items()},
             }
             for action in BUILTIN_ACTIONS
         },
@@ -1345,6 +1356,8 @@ def support_manifest() -> dict[str, Any]:
         },
         "events": sorted(EVENTS),
         "cache_modes": sorted(CACHE_MODES),
+        "value_hints": {"shell": list(SHELLS)},
+        "platform_names": PLATFORM_NAMES,
         "contexts": sorted(expressions.CONTEXTS),
         "context_properties": {
             key: sorted(value) for key, value in expressions.CONTEXT_PROPERTIES.items()

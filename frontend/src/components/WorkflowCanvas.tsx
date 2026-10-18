@@ -16,6 +16,7 @@ import { builtinLabel } from "../builtin-actions";
 
 import { FlowCanvas } from "./FlowCanvas";
 import { YamlEditor } from "./YamlEditor";
+import { EMPTY_WORKFLOW } from "./ActionsWorkflowWorkspaceShared";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
 export function WorkflowCanvas({
@@ -56,6 +57,11 @@ export function WorkflowCanvas({
     triggerRows,
     toggleTrigger,
     setActivation,
+    validation,
+    saved,
+    restoreSaved,
+    addFirstJob,
+    agents,
   } = state;
   return (
     <Box
@@ -72,6 +78,25 @@ export function WorkflowCanvas({
         gap: 2,
       }}
     >
+      {validation === "empty" && (
+        <Alert
+          severity="info"
+          sx={{ gridColumn: "1 / -1" }}
+          action={
+            <Stack direction="row" spacing={1}>
+              <Button
+                disabled={!saved.trim()}
+                onClick={() => void restoreSaved()}
+              >
+                Restore saved source
+              </Button>
+              <Button onClick={addFirstJob}>Add a job</Button>
+            </Stack>
+          }
+        >
+          {EMPTY_WORKFLOW}
+        </Alert>
+      )}
       {mode !== "YAML" && (
         <Paper sx={{ p: 2 }}>
           <Stack spacing={2}>
@@ -219,6 +244,7 @@ export function WorkflowCanvas({
             manifest={manifest}
             diagnostics={diagnostics}
             warnings={warnings}
+            agentIds={agents.map((agent) => agent.id)}
           />
           {events
             .filter((event) =>

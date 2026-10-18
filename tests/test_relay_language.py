@@ -199,6 +199,57 @@ def test_manifest_describes_builtin_versions() -> None:
     assert set(manifest["builtin_inputs"]) == set(versions)
 
 
+def test_every_reachable_property_and_action_input_has_a_description() -> None:
+    from relay.workflows.actions.builtins import BUILTIN_ACTIONS
+
+    manifest = support_manifest()
+    texts = {
+        f"{name}.{key}": manifest["property_descriptions"].get(f"{name}.{key}")
+        for name, definition in manifest["definitions"].items()
+        for key in (definition.get("mapping") or {}).get("properties") or {}
+    }
+    assert len(texts) == 108
+    assert set(manifest["property_descriptions"]) == set(texts)
+    for action in BUILTIN_ACTIONS:
+        entry = manifest["builtin_inputs"][action.reference]
+        texts[action.reference] = entry["summary"]
+        assert set(entry["descriptions"]) == action.allowed
+        for key in action.allowed:
+            texts[f"{action.reference}.{key}"] = entry["descriptions"][key]
+    assert len(texts) == 108 + 11 + 46
+    problems = {
+        key: text
+        for key, text in texts.items()
+        if not isinstance(text, str) or not text.strip() or len(text) > 240 or "GitHub" in text
+    }
+    assert not problems
+
+
+def test_manifest_offers_fixed_values_for_completion() -> None:
+    manifest = support_manifest()
+    assert manifest["value_hints"] == {
+        "shell": ["bash", "sh", "pwsh", "powershell", "cmd", "python"]
+    }
+    inputs = manifest["builtin_inputs"]
+    assert inputs["relay/agent@v1"]["values"] == {
+        "format": ["exists", "label", "json", "yaml"],
+        "auto-retry": ["true", "false"],
+    }
+    assert inputs["relay/validate-report@v1"]["values"] == {
+        "format": ["exists", "label", "json", "yaml"]
+    }
+    assert inputs["relay/validate-input@v1"]["values"] == {
+        "type": ["string", "integer", "number", "boolean", "enum"]
+    }
+    assert all(
+        not entry["values"]
+        for reference, entry in inputs.items()
+        if reference
+        not in {"relay/agent@v1", "relay/validate-report@v1", "relay/validate-input@v1"}
+    )
+    assert manifest["platform_names"]["runner"]["os"] == "host.os"
+
+
 def test_manifest_contains_only_local_reachable_definitions_and_facts() -> None:
     manifest = support_manifest()
     assert manifest["dialect"] == "relay-local-1"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 from typing import Any, Literal
@@ -21,15 +21,40 @@ SHELL_HINT = (
 )
 
 
+# Formats an agent or validate-report step can read a report in.
+REPORT_FORMATS = ("exists", "label", "json", "yaml")
+_REPORT_FORMAT = (
+    "How to read the report: label (the default), json, yaml, or exists, which only checks "
+    "that the file is there."
+)
+_REPORT_FIELD = (
+    "Dotted key to read from a json or yaml report, such as result.status. Defaults to value."
+)
+_REPORT_LABEL = (
+    "Label to look for in a label report: the text after the first line that starts with "
+    "'<label>: ' becomes the value. Defaults to Ready."
+)
+_CACHE_PATH = (
+    "Files and folders to cache, as patterns relative to the job's working copy, one per line."
+)
+_RESTORE_KEYS = (
+    "Fallback key prefixes, one per line, tried in order when key has no exact match. "
+    "The newest matching entry is restored."
+)
+
+
 @dataclass(frozen=True, slots=True)
 class BuiltinAction:
-    """One major version of a built-in action and its inputs."""
+    """One major version of a built-in action, its inputs, and their help text."""
 
     name: str
     major: int
     allowed: frozenset[str]
     required: frozenset[str]
     status: Literal["current", "deprecated"] = "current"
+    summary: str = ""
+    descriptions: Mapping[str, str] = field(default_factory=dict)
+    values: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def reference(self) -> str:
@@ -58,42 +83,255 @@ BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (
             }
         ),
         frozenset(),
+        summary="Ask an installed coding agent to do work in the job's working copy.",
+        descriptions={
+            "agent": (
+                "One installed agent to run the step, by ID, such as codex or claude. "
+                "Use agents instead to give agents to try in order."
+            ),
+            "agents": (
+                "Agents to try in order, as a JSON array or one per line. "
+                "The first available agent runs the step."
+            ),
+            "model": (
+                "Exact model value for the agent, matched with case. Without it, your saved "
+                "default model applies; the run stops rather than switch to another model."
+            ),
+            "effort": (
+                "Exact reasoning effort value for the chosen model. Leave it out to use your "
+                "saved setting; an empty value keeps the agent's own default."
+            ),
+            "prompt-files": (
+                "Instruction files sent before prompt, one per line, under .relay/ or "
+                "global:NAME for your global prompts. Their text is fixed when the run starts."
+            ),
+            "prompt": (
+                "Instructions sent to the agent after any prompt files. "
+                "Expressions such as ${{ inputs.task }} are filled in at launch."
+            ),
+            "report": (
+                "File the agent must write in the job's working copy. Relay reads it as format "
+                "says, and the step fails if it is missing or does not match."
+            ),
+            "selector": (
+                "Full report check as a JSON object using exists, label, json_path, or "
+                "yaml_path. Use it instead of report, format, field, and label."
+            ),
+            "format": _REPORT_FORMAT,
+            "field": _REPORT_FIELD,
+            "label": _REPORT_LABEL,
+            "auto-retry": (
+                "true lets Relay retry this step after a report, protocol, or time-limit "
+                "failure; false never retries it. Without it, the run's recovery setting decides."
+            ),
+            "retry-limit": (
+                "Most automatic retries for this step, 1 or 2, used with auto-retry: true. "
+                "Retries already used are not reset by a restart."
+            ),
+        },
+        values={"format": REPORT_FORMATS, "auto-retry": ("true", "false")},
     ),
-    BuiltinAction("command", 1, frozenset({"argv", "command"}), frozenset()),
     BuiltinAction(
-        "human-wait", 1, frozenset({"prompt", "timeout-minutes", "options"}), frozenset({"prompt"})
+        "command",
+        1,
+        frozenset({"argv", "command"}),
+        frozenset(),
+        summary="Run a program with exact arguments in the job's working copy, without a shell.",
+        descriptions={
+            "argv": (
+                "Program and arguments, as a JSON array or one argument per line. "
+                "Arguments are passed exactly; no shell is involved."
+            ),
+            "command": (
+                "Name of a command saved in Relay's settings, used instead of argv. "
+                "Its saved arguments are fixed when the run starts."
+            ),
+        },
+    ),
+    BuiltinAction(
+        "human-wait",
+        1,
+        frozenset({"prompt", "timeout-minutes", "options"}),
+        frozenset({"prompt"}),
+        summary="Pause the job until you answer a question in Relay.",
+        descriptions={
+            "prompt": (
+                "Question shown to you while the job waits. It can use expressions; "
+                "your answer becomes steps.<id>.outputs.answer."
+            ),
+            "timeout-minutes": (
+                "Minutes to wait for an answer before the step fails. "
+                "Without it, the job's time limit applies."
+            ),
+            "options": (
+                "Answer buttons, as a JSON array or one per line. "
+                "Without options the answer is free text."
+            ),
+        },
     ),
     BuiltinAction(
         "loop",
         1,
         frozenset({"workflow", "inputs", "max-iterations", "until-output", "equals"}),
         frozenset({"workflow", "max-iterations"}),
+        summary=(
+            "Run a local workflow again and again until one of its outputs has a chosen value "
+            "or the limit is reached."
+        ),
+        descriptions={
+            "workflow": (
+                "Workflow file to repeat, such as ./.relay/workflows/fix.yaml. "
+                "It must declare on: workflow_call."
+            ),
+            "inputs": (
+                'Inputs passed to each repetition, as a JSON object such as {"target": "tests"}. '
+                "Defaults to none."
+            ),
+            "max-iterations": (
+                "Most repetitions to run, a whole number from 1 to 100. "
+                "If until-output never matches, the loop fails after the last one."
+            ),
+            "until-output": (
+                "Output of the repeated workflow to check after each repetition. The loop stops "
+                "when it matches equals; without until-output, the workflow runs once."
+            ),
+            "equals": "Value that until-output must have to stop the loop. Defaults to true.",
+        },
     ),
     BuiltinAction(
         "validate-report",
         1,
         frozenset({"path", "report", "selector", "format", "field", "label"}),
         frozenset(),
+        summary="Check a report file in the job's working copy and export a value read from it.",
+        descriptions={
+            "path": (
+                "Report file to check, relative to the job's working copy. "
+                "You can use report instead."
+            ),
+            "report": (
+                "Report file to check, relative to the job's working copy. "
+                "Same as path; report is used when both are set."
+            ),
+            "selector": (
+                "Full report check as a JSON object using exists, label, json_path, or "
+                "yaml_path. Use it instead of path, format, field, and label."
+            ),
+            "format": _REPORT_FORMAT,
+            "field": _REPORT_FIELD,
+            "label": _REPORT_LABEL,
+        },
+        values={"format": REPORT_FORMATS},
     ),
     BuiltinAction(
         "validate-input",
         1,
         frozenset({"value", "type", "constraints"}),
         frozenset({"value", "type"}),
+        summary=(
+            "Check that a value has the expected type and limits; the step fails when it does not."
+        ),
+        descriptions={
+            "value": (
+                "Value to check, usually an expression such as ${{ inputs.count }}. "
+                "It is exported unchanged as the value output."
+            ),
+            "type": (
+                "Kind of value expected: string (the default), integer, number, boolean, or enum."
+            ),
+            "constraints": (
+                "Limits as a JSON object: min_length, max_length, or pattern for a string, "
+                "min or max for a number, and values for an enum."
+            ),
+        },
+        values={"type": ("string", "integer", "number", "boolean", "enum")},
     ),
     BuiltinAction(
-        "upload-artifact", 1, frozenset({"name", "path", "retention-days"}), frozenset({"path"})
+        "upload-artifact",
+        1,
+        frozenset({"name", "path", "retention-days"}),
+        frozenset({"path"}),
+        summary="Save files from the job's working copy as a named artifact of this run.",
+        descriptions={
+            "name": (
+                "Artifact name, unique within the run and without slashes. Defaults to artifact."
+            ),
+            "path": (
+                "Files to save, as glob patterns relative to the job's working copy, one per line."
+            ),
+            "retention-days": (
+                "Days to keep the artifact, from 0 to 365. Defaults to 0, which keeps it with no "
+                "expiry."
+            ),
+        },
     ),
     BuiltinAction(
-        "download-artifact", 1, frozenset({"name", "path", "run-id"}), frozenset({"name"})
+        "download-artifact",
+        1,
+        frozenset({"name", "path", "run-id"}),
+        frozenset({"name"}),
+        summary=(
+            "Copy a saved artifact from this run, or an earlier run of the same project, "
+            "into the job's working copy."
+        ),
+        descriptions={
+            "name": "Name of the artifact to copy.",
+            "path": (
+                "Folder in the job's working copy to copy the files into. "
+                "Defaults to the top of the working copy."
+            ),
+            "run-id": (
+                "ID of the run that saved the artifact, in the same project. "
+                "Defaults to the current run."
+            ),
+        },
     ),
     BuiltinAction(
-        "cache", 1, frozenset({"key", "path", "restore-keys"}), frozenset({"key", "path"})
+        "cache",
+        1,
+        frozenset({"key", "path", "restore-keys"}),
+        frozenset({"key", "path"}),
+        summary=(
+            "Restore files from the project cache, and save them under key when the job succeeds."
+        ),
+        descriptions={
+            "key": (
+                "Exact name for the cached files, up to 512 characters. Saved entries never "
+                "change, so include a hash of the files they depend on."
+            ),
+            "path": _CACHE_PATH,
+            "restore-keys": _RESTORE_KEYS,
+        },
     ),
     BuiltinAction(
-        "restore-cache", 1, frozenset({"key", "path", "restore-keys"}), frozenset({"key", "path"})
+        "restore-cache",
+        1,
+        frozenset({"key", "path", "restore-keys"}),
+        frozenset({"key", "path"}),
+        summary="Restore files from the project cache without saving them later.",
+        descriptions={
+            "key": (
+                "Exact name of the cached files to restore. "
+                "When nothing matches it, restore-keys are tried."
+            ),
+            "path": _CACHE_PATH,
+            "restore-keys": _RESTORE_KEYS,
+        },
     ),
-    BuiltinAction("save-cache", 1, frozenset({"key", "path"}), frozenset({"key", "path"})),
+    BuiltinAction(
+        "save-cache",
+        1,
+        frozenset({"key", "path"}),
+        frozenset({"key", "path"}),
+        summary="Save files from the job's working copy to the project cache under a key.",
+        descriptions={
+            "key": (
+                "Exact name for the saved files, up to 512 characters. "
+                "An entry that already has this key is not replaced."
+            ),
+            "path": _CACHE_PATH,
+        },
+    ),
 )
 _BY_REFERENCE: dict[str, BuiltinAction] = {action.reference: action for action in BUILTIN_ACTIONS}
 
@@ -247,7 +485,7 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     if (
         format_name is not None
         and "${{" not in str(format_name)
-        and format_name not in {"exists", "label", "json", "yaml"}
+        and format_name not in REPORT_FORMATS
     ):
         message = "Report format must be exists, label, json, or yaml."
         raise WorkflowValidationError(message)

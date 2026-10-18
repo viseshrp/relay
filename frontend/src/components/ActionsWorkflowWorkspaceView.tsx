@@ -23,7 +23,10 @@ import { formatWorkflowYaml } from "../source-format";
 import { WorkflowSidebar } from "./WorkflowSidebar";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
-import type { Diagnostic } from "./ActionsWorkflowWorkspaceShared";
+import {
+  VALIDATION_STATUS,
+  type Diagnostic,
+} from "./ActionsWorkflowWorkspaceShared";
 
 // Schema errors name fields from workflow.jobs; other diagnostics from jobs.
 const JOB_FIELD = /^(?:workflow\.)?jobs\.([^.[]+)/;
@@ -70,7 +73,7 @@ export function ActionsWorkflowWorkspaceView({
     parsed,
     disabled,
     lease,
-    valid,
+    validation,
     text,
     saved,
     promptEdits,
@@ -207,11 +210,7 @@ export function ActionsWorkflowWorkspaceView({
           onEnvironments={setEnvironments}
         />
         <Typography>
-          {lease && valid
-            ? "Ready to edit"
-            : lease
-              ? "Validating workflow…"
-              : "Connecting editor…"}
+          {lease ? VALIDATION_STATUS[validation] : "Connecting editor…"}
         </Typography>
         {notice && <Alert severity="success">{notice}</Alert>}
         {inventoryWarning && (
@@ -258,14 +257,16 @@ export function ActionsWorkflowWorkspaceView({
             </Box>
           </Alert>
         )}
-        {diagnostics.map((item, i) => (
-          <DiagnosticAlert
-            key={`error-${i}`}
-            item={item}
-            severity="error"
-            onOpenJob={openJob}
-          />
-        ))}
+        {/* An empty source explains itself beside its fixes, below. */}
+        {validation !== "empty" &&
+          diagnostics.map((item, i) => (
+            <DiagnosticAlert
+              key={`error-${i}`}
+              item={item}
+              severity="error"
+              onOpenJob={openJob}
+            />
+          ))}
         {warnings.map((item, i) => (
           <DiagnosticAlert
             key={`warning-${i}`}
@@ -274,7 +275,7 @@ export function ActionsWorkflowWorkspaceView({
             onOpenJob={openJob}
           />
         ))}
-        {key && !text && !error ? (
+        {key && !text && !error && validation !== "empty" ? (
           <ViewSkeleton view="workflows" header={false} />
         ) : (
           <WorkflowCanvas state={state} />

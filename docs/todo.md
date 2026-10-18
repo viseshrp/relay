@@ -1984,7 +1984,7 @@ at 375 pixels.
 
 ### YAML editor
 
-- [ ] **WB-01. Make completion follow the cursor position.**
+- [x] **WB-01. Make completion follow the cursor position.**
   - **Priority:** P0.
   - **Spec:** [WB-01 in the handoff](workflow-builder-handoff.md#wb-01-make-completion-follow-the-cursor-position)
   - **Evidence:** `YamlEditor.tsx:61` merges every property of all 115
@@ -2001,8 +2001,15 @@ at 375 pixels.
   - **Done when:** A browser test checks completion at the root, a job, a
     step, an agent step's `with:`, and inside an expression, and each list
     contains only fields valid there.
+  - **Verified:** `workflow-authoring.spec.ts` "YAML completion offers only
+    fields valid at the cursor" (root, job, step, agent `with:`, and
+    expression); the label cases and the expression cases in
+    `frontend/unit/yaml-completion.spec.ts`, which also limit expression names
+    to the contexts and functions the field accepts; `yamlCursorAt` in
+    `frontend/unit/yaml-path.spec.ts` and `definitionAt` in
+    `frontend/unit/workflow-language.spec.ts`.
 
-- [ ] **WB-02. Suggest values, starting with action names.**
+- [x] **WB-02. Suggest values, starting with action names.**
   - **Priority:** P0.
   - **Spec:** [WB-02 in the handoff](workflow-builder-handoff.md#wb-02-suggest-values-starting-with-action-names)
   - **Evidence:** Completion only offers keys. The 11 `relay/*@v1` actions in
@@ -2015,8 +2022,15 @@ at 375 pixels.
     block containing its required inputs (see WB-07).
   - **Done when:** Ctrl+Space after `uses:` lists the 11 actions, and each
     fixed-value field lists its values.
+  - **Verified:** `workflow-authoring.spec.ts` "Ctrl+Space after uses lists
+    the built-in actions"; "uses on a step offers every built-in action",
+    "fixed values are offered in their own order", and "choosing an action for
+    a step without with adds its required inputs" in
+    `frontend/unit/yaml-completion.spec.ts`;
+    `test_manifest_offers_fixed_values_for_completion` in
+    `tests/test_relay_language.py`.
 
-- [ ] **WB-03. Give hover and completion real descriptions.**
+- [x] **WB-03. Give hover and completion real descriptions.**
   - **Priority:** P0.
   - **Spec:** [WB-03 in the handoff](workflow-builder-handoff.md#wb-03-give-hover-and-completion-real-descriptions)
   - **Evidence:** Only 6 of 115 definitions in the served manifest have a
@@ -2038,8 +2052,14 @@ at 375 pixels.
   - **Done when:** A test fails when a property reachable from
     `workflow-root`, or an action input, has no description. A hover test
     distinguishes a step's `run` from `defaults.run`.
+  - **Verified:**
+    `test_every_reachable_property_and_action_input_has_a_description` in
+    `tests/test_relay_language.py` (108 fields, 11 action summaries, and 46
+    action inputs); "hover describes the field under the pointer by its
+    place" and "key completion describes each field and inserts its colon" in
+    `frontend/unit/yaml-completion.spec.ts`.
 
-- [ ] **WB-04. Make Tab indent in the YAML editor.**
+- [x] **WB-04. Make Tab indent in the YAML editor.**
   - **Priority:** P1.
   - **Spec:** [WB-04 in the handoff](workflow-builder-handoff.md#wb-04-make-tab-indent-in-the-yaml-editor)
   - **Evidence:** The editor uses `basicSetup` without `indentWithTab`.
@@ -2054,8 +2074,10 @@ at 375 pixels.
   - **Done when:** A browser test checks that Tab indents by two spaces,
     Shift+Tab outdents, and Escape followed by Tab moves focus out of the
     editor.
+  - **Verified:** `accessibility.spec.ts` "Tab indents in the YAML editor and
+    Escape then Tab leaves it". The script editor uses the same binding.
 
-- [ ] **WB-05. Explain an empty YAML document.**
+- [x] **WB-05. Explain an empty YAML document.**
   - **Priority:** P1.
   - **Spec:** [WB-05 in the handoff](workflow-builder-handoff.md#wb-05-explain-an-empty-yaml-document)
   - **Evidence:** After selecting all and deleting, the page still shows
@@ -2068,6 +2090,10 @@ at 375 pixels.
     loading state.
   - **Done when:** A browser test clears the document and sees that message
     in both Visual and YAML modes.
+  - **Verified:** `workflow-authoring.spec.ts` "clearing the YAML explains the
+    empty workflow" (Split, Visual, and YAML modes; **Add a job** returns to
+    **Ready to edit**; an invalid source reads "Fix the problems above to
+    save.").
 
 ### Visual editor
 
@@ -2602,7 +2628,10 @@ where that familiarity stops, usually without saying so.
     equivalent produces a message naming it.
   - **Verified:** `test_platform_names_point_to_relay_names` and
     `test_platform_expression_roots_and_placeholders_are_removed` in
-    `tests/test_relay_language.py`. Completion (WB-01) is left to PR D.
+    `tests/test_relay_language.py`. Completion offers the Relay name for a
+    `github.*` or `runner.*` name typed in an expression (WB-01): "expression
+    completion offers names valid in the expression" in
+    `frontend/unit/yaml-completion.spec.ts`.
 
 - [x] **WB-35. Reject the GitHub file variables in scripts.**
   - **Priority:** P0. **Decided** (D2): a hard validation error; no warning,

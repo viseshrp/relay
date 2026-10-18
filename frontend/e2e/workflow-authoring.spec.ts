@@ -1,4 +1,4 @@
-import { expect, test } from "./a11y-test";
+import { expect, test, type Page } from "./a11y-test";
 import { post } from "./setup-helpers";
 import { parse, stringify } from "yaml";
 
@@ -162,6 +162,100 @@ test("warnings appear beside the editor without blocking save", async ({
     await page.request.get("/api/workflows/workflow.yaml")
   ).json();
   expect(source.yaml).toContain("${{ inputs.missing }}");
+});
+
+async function openYamlEditor(page: Page) {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Editor mode" }).click();
+  await page.getByRole("option", { name: "YAML", exact: true }).click();
+  return page.locator(".cm-content");
+}
+
+/** Replace the YAML, then type the last part so completion sees typing. */
+async function typeYaml(page: Page, source: string, typed: string) {
+  await page.locator(".cm-content").fill(source);
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(typed);
+}
+
+test("YAML completion offers only fields valid at the cursor", async ({
+  page,
+}) => {
+  await openYamlEditor(page);
+  const options = page.locator(".cm-tooltip-autocomplete [role=option]");
+  const source =
+    "name: Completion\non:\n  workflow_dispatch:\n    inputs:\n      task: {type: string}\njobs:\n  work:\n    steps:\n      - run: echo Ready\n";
+  await typeYaml(page, source, "      - ru");
+  await expect(options).toHaveText(["run"]);
+  await typeYaml(page, source, "ru");
+  await expect(options).toHaveText(["run-name"]);
+  await typeYaml(page, source, "    ti");
+  await expect(options).toHaveText(["timeout-minutes"]);
+  await typeYaml(
+    page,
+    `${source}      - uses: relay/agent@v1\n        with:\n`,
+    "          mo",
+  );
+  await expect(options).toHaveText(["model"]);
+  await typeYaml(page, source, "      - run: echo ${{ inp");
+  await expect(options).toHaveText(["inputs.task"]);
+  await page.keyboard.press("Escape");
+  await expect(options).toHaveCount(0);
+});
+
+test("Ctrl+Space after uses lists the built-in actions", async ({ page }) => {
+  const { builtins } = await (
+    await page.request.get("/api/workflow-language")
+  ).json();
+  const editor = await openYamlEditor(page);
+  await editor.fill(
+    "name: Actions\non: workflow_dispatch\njobs:\n  work:\n    steps:\n      - uses: ",
+  );
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Control+Space");
+  const options = page.locator(".cm-tooltip-autocomplete [role=option]");
+  await expect(options).toHaveText(
+    [...builtins].sort().concat("./.relay/actions/"),
+  );
+  await options.filter({ hasText: "human-wait" }).click();
+  await expect(options).toHaveCount(0);
+  await expect(editor).toContainText("uses: relay/human-wait@v1");
+  await expect(editor).toContainText("with:");
+  await expect(editor).toContainText("prompt:");
+});
+
+test("clearing the YAML explains the empty workflow", async ({ page }) => {
+  const editor = await openYamlEditor(page);
+  await page.getByRole("combobox", { name: "Editor mode" }).click();
+  await page.getByRole("option", { name: "Split", exact: true }).click();
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Delete");
+  const status = page.getByText("This workflow is empty.", { exact: true });
+  await expect(status).toBeVisible({ timeout: 2000 });
+  const empty = page.getByRole("alert").filter({
+    hasText: "This workflow is empty. Restore the saved source or add a job.",
+  });
+  await expect(empty).toBeVisible();
+  await expect(
+    empty.getByRole("button", { name: "Restore saved source" }),
+  ).toBeEnabled();
+  for (const mode of ["Visual", "YAML"]) {
+    await page.getByRole("combobox", { name: "Editor mode" }).click();
+    await page.getByRole("option", { name: mode, exact: true }).click();
+    await expect(empty).toBeVisible();
+  }
+  await expect(page.getByText("Validating workflow…")).toHaveCount(0);
+  await empty.getByRole("button", { name: "Add a job" }).click();
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await expect(empty).toHaveCount(0);
+  await expect(editor).toContainText("name: Configuration");
+  await expect(editor).toContainText("- run: echo Ready");
+  await editor.fill("jobs:\n  work:\n    stpes: []\n");
+  await expect(
+    page.getByText("Fix the problems above to save.", { exact: true }),
+  ).toBeVisible();
 });
 
 test("inventory refresh failure preserves save success and the next save base", async ({

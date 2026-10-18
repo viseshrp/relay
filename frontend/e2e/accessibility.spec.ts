@@ -94,3 +94,34 @@ test("invalid settings cannot save, section changes require discard, and Escape 
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".driver-popover")).toHaveCount(0);
 });
+
+test("Tab indents in the YAML editor and Escape then Tab leaves it", async ({
+  page,
+}) => {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  const content = page.locator(".yaml-editor .cm-content");
+  const text = () =>
+    content.evaluate((element) =>
+      [...element.querySelectorAll(".cm-line")]
+        .map((line) => line.textContent)
+        .join("\n"),
+    );
+  await page.locator(".yaml-editor .cm-line").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  const before = await text();
+  await page.keyboard.press("Tab");
+  await expect.poll(text).toBe(before.replace(/^(.*\n)/, "$1  "));
+  expect(await text()).not.toContain("\t");
+  await expect(content).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(text).toBe(before);
+  // The editor is the page's last control, so focus may leave the page.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
+  expect(
+    await page.evaluate(() => !document.activeElement?.closest(".yaml-editor")),
+  ).toBe(true);
+  expect(await text()).toBe(before);
+});

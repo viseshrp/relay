@@ -64,7 +64,7 @@ accept workflow jobs and ordered steps.
 
 | Method and path | Purpose and body |
 | --- | --- |
-| `GET /api/workflow-language` | Relay schema, built-in action versions and inputs, local contexts/properties, supported fields, and limits |
+| `GET /api/workflow-language` | Relay schema with `property_descriptions` keyed `<definition>.<property>`; built-in action versions and inputs, where each `builtin_inputs` entry adds `summary`, per-input `descriptions`, and fixed `values`; `value_hints` (named shells), `cache_modes`, and `platform_names` (the Relay expression names that completion offers for another platform's names); local contexts/properties, supported fields, and limits |
 | `POST /api/workflow-language/validate` | `{yaml, source?, prompts?}`; pure validation returns `{valid, diagnostics, warnings, definition?, sources?}`. A literal agent `prompt-files` entry that does not exist is a diagnostic unless `prompts` lists it as an unsaved draft (at most 32 local names). `warnings` are located envelopes with `context.severity: "warning"` for a valid source and `[]` otherwise; they never set `valid` to false |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |

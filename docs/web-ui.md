@@ -310,8 +310,15 @@ select an edge and press Delete to remove it. The plus button between jobs
 inserts a job. Right-click a card to duplicate, delete, or run from that job.
 **Run from here** saves a declared start point before opening launch options.
 Undo and redo reverse document edits. **Format as YAML** previews changes
-before applying them to the draft. YAML completion and hover help use the
-server language manifest; diagnostics underline their source position.
+before applying them to the draft. YAML completion offers the fields, action
+inputs, and expression names that are valid at the cursor, and hover shows
+each field's description. Both come from the server language manifest.
+Completion also offers fixed values, such as built-in actions after `uses:`,
+shells, and input types; choosing an action for a step without `with` adds its
+required inputs. Diagnostics underline their source position. Tab indents in
+the YAML and script editors; see [Keyboard shortcuts](keyboard-shortcuts.md).
+When the YAML is empty, the editor says so and offers **Restore saved source**
+and **Add a job**.
 
 **Workflow settings** edits names, launch inputs, defaults, environment,
 concurrency, events, recovery, and declared start points. Job forms use

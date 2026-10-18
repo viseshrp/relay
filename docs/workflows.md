@@ -508,7 +508,8 @@ other change ships as the next major version.
 
 The support manifest lists every registered version under `builtin_versions`,
 with its action name, major version, and status, and its inputs under
-`builtin_inputs`. `builtins` lists the current references.
+`builtin_inputs`, with a one-line summary, a description of each input, and
+the fixed values an input accepts. `builtins` lists the current references.
 
 ## Variables, secrets, and environments
 

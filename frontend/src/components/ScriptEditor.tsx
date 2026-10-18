@@ -1,9 +1,10 @@
-import { StreamLanguage } from "@codemirror/language";
+import { indentWithTab } from "@codemirror/commands";
+import { indentUnit, StreamLanguage } from "@codemirror/language";
 import { shell as shellMode } from "@codemirror/legacy-modes/mode/shell";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { Box, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
@@ -44,6 +45,8 @@ export function ScriptEditor({
         doc: currentValue.current,
         extensions: [
           basicSetup,
+          keymap.of([indentWithTab]),
+          indentUnit.of("  "),
           themeCompartment.current.of(createCodeMirrorTheme(isDarkRef.current)),
           StreamLanguage.define(
             language === "python"
