@@ -38,7 +38,11 @@ type ReadResponse2 = {
   conflict?: { message: string };
 };
 type ReadResponse3 = { draft: WorkflowDraft };
-type ReadResponse4 = { valid: boolean; diagnostics: Diagnostic[] };
+type ReadResponse4 = {
+  valid: boolean;
+  diagnostics: Diagnostic[];
+  warnings?: Diagnostic[];
+};
 type ReadResponse5 = { triggers: Trigger[] };
 type ReadResponse6 = { environments: Array<{ name: string }> };
 type ReadResponse7 = { triggers: Trigger[] };
@@ -79,6 +83,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [create, setCreate] = useState(Boolean(props.initialCreate));
   const [launch, setLaunch] = useState(props.initialLaunch);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  // Warnings never block saving; the server sends them only for valid sources.
+  const [warnings, setWarnings] = useState<Diagnostic[]>([]);
   const [valid, setValid] = useState(false);
   const [triggerRows, setTriggerRows] = useState<Trigger[]>([]);
   const [activation, setActivation] = useState<string | null>(null);
@@ -330,6 +336,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   useEffect(() => {
     setValid(false);
     setDiagnostics([]);
+    setWarnings([]);
     if (!text || loadedDocument !== path("")) return;
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
@@ -349,6 +356,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
           if (!abort.signal.aborted) {
             setValid(result.valid);
             setDiagnostics(result.diagnostics);
+            setWarnings(result.warnings ?? []);
           }
         })
         .catch((e) => {
@@ -655,6 +663,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     error,
     draft,
     diagnostics,
+    warnings,
     setJobId,
     setDrawer,
     lastValid,

@@ -221,3 +221,47 @@ def test_validate_reports_missing_prompt_files(owner: Client, project: RelayProj
     assert post(owner, "/api/workflow-language/validate", drafts).json()["valid"] is True
     rejected = post(owner, "/api/workflow-language/validate", {"yaml": text, "prompts": "x"})
     assert rejected.status_code == 422
+
+
+def test_validate_reports_warnings_without_invalidating(
+    owner: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from relay.web.views import actions_language
+    from relay.workflows.actions.language import _warning
+
+    monkeypatch.setattr(
+        actions_language,
+        "workflow_warnings",
+        lambda document: [_warning("jobs.check.steps[0].run", "A note.")],
+    )
+    result = post(owner, "/api/workflow-language/validate", {"yaml": SOURCE}).json()
+    assert result["valid"] is True
+    assert result["diagnostics"] == []
+    [warning] = result["warnings"]
+    assert warning["message"] == "jobs.check.steps[0].run: A note."
+    assert warning["context"]["severity"] == "warning"
+    assert warning["context"]["line"] == "2"
+    assert warning["context"]["column"]
+    invalid = post(owner, "/api/workflow-language/validate", {"yaml": "jobs: [\n"}).json()
+    assert invalid["valid"] is False
+    assert invalid["warnings"] == []
+
+
+def test_validate_leaves_prompt_paths_outside_their_folder_to_launch(owner: Client) -> None:
+    text = (
+        "jobs:\n  ask:\n    steps:\n      - uses: relay/agent@v1\n        with:\n"
+        "          agent: codex\n"
+        "          prompt-files: |\n"
+        "            prompts/../../outside.md\n"
+        "            global:../outside.md\n"
+        "            prompts/missing.md\n"
+    )
+    # Draft names that leave the prompt folder never count as present.
+    body = {"yaml": text, "prompts": ["../missing.md", "prompts/../../missing.md"]}
+    result = post(owner, "/api/workflow-language/validate", body).json()
+    assert result["valid"] is False
+    assert [item["message"] for item in result["diagnostics"]] == [
+        "Prompt file prompts/missing.md does not exist."
+    ]
+    body["prompts"] = ["prompts/missing.md"]
+    assert post(owner, "/api/workflow-language/validate", body).json()["valid"] is True

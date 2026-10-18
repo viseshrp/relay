@@ -10,23 +10,30 @@ import { useEffect, useRef } from "react";
 import { createCodeMirrorTheme } from "../theme";
 import type { LanguageManifest } from "../workflow-language";
 
+type EditorDiagnostic = {
+  message: string;
+  context?: { line?: string; column?: string };
+};
+
 interface YamlEditorProps {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
   manifest?: LanguageManifest | null;
-  diagnostics?: Array<{
-    message: string;
-    context?: { line?: string; column?: string };
-  }>;
+  diagnostics?: EditorDiagnostic[];
+  /** Non-blocking findings, marked as warnings rather than errors. */
+  warnings?: EditorDiagnostic[];
 }
+
+const NONE: EditorDiagnostic[] = [];
 
 export function YamlEditor({
   value,
   onChange,
   onBlur,
   manifest,
-  diagnostics = [],
+  diagnostics = NONE,
+  warnings = NONE,
 }: YamlEditorProps) {
   const muiTheme = useTheme();
   const isDark = muiTheme.palette.mode === "dark";
@@ -191,7 +198,10 @@ export function YamlEditor({
       setDiagnostics(
         editor.state,
         // A diagnostic without a line stays in the banner and underlines nothing.
-        diagnostics.flatMap((item) => {
+        [
+          ...diagnostics.map((item) => ({ item, severity: "error" as const })),
+          ...warnings.map((item) => ({ item, severity: "warning" as const })),
+        ].flatMap(({ item, severity }) => {
           if (!Number(item.context?.line)) return [];
           const number = Math.min(
             editor.state.doc.lines,
@@ -214,14 +224,14 @@ export function YamlEditor({
                       .length ?? 1,
                   ),
               ),
-              severity: "error" as const,
+              severity,
               message: item.message,
             },
           ];
         }),
       ),
     );
-  }, [diagnostics, value]);
+  }, [diagnostics, warnings, value]);
 
   return (
     <div

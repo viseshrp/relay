@@ -65,7 +65,7 @@ accept workflow jobs and ordered steps.
 | Method and path | Purpose and body |
 | --- | --- |
 | `GET /api/workflow-language` | Relay schema, built-in action versions and inputs, local contexts/properties, supported fields, and limits |
-| `POST /api/workflow-language/validate` | `{yaml, source?, prompts?}`; pure validation returns `{valid, diagnostics, definition?, sources?}`. A literal agent `prompt-files` entry that does not exist is a diagnostic unless `prompts` lists it as an unsaved draft (at most 32 local names) |
+| `POST /api/workflow-language/validate` | `{yaml, source?, prompts?}`; pure validation returns `{valid, diagnostics, warnings, definition?, sources?}`. A literal agent `prompt-files` entry that does not exist is a diagnostic unless `prompts` lists it as an unsaved draft (at most 32 local names). `warnings` are located envelopes with `context.severity: "warning"` for a valid source and `[]` otherwise; they never set `valid` to false |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
 | `POST /api/attempts/<id>/environment` | Approve the exact waiting environment attempt |
@@ -151,7 +151,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
-| `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false}` |
+| `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false,"warnings":[]}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
@@ -185,6 +185,13 @@ setup-file exemption. No file contents are returned.
 
 Counts cover every changed file. The preview returns at most 200 entries and
 512 KiB of serialized file metadata; `truncated` indicates omitted entries.
+
+`warnings` lists, sorted by name, each secret that the workflow's expressions
+name literally but no binding supplies, as
+`{"code":"unbound_secret","name":"<NAME>","message":"<text>"}`. A job counts
+installation and project secrets plus those of the environment it declares; an
+environment chosen by an expression counts every configured environment.
+Warnings never block launch; such a secret resolves to an empty value.
 The owner can inspect the complete list with `git status`. Reading preflight
 does not change files, Git history, the index, or editor leases. Launch repeats
 validation and cleanliness checks even after a successful preview.

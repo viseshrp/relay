@@ -23,6 +23,36 @@ import { formatWorkflowYaml } from "../source-format";
 import { WorkflowSidebar } from "./WorkflowSidebar";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
+import type { Diagnostic } from "./ActionsWorkflowWorkspaceShared";
+
+// Schema errors name fields from workflow.jobs; other diagnostics from jobs.
+const JOB_FIELD = /^(?:workflow\.)?jobs\.([^.[]+)/;
+
+function DiagnosticAlert({
+  item,
+  severity,
+  onOpenJob,
+}: {
+  item: Diagnostic;
+  severity: "error" | "warning";
+  onOpenJob: (job: string) => void;
+}) {
+  const job = item.context?.field?.match(JOB_FIELD)?.[1];
+  return (
+    <Alert
+      severity={severity}
+      action={
+        job ? (
+          <Button onClick={() => onOpenJob(job)}>Open job</Button>
+        ) : undefined
+      }
+    >
+      {item.context?.line ? `Line ${item.context.line}: ` : ""}
+      {item.message}
+    </Alert>
+  );
+}
+
 export function ActionsWorkflowWorkspaceView({
   state,
 }: {
@@ -66,9 +96,14 @@ export function ActionsWorkflowWorkspaceView({
     error,
     draft,
     diagnostics,
+    warnings,
     setJobId,
     setDrawer,
   } = state;
+  const openJob = (job: string) => {
+    setJobId(job);
+    setDrawer(true);
+  };
   if (
     (!state.inventoryLoaded || !manifest || (key && !state.loadedDocument)) &&
     !error
@@ -224,25 +259,20 @@ export function ActionsWorkflowWorkspaceView({
           </Alert>
         )}
         {diagnostics.map((item, i) => (
-          <Alert
+          <DiagnosticAlert
+            key={`error-${i}`}
+            item={item}
             severity="error"
-            key={i}
-            action={
-              item.context?.field?.match(/^jobs\.([^.[]+)/) ? (
-                <Button
-                  onClick={() => {
-                    setJobId(item.context!.field!.match(/^jobs\.([^.[]+)/)![1]);
-                    setDrawer(true);
-                  }}
-                >
-                  Open job
-                </Button>
-              ) : undefined
-            }
-          >
-            {item.context?.line ? `Line ${item.context.line}: ` : ""}
-            {item.message}
-          </Alert>
+            onOpenJob={openJob}
+          />
+        ))}
+        {warnings.map((item, i) => (
+          <DiagnosticAlert
+            key={`warning-${i}`}
+            item={item}
+            severity="warning"
+            onOpenJob={openJob}
+          />
         ))}
         {key && !text && !error ? (
           <ViewSkeleton view="workflows" header={false} />

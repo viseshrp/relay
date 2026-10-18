@@ -51,6 +51,7 @@ export function WorkflowCanvas({
     manifest,
     drawer,
     diagnostics,
+    warnings,
     events,
     triggerRows,
     toggleTrigger,
@@ -217,6 +218,7 @@ export function WorkflowCanvas({
             onChange={setText}
             manifest={manifest}
             diagnostics={diagnostics}
+            warnings={warnings}
           />
           {events
             .filter((event) =>

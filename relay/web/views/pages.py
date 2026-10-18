@@ -191,10 +191,15 @@ def workflow_preflight(request: HttpRequest, key: str) -> HttpResponse:
     from relay.workflows.actions.language import load as load_actions
     from relay.workflows.loader import load_workflow, resolve_workflow_path
 
+    from ..binding_snapshots import unbound_secret_warnings
+
     source = resolve_workflow_path(relay_root / "workflows", key)
-    load_actions(load_workflow(source).text, source=source)
+    document = load_actions(load_workflow(source).text, source=source)
     preview = inspect_launch_cleanliness(relay_root, key, merge_on_success=strict)
-    return JsonResponse(asdict(preview))
+    # Warnings never block a launch; an unbound secret resolves to an empty value.
+    return JsonResponse(
+        {**asdict(preview), "warnings": unbound_secret_warnings(project.id, document)}
+    )
 
 
 @api_errors

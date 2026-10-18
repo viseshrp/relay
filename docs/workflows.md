@@ -163,6 +163,11 @@ yield the empty value. Equality follows Actions' loose numeric coercion and
 case-insensitive string comparison. Logical operators return the selected
 operand rather than forcing a boolean.
 
+The editor warns when an expression names an input, an earlier step, or a
+needed job that cannot supply a value; such references are empty at run time.
+It also warns about an agent step with neither `prompt` nor `prompt-files`.
+Warnings never block saving or launch.
+
 Functions are `contains`, `startsWith`, `endsWith`, `format`, `join`,
 `toJSON`, `fromJSON`, `hashFiles`, `case`, `success`, `failure`, `cancelled`,
 and `always`. `case(condition, value, ..., fallback)` selects the first match.
@@ -519,6 +524,8 @@ backend: macOS Keychain, Windows Credential Manager, or Linux Secret Service.
 Credential operations run in a bounded subprocess with no plaintext fallback.
 Secret values are never returned by the binding API or saved in snapshots or
 binding rows. Missing bindings fail rather than changing secret source.
+A secret that an expression names but no binding supplies resolves to an empty
+value; the launch panel warns about each one, `GITHUB_TOKEN` included.
 
 Jobs select `environment` as a name or `{name, url}`. Settings provide branch
 patterns, optional owner approval, and a wait timer. The gate belongs to the

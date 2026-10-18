@@ -134,6 +134,36 @@ test("inputs, ordered prompts, and YAML are saved together and launch end to end
   ).toBeVisible();
 });
 
+test("warnings appear beside the editor without blocking save", async ({
+  page,
+}) => {
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .locator(".cm-content")
+    .fill(
+      "name: Warnings\njobs:\n  check:\n    steps:\n      - run: echo ${{ inputs.missing }}\n",
+    );
+  const warning = page.locator(".MuiAlert-colorWarning");
+  await expect(warning).toHaveCount(1);
+  await expect(warning).toHaveText(
+    /Line 5: jobs\.check\.steps\[0\]\.run: inputs\.missing is not a declared input\. It will be empty at run time\./,
+  );
+  await expect(page.locator(".MuiAlert-colorError")).toHaveCount(0);
+  await expect(page.locator(".cm-lintRange-warning")).toHaveCount(1);
+  await expect(warning.getByRole("button", { name: "Open job" })).toBeVisible();
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(
+    page.getByText("Workflow and instructions saved and validated."),
+  ).toBeVisible();
+  const source = await (
+    await page.request.get("/api/workflows/workflow.yaml")
+  ).json();
+  expect(source.yaml).toContain("${{ inputs.missing }}");
+});
+
 test("inventory refresh failure preserves save success and the next save base", async ({
   page,
 }) => {

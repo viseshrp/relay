@@ -2285,7 +2285,7 @@ at 375 pixels.
     `test_builtin_runtime_errors_settle_the_step_and_keep_failure_evidence`
     and `test_custom_shell_requires_exactly_one_placeholder`.
 
-- [ ] **WB-16. Warn about references to names that do not exist.**
+- [x] **WB-16. Warn about references to names that do not exist.**
   - **Priority:** P1.
   - **Spec:** [WB-16 in the handoff](workflow-builder-handoff.md#wb-16-warn-about-references-to-names-that-do-not-exist)
   - **Evidence:** `${{ inputs.task }}` with no `task` input,
@@ -2299,6 +2299,15 @@ at 375 pixels.
     `YamlEditor.tsx` currently marks everything as an error.
   - **Done when:** Each case shows a warning in the editor and still
     launches.
+  - **Verified:** `tests/test_workflow_warnings.py` (each message and its
+    severity, declared names producing none, source order, bounds, and
+    unparsed matrix values);
+    `test_validate_reports_warnings_without_invalidating` in
+    `tests/test_editor_recovery.py`; `warnings appear beside the editor
+    without blocking save` in `frontend/e2e/workflow-authoring.spec.ts`; and
+    the **Open job** check for `workflow.jobs.<id>` errors in `removed
+    platform syntax blocks saving and clears when removed` in
+    `frontend/e2e/workflow-opening.spec.ts`.
 
 - [x] **WB-17. List the valid choices in errors.**
   - **Priority:** P1.
@@ -2687,7 +2696,7 @@ where that familiarity stops, usually without saying so.
   - **Verified:** `test_expression_axis_explains_the_whole_matrix_form` in
     `tests/test_relay_language.py`.
 
-- [ ] **WB-40. Warn about secrets that are never bound.**
+- [x] **WB-40. Warn about secrets that are never bound.**
   - **Priority:** P1. Default (D6): one generic warning for every name.
   - **Spec:** [WB-40 in the handoff](workflow-builder-handoff.md#wb-40-warn-about-secrets-that-are-never-bound)
   - **Evidence:** `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` validated and ran.
@@ -2699,6 +2708,11 @@ where that familiarity stops, usually without saying so.
     `GITHUB_TOKEN` included, and say where to add it.
   - **Done when:** Launching with an unbound secret shows a warning naming
     it.
+  - **Verified:** `test_preflight_warns_about_unbound_secrets` in
+    `tests/test_launch_preflight.py`;
+    `test_referenced_secrets_are_literal_names_per_job` in
+    `tests/test_workflow_warnings.py`; `an unbound secret shows a warning and
+    the workflow still runs` in `frontend/e2e/launch-panel.spec.ts`.
 
 - [ ] **WB-41. Complete the GitHub Actions mapping in the guide.**
   - **Priority:** P1.

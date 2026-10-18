@@ -49,6 +49,12 @@ export function LaunchPreflight({
               ? "Project files are ready to run."
               : `${result.blocking_count} ${result.blocking_count === 1 ? "file blocks" : "files block"} this run.`}
           </Typography>
+          {/* Warnings never block the run. */}
+          {result.warnings.map((warning) => (
+            <Alert severity="warning" key={`${warning.code}-${warning.name}`}>
+              {warning.message}
+            </Alert>
+          ))}
           {result.files
             .filter((file) => !file.allowed)
             .map((file) => (

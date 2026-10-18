@@ -96,6 +96,13 @@ test("removed platform syntax blocks saving and clears when removed", async ({
       "jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n",
     );
   await expect(page.getByText(/runs-on: Unknown workflow field/)).toBeVisible();
+  // Schema errors name workflow.jobs.<id> fields and still open their job.
+  await expect(
+    page
+      .locator(".MuiAlert-colorError")
+      .filter({ hasText: "workflow.jobs.check.runs-on" })
+      .getByRole("button", { name: "Open job" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeDisabled();

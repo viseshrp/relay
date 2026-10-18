@@ -361,7 +361,10 @@ Workflow management shares this list refresh. A response that arrives after
 the owner switches workflows or projects cannot replace the new selection.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
-edit keeps the last valid graph visible with an explanation.
+edit keeps the last valid graph visible with an explanation. Warnings, such as
+a reference that will be empty at run time, appear after errors and underline
+their line without disabling **Save**. A diagnostic or warning inside a job
+offers **Open job**.
 
 ## Launch a run
 
@@ -388,7 +391,9 @@ When the saved workflow is ready, **Project files** checks launch cleanliness
 before enabling **Run workflow**. It lists blocking files with their Git
 reasons and lists permitted changes under a count such as **2 new workflow
 files can stay uncommitted**, explaining each exemption. A bounded preview
-shows full counts when the file list is truncated.
+shows full counts when the file list is truncated. A warning names each
+secret the workflow reads without a binding; warnings do not disable
+**Run workflow**.
 **Check files again** refreshes the file check and current branch.
 
 Blocked previews offer **Copy** for `git commit` and `git stash -u`. Relay

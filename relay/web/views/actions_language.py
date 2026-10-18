@@ -18,6 +18,7 @@ from relay.workflows.actions.language import (
     missing_prompt_files,
     support_manifest,
     workflow_diagnostics,
+    workflow_warnings,
 )
 
 from ..actions_bindings import put_binding, scopes
@@ -119,7 +120,11 @@ def validate(request: HttpRequest) -> JsonResponse:
     diagnostics = workflow_diagnostics(text, source=source)
     if diagnostics:
         return JsonResponse(
-            {"valid": False, "diagnostics": [item.to_envelope() for item in diagnostics]}
+            {
+                "valid": False,
+                "diagnostics": [item.to_envelope() for item in diagnostics],
+                "warnings": [],
+            }
         )
     try:
         document = load(text, source=source)
@@ -137,18 +142,27 @@ def validate(request: HttpRequest) -> JsonResponse:
         missing = missing_prompt_files(document, root, pending)
         if missing:
             return JsonResponse(
-                {"valid": False, "diagnostics": [item.to_envelope() for item in missing]}
+                {
+                    "valid": False,
+                    "diagnostics": [item.to_envelope() for item in missing],
+                    "warnings": [],
+                }
             )
+        # Warnings never block saving or set valid to false.
+        warnings = workflow_warnings(document)
+        for warning in warnings:
+            _locate(warning, document.locations)
         return JsonResponse(
             {
                 "valid": True,
                 "diagnostics": [],
+                "warnings": [item.to_envelope() for item in warnings],
                 "definition": document.value,
                 "sources": list(sources),
             }
         )
     except RelayError as error:
-        return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()]})
+        return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()], "warnings": []})
 
 
 def _scope(request: HttpRequest, body: dict[str, Any]) -> str:

@@ -62,6 +62,14 @@ export interface LaunchCleanliness {
     reasons: string[];
   }>;
   truncated: boolean;
+  /** Non-blocking findings, such as a referenced secret without a binding. */
+  warnings: LaunchWarning[];
+}
+
+export interface LaunchWarning {
+  code: "unbound_secret";
+  name: string;
+  message: string;
 }
 
 export interface ModelObservation {

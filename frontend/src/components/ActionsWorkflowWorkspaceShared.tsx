@@ -1,6 +1,11 @@
 type Diagnostic = {
   message: string;
-  context?: { field?: string; line?: string; column?: string };
+  context?: {
+    field?: string;
+    line?: string;
+    column?: string;
+    severity?: "error" | "warning";
+  };
 };
 type Trigger = { workflow_key: string; event: string; enabled: boolean };
 const encoded = (key: string) =>

@@ -105,6 +105,12 @@ def _issue(path: str, message: str, *, unsupported: bool = False) -> WorkflowVal
     )
 
 
+def _warning(path: str, message: str) -> WorkflowValidationError:
+    issue = _issue(path, message)
+    issue.context["severity"] = "warning"
+    return issue
+
+
 FIELD_HINTS = {
     "runs-on": "Relay runs on this computer. Remove runs-on; select an agent in the step.",
     "permissions": "Authentication belongs to your installed tools. Remove permissions.",
@@ -341,9 +347,7 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         for key, item in record.items():
             descriptor = properties.get(key)
             if descriptor is None:
-                if "loose-key-type" not in definition:
-                    message = f"{path}.{key}"
-                    raise _unknown_field(message, properties)
+                # Unknown keys were rejected above unless this mapping allows loose keys.
                 _validate_type(str(definition["loose-key-type"]), key, f"{path}.{key}")
                 descriptor = definition["loose-value-type"]
             type_name = descriptor["type"] if isinstance(descriptor, Mapping) else descriptor
@@ -807,13 +811,17 @@ def _read_document(text: str) -> tuple[Mapping[str, Any], dict[str, tuple[int, i
     return cast(Mapping[str, Any], document), locations
 
 
-def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
-    field = str(error.context.get("field", "workflow"))
+def _position(field: str, locations: Mapping[str, tuple[int, int]]) -> tuple[int, int] | None:
+    """The line and column of a field, or of its nearest located parent."""
     location = locations.get(field) or locations.get("workflow." + field)
     while location is None and "." in field:
         field = field.rsplit(".", 1)[0]
         location = locations.get(field) or locations.get("workflow." + field)
-    location = location or locations.get("workflow")
+    return location or locations.get("workflow")
+
+
+def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
+    location = _position(str(error.context.get("field", "workflow")), locations)
     if location:
         error.context.update({"line": str(location[0]), "column": str(location[1])})
 
@@ -1098,6 +1106,185 @@ def missing_prompt_files(
                 _locate(error, document.locations)
                 issues.append(error)
     return issues
+
+
+MAX_WARNINGS = 100
+_AGENT_WITHOUT_PROMPT = (
+    "This agent step has no prompt or prompt-files, so the agent receives no instructions."
+)
+
+
+def _field_strings(value: object, path: str) -> Iterator[tuple[str, str]]:
+    """Every string below one field, with its path."""
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _field_strings(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _field_strings(item, f"{path}[{index}]")
+
+
+def _scoped_strings(
+    workflow: Mapping[str, Any],
+) -> Iterator[tuple[str, str, bool, str | None, frozenset[str] | None]]:
+    """Each string with its path, bare-if flag, job, and the step ids it can read.
+
+    The workflow has already validated, so jobs are mappings and steps, when
+    present, are a list of mappings. A step reads the ids of earlier steps in
+    its job, a job-level field such as outputs reads every step id in its job,
+    and a workflow-level field reads none. Ids are upper-cased because
+    expression lookups ignore case.
+    """
+    for key, value in workflow.items():
+        if key != "jobs":
+            for path, text in _field_strings(value, key):
+                yield path, text, False, None, None
+            continue
+        for job_id, job in value.items():
+            steps = job.get("steps", [])
+            ids = [
+                expressions.upper(str(step["id"])) if step.get("id") is not None else ""
+                for step in steps
+            ]
+            for job_key, item in job.items():
+                if job_key != "steps":
+                    path = f"jobs.{job_id}.{job_key}"
+                    every = frozenset(filter(None, ids))
+                    for here, text in _field_strings(item, path):
+                        yield here, text, job_key == "if" and here == path, job_id, every
+                    continue
+                for index, step in enumerate(steps):
+                    earlier = frozenset(filter(None, ids[:index]))
+                    for step_key, field in step.items():
+                        path = f"jobs.{job_id}.steps[{index}].{step_key}"
+                        for here, text in _field_strings(field, path):
+                            yield here, text, step_key == "if" and here == path, job_id, earlier
+
+
+def _named_properties(tree: expressions.Tree) -> Iterator[tuple[str, str]]:
+    """Each context.<name> or context['<name>'] access in a parsed expression.
+
+    The walk uses its own stack because long operator chains nest deeply.
+    """
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        kind = node[0]
+        if kind == "index":
+            target, key = node[1], node[2]
+            if target[0] == "context" and key[0] == "literal" and isinstance(key[1], str):
+                yield str(target[1]), key[1]
+            children: Sequence[object] = (target, key)
+        elif kind == "call":
+            children = node[2]
+        elif kind in {"literal", "context", "star"}:
+            children = ()
+        else:
+            children = node[1:]
+        pending.extend(
+            cast(expressions.Tree, child)
+            for child in reversed(children)
+            if isinstance(child, tuple) and child
+        )
+
+
+def _expression_references(text: str, *, bare: bool) -> Iterator[tuple[str, str]]:
+    """Context properties a string names; a bare if is one whole expression."""
+    try:
+        parts = expressions.segments(text)
+    except WorkflowValidationError:
+        return
+    if bare and not any(expr for expr, _ in parts):
+        parts = [(True, text)]
+    for expr, source in parts:
+        if not expr:
+            continue
+        try:
+            tree = expressions.parse(source)
+        except WorkflowValidationError:
+            continue
+        yield from _named_properties(tree)
+
+
+def workflow_warnings(
+    document: ActionsDocument,
+) -> list[WorkflowValidationError]:
+    """Non-blocking findings for a source that already validates.
+
+    Each warning names an input, earlier step, or needed job that cannot supply
+    a value, or an agent step without instructions. Warnings appear in source
+    order; callers locate them with _locate. Nothing here reads files or
+    credentials.
+    """
+    workflow = document.value
+    jobs = cast(Mapping[str, Mapping[str, Any]], workflow["jobs"])
+    inputs = {
+        expressions.upper(name)
+        for event in ("workflow_dispatch", "workflow_call")
+        for name in input_definitions(workflow, event)
+    }
+    needs: dict[str, set[str]] = {}
+    for job_id, job in jobs.items():
+        declared = job.get("needs", [])
+        declared = [declared] if isinstance(declared, str) else declared
+        needs[job_id] = {expressions.upper(str(item)) for item in declared}
+    found: dict[tuple[str, str], WorkflowValidationError] = {}
+
+    def add(path: str, message: str) -> None:
+        if len(found) < MAX_WARNINGS:
+            found.setdefault((path, message), _warning(path, message))
+
+    for job_id, job in jobs.items():
+        for index, step in enumerate(job.get("steps", [])):
+            if not is_builtin(step.get("uses"), "agent"):
+                continue
+            given = step.get("with", {})
+            if not any(
+                isinstance(given.get(name), str) and given[name].strip()
+                for name in ("prompt", "prompt-files")
+            ):
+                add(f"jobs.{job_id}.steps[{index}]", _AGENT_WITHOUT_PROMPT)
+    for path, text, bare, job_id, step_ids in _scoped_strings(workflow):
+        for context, name in _expression_references(text, bare=bare):
+            key = expressions.upper(name)
+            if context == "inputs" and key not in inputs:
+                add(path, f"inputs.{name} is not a declared input. It will be empty at run time.")
+            elif context == "steps" and step_ids is not None and key not in step_ids:
+                add(
+                    path,
+                    f"steps.{name} does not name an earlier step in this job. "
+                    "It will be empty at run time.",
+                )
+            elif context == "needs" and job_id is not None and key not in needs[job_id]:
+                add(
+                    path,
+                    f"needs.{name} is not listed in this job's needs. "
+                    "It will be empty at run time.",
+                )
+    return sorted(
+        found.values(),
+        key=lambda item: _position(str(item.context["field"]), document.locations) or (0, 0),
+    )
+
+
+def referenced_secrets(document: ActionsDocument, *, job: str | None = None) -> set[str]:
+    """Secret names the workflow's expressions read by literal name, upper-cased.
+
+    Binding names are upper-case and expression lookups ignore case. With job,
+    only that job's fields and the workflow-level fields it inherits count.
+    """
+    names = set()
+    for _, text, bare, job_id, _ in _scoped_strings(document.value):
+        if job is not None and job_id not in {None, job}:
+            continue
+        names.update(
+            name.upper()
+            for context, name in _expression_references(text, bare=bare)
+            if context == "secrets"
+        )
+    return names
 
 
 def capture_script(path: Path, project_root: Path, result: dict[str, str]) -> None:

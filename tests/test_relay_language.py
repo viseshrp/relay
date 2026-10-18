@@ -592,6 +592,16 @@ def test_each_rejected_step_reports_its_own_index() -> None:
     ]
 
 
+def test_a_step_written_as_text_asks_for_a_mapping() -> None:
+    text = "jobs:\n  a:\n    steps:\n      - echo Ready\n"
+    issues = workflow_diagnostics(text)
+    assert [(issue.message, issue.context["line"]) for issue in issues] == [
+        ("workflow.jobs.a.steps[0]: Expected a mapping.", "4")
+    ]
+    with pytest.raises(WorkflowValidationError, match="Expected a mapping"):
+        load(text)
+
+
 EVENTS_SENTENCE = (
     "Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, "
     "and workflow_run. Pull request and other hosted events have no local equivalent."
@@ -616,6 +626,19 @@ def test_unsupported_events_share_one_message(header: str, line: str) -> None:
     assert issues[0].context["line"] == line
     with pytest.raises(WorkflowValidationError, match=re.escape(EVENTS_SENTENCE)):
         load(text)
+
+
+def test_contract_check_rejects_an_event_without_an_adapter() -> None:
+    """The contract check guards events even if the schema ever admits a new one."""
+    from relay.workflows.actions.language import _validate_contracts
+
+    workflow = {"on": {"pull_request": {}}, "jobs": {"a": {"steps": [{"run": "echo"}]}}}
+    with pytest.raises(WorkflowValidationError) as caught:
+        _validate_contracts(workflow)
+    assert caught.value.message == (
+        f"on.pull_request: This event has no local Relay adapter. {EVENTS_SENTENCE}"
+    )
+    assert caught.value.context == {"field": "on.pull_request", "feature": "unsupported"}
 
 
 def test_expression_axis_explains_the_whole_matrix_form() -> None:

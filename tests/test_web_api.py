@@ -90,6 +90,7 @@ def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
                 "reasons": ["Root workflow report"],
             },
         ],
+        "warnings": [],
     }
     assert git(served.repository, "status", "--porcelain=v1") == before
     assert git(served.repository, "rev-parse", "HEAD") == head
@@ -105,6 +106,7 @@ def test_workflow_preflight_is_read_only_and_scoped_to_the_selected_project(
         "allowed_count": 0,
         "files": [],
         "truncated": False,
+        "warnings": [],
     }
     assert owner.post("/api/workflows/nested/check/preflight").status_code == 405
 
