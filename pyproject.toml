@@ -132,7 +132,8 @@ default-groups = "all"
 
 [tool.ty.src]
 include = [
-    "relay"
+    "relay",
+    "scripts/container_entrypoint.py",
 ]
 
 [tool.ty.environment]
