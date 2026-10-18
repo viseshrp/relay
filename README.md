@@ -29,8 +29,10 @@ and signed in. The setup screen gives install links and sign-in commands.
 Relay opens your browser and creates the blank project files on first start.
 To open the local app without a password, use `relay up --no-login`.
 
-For a syntax comparison and three examples, see
-[Coming from GitHub Actions](docs/coming-from-github-actions.md).
+For a syntax comparison and examples, see
+[Coming from GitHub Actions](docs/coming-from-github-actions.md). To build a
+workflow step by step, see
+[Build your first workflow](docs/build-your-first-workflow.md).
 
 ## Requirements
 

@@ -2436,7 +2436,7 @@ at 375 pixels.
     "every workflow settings field has help" (both **Workflow settings**
     dialogs).
 
-- [ ] **WB-20. Write a "Build your first workflow" guide.**
+- [x] **WB-20. Write a "Build your first workflow" guide.**
   - **Priority:** P1.
   - **Spec:** [WB-20 in the handoff](workflow-builder-handoff.md#wb-20-write-a-build-your-first-workflow-guide)
   - **Evidence:** [Getting started](getting-started.md) (18 lines) covers
@@ -2449,6 +2449,16 @@ at 375 pixels.
     `scripts/check_workflow_examples.py`. Link both from the Help menu.
   - **Done when:** A new user can follow the guide end to end on a
     disposable repository.
+  - **Verified:** [Build your first workflow](build-your-first-workflow.md)
+    builds, runs, and fixes a two-job workflow, with an action table.
+    `first-workflow-guide.spec.ts` "following Build your first workflow
+    produces a successful run" follows its steps and labels on the isolated
+    server, matches the saved YAML, and reads the `stpes:` suggestion; "the
+    Help menu shows the guides as readable steps and tables" opens it from
+    Help. `test_action_table_matches_contracts` in
+    `tests/test_relay_language.py` compares the table with the registry and
+    the editor's step type labels, and `scripts/check_workflow_examples.py`
+    checks its examples.
 
 - [x] **WB-21. Use the YAML words in the gallery.**
   - **Priority:** P2.
@@ -2793,7 +2803,7 @@ where that familiarity stops, usually without saying so.
     `tests/test_workflow_warnings.py`; `an unbound secret shows a warning and
     the workflow still runs` in `frontend/e2e/launch-panel.spec.ts`.
 
-- [ ] **WB-41. Complete the GitHub Actions mapping in the guide.**
+- [x] **WB-41. Complete the GitHub Actions mapping in the guide.**
   - **Priority:** P1.
   - **Spec:** [WB-41 in the handoff](workflow-builder-handoff.md#wb-41-complete-the-github-actions-mapping-in-the-guide)
   - **Evidence:** [Coming from GitHub Actions](coming-from-github-actions.md)
@@ -2806,6 +2816,12 @@ where that familiarity stops, usually without saying so.
     `scripts/check_workflow_examples.py`.
   - **Done when:** Every GitHub construct named in WB-34 to WB-40 appears in
     the guide with its Relay equivalent or "not supported".
+  - **Verified:** [Coming from GitHub Actions](coming-from-github-actions.md)
+    maps every construct from WB-34 to WB-40 and shows the WB-37 CI file
+    before (`invalid github-ci`) and after import (`valid imported-ci`),
+    checked by `scripts/check_workflow_examples.py`. The Help dialog renders
+    its escaped `|` cell in "the Help menu shows the guides as readable steps
+    and tables" in `first-workflow-guide.spec.ts`.
 
 ### Accessibility
 

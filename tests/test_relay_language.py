@@ -1,6 +1,7 @@
 """Only syntax with a local Relay contract belongs in the public language."""
 
 from io import StringIO
+from pathlib import Path
 import re
 from typing import Any
 
@@ -207,6 +208,53 @@ def test_manifest_describes_builtin_versions() -> None:
     )
     assert manifest["builtins"] == sorted(versions)
     assert set(manifest["builtin_inputs"]) == set(versions)
+
+
+def test_action_table_matches_contracts() -> None:
+    from relay.workflows.actions.builtins import BUILTIN_ACTIONS
+
+    root = Path(__file__).resolve().parents[1]
+    guide = (root / "docs/build-your-first-workflow.md").read_text(encoding="utf-8")
+    section = guide.partition("\n## Built-in actions\n")[2]
+    rows = []
+    for line in section.splitlines():
+        if line.startswith("|"):
+            rows.append([cell.strip() for cell in line.strip("|").split("|")])
+        elif rows:
+            break
+    assert rows[0] == [
+        "Step type",
+        "Reference",
+        "Purpose",
+        "Required inputs",
+        "Optional inputs",
+        "Outputs",
+    ]
+    # The step type is the label the editor's step type menus show.
+    labels = dict(
+        re.findall(
+            r'name: "([a-z-]+)",\s+label: "([^"]+)"',
+            (root / "frontend/src/action-labels.ts").read_text(encoding="utf-8"),
+        )
+    )
+
+    def names(cell: str) -> set[str]:
+        return set(re.findall(r"`([^`]+)`", cell))
+
+    table = {
+        reference.strip("`"): (label, purpose, names(required), names(optional))
+        for label, reference, purpose, required, optional, _ in rows[2:]
+    }
+    assert table == {
+        action.reference: (
+            labels[action.name],
+            action.summary,
+            set(action.required),
+            set(action.allowed - action.required),
+        )
+        for action in BUILTIN_ACTIONS
+        if action.status == "current"
+    }
 
 
 def test_every_reachable_property_and_action_input_has_a_description() -> None:

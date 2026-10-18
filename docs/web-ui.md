@@ -1159,6 +1159,7 @@ the Run workflow panel does not wait for a first chunk download.
 ### Help, keyboard access, and settings validation
 
 The Help menu includes [Getting started](getting-started.md),
+[Build your first workflow](build-your-first-workflow.md),
 [Coming from GitHub Actions](coming-from-github-actions.md), and
 [keyboard shortcuts](keyboard-shortcuts.md). Welcome slides close on Escape;
 starting a tour is an explicit choice. A successful project run hides the
