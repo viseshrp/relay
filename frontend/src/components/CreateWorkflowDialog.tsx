@@ -15,9 +15,13 @@ import { useEffect, useState } from "react";
 
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
-import type { WorkflowTemplate } from "../types";
+import type { WorkflowCreatedResponse, WorkflowTemplate } from "../types";
+import {
+  createImportedWorkflow,
+  GitHubImportPanel,
+  type ImportedWorkflow,
+} from "./GitHubImportPanel";
 type ReadResponse1 = { templates: WorkflowTemplate[] };
-type ReadResponse2 = { key: string };
 
 /** Show the YAML word for an input type, not the compiled schema name. */
 function inputTypeLabel(type: string): string {
@@ -57,11 +61,16 @@ export function CreateWorkflowDialog({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [check, setCheck] = useState(0);
+  // Import from GitHub Actions is the third choice beside starters and blank.
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<ImportedWorkflow | null>(null);
 
   useEffect(() => {
     if (open) {
       setSelected(null);
       setName("New workflow");
+      setImporting(false);
+      setImported(null);
     }
   }, [open]);
 
@@ -78,6 +87,7 @@ export function CreateWorkflowDialog({
           ? null
           : (value.templates.find((item) => item.default) ?? null);
         setSelected(starter);
+        setImporting(false);
         setName(starter?.name ?? "New workflow");
       })
       .catch((caught: unknown) => {
@@ -95,6 +105,15 @@ export function CreateWorkflowDialog({
     setBusy(true);
     setError(null);
     try {
+      if (importing) {
+        if (!imported) return;
+        await onCreated(
+          await createImportedWorkflow(requestProject, holder, imported),
+          null,
+        );
+        onClose();
+        return;
+      }
       const slug =
         name
           .trim()
@@ -107,7 +126,7 @@ export function CreateWorkflowDialog({
       const key = selected
         ? `${portable}-${crypto.randomUUID().slice(0, 8)}`
         : portable;
-      const result = await api<ReadResponse2>(
+      const result = await api<WorkflowCreatedResponse>(
         projectPath("/api/workflows", requestProject),
         {
           method: "POST",
@@ -139,8 +158,9 @@ export function CreateWorkflowDialog({
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           <Typography>
-            Choose a starter or begin with a blank workflow. Relay copies the
-            starter's files into your project so you can edit them.
+            Choose a starter, begin with a blank workflow, or import a GitHub
+            Actions workflow. Relay copies the files into your project so you
+            can edit them.
           </Typography>
           {loading && (
             <Typography role="status">Loading starter workflows…</Typography>
@@ -197,6 +217,7 @@ export function CreateWorkflowDialog({
                     aria-pressed={selected?.id === template.id}
                     onClick={() => {
                       setSelected(template);
+                      setImporting(false);
                       setName(template.name);
                     }}
                     disabled={busy || loading}
@@ -207,18 +228,42 @@ export function CreateWorkflowDialog({
               </Paper>
             ))}
           </Box>
-          <Button
-            variant={selected === null ? "contained" : "outlined"}
-            aria-pressed={selected === null}
-            onClick={() => {
-              setSelected(null);
-              setName("New workflow");
-            }}
-            disabled={busy || loading}
-          >
-            Blank workflow
-          </Button>
-          {!selected && (
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <Button
+              variant={!selected && !importing ? "contained" : "outlined"}
+              aria-pressed={!selected && !importing}
+              onClick={() => {
+                setSelected(null);
+                setImporting(false);
+                setName("New workflow");
+              }}
+              disabled={busy || loading}
+              sx={{ flex: 1 }}
+            >
+              Blank workflow
+            </Button>
+            <Button
+              variant={importing ? "contained" : "outlined"}
+              aria-pressed={importing}
+              onClick={() => {
+                setSelected(null);
+                setImported(null);
+                setImporting(true);
+              }}
+              disabled={busy || loading}
+              sx={{ flex: 1 }}
+            >
+              Import from GitHub Actions
+            </Button>
+          </Stack>
+          {importing && (
+            <GitHubImportPanel
+              requestProject={requestProject}
+              disabled={busy}
+              onChange={setImported}
+            />
+          )}
+          {!selected && !importing && (
             <TextField
               autoFocus
               label="Workflow name"
@@ -251,7 +296,7 @@ export function CreateWorkflowDialog({
         <Button
           variant="contained"
           onClick={() => void create()}
-          disabled={busy || loading || !name.trim()}
+          disabled={busy || loading || (importing ? !imported : !name.trim())}
         >
           Create workflow
         </Button>

@@ -300,6 +300,19 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Add browser-test review material")
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def github_workflow(request: HttpRequest) -> JsonResponse:
+        text = json_body(request).get("yaml")
+        if not isinstance(text, str):
+            message = "The browser-test GitHub workflow requires YAML text."
+            raise ConfigError(message)
+        # Commit it so later launches still see a clean checkout.
+        project.write(".github/workflows/ci.yml", text)
+        project.commit("Add browser-test GitHub workflow")
+        return JsonResponse({"ok": True})
+
     @owner_required
     @require_POST
     def feedback_provider(request: HttpRequest) -> JsonResponse:
@@ -409,6 +422,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/resource-remnant", resource_remnant))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
+    urlpatterns.insert(0, path("__test__/github-workflow", github_workflow))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))

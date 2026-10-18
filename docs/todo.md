@@ -2719,7 +2719,7 @@ where that familiarity stops, usually without saying so.
     `test_each_rejected_step_reports_its_own_index` in
     `tests/test_relay_language.py`.
 
-- [ ] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
+- [x] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
   - **Priority:** P1.
   - **Spec:** [WB-37 in the handoff](workflow-builder-handoff.md#wb-37-import-an-existing-github-workflow)
   - **Evidence:** A typical 15-line CI file (`push` and `pull_request`,
@@ -2735,6 +2735,11 @@ where that familiarity stops, usually without saying so.
     `relay/agent@v1` step."
   - **Done when:** Importing the CI file above yields a valid workflow and a
     list of every change made.
+  - **Verified:** `test_typical_ci_converts_to_a_valid_workflow`,
+    `test_every_rule_reports_its_change_once`, the path-safety tests
+    `test_import_refuses_paths_that_leave_the_folder` and
+    `test_import_refuses_a_symlinked_file` in `tests/test_workflow_import.py`,
+    and `frontend/e2e/workflow-import.spec.ts`.
 
 - [x] **WB-38. Answer every unsupported trigger the same way.**
   - **Priority:** P2.
