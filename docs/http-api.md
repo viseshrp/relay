@@ -209,7 +209,9 @@ byte-for-byte. It rejects a supplied `yaml`, an unknown template, an existing
 workflow, or an existing prompt with different bytes. Identical shared starter
 prompts can be reused. All sources validate before copying; a failed copy
 removes only its newly created, unchanged files. Gallery records contain `id`,
-`name`, `description`, `jobs`, `required_agents`, and schema-defined `inputs`.
+`name`, `description`, `jobs`, `required_agents`, `job_count`,
+`approval_count`, and schema-defined `inputs`. `job_count` counts top-level
+jobs; `approval_count` counts human wait steps in the main workflow file.
 New workflow and instruction paths reject Windows device names, reserved
 characters, and trailing spaces or dots on every operating system. For example,
 `NUL.yaml` and `draft:notes.md` are rejected; `nested/review.yaml` is accepted.
@@ -240,7 +242,7 @@ The same holder renews it; another holder gets `409` until expiry.
 | `GET /api/runs/{id}/artifacts` | `?since=0&limit=200` | `200 {"artifacts":[...],"next":...}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
-| `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
+| `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head`, `files`, `files_truncated` |
 
 Finished-run monitors use `events?summary=true`: at most 50 state events and
 16 KiB per page, excluding agent output, command output and step summaries.
@@ -405,12 +407,17 @@ an event persistence failure rolls back the corresponding interaction change.
 }
 ```
 
-`run` has the existing run metadata. Interactions include pending requests;
-optional `interaction={id}` also returns that run's selected historical request
-as `linked_interaction`. Use `nodes_since` and `interactions_since` with the
-returned numeric cursors. `limit` defaults to 200 and cannot raise the existing
-200-record page cap. Further pages have no 1,000-record cutoff. The complete
-JSON response, including metadata and escaped Unicode, stays within 1 MiB.
+`run` has the existing run metadata plus three fields read from the database
+in the same snapshot. `artifact_count` is the total number of visible
+artifacts, the records that `artifacts?visible=true` pages through.
+`recorded_head` is the protected run head, and `has_committed_changes` is true
+when it is set and differs from `source_commit`. Interactions include pending
+requests; optional `interaction={id}` also returns that run's selected
+historical request as `linked_interaction`. Use `nodes_since` and
+`interactions_since` with the returned numeric cursors. `limit` defaults to
+200 and cannot raise the existing 200-record page cap. Further pages have no
+1,000-record cutoff. The complete JSON response, including metadata and
+escaped Unicode, stays within 1 MiB.
 
 `event_cursor` includes output. `state_cursor` excludes output-only events:
 agent messages, thoughts, tool calls and results, plans, provider events,
@@ -420,6 +427,10 @@ state event still advance it. Both cursors describe the same snapshot as the
 returned records. A client rebuilding several pages must restart when their
 state cursors differ. SQLite's single writer orders committed event IDs;
 a future database adapter must preserve that ordering contract.
+
+Before a job resolves its name, its `display_name` is its literal `name:` from
+the source, `Round <n>` for loop iteration `n`, or its job ID. A name that
+contains an expression is shown once the job starts.
 
 Resolving an Actions job or step name emits `node.display_name_changed` with
 its `scope_path` and masked `display_name` in the same transaction. This
@@ -462,6 +473,10 @@ the last page of that exact attempt in ascending event order. In this mode,
 `next` is an older-page cursor: send it as `before=next` with the same filters
 and `latest=true`. Without `latest=true`, `since` and `next` keep their existing
 forward behavior. Event payloads are unchanged.
+
+The whole-run `changes` response also lists the paths changed from
+`source_commit` to `recorded_head` in `files`, at most 200, and sets
+`files_truncated` when more paths changed.
 
 `GET /api/runs/{id}/changes?job=root.check&attempt=2` previews that attempt's
 committed changes, using its recorded starting and ending heads. It adds

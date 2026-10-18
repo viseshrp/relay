@@ -1998,6 +1998,42 @@ def test_job_changes_are_limited_to_the_selected_attempt(
     assert missing["text"] == ""
 
 
+@pytest.mark.parametrize("extra", [0, 200])
+def test_run_changes_lists_changed_files(
+    owner: Client, served: RelayProject, engine: InlineEngine, extra: int
+) -> None:
+    served.write_workflow(
+        "files",
+        (
+            "jobs:\n"
+            "  work:\n"
+            "    steps:\n"
+            "    - shell: python\n"
+            "      run: |\n"
+            "        from pathlib import Path\n"
+            "        Path('feature.py').write_text('x = 1\\n')\n"
+            "        Path('test_feature.py').write_text('def test_x(): pass\\n')\n"
+            f"        for index in range({extra}):\n"
+            "            Path(f'extra_{index:03}.txt').write_text('x')\n"
+        ),
+    )
+    run_id = engine.launch(served, "files")
+    engine.drain(run_id)
+    assert run_status(run_id) == "succeeded"
+    response = owner.get(f"/api/runs/{run_id}/changes").json()
+    if extra:
+        assert len(response["files"]) == 200
+        assert response["files_truncated"] is True
+    else:
+        assert response["files"] == ["feature.py", "test_feature.py"]
+        assert response["files_truncated"] is False
+    assert "feature.py" in response["text"]
+    # A single job's form keeps its commit list and omits the run's file list.
+    job = owner.get(f"/api/runs/{run_id}/changes?job=root.work").json()
+    assert "files" not in job
+    assert "commits" in job
+
+
 def test_job_reads_omit_redacted_output_and_failure_text(
     owner: Client, served: RelayProject, engine: InlineEngine
 ) -> None:

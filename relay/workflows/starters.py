@@ -20,9 +20,12 @@ from .editor import (
     read_workflow_document,
 )
 from .loader import load_workflow_text, workflow_key_parts
+from .schema import WorkflowDefinition
 from .validation import validate_loaded_workflow
 
 STARTER_ROOT = Path(__file__).with_name("starters")
+# Counted as an owner approval on a gallery card.
+_APPROVAL_ACTION = "relay/human-wait@v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +46,9 @@ STARTERS = (
     Starter(
         "ai-coding-workflow",
         "AI coding workflow",
-        "Enter a task once. Explore, plan, implement, review, and test with human approvals.",
+        "Enter a task once. Agents explore, plan, implement, review, and test, with your"
+        " approval at three points. Approving lets the agent commit, push its branch, and"
+        " open a pull request if the repository has a remote.",
         ("Explore", "Plan and verify", "Approve and implement", "Review", "Walkthrough", "Tests"),
         tuple(
             f"ai-coding-workflow/{name}"
@@ -137,6 +142,19 @@ def _sources(starter: Starter, key: str) -> tuple[tuple[str, str], ...]:
     )
 
 
+def starter_size(definition: WorkflowDefinition) -> dict[str, int]:
+    """Count top-level jobs and owner approvals for a gallery card."""
+    approvals = 0
+    for node in definition.nodes.values():
+        job = getattr(node, "job", None)
+        steps = job.get("steps") if isinstance(job, dict) else None
+        if isinstance(steps, list):
+            approvals += sum(
+                isinstance(step, dict) and step.get("uses") == _APPROVAL_ACTION for step in steps
+            )
+    return {"job_count": len(definition.nodes), "approval_count": approvals}
+
+
 def starter_inventory() -> list[dict[str, object]]:
     """Return gallery metadata and schema-defined inputs from the same sources."""
     records: list[dict[str, object]] = []
@@ -153,6 +171,7 @@ def starter_inventory() -> list[dict[str, object]]:
                 "jobs": list(starter.jobs),
                 "required_agents": starter.required_agents,
                 "default": starter.default,
+                **starter_size(definition),
                 "inputs": {
                     key: item.model_dump(mode="json") for key, item in definition.inputs.items()
                 },

@@ -19,6 +19,20 @@ import type { WorkflowTemplate } from "../types";
 type ReadResponse1 = { templates: WorkflowTemplate[] };
 type ReadResponse2 = { key: string };
 
+/** Show the YAML word for an input type, not the compiled schema name. */
+function inputTypeLabel(type: string): string {
+  return type === "enum" ? "choice" : type;
+}
+
+function templateSize(template: WorkflowTemplate): string {
+  const jobs = `${template.job_count} ${template.job_count === 1 ? "job" : "jobs"}`;
+  if (!template.approval_count) return jobs;
+  const approvals = `${template.approval_count} ${
+    template.approval_count === 1 ? "approval" : "approvals"
+  }`;
+  return `${jobs} · ${approvals}`;
+}
+
 interface CreateWorkflowDialogProps {
   open: boolean;
   requestProject: string | null;
@@ -139,7 +153,13 @@ export function CreateWorkflowDialog({
             }}
           >
             {templates.map((template) => (
-              <Paper key={template.id} variant="outlined" sx={{ p: 2 }}>
+              <Paper
+                key={template.id}
+                component="article"
+                aria-label={template.name}
+                variant="outlined"
+                sx={{ p: 2 }}
+              >
                 <Stack spacing={1}>
                   <Typography variant="h6">{template.name}</Typography>
                   <Typography>{template.description}</Typography>
@@ -150,12 +170,24 @@ export function CreateWorkflowDialog({
                     {template.jobs.join(" → ")}
                   </Typography>
                   <Typography variant="body2">
+                    {templateSize(template)}
+                  </Typography>
+                  <Typography variant="body2">
                     Requires: {template.required_agents}
                   </Typography>
+                  {template.default && (
+                    <Typography variant="body2">
+                      Needs Claude Code with an Opus model and one other coding
+                      agent. Choose Ask an agent for a smaller first run.
+                    </Typography>
+                  )}
                   <Typography variant="body2">
                     Inputs:{" "}
                     {Object.entries(template.inputs)
-                      .map(([key, input]) => `${key} (${input.type})`)
+                      .map(
+                        ([key, input]) =>
+                          `${key} (${inputTypeLabel(input.type)})`,
+                      )
                       .join(", ")}
                   </Typography>
                   <Button

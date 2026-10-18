@@ -70,12 +70,13 @@ jobs:
       - id: approval
         uses: relay/human-wait@v1
         with:
-          prompt: |
-            Review FEATURE_SPEC_AND_PLAN.md, EXECUTION_PROMPT.md, and
-            PLAN_REVISION_VERIFICATION.md in the run workspace.
-            Reply IMPLEMENT to authorize the locked implementation,
-            valid review fixes, focused tests, commits, push, and PR
-            creation when missing. This does not authorize merging.
+          prompt: >-
+            Read FEATURE_SPEC_AND_PLAN.md, EXECUTION_PROMPT.md, and
+            PLAN_REVISION_VERIFICATION.md. Choose IMPLEMENT to let the agent
+            build the plan, fix valid review findings, and write focused tests.
+            The agent may commit, push its branch, and open a pull request.
+            Nothing is merged. To stop, cancel the run.
+          options: '["IMPLEMENT"]'
       - uses: relay/validate-input@v1
         with:
           value: ${{ toJSON(steps.approval.outputs.answer) }}
@@ -128,13 +129,12 @@ jobs:
       - id: decision
         uses: relay/human-wait@v1
         with:
-          prompt: |
-            Continue only after phase 07 is complete: each changed file
-            has explicit RESOLVE and verified GitHub Viewed state, and
-            each FOLLOWUP.md item has its own explicit AGREE.
-            Reply FOLLOWUP to authorize those exact agreed items.
-            Reply TESTS only when no follow-up work remains.
-            Otherwise leave this request pending.
+          prompt: >-
+            Finish the walkthrough first: mark each changed file as reviewed
+            and agree to each item in FOLLOWUP.md that should be done. Choose
+            FOLLOWUP to have the agent do the agreed items, or TESTS when
+            nothing more is needed.
+          options: '["FOLLOWUP", "TESTS"]'
       - uses: relay/validate-input@v1
         with:
           value: ${{ toJSON(steps.decision.outputs.answer) }}
@@ -167,10 +167,10 @@ jobs:
       - id: approval
         uses: relay/human-wait@v1
         with:
-          prompt: |
-            Review the final test diff and TEST_AUDIT.md.
-            Reply ACCEPT only after your human review passes.
-            This finishes the workflow and does not merge the PR.
+          prompt: >-
+            Review the final test changes and TEST_AUDIT.md. Choose ACCEPT to
+            finish the run. Nothing is merged.
+          options: '["ACCEPT"]'
       - uses: relay/validate-input@v1
         with:
           value: ${{ toJSON(steps.approval.outputs.answer) }}

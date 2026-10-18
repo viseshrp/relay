@@ -64,10 +64,17 @@ def test_clock_jump_or_sleep_cannot_hand_off_a_writer_before_git_finalization(
         job_id: str,
         *,
         snapshot_files: frozenset[str] = frozenset(),
+        display_name: str | None = None,
     ) -> CommitResult:
         reached_git.set()
         assert allow_git.wait(10)
-        return original(worktree, starting_head, job_id, snapshot_files=snapshot_files)
+        return original(
+            worktree,
+            starting_head,
+            job_id,
+            snapshot_files=snapshot_files,
+            display_name=display_name,
+        )
 
     monkeypatch.setattr(runner, "accept_job_result", pause_finalization)
 

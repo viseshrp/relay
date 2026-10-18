@@ -8,12 +8,16 @@ export function useReviewRequest({
   interaction,
   runId,
   artifacts,
+  hasChanges,
+  onLoadAll,
   selected,
   onAnswered,
 }: {
   interaction: RunInteraction;
   runId: string;
   artifacts: ArtifactRecord[];
+  hasChanges: boolean;
+  onLoadAll: () => Promise<void>;
   selected: boolean;
   onAnswered: () => Promise<void>;
 }) {
@@ -119,6 +123,8 @@ export function useReviewRequest({
     link,
     runId,
     artifacts,
+    hasChanges,
+    onLoadAll,
     options,
     busy,
     answer,

@@ -83,7 +83,9 @@ def _input_value(item: InputDefinition, value: object, input_id: str) -> object:
         return value
     elif isinstance(item, EnumInput):
         if value not in item.constraints.values:
-            message = "must be one of the declared enum values"
+            message = (
+                f"must be one of {', '.join(str(choice) for choice in item.constraints.values)}"
+            )
             raise ValueError(message)
         return value
     else:

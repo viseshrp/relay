@@ -117,6 +117,8 @@ export interface WorkflowTemplate {
   jobs: string[];
   required_agents: string;
   default?: boolean;
+  job_count: number;
+  approval_count: number;
   inputs: Record<
     string,
     {
@@ -334,8 +336,23 @@ export interface RunDetail extends RunSummary {
     hashes: Record<string, JsonValue>;
     created_at: string;
   };
+  /** Total visible artifacts, not only the loaded page. */
+  artifact_count: number;
+  recorded_head: string;
+  has_committed_changes: boolean;
   nodes: RunNode[];
   interactions: RunInteraction[];
+}
+
+export interface RunChanges {
+  text: string;
+  truncated: boolean;
+  source_commit: string;
+  recorded_head: string;
+  /** Whole-run reads list at most 200 changed paths. */
+  files?: string[];
+  files_truncated?: boolean;
+  commits?: { sha: string; title: string }[];
 }
 
 export interface RetryConfiguration {

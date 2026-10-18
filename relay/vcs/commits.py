@@ -50,7 +50,12 @@ def commits_between(repository: Path, starting_head: str, ending_head: str) -> t
 
 
 def accept_job_result(
-    worktree: Path, starting_head: str, job_id: str, *, snapshot_files: frozenset[str] = frozenset()
+    worktree: Path,
+    starting_head: str,
+    job_id: str,
+    *,
+    snapshot_files: frozenset[str] = frozenset(),
+    display_name: str | None = None,
 ) -> CommitResult:
     """Commit changed code at a successful Actions job boundary, or accept a no-op."""
     if not is_ancestor(worktree, starting_head, current_head(worktree)):
@@ -74,7 +79,8 @@ def accept_job_result(
             {path for change in changes for path in (change.path, change.original_path) if path}
         )
         run_git(worktree, ["add", "--all", "--", *paths])
-        run_git(worktree, ["commit", "-m", f"Relay: complete job {job_id}"])
+        label = f"{display_name} ({job_id})" if display_name else job_id
+        run_git(worktree, ["commit", "-m", f"Relay: complete job {label}"])
     # Retained report and captured source exemptions remain unstaged.
     if execution_changes(worktree, snapshot_files=snapshot_files):
         message = "A job left uncommitted code after its checkpoint."

@@ -124,6 +124,8 @@ def export_template(identity: str) -> dict[str, Any]:
 
 
 def inventory() -> list[dict[str, Any]]:
+    from .starters import starter_size
+
     result = []
     for path in sorted(_root().glob("*.json"))[:100]:
         bundle = export_template(path.stem)
@@ -133,6 +135,7 @@ def inventory() -> list[dict[str, Any]]:
                 "id": f"owner:{path.stem}",
                 **bundle["metadata"],
                 "jobs": list(compiled.nodes),
+                **starter_size(compiled),
                 "prompts": [],
                 "required_agents": "Workflow-defined agents",
                 "inputs": {

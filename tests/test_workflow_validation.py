@@ -104,6 +104,11 @@ def test_an_invalid_launch_input_is_rejected(supplied: dict[str, object]) -> Non
         resolve_inputs(_inputs_definition(), supplied)
 
 
+def test_a_rejected_choice_names_the_allowed_values() -> None:
+    with pytest.raises(WorkflowValidationError, match="input 'mode' must be one of a, b"):
+        resolve_inputs(_inputs_definition(), {"name": "abc", "mode": "c"})
+
+
 def test_a_local_prompt_resolves_to_its_text_and_digest(tmp_path: Path) -> None:
     root = _relay_root(tmp_path, {"prompts/a.md": "text"})
 
