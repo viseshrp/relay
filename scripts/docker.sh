@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DEFAULT_IMAGE="ghcr.io/viseshrp/relay:local"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/docker.sh <command>
@@ -41,7 +43,7 @@ expect_equal() {
 }
 
 cmd_build() {
-  local image="${DOCKER_IMAGE:-ghcr.io/viseshrp/relay:local}"
+  local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local version
   version="$(resolve_version)"
   local revision
@@ -67,9 +69,12 @@ cmd_build() {
 }
 
 cmd_smoke() {
-  local image="${DOCKER_IMAGE:-ghcr.io/viseshrp/relay:local}"
-  if [[ "${image}" == "ghcr.io/viseshrp/relay:local" ]] && ! docker image inspect "${image}" >/dev/null 2>&1; then
+  local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
+  if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
+    # Rebuild so the smoke test covers the current sources; unchanged layers are cached.
     cmd_build
+  elif ! docker image inspect "${image}" >/dev/null 2>&1; then
+    docker pull "${image}"
   fi
 
   local expected_revision
@@ -188,11 +193,12 @@ PY
 }
 
 cmd_up() {
-  local image="${DOCKER_IMAGE:-ghcr.io/viseshrp/relay:local}"
+  local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local port="${DOCKER_PORT:-7845}"
   local worktree="${DOCKER_WORKTREE:-$(pwd)}"
 
-  if ! docker image inspect "${image}" >/dev/null 2>&1; then
+  if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
+    # Rebuild so the container serves the current sources; unchanged layers are cached.
     cmd_build
   fi
 

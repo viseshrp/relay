@@ -9,14 +9,12 @@ FROM ${PYTHON_IMAGE} AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG UV_VERSION=0.13.0
-ARG VERSION=0.0.0
 
 ENV PATH=/opt/relay/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION} \
     UV_NO_CACHE=1
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
@@ -41,6 +39,10 @@ COPY docs/getting-started.md docs/coming-from-github-actions.md docs/keyboard-sh
 COPY frontend/ frontend/
 COPY relay/ relay/
 COPY scripts/check_distribution_contents.py scripts/check_distribution_contents.py
+
+# Declared late so a new version reuses the dependency layers above.
+ARG VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
 
 RUN python3 - <<'PY'
 import os
@@ -69,8 +71,6 @@ RUN /opt/build-venv/bin/uv build --wheel --out-dir /dist \
 FROM ${PYTHON_IMAGE} AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG VERSION=0.0.0
-ARG VCS_REF=unknown
 ARG RELAY_UID=1000
 ARG RELAY_GID=1000
 
@@ -81,13 +81,6 @@ ENV HOME=/home/relay \
     XDG_CONFIG_HOME=/home/relay/.config \
     XDG_DATA_HOME=/home/relay/.local/share \
     XDG_STATE_HOME=/home/relay/.local/state
-
-LABEL org.opencontainers.image.title="Relay" \
-      org.opencontainers.image.description="Local workflow orchestration for coding agents." \
-      org.opencontainers.image.source="https://github.com/viseshrp/relay" \
-      org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${VCS_REF}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -150,6 +143,16 @@ EXPOSE 7845
 USER relay:relay
 WORKDIR /workspace
 RUN git config --global --add safe.directory /workspace
+
+ARG VERSION=0.0.0
+ARG VCS_REF=unknown
+
+LABEL org.opencontainers.image.title="Relay" \
+      org.opencontainers.image.description="Local workflow orchestration for coding agents." \
+      org.opencontainers.image.source="https://github.com/viseshrp/relay" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"
 
 STOPSIGNAL SIGTERM
 
