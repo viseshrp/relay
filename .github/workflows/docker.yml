@@ -18,6 +18,10 @@ on:
       - 'uv.lock'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
+      - 'frontend/playwright.config.ts'
+      - 'frontend/playwright.container.config.ts'
+      - 'frontend/e2e/container.spec.ts'
+      - 'frontend/e2e/setup-helpers.ts'
       - '.github/workflows/docker.yml'
   release:
     types: [published]
@@ -203,6 +207,36 @@ jobs:
           DOCKER_VCS_REF: ${{ needs.prepare.outputs.revision }}
           EXPECTED_ARCH: ${{ matrix.machine }}
         run: make docker-smoke
+
+      - name: Set up Node for container browser flows
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install container browser flow dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # The runs write a mounted host repository, so docker-e2e rebuilds the
+      # image as the runner's user; the builder stage comes from the cache.
+      - name: Run browser flows against the container image
+        env:
+          DOCKER_PLATFORM: ${{ matrix.platform }}
+          DOCKER_VERSION: ${{ needs.prepare.outputs.version }}
+          DOCKER_VCS_REF: ${{ needs.prepare.outputs.revision }}
+          DOCKER_CREATED: ${{ needs.prepare.outputs.created }}
+        run: make docker-e2e
+
+      - name: Keep container browser traces
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: container-e2e-${{ matrix.arch }}
+          path: frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Export the verified platform digest
         if: needs.prepare.outputs.publish == 'true'

@@ -150,6 +150,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     for make_cmd in (
         "make docker-build",
         "make docker-smoke",
+        "make docker-e2e",
         "make docker-push-digest",
         "make docker-publish-manifest",
     ):
