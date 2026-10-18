@@ -2414,7 +2414,9 @@ at 375 pixels.
     `tests/test_relay_language.py`;
     `test_source_errors_point_at_the_step_that_names_them` in
     `tests/test_editor_recovery.py`; and `workflow-opening.spec.ts`
-    "diagnostics underline their own line and never guess one".
+    "diagnostics underline their own line and never guess one". Unknown keys
+    whose value starts on the next line point at the key, not the value:
+    `test_unknown_keys_point_at_the_key_when_the_value_is_on_the_next_line`.
 
 ### Help, docs, and vocabulary
 

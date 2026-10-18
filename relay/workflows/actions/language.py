@@ -141,11 +141,18 @@ def _unknown_hint(path: str, candidates: Iterable[str]) -> tuple[str | None, str
     return (hint, None) if hint else (None, closest(key, candidates))
 
 
+# Locations keyed by a mapping key's own position, not its value's.
+_KEY_SUFFIX = "#key"
+
+
 def _unknown_field(path: str, candidates: Iterable[str] = ()) -> WorkflowValidationError:
     hint, suggestion = _unknown_hint(path, candidates)
     if suggestion:
         hint = f"Did you mean {suggestion}?"
-    return _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
+    issue = _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
+    # The key itself is the mistake, even when its value starts on a later line.
+    issue.context["at_key"] = "true"
+    return issue
 
 
 def _inspect_tree(
@@ -185,6 +192,7 @@ def _inspect_tree(
                 locations[message] = mark
                 raise _issue(message, "Duplicate YAML key.")
             names.add(key.value)
+            locations[f"{path}.{key.value}{_KEY_SUFFIX}"] = mark
             _inspect_tree(child, f"{path}.{key.value}", locations, parents, counts, depth + 1)
             if (
                 isinstance(child, ScalarNode)
@@ -868,7 +876,13 @@ def _position(field: str, locations: Mapping[str, tuple[int, int]]) -> tuple[int
 
 
 def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
-    location = _position(str(error.context.get("field", "workflow")), locations)
+    field = str(error.context.get("field", "workflow"))
+    location = None
+    if error.context.get("at_key") == "true":
+        location = locations.get(field + _KEY_SUFFIX) or locations.get(
+            "workflow." + field + _KEY_SUFFIX
+        )
+    location = location or _position(field, locations)
     if location:
         error.context.update({"line": str(location[0]), "column": str(location[1])})
 
