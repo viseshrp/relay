@@ -23,7 +23,7 @@ from relay.vcs.git import run_git
 from .actions.compiler import definition
 from .actions.language import MAX_YAML_BYTES, capture_sources, load, source_bytes
 from .editor import WorkflowDocument, WorkflowEditorStore, _atomic_create, read_workflow_document
-from .schema import workflow_size
+from .gallery import workflow_size
 
 
 def _root() -> Path:

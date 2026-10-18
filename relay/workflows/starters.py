@@ -19,8 +19,8 @@ from .editor import (
     _require_portable_names,
     read_workflow_document,
 )
+from .gallery import workflow_size
 from .loader import load_workflow_text, workflow_key_parts
-from .schema import workflow_size
 from .validation import validate_loaded_workflow
 
 STARTER_ROOT = Path(__file__).with_name("starters")

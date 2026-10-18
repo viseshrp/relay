@@ -12,8 +12,6 @@ from relay.constants import (
     MAX_AUTOMATIC_RETRIES,
 )
 
-from .actions.builtins import is_builtin
-
 NODE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 DURATION_PATTERN = re.compile(r"^[0-9]+(?:ms|s|m|h)$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -395,17 +393,3 @@ __all__ = [
     "WorkflowDefinition",
     "YamlPathSelector",
 ]
-
-
-def workflow_size(definition: WorkflowDefinition) -> dict[str, int]:
-    """Count top-level jobs and owner approvals for a gallery card."""
-    approvals = 0
-    for node in definition.nodes.values():
-        job = getattr(node, "job", None)
-        steps = job.get("steps") if isinstance(job, dict) else None
-        if isinstance(steps, list):
-            approvals += sum(
-                isinstance(step, dict) and is_builtin(step.get("uses"), "human-wait")
-                for step in steps
-            )
-    return {"job_count": len(definition.nodes), "approval_count": approvals}
