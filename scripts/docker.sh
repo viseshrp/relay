@@ -323,12 +323,18 @@ cmd_push_digest() {
   # Expand now: the local is out of scope when the EXIT trap runs under `set -u`.
   trap "rm -f -- $(printf '%q' "${metadata_file}")" EXIT
 
-  echo "📤 Pushing verified ${platform} image by digest to ${repo}..."
+  local cache_args=()
+  if [[ "${DOCKER_NO_CACHE:-0}" == "1" ]]; then
+    cache_args+=(--pull --no-cache)
+  fi
+
+  echo "📤 Pushing ${platform} image by digest to ${repo}..."
   docker buildx build \
     --platform "${platform}" \
     --build-arg "VERSION=${version}" \
     --build-arg "VCS_REF=${revision}" \
     --label "org.opencontainers.image.created=${created}" \
+    ${cache_args[@]+"${cache_args[@]}"} \
     --output "type=image,name=${repo},push-by-digest=true,name-canonical=true,push=true" \
     --metadata-file "${metadata_file}" \
     .
