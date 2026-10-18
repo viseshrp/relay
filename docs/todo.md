@@ -2213,7 +2213,7 @@ at 375 pixels.
 
 ### Validation and error messages
 
-- [ ] **WB-13. Name the field and suggest the closest match.**
+- [x] **WB-13. Name the field and suggest the closest match.**
   - **Priority:** P0.
   - **Spec:** [WB-13 in the handoff](workflow-builder-handoff.md#wb-13-name-the-field-and-suggest-the-closest-match)
   - **Evidence:**
@@ -2228,6 +2228,10 @@ at 375 pixels.
     key it causes.
   - **Done when:** Tests cover a misspelled root, job, step, and action-input
     key.
+  - **Verified:** `test_closest_suggests_one_nearby_name` and
+    `test_unknown_keys_suggest_the_nearest_field` in
+    `tests/test_relay_language.py`; `test_action_input_errors_name_the_inputs`
+    in `tests/test_actions_builtin_contracts.py`.
 
 - [ ] **WB-14. Accept one value per line for list inputs.**
   - **Priority:** P0. **Decided** (D1): accept a JSON array string or one value
@@ -2283,7 +2287,7 @@ at 375 pixels.
   - **Done when:** Each case shows a warning in the editor and still
     launches.
 
-- [ ] **WB-17. List the valid choices in errors.**
+- [x] **WB-17. List the valid choices in errors.**
   - **Priority:** P1.
   - **Spec:** [WB-17 in the handoff](workflow-builder-handoff.md#wb-17-list-the-valid-choices-in-errors)
   - **Evidence:**
@@ -2303,8 +2307,12 @@ at 375 pixels.
     strings" for a double-quoted literal. Say "A step needs either run or
     uses" for both step-shape errors.
   - **Done when:** Tests assert each message above.
+  - **Verified:** `test_errors_list_the_valid_choices` and
+    `test_someone_elses_action_lists_every_current_builtin` in
+    `tests/test_relay_language.py`; the existing `Expected one of` cases in
+    `tests/test_actions_language_boundaries.py` still pass.
 
-- [ ] **WB-18. Give every diagnostic a location.**
+- [x] **WB-18. Give every diagnostic a location.**
   - **Priority:** P2.
   - **Spec:** [WB-18 in the handoff](workflow-builder-handoff.md#wb-18-give-every-diagnostic-a-location)
   - **Evidence:** A duplicate YAML key and "with.workflow: Loop requires a
@@ -2315,6 +2323,12 @@ at 375 pixels.
     show the banner without underlining line 1.
   - **Done when:** No diagnostic in the WB validation matrix lacks a line,
     and an unlocated diagnostic underlines nothing.
+  - **Verified:** `test_every_diagnostic_has_a_line` and
+    `test_unsupported_events_share_one_message` in
+    `tests/test_relay_language.py`;
+    `test_source_errors_point_at_the_step_that_names_them` in
+    `tests/test_editor_recovery.py`; and `workflow-opening.spec.ts`
+    "diagnostics underline their own line and never guess one".
 
 ### Help, docs, and vocabulary
 
@@ -2498,7 +2512,7 @@ or `bash --noprofile --norc -eo pipefail` when named; `pwsh` on Windows),
 and expressions use GitHub's own grammar and fixtures. The gaps below are
 where that familiarity stops, usually without saying so.
 
-- [ ] **WB-34. Point `github` and `runner` expressions to their Relay
+- [x] **WB-34. Point `github` and `runner` expressions to their Relay
   names.**
   - **Priority:** P0.
   - **Spec:** [WB-34 in the handoff](workflow-builder-handoff.md#wb-34-point-github-and-runner-expressions-to-their-relay-names)
@@ -2514,8 +2528,11 @@ where that familiarity stops, usually without saying so.
     Add the mapping to completion (WB-01).
   - **Done when:** Each `github.*` and `runner.*` property that has a Relay
     equivalent produces a message naming it.
+  - **Verified:** `test_platform_names_point_to_relay_names` and
+    `test_platform_expression_roots_and_placeholders_are_removed` in
+    `tests/test_relay_language.py`. Completion (WB-01) is left to PR D.
 
-- [ ] **WB-35. Reject the GitHub file variables in scripts.**
+- [x] **WB-35. Reject the GitHub file variables in scripts.**
   - **Priority:** P0. **Decided** (D2): a hard validation error; no warning,
     no alias, and messages name only the `RELAY_*` variable.
   - **Spec:** [WB-35 in the handoff](workflow-builder-handoff.md#wb-35-reject-the-github-file-variables-in-scripts)
@@ -2532,8 +2549,11 @@ where that familiarity stops, usually without saying so.
     that have ever existed.
   - **Done when:** Each of the five names is a validation error naming its
     `RELAY_*` variable.
+  - **Verified:** `test_unknown_file_variables_are_rejected` and
+    `test_relay_file_variables_and_other_github_names_validate` in
+    `tests/test_relay_language.py`.
 
-- [ ] **WB-36. Say what replaces each common GitHub action.**
+- [x] **WB-36. Say what replaces each common GitHub action.**
   - **Priority:** P1.
   - **Spec:** [WB-36 in the handoff](workflow-builder-handoff.md#wb-36-say-what-replaces-each-common-github-action)
   - **Evidence:** `actions/checkout@v4`, `actions/setup-python@v5`,
@@ -2552,6 +2572,9 @@ where that familiarity stops, usually without saying so.
     built-in actions (WB-17). Report each step's real index.
   - **Done when:** Each action above produces its specific guidance with the
     correct step path.
+  - **Verified:** `test_common_actions_get_specific_guidance` and
+    `test_each_rejected_step_reports_its_own_index` in
+    `tests/test_relay_language.py`.
 
 - [ ] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
   - **Priority:** P1.
@@ -2570,7 +2593,7 @@ where that familiarity stops, usually without saying so.
   - **Done when:** Importing the CI file above yields a valid workflow and a
     list of every change made.
 
-- [ ] **WB-38. Answer every unsupported trigger the same way.**
+- [x] **WB-38. Answer every unsupported trigger the same way.**
   - **Priority:** P2.
   - **Spec:** [WB-38 in the handoff](workflow-builder-handoff.md#wb-38-answer-every-unsupported-trigger-the-same-way)
   - **Evidence:** `on: pull_request_target` reports "Expected one of
@@ -2583,8 +2606,10 @@ where that familiarity stops, usually without saying so.
     line.
   - **Done when:** The scalar, list, and mapping forms of an unsupported
     event produce the same message on the right line.
+  - **Verified:** `test_unsupported_events_share_one_message` in
+    `tests/test_relay_language.py`.
 
-- [ ] **WB-39. Explain how to build a matrix from an expression.**
+- [x] **WB-39. Explain how to build a matrix from an expression.**
   - **Priority:** P2. Default (D5): message only.
   - **Spec:** [WB-39 in the handoff](workflow-builder-handoff.md#wb-39-explain-how-to-build-a-matrix-from-an-expression)
   - **Evidence:** `matrix: {v: ${{ fromJSON('["a","b"]') }}}` reports "A
@@ -2596,6 +2621,8 @@ where that familiarity stops, usually without saying so.
     matrix: `matrix: ${{ fromJSON(...) }}`". Per-axis expressions are not
     added.
   - **Done when:** The message shows the accepted form.
+  - **Verified:** `test_expression_axis_explains_the_whole_matrix_form` in
+    `tests/test_relay_language.py`.
 
 - [ ] **WB-40. Warn about secrets that are never bound.**
   - **Priority:** P1. Default (D6): one generic warning for every name.

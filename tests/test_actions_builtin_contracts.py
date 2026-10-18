@@ -326,3 +326,36 @@ jobs:
     )
     assert "relay/command@v1 is not included in this Relay version." in events
     assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "reference, inputs, message",
+    [
+        (
+            "relay/agent@v1",
+            {"prmpt": "hi"},
+            "relay/agent@v1 does not accept input prmpt. Did you mean prompt?",
+        ),
+        ("relay/human-wait@v1", {}, "relay/human-wait@v1 requires input prompt."),
+        ("relay/loop@v1", {}, "relay/loop@v1 requires inputs max-iterations, workflow."),
+        (
+            "relay/command@v1",
+            {"zz": "1", "argv": "[]", "qq": "2"},
+            "relay/command@v1 does not accept inputs qq, zz.",
+        ),
+        (
+            "relay/human-wait@v1",
+            {"prmpt": "Go?"},
+            "relay/human-wait@v1 does not accept input prmpt. Did you mean prompt? "
+            "relay/human-wait@v1 requires input prompt.",
+        ),
+    ],
+)
+def test_action_input_errors_name_the_inputs(
+    reference: str, inputs: dict[str, str], message: str
+) -> None:
+    from relay.errors import WorkflowValidationError
+
+    with pytest.raises(WorkflowValidationError) as caught:
+        builtins.validate_inputs(reference, inputs)
+    assert caught.value.message == message

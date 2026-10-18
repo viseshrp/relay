@@ -9,8 +9,9 @@ from typing import Any, cast
 from django.http import FileResponse, HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
-from relay.errors import ConfigError, RelayError
+from relay.errors import ConfigError, RelayError, WorkflowValidationError
 from relay.workflows.actions.language import (
+    _locate,
     capture_sources,
     load,
     support_manifest,
@@ -112,7 +113,11 @@ def validate(request: HttpRequest) -> JsonResponse:
         )
     try:
         document = load(text, source=source)
-        sources = capture_sources(document, root.parent)
+        try:
+            sources = capture_sources(document, root.parent)
+        except WorkflowValidationError as error:
+            _locate(error, document.locations)
+            raise
         return JsonResponse(
             {
                 "valid": True,

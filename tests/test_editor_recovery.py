@@ -130,6 +130,34 @@ def test_independent_language_errors_are_reported_together_with_locations(owner:
 
 
 @pytest.mark.parametrize(
+    "text, line, message",
+    [
+        (
+            "jobs:\n  check:\n    steps:\n      - run: echo Ready\n"
+            "      - uses: relay/loop@v1\n        with:\n          max-iterations: 2\n"
+            "          workflow: other.yaml\n",
+            "8",
+            "Loop requires a static reusable workflow.",
+        ),
+        (
+            "jobs:\n  check:\n    steps:\n      - run: echo Ready\n"
+            "      - uses: ./.relay/actions/missing\n",
+            "5",
+            "Local action directory is missing.",
+        ),
+    ],
+)
+def test_source_errors_point_at_the_step_that_names_them(
+    owner: Client, text: str, line: str, message: str
+) -> None:
+    result = post(owner, "/api/workflow-language/validate", {"yaml": text}).json()
+    assert result["valid"] is False
+    [diagnostic] = result["diagnostics"]
+    assert message in diagnostic["message"]
+    assert diagnostic["context"]["line"] == line
+
+
+@pytest.mark.parametrize(
     "text",
     [
         'jobs:\n  check:\n    steps:\n      - run: echo "Task: example"\n',

@@ -190,30 +190,34 @@ export function YamlEditor({
     editor.dispatch(
       setDiagnostics(
         editor.state,
-        diagnostics.map((item) => {
+        // A diagnostic without a line stays in the banner and underlines nothing.
+        diagnostics.flatMap((item) => {
+          if (!Number(item.context?.line)) return [];
           const number = Math.min(
             editor.state.doc.lines,
-            Math.max(1, Number(item.context?.line) || 1),
+            Math.max(1, Number(item.context?.line)),
           );
           const line = editor.state.doc.line(number);
           const from = Math.min(
             line.to,
             line.from + Math.max(0, (Number(item.context?.column) || 1) - 1),
           );
-          return {
-            from,
-            to: Math.min(
-              line.to,
-              from +
-                Math.max(
-                  1,
-                  line.text.slice(from - line.from).match(/^[\w-]+/)?.[0]
-                    .length ?? 1,
-                ),
-            ),
-            severity: "error" as const,
-            message: item.message,
-          };
+          return [
+            {
+              from,
+              to: Math.min(
+                line.to,
+                from +
+                  Math.max(
+                    1,
+                    line.text.slice(from - line.from).match(/^[\w-]+/)?.[0]
+                      .length ?? 1,
+                  ),
+              ),
+              severity: "error" as const,
+              message: item.message,
+            },
+          ];
         }),
       ),
     );

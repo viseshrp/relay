@@ -1,13 +1,14 @@
 """Only syntax with a local Relay contract belongs in the public language."""
 
 from io import StringIO
+import re
 from typing import Any
 
 import pytest
 from ruamel.yaml import YAML
 
 from relay.errors import WorkflowValidationError
-from relay.workflows.actions.language import load, support_manifest
+from relay.workflows.actions.language import load, support_manifest, workflow_diagnostics
 from relay.workflows.actions.metadata import load_action
 
 
@@ -292,3 +293,336 @@ def test_human_wait_answer_buttons_are_bounded(options: str) -> None:
     else:
         with pytest.raises(WorkflowValidationError, match="answer strings"):
             load(source(value))
+
+
+def _properties(definition: str) -> list[str]:
+    return list(support_manifest()["definitions"][definition]["mapping"]["properties"])
+
+
+def test_closest_suggests_one_nearby_name() -> None:
+    from relay.workflows.actions.suggest import closest
+
+    agent_inputs = support_manifest()["builtin_inputs"]["relay/agent@v1"]["allowed"]
+    assert closest("stpes", _properties("job-factory")) == "steps"
+    assert closest("rnu", _properties("run-step")) == "run"
+    assert closest("need", _properties("job-factory")) == "needs"
+    assert closest("Jobs", ["jobs"]) == "jobs"
+    assert closest("prmpt", agent_inputs) == "prompt"
+    assert closest("xyz", _properties("job-factory")) is None
+    assert closest("agent", _properties("regular-step")) is None
+
+
+@pytest.mark.parametrize(
+    "text, expected, suggested",
+    [
+        (
+            "Jobs: {a: {steps: [{run: echo}]}}\n",
+            "workflow.Jobs: Unknown workflow field. Did you mean jobs?",
+            "workflow.jobs",
+        ),
+        (
+            "jobs:\n  a:\n    need: b\n    steps: [{run: echo}]\n  b:\n    steps: [{run: echo}]\n",
+            "workflow.jobs.a.need: Unknown workflow field. Did you mean needs?",
+            "workflow.jobs.a.needs",
+        ),
+        (
+            "jobs:\n  a:\n    steps:\n      - rnu: echo\n",
+            "workflow.jobs.a.steps[0].rnu: Unknown workflow field. Did you mean run?",
+            "workflow.jobs.a.steps[0].run",
+        ),
+        (
+            "jobs:\n  a:\n    stpes:\n      - run: echo\n",
+            "workflow.jobs.a.stpes: Unknown workflow field. Did you mean steps?",
+            "workflow.jobs.a.steps",
+        ),
+    ],
+)
+def test_unknown_keys_suggest_the_nearest_field(text: str, expected: str, suggested: str) -> None:
+    messages = [issue.message for issue in workflow_diagnostics(text)]
+    assert [message for message in messages if expected in message] == [expected]
+    assert f"{suggested}: Required field is missing." not in messages
+    with pytest.raises(WorkflowValidationError, match=re.escape(expected.partition(": ")[2])):
+        load(text)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (
+            "on: {workflow_dispatch: {inputs: {x: {type: text}}}}\n"
+            "jobs: {a: {steps: [{run: echo}]}}\n",
+            "Expected one of string, boolean, number, environment, choice.",
+        ),
+        ("jobs: {a: {steps: [{uses: relay/agent}]}}\n", "Did you mean relay/agent@v1?"),
+        ("jobs: {a: {steps: [{uses: relay/agent@v9}]}}\n", "Did you mean relay/agent@v1?"),
+        (
+            "jobs: {a: {steps: [{uses: someone/thing@v1}]}}\n",
+            "Use one of relay/agent@v1, relay/cache@v1,",
+        ),
+        (
+            "jobs: {a: {steps: [{run: echo, if: 'inputs.x == \"y\"'}]}}\n",
+            "Strings use single quotes, for example 'main'.",
+        ),
+        (
+            "jobs: {a: {steps: [{run: echo, uses: relay/agent@v1}]}}\n",
+            "workflow.jobs.a.steps[0]: A step needs either run or uses, not both.",
+        ),
+        (
+            "jobs: {a: {steps: [{name: Nothing}]}}\n",
+            "workflow.jobs.a.steps[0]: A step needs run (a script) or uses (an action).",
+        ),
+    ],
+)
+def test_errors_list_the_valid_choices(text: str, expected: str) -> None:
+    issues = workflow_diagnostics(text)
+    assert any(expected in issue.message for issue in issues), [i.message for i in issues]
+    if "A step needs" in expected:
+        assert [issue.message for issue in issues] == [expected]
+    with pytest.raises(WorkflowValidationError, match=re.escape(expected)):
+        load(text)
+
+
+def test_someone_elses_action_lists_every_current_builtin() -> None:
+    with pytest.raises(WorkflowValidationError) as caught:
+        load("jobs: {a: {steps: [{uses: someone/thing@v1}]}}\n")
+    builtins = ", ".join(support_manifest()["builtins"])
+    assert caught.value.message == (
+        "jobs.a.steps[0].uses: Only frozen local and versioned relay actions are supported. "
+        f"Use one of {builtins}, or a local action under ./.relay/actions/."
+    )
+
+
+@pytest.mark.parametrize(
+    "text, line",
+    [
+        ("jobs:\n  a:\n    steps: [{run: echo}]\n  a:\n    steps: [{run: echo}]\n", "4"),
+        ("on:\n  push: {}\n  pull_request:\njobs: {a: {steps: [{run: echo}]}}\n", "3"),
+        (
+            "jobs:\n  a:\n    steps:\n      - run: echo\n      - uses: relay/loop@v1\n"
+            "        with:\n          max-iterations: 2\n",
+            "5",
+        ),
+        (
+            "jobs:\n  a:\n    strategy:\n      matrix:\n        v: '${{ inputs.v }}'\n"
+            "    steps: [{run: echo}]\n",
+            "5",
+        ),
+    ],
+)
+def test_every_diagnostic_has_a_line(text: str, line: str) -> None:
+    issues = workflow_diagnostics(text)
+    assert issues
+    assert [issue.context["line"] for issue in issues] == [line] * len(issues)
+
+
+@pytest.mark.parametrize(
+    "written, hint",
+    [
+        ("github.sha", "Use relay.sha."),
+        ("github.ref", "Use relay.ref."),
+        ("github.ref_name", "Use relay.ref_name."),
+        ("github.ref_type", "Use relay.ref_type."),
+        ("github.event", "Use relay.event."),
+        ("github.event.pull_request.title", "Use relay.event."),
+        ("github.event_name", "Use relay.event_name."),
+        ("github.event.inputs.task", "Use inputs.task."),
+        ("github.workspace", "Use relay.workspace."),
+        ("github.repository", "Use relay.repository."),
+        ("github.actor", "Use relay.actor."),
+        ("github.triggering_actor", "Use relay.actor."),
+        ("github.workflow", "Use relay.workflow."),
+        ("github.workflow_ref", "Use relay.workflow_ref."),
+        ("github.run_id", "Use relay.run_id."),
+        ("github.run_number", "Use relay.run_number."),
+        ("github.run_attempt", "Use relay.attempt_number."),
+        ("github.job", "Use relay.job."),
+        ("github.action", "Use relay.action."),
+        ("github.action_path", "Use relay.action_path."),
+        ("runner.os", "Use host.os."),
+        ("runner.arch", "Use host.arch."),
+        ("runner.name", "Use host.name."),
+        ("runner.temp", "Use host.temp."),
+        ("github.token", "Relay does not issue a token; bind a secret instead."),
+        (
+            "github.server_url",
+            "Use relay, which provides action, action_path, actor, attempt_number, chain, "
+            "delivery_id, event, event_name, job, ref, ref_name, ref_type, repository, run_id, "
+            "run_number, scheduled_at, sha, workflow, workflow_ref, workspace.",
+        ),
+        ("runner.tool_cache", "Use host, which provides arch, name, os, temp."),
+    ],
+)
+def test_platform_names_point_to_relay_names(written: str, hint: str) -> None:
+    root = written.partition(".")[0]
+    with pytest.raises(WorkflowValidationError) as caught:
+        load(source({"jobs": {"a": {"steps": [{"run": f"echo ${{{{ {written} }}}}"}]}}}))
+    assert caught.value.message == (
+        f"workflow.jobs.a.steps[0].run: Unrecognized named-value: {root}. {hint}"
+    )
+
+
+FILE_VARIABLE_MESSAGES = {
+    "GITHUB_OUTPUT": "Write step outputs to $RELAY_OUTPUT.",
+    "GITHUB_ENV": "Set variables for later steps in $RELAY_ENV.",
+    "GITHUB_PATH": "Add search paths in $RELAY_PATH.",
+    "GITHUB_STATE": "Save action state in $RELAY_STATE.",
+    "GITHUB_STEP_SUMMARY": "Write the step summary to $RELAY_STEP_SUMMARY.",
+}
+
+
+@pytest.mark.parametrize("name", list(FILE_VARIABLE_MESSAGES))
+@pytest.mark.parametrize(
+    "script",
+    [
+        'echo "value=1" >> "${name}"',
+        '"value=1" | Out-File -Append $env:{name}',
+        "python -c \"import os; open(os.environ['{name}'], 'a')\"",
+    ],
+    ids=["bash", "pwsh", "python"],
+)
+def test_unknown_file_variables_are_rejected(name: str, script: str) -> None:
+    run = script.replace("{name}", name)
+    with pytest.raises(WorkflowValidationError) as caught:
+        load(source({"jobs": {"a": {"steps": [{"run": "echo"}, {"run": run}]}}}))
+    assert caught.value.message == (
+        f"jobs.a.steps[1].run: {name} is not a Relay variable. {FILE_VARIABLE_MESSAGES[name]}"
+    )
+    assert any(
+        issue.message == caught.value.message
+        for issue in workflow_diagnostics(
+            source({"jobs": {"a": {"steps": [{"run": "echo"}, {"run": run}]}}})
+        )
+    )
+
+
+def test_relay_file_variables_and_other_github_names_validate() -> None:
+    assert load(
+        source(
+            {
+                "jobs": {
+                    "a": {
+                        "steps": [
+                            {"run": 'echo "value=1" >> "$RELAY_OUTPUT"'},
+                            {"run": "echo $GITHUB_TOKEN $GITHUB_OUTPUTS"},
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    with pytest.raises(WorkflowValidationError, match="GITHUB_ENV is not a Relay variable"):
+        load_action(
+            source(
+                {
+                    "name": "Local",
+                    "description": "Local",
+                    "runs": {
+                        "using": "composite",
+                        "steps": [{"run": 'echo "A=1" >> "$GITHUB_ENV"', "shell": "bash"}],
+                    },
+                }
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "reference, guidance",
+    [
+        (
+            "actions/checkout@v4",
+            "Remove this step: jobs already run in a working copy of this repository.",
+        ),
+        (
+            "actions/setup-python@v5",
+            "Remove this step and use the tool installed on this computer.",
+        ),
+        (
+            "actions/upload-artifact@v4",
+            "Use relay/upload-artifact@v1 with the same name, path, and retention-days inputs.",
+        ),
+        (
+            "actions/download-artifact@v4",
+            "Use relay/download-artifact@v1 with the same name and path inputs.",
+        ),
+        (
+            "actions/cache@v4",
+            "Use relay/cache@v1 with the same key, path, and restore-keys inputs.",
+        ),
+        (
+            "actions/cache/restore@v4",
+            "Use relay/restore-cache@v1 with the same key, path, and restore-keys inputs.",
+        ),
+        ("actions/cache/save@v4", "Use relay/save-cache@v1 with the same key and path inputs."),
+        (
+            "docker://alpine:3.20",
+            "Run the program with a run step or relay/command@v1 instead of a container image.",
+        ),
+        (
+            "./.github/actions/setup",
+            "Move the action to ./.relay/actions/setup and use that path.",
+        ),
+    ],
+)
+def test_common_actions_get_specific_guidance(reference: str, guidance: str) -> None:
+    with pytest.raises(WorkflowValidationError) as caught:
+        load(source({"jobs": {"a": {"steps": [{"uses": reference}]}}}))
+    assert caught.value.message == (
+        "jobs.a.steps[0].uses: Only frozen local and versioned relay actions are supported. "
+        + guidance
+    )
+
+
+def test_each_rejected_step_reports_its_own_index() -> None:
+    text = (
+        "jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-python@v5\n"
+    )
+    issues = workflow_diagnostics(text)
+    assert [(issue.message.partition(":")[0], issue.context["line"]) for issue in issues] == [
+        ("jobs.a.steps[0].uses", "4"),
+        ("jobs.a.steps[1].uses", "5"),
+    ]
+
+
+EVENTS_SENTENCE = (
+    "Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, "
+    "and workflow_run. Pull request and other hosted events have no local equivalent."
+)
+
+
+@pytest.mark.parametrize(
+    "header, line",
+    [
+        ("on: pull_request\n", "1"),
+        ("on:\n  - push\n  - pull_request\n", "3"),
+        ("on:\n  push: {}\n  pull_request:\n", "3"),
+        ("on:\n  push: {}\n  pull_request: {branches: [main]}\n", "3"),
+    ],
+    ids=["scalar", "list", "mapping", "configured-mapping"],
+)
+def test_unsupported_events_share_one_message(header: str, line: str) -> None:
+    text = header + "jobs: {a: {steps: [{run: echo}]}}\n"
+    issues = workflow_diagnostics(text)
+    assert len(issues) == 1
+    assert issues[0].message.endswith(EVENTS_SENTENCE)
+    assert issues[0].context["line"] == line
+    with pytest.raises(WorkflowValidationError, match=re.escape(EVENTS_SENTENCE)):
+        load(text)
+
+
+def test_expression_axis_explains_the_whole_matrix_form() -> None:
+    text = (
+        "jobs:\n  a:\n    strategy:\n      matrix:\n"
+        '        v: ${{ fromJSON(\'["a","b"]\') }}\n    steps: [{run: echo}]\n'
+    )
+    with pytest.raises(WorkflowValidationError) as caught:
+        load(text)
+    assert caught.value.message == (
+        "jobs.a.strategy.matrix.v: A matrix axis must be a nonempty sequence. To build the "
+        "matrix from an expression, set the whole matrix: matrix: ${{ fromJSON(...) }}."
+    )
+    with pytest.raises(WorkflowValidationError) as plain:
+        load("jobs: {a: {strategy: {matrix: {v: []}}, steps: [{run: echo}]}}")
+    assert plain.value.message == (
+        "jobs.a.strategy.matrix.v: A matrix axis must be a nonempty sequence."
+    )

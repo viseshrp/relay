@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from relay.errors import WorkflowValidationError
 
+from .suggest import closest
+
 BUILTIN_REFERENCE = re.compile(r"relay/([a-z][a-z-]*)@v([1-9][0-9]*)")
 
 
@@ -132,9 +134,19 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     action = builtin(reference)
     if action is None:
         raise KeyError(reference)
-    if inputs.keys() - action.allowed or action.required - inputs.keys():
-        message = f"{reference} has missing required or unknown action inputs."
-        raise WorkflowValidationError(message)
+    unknown = sorted(inputs.keys() - action.allowed)
+    missing = sorted(action.required - inputs.keys())
+    if unknown or missing:
+        sentences = []
+        if unknown:
+            noun = "input" if len(unknown) == 1 else "inputs"
+            sentence = f"{reference} does not accept {noun} {', '.join(unknown)}."
+            suggestion = closest(unknown[0], action.allowed) if len(unknown) == 1 else None
+            sentences.append(sentence + (f" Did you mean {suggestion}?" if suggestion else ""))
+        if missing:
+            noun = "input" if len(missing) == 1 else "inputs"
+            sentences.append(f"{reference} requires {noun} {', '.join(missing)}.")
+        raise WorkflowValidationError(" ".join(sentences))
     if action.name == "command" and len({"argv", "command"} & inputs.keys()) != 1:
         message = f"{reference} requires exactly one of argv or command."
         raise WorkflowValidationError(message)
