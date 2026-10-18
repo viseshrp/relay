@@ -22,6 +22,9 @@ REAL_RELAY = "/opt/relay/venv/bin/relay"
 ROUTE_TABLE = Path("/proc/net/route")
 _PASSTHROUGH_FLAGS = frozenset({"-h", "--help", "-v", "--version"})
 _CHUNK_BYTES = 65_536
+# Before Python 3.12, asyncio held start_server handler tasks only weakly, so a
+# garbage collection could destroy a connection that was waiting on Relay.
+_CONNECTIONS: set[asyncio.Task[None]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +125,10 @@ async def forward_connection(
     gateway: str,
 ) -> None:
     """Relay one connection from the Docker gateway to Relay's loopback server."""
+    task = asyncio.current_task()
+    if task is not None:
+        _CONNECTIONS.add(task)
+        task.add_done_callback(_CONNECTIONS.discard)
     peer = client_writer.get_extra_info("peername")
     # Other containers on the network connect from their own addresses; only the
     # gateway carries the host's published port.
