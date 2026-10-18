@@ -91,11 +91,15 @@ jobs:
             mode="pull_request"
             publish="false"
           else
-            make check-dev-version
             stamp="$(date -u +%Y%m%d)"
             raw_version="$(uv run hatch version)"
-            base_version="${raw_version%%.dev*}"
-            version="${base_version}.dev${stamp}${GITHUB_RUN_NUMBER}${GITHUB_RUN_ATTEMPT}"
+            if [[ "$raw_version" =~ \.dev[0-9]+$ ]]; then
+              base_version="${raw_version%%.dev*}"
+              version="${base_version}.dev${stamp}${GITHUB_RUN_NUMBER}${GITHUB_RUN_ATTEMPT}"
+            else
+              # Tagging leaves main's HEAD on the release; nightly then carries it.
+              version="$raw_version"
+            fi
             build_tag="nightly-${stamp}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
             tags="nightly ${build_tag}"
             primary_tag="nightly"
