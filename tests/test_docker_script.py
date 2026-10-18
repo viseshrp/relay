@@ -121,3 +121,26 @@ def test_smoke_reports_the_mismatched_label(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "revision label: expected 'def456', got 'abc123'" in result.stderr
+
+
+def test_up_mounts_the_repository_and_data_at_their_host_paths(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    data_home = tmp_path / "data"
+
+    result, calls = _run(
+        tmp_path,
+        "up",
+        DOCKER_IMAGE="example.invalid/relay:test",
+        DOCKER_WORKTREE=str(repository),
+        DOCKER_DATA_HOME=str(data_home),
+    )
+
+    assert result.returncode == 0, result.stderr
+    run = calls.splitlines()[-1]
+    # Distinct repositories keep distinct project identities and resolvable worktrees.
+    assert f"-v {repository}:{repository} -w {repository}" in run
+    assert f"GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0={repository}" in run
+    assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
+    assert "/workspace" not in run
+    assert run.endswith("example.invalid/relay:test up --port 7845")

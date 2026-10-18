@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Git Bash would otherwise rewrite container paths such as /bin/sh and mount specs.
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+
 DEFAULT_IMAGE="ghcr.io/viseshrp/relay:local"
 
 usage() {
@@ -42,6 +45,15 @@ expect_equal() {
   fi
 }
 
+host_path() {
+  # Docker Desktop on Windows takes drive-letter paths; the container keeps /c/...
+  if [[ "${OSTYPE:-}" == msys* ]]; then
+    (cd "$1" && pwd -W)
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 cmd_build() {
   local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local version
@@ -59,6 +71,12 @@ cmd_build() {
   )
   if [[ -n "${DOCKER_PLATFORM:-}" ]]; then
     args+=(--platform "${DOCKER_PLATFORM}")
+  fi
+  if [[ -n "${DOCKER_UID:-}" ]]; then
+    args+=(--build-arg "RELAY_UID=${DOCKER_UID}")
+  fi
+  if [[ -n "${DOCKER_GID:-}" ]]; then
+    args+=(--build-arg "RELAY_GID=${DOCKER_GID}")
   fi
   if [[ "${DOCKER_NO_CACHE:-0}" == "1" ]]; then
     args+=(--pull --no-cache)
@@ -195,12 +213,32 @@ PY
 cmd_up() {
   local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
   local port="${DOCKER_PORT:-7845}"
-  local worktree="${DOCKER_WORKTREE:-$(pwd)}"
+  local worktree
+  worktree="$(cd "${DOCKER_WORKTREE:-.}" && pwd)"
+  local data_home="${DOCKER_DATA_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/relay-docker}"
+  mkdir -p "${data_home}"
+  data_home="$(cd "${data_home}" && pwd)"
 
   if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      # Linux bind mounts keep host ownership, so the container user must match it.
+      local uid gid
+      uid="$(id -u)"
+      gid="$(id -g)"
+      if ((uid >= 1000)); then
+        export DOCKER_UID="${DOCKER_UID:-${uid}}"
+      fi
+      if ((gid >= 1000)); then
+        export DOCKER_GID="${DOCKER_GID:-${gid}}"
+      fi
+    fi
     # Rebuild so the container serves the current sources; unchanged layers are cached.
     cmd_build
   fi
+
+  local worktree_source data_source
+  worktree_source="$(host_path "${worktree}")"
+  data_source="$(host_path "${data_home}")"
 
   local tty_flags=()
   if [[ -t 0 && -t 1 ]]; then
@@ -208,12 +246,21 @@ cmd_up() {
   fi
 
   echo "▶️ Starting Relay container at http://127.0.0.1:${port}/ for ${worktree}..."
+  # The repository and Relay's data keep their host paths in the container, so each
+  # repository keeps its own project identity and host Git can still resolve the run
+  # worktrees that Relay registers in the repository. Docker Desktop reports the
+  # mount root as root-owned, so Git needs that path marked safe.
   exec docker run --rm ${tty_flags[@]+"${tty_flags[@]}"} \
     --init \
     -p "127.0.0.1:${port}:${port}" \
-    -v "${worktree}:/workspace" \
+    -v "${worktree_source}:${worktree}" \
+    -w "${worktree}" \
+    -e GIT_CONFIG_COUNT=1 \
+    -e GIT_CONFIG_KEY_0=safe.directory \
+    -e "GIT_CONFIG_VALUE_0=${worktree}" \
+    -v "${data_source}:${data_home}" \
+    -e "XDG_DATA_HOME=${data_home}" \
     -v relay-config:/home/relay/.config/relay \
-    -v relay-data:/home/relay/.local/share/relay \
     -v relay-state:/home/relay/.local/state/relay \
     "${image}" \
     up --port "${port}" ${DOCKER_UP_ARGS:-}
