@@ -20,7 +20,7 @@ backlog entry.
 | PR | Items | Commits |
 | --- | --- | --- |
 | R | AV-01 | `67825d3` |
-| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 | `a96366f`, `9399b5a` (WB-18 key positions) |
+| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 | `a96366f`, `9399b5a` and `60116c1` (WB-18 key positions) |
 | B | F5, WB-14, WB-15 | `2e9b2d2`, `2e0f381` |
 | C | F1, WB-16, WB-40 | `d34234d` |
 | D | F2, F3, WB-01 to WB-05 | `c83f724` |
@@ -29,6 +29,31 @@ backlog entry.
 | G | WB-37 | `95d581e`, merged in `3a8e228`; `f498ea5`, `7c7a6d9` (tests and comment fix) |
 | H | WB-20, WB-41 | `669a98f` (runs-on hint, matrix field), `a10f5eb` |
 | V, W | AV-02 to AV-04 | `4c8f429`, `2fb896d`, merged in `70e0a88` |
+
+`ae3f514` added this section. `be756fe` updates the Linux visual baselines
+for approvals (WB-24) and canvas cards (WB-12); the Main workflow's baseline
+job generated them on `9399b5a`, and they were compared with the old images
+before commit. `ebdc7da` merges the Docker image from `main` and adds
+[Build your first workflow](build-your-first-workflow.md) to its build
+context, because the Help dialog imports it.
+
+Verification:
+
+- Pull request CI on `be756fe` passed the quality job, the Python suite on
+  Python 3.10 to 3.14 on Ubuntu, macOS, and Windows, CodeQL, and browser
+  shards 1, 3, and 4. Shard 4 also runs the complete no-login and visual
+  suites. Codecov reported 99.8% patch and 88.3% project coverage.
+- Browser shard 2 passed 90 of 91 tests. "Home reads once under StrictMode
+  and hidden tabs make no polling requests" in `data-layer.spec.ts` failed
+  once because the test hides the tab before the first dashboard read
+  settles. That code is unchanged by this work. Pushing the merge with `main`
+  cancelled its re-run; CI on `ebdc7da` and later heads runs the shard again.
+- The complete browser suite (`make test-frontend`) passed on `9399b5a` in
+  the Main workflow's baseline run.
+- Locally, `uv run pytest tests -q` and `make check` passed, except four
+  `test_native_tox_runs_both_lanes_and_preserves_failure` cases that need
+  packages missing from the offline uv cache; they pass in CI. `deptry` does
+  not start locally and was skipped there; the CI quality job runs it.
 
 PRs V and W were built ahead of their trigger at the owner's request. They
 are proven with a stand-in `relay/command@v2` that only tests register; no
@@ -45,6 +70,10 @@ Known follow-ups found during implementation, outside the items:
 - Rewriting a document with ruamel (the importer and **Update to current
   versions**) turns a one-key flow mapping inside a flow list, such as
   `[{uses: x}]`, into `[uses: x]`. The YAML means the same.
+- The hidden-tab test in `frontend/e2e/data-layer.spec.ts` should wait for
+  the first `/api/dashboard` response to finish before it hides the tab.
+  Otherwise the read can settle after `page.clock.install()`, stay in the
+  shared read cache, and answer the refresh without a request.
 
 ## How to use this document
 
