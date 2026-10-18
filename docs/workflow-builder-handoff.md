@@ -2,7 +2,9 @@
 
 This is the implementation specification for the 41 items in the
 [workflow builder beginner audit](todo.md#workflow-builder-beginner-audit)
-(WB-01 to WB-41). The audit entry for each item records what was observed. This
+(WB-01 to WB-41) and the four
+[built-in action version](todo.md#built-in-action-versions) items (AV-01 to
+AV-04). The backlog entry for each item records what was observed. This
 document says exactly what to change, where, with which wording, and how to
 prove it. Work through it in the order given in
 [Delivery plan](#delivery-plan).
@@ -60,6 +62,12 @@ These come from [AGENTS.md](../AGENTS.md) and apply to every item.
 - Markdown prose and code blocks wrap at 80 columns; table rows may be wider.
 - Write Python compatible with 3.10, with parameter and return types on every
   changed function.
+- After PR R (AV-01), code never spells a built-in reference such as
+  `relay/cache@v1`. Python uses `current_builtin("cache").reference`, the
+  browser uses `currentBuiltin(manifest, "cache")`, and tables are keyed by
+  action name. Message text in this document shows the rendered result.
+  Only `builtins.py`, starter YAML, tests, and documentation contain the
+  literal strings; a test enforces this.
 
 ## Owner decisions
 
@@ -71,6 +79,7 @@ These were decided by the owner on 2026-10-18 and are binding.
 | D2 | WB-35 | `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, and `$GITHUB_STEP_SUMMARY` in a `run` script are a hard validation error. No warning, no alias, no compatibility path. Messages name only the `RELAY_*` variable and never describe GitHub or a migration. Treat `RELAY_*` as the only names that have ever existed. |
 | D3 | WB-22 | Keep **AI coding workflow** as the preselected starter. Add size labels and a clear requirements note. |
 | D4 | WB-29 | Keep the **Get started** banner after the welcome slides close. It disappears only when the checklist is opened or **Dismiss welcome** is pressed. |
+| D11 | AV-01 to AV-04 | Built-in action versions: name every built-in through one registry now (AV-01). At the first breaking change to a built-in, ship the new major version beside the old one (AV-02) with a one-click update in the editor (AV-03). After a deprecation period, remove the old version (AV-04). A run keeps the version it launched with. |
 
 The following defaults were chosen while writing this plan so that nothing is
 left open. The owner may override them; until then, implement them as written.
@@ -83,6 +92,10 @@ left open. The owner may override them; until then, implement them as written.
 | D8 | WB-34 | Messages name the Relay replacement and do not mention GitHub. |
 | D9 | WB-24 | Starter approvals gain `options` buttons; the `relay/validate-input@v1` steps stay as a second check. |
 | D10 | WB-31 | Job IDs never change on their own. Labels show names; a separate **Rename job ID** action updates references. |
+| D12 | AV-02 | Versions of one built-in share one implementation and branch on the major version only where behavior differs. Do not copy modules per version. |
+| D13 | AV-04 | A deprecated version stays in the Relay release that deprecates it and in the next minor release. It may be removed from the minor release after that at the earliest: deprecated in 0.4.0, removable in 0.6.0. |
+| D14 | AV-03 | **Update to current versions** rewrites only the open document, as an unsaved draft. Nothing is updated on save or in the background. |
+| D15 | AV-04 | A removed version is an error that names its replacement. Relay never runs the replacement in its place. |
 
 ## Environment and reproduction
 
@@ -353,14 +366,16 @@ Purpose: one source of help text for hover, completion, and form help.
    `relay/workflows/actions/schema.json`, keyed `"<definition>.<property>"`.
    Fill all 108 pairs listed in
    [Appendix A](#appendix-a-fields-that-need-descriptions).
-2. In `relay/workflows/actions/builtins.py`, add:
+2. In `relay/workflows/actions/builtins.py`, add two fields to
+   `BuiltinAction` (the registry from [AV-01](#av-01-keep-every-built-in-action-in-one-versioned-registry)):
 
    ```python
-   ACTION_DESCRIPTIONS: dict[str, str] = {...}  # 11 entries
-   INPUT_DESCRIPTIONS: dict[str, dict[str, str]] = {...}  # 46 entries
+   summary: str = ""
+   descriptions: Mapping[str, str] = field(default_factory=dict)
    ```
 
-   One entry per action in `CONTRACTS` and per input in its allowed set.
+   Fill `summary` for each of the 11 entries in `BUILTIN_ACTIONS` and one
+   `descriptions` entry per input in its `allowed` set (46 in all).
 3. In `language.py`, add a cached loader
    `language_property_descriptions() -> dict[str, str]` next to
    `language_definitions()`. In `support_manifest()` (line 879), add
@@ -395,7 +410,8 @@ Style anchors (use these exact texts for these keys):
 Tests: in `tests/test_relay_language.py`, add
 `test_every_reachable_property_and_action_input_has_a_description`. It walks
 `support_manifest()["definitions"]` for every `mapping.properties` key and
-every `CONTRACTS` input, and asserts a non-empty description of at most 240
+every input of every `BUILTIN_ACTIONS` entry, and asserts a non-empty
+description of at most 240
 characters that does not contain `GitHub`.
 
 ### F4. Closest-match suggestions
@@ -491,7 +507,8 @@ starting the next unless the row says otherwise.
 
 | PR | Content | Depends on |
 | --- | --- | --- |
-| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 (validation messages) | none |
+| R | AV-01 (built-in action registry; no behavior change) | none |
+| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 (validation messages) | R |
 | B | F5, WB-14, WB-15 (list inputs and literal checks) | A |
 | C | F1, WB-16, WB-40 (warnings) | A |
 | D | F2, F3, WB-01, WB-02, WB-03, WB-04, WB-05 (YAML editor) | A, C |
@@ -499,6 +516,12 @@ starting the next unless the row says otherwise.
 | F | WB-21, WB-22, WB-24 to WB-30 (first run and results) | none; may run beside A to E |
 | G | WB-37 (import) | A, B, C |
 | H | WB-20, WB-41 (guides) | all others, so they describe shipped behavior |
+| V | AV-02, AV-03 (two versions side by side, with a one-click update) | R, C. Not scheduled: start only at the trigger in AV-02 |
+| W | AV-04 (remove a deprecated version) | V. Not scheduled: start only after the D13 period |
+
+PRs V and W are not part of the builder work. They are specified now so the
+first breaking change to a built-in follows a known path. Stop after PR H
+unless the owner asks for V.
 
 ## Item specifications
 
@@ -609,24 +632,23 @@ lists other than `cache_modes`.
    in `relay/execution/action_files.py` and assert in a test that it equals
    the `suffix` keys in `shell_script` (line 208). In `support_manifest()`,
    add `"value_hints": {"shell": list(SHELLS)}`. WB-15 reuses `SHELLS`.
-2. In `relay/workflows/actions/builtins.py`, add:
+2. In `relay/workflows/actions/builtins.py`, add a field to `BuiltinAction`
+   (AV-01):
 
    ```python
-   INPUT_VALUES: dict[str, dict[str, list[str]]] = {
-       "relay/agent@v1": {
-           "format": ["exists", "label", "json", "yaml"],
-           "auto-retry": ["true", "false"],
-       },
-       "relay/validate-report@v1": {
-           "format": ["exists", "label", "json", "yaml"],
-       },
-       "relay/validate-input@v1": {
-           "type": ["string", "integer", "number", "boolean", "enum"],
-       },
-   }
+   values: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
    ```
 
-   Expose it as `builtin_inputs[ref]["values"]` in `support_manifest()`.
+   Fill it on three entries:
+
+   | Entry | `values` |
+   | --- | --- |
+   | `agent` v1 | `{"format": ("exists", "label", "json", "yaml"), "auto-retry": ("true", "false")}` |
+   | `validate-report` v1 | `{"format": ("exists", "label", "json", "yaml")}` |
+   | `validate-input` v1 | `{"type": ("string", "integer", "number", "boolean", "enum")}` |
+
+   Expose it as `builtin_inputs[ref]["values"]` (lists) in
+   `support_manifest()`.
 3. In `frontend/src/yaml-completion.ts`, add `valueCompletionsAt` with these
    rules, checked in order:
    - `uses` on a step: the 11 `manifest.builtins`, sorted, each with its
@@ -700,8 +722,8 @@ parent's description or `"<key>: <type>"`.
   - `run` in a step returns the `run-step.run` text.
   - `run` under top-level `defaults:` returns the `workflow-defaults.run` text.
   - `needs` returns the `job-factory.needs` text.
-  - `prompt` inside an agent step's `with` returns
-    `INPUT_DESCRIPTIONS["relay/agent@v1"]["prompt"]`.
+  - `prompt` inside an agent step's `with` returns the manifest's
+    `builtin_inputs["relay/agent@v1"].descriptions.prompt`.
   - An unknown key returns null.
 
 **Done when.**
@@ -866,20 +888,22 @@ with empty strings.
 
 1. Create `frontend/src/action-defaults.ts` exporting
    `defaultStep(reference: string): ActionStep`, and use it from both places.
-   Values (YAML shown; `with` values are strings):
+   Key the table by action name and read the name with `parseBuiltin`
+   (AV-01); `uses` is the `reference` passed in, which the menus take from
+   the manifest. Values (YAML shown; `with` values are strings):
 
-   | Reference | `with` |
+   | Name | `with` |
    | --- | --- |
    | `script` | none; the step is `run: echo Ready` |
-   | `relay/agent@v1` | `prompt: Describe the change you want.` |
-   | `relay/command@v1` | `argv: '["echo","Ready"]'` |
-   | `relay/human-wait@v1` | `prompt: Review the work so far, then choose an answer.` and `options: '["Continue","Stop"]'` |
-   | `relay/validate-report@v1` | `path: REPORT.md` and `format: exists` |
-   | `relay/validate-input@v1` | `value: ready` and `type: string` |
-   | `relay/upload-artifact@v1` | `name: report` and `path: REPORT.md` |
-   | `relay/download-artifact@v1` | `name: report` |
-   | `relay/cache@v1`, `relay/restore-cache@v1`, `relay/save-cache@v1` | `key: deps-${{ hashFiles('requirements.txt') }}` and `path: .venv` |
-   | `relay/loop@v1` | see step 2 |
+   | `agent` | `prompt: Describe the change you want.` |
+   | `command` | `argv: '["echo","Ready"]'` |
+   | `human-wait` | `prompt: Review the work so far, then choose an answer.` and `options: '["Continue","Stop"]'` |
+   | `validate-report` | `path: REPORT.md` and `format: exists` |
+   | `validate-input` | `value: ready` and `type: string` |
+   | `upload-artifact` | `name: report` and `path: REPORT.md` |
+   | `download-artifact` | `name: report` |
+   | `cache`, `restore-cache`, `save-cache` | `key: deps-${{ hashFiles('requirements.txt') }}` and `path: .venv` |
+   | `loop` | see step 2 |
 
 2. `relay/loop@v1` needs an existing reusable workflow. When it is chosen,
    open a dialog titled **`Choose the workflow to repeat`** with a select of
@@ -980,21 +1004,24 @@ text.
 
 1. Create `frontend/src/action-labels.ts` exporting `ACTION_TYPES`, one entry
    per row below, and `actionLabel(reference: string | undefined): string`.
+   Key the entries by action name, not by reference: `actionLabel` reads the
+   name with `parseBuiltin` from AV-01, so every version of an action gets
+   the same label, and no `@v1` string appears in the frontend.
 
-   | Group | Reference | Label | Description |
+   | Group | Name | Label | Description |
    | --- | --- | --- | --- |
-   | Agents | `relay/agent@v1` | Agent | Ask a coding agent to do the work. |
+   | Agents | `agent` | Agent | Ask a coding agent to do the work. |
    | Scripts and commands | `script` | Script | Run commands in a shell. |
-   | Scripts and commands | `relay/command@v1` | Command | Run one program with exact arguments. |
-   | Approvals | `relay/human-wait@v1` | Approval | Pause until you answer. |
-   | Reports and checks | `relay/validate-report@v1` | Check a report | Read a report file and pass its verdict on. |
-   | Reports and checks | `relay/validate-input@v1` | Check a value | Stop when a value is not the expected type. |
-   | Artifacts and caches | `relay/upload-artifact@v1` | Upload artifact | Keep files from this run. |
-   | Artifacts and caches | `relay/download-artifact@v1` | Download artifact | Bring back files kept by a run. |
-   | Artifacts and caches | `relay/cache@v1` | Cache | Restore files now and save them after the job. |
-   | Artifacts and caches | `relay/restore-cache@v1` | Restore cache | Restore files saved earlier. |
-   | Artifacts and caches | `relay/save-cache@v1` | Save cache | Save files for later runs. |
-   | Advanced | `relay/loop@v1` | Repeat a workflow | Run another workflow until it reports done. |
+   | Scripts and commands | `command` | Command | Run one program with exact arguments. |
+   | Approvals | `human-wait` | Approval | Pause until you answer. |
+   | Reports and checks | `validate-report` | Check a report | Read a report file and pass its verdict on. |
+   | Reports and checks | `validate-input` | Check a value | Stop when a value is not the expected type. |
+   | Artifacts and caches | `upload-artifact` | Upload artifact | Keep files from this run. |
+   | Artifacts and caches | `download-artifact` | Download artifact | Bring back files kept by a run. |
+   | Artifacts and caches | `cache` | Cache | Restore files now and save them after the job. |
+   | Artifacts and caches | `restore-cache` | Restore cache | Restore files saved earlier. |
+   | Artifacts and caches | `save-cache` | Save cache | Save files for later runs. |
+   | Advanced | `loop` | Repeat a workflow | Run another workflow until it reports done. |
 
 2. Render both selects and the WB-08 menu with group subheaders and
    two-line items (label and description).
@@ -1371,7 +1398,7 @@ parametrized, asserting the message text:
 | --- | --- |
 | dispatch input `type: text` | `Expected one of string, boolean, number, environment, choice.` |
 | `uses: relay/agent` | `Did you mean relay/agent@v1?` |
-| `uses: relay/agent@v2` | `Did you mean relay/agent@v1?` |
+| `uses: relay/agent@v9` | `Did you mean relay/agent@v1?` |
 | `uses: someone/thing@v1` | `Use one of relay/agent@v1, relay/cache@v1,` |
 | `if: inputs.x == "y"` | `Strings use single quotes, for example 'main'.` |
 | step with `run` and `uses` | `A step needs either run or uses, not both.` |
@@ -1494,10 +1521,11 @@ not building one, and no table lists the built-in actions.
       suggestion, and fix it.
    Show each step's resulting YAML as a tagged `relay-example` block.
 2. Add a "Built-in actions" section with one row per action: label (WB-10),
-   reference, purpose (`ACTION_DESCRIPTIONS`), required inputs, optional
-   inputs, and outputs. Add
+   reference, purpose (the registry entry's `summary`), required inputs,
+   optional inputs, and outputs. Add
    `tests/test_relay_language.py::test_action_table_matches_contracts`, which
-   parses that table and compares it with `CONTRACTS`.
+   parses that table and compares it with the current entries in
+   `BUILTIN_ACTIONS`.
 3. Link the guide from [Getting started](getting-started.md); from
    [README.md](../README.md), after the sentence that links
    [Coming from GitHub Actions](coming-from-github-actions.md) (around line
@@ -2126,7 +2154,8 @@ actions are supported." In a file with two of them, both errors say
    path it builds. `workflow_diagnostics` passes `start=index` and stops
    rewriting the field.
 2. Add guidance after the existing prefix for these references (match on
-   the part before `@`):
+   the part before `@`). Build each `relay/…` reference in the text with
+   `current_builtin(name).reference`:
 
    | Reference | Guidance |
    | --- | --- |
@@ -2195,8 +2224,9 @@ it. Relay reads only `.relay/workflows/`.
    | the five `GITHUB_*` file variables in `run` | `RELAY_*` | `Replaced $<old> with $<new> (<n> places).` |
    | any other `uses` | leave | `unresolved`: `Step <n> in job <id> uses <ref>. Replace it with a run step or a relay action.` |
 
-   Finally run `workflow_diagnostics` on the result and add each remaining
-   message to `unresolved`.
+   Build each `relay/…` reference in the rules with
+   `current_builtin(name).reference`. Finally run `workflow_diagnostics` on
+   the result and add each remaining message to `unresolved`.
 2. In `relay/web/views/actions_language.py`, add two owner-only views, and
    register them in `relay/web/urls.py`:
    - `GET /api/workflow-import`: list `*.yml` and `*.yaml` files directly in
@@ -2385,6 +2415,590 @@ docs/coming-from-github-actions.md` and the link checker.
 - [ ] Every construct named in WB-34 to WB-40 appears with its Relay
   equivalent or "Not supported".
 
+### Built-in action version items
+
+These items implement D11. AV-01 ships first, as PR R. AV-02 and AV-03 wait
+for the first breaking change to a built-in action, and AV-04 waits for the
+D13 period after that. Do not start an item before its trigger.
+
+A change to a built-in action is **breaking** when a workflow that validated
+and ran before the change would afterwards fail validation, fail at run
+time, or behave differently with the same inputs. For example:
+
+- removing or renaming an input or output;
+- making an optional input required, or accepting fewer values for an input;
+- changing a default, the format or meaning of an output, or what the step
+  commits, retains, or waits for.
+
+A **compatible** change stays in the current version: a new optional input
+whose absence keeps today's behavior, a new output, a clearer message, or a
+fix that restores documented behavior.
+
+#### AV-01. Keep every built-in action in one versioned registry
+
+- **Priority:** P1. **PR:** R. **Decision:** D11.
+
+**Problem.** The 11 built-in actions are named by literal `relay/<name>@v1`
+strings: 56 in 10 Python files and 18 in 6 frontend files. Adding a second
+version means finding each one by hand, and a missed one silently treats the
+new version as a different action. Five of them read persisted run rows, so
+they also decide how retained runs resume.
+
+**Code today.** Every site, with its replacement. Line numbers are at
+`main` `d4cd0ec`.
+
+| Location | What it does | Replace with |
+| --- | --- | --- |
+| `relay/workflows/actions/builtins.py:11` `CONTRACTS` | allowed and required inputs per reference | `BUILTIN_ACTIONS` (step 1) |
+| `builtins.py:46-80` `validate_inputs` | five `reference == "relay/<name>@v1"` checks; two messages spell the reference | look the entry up once with `builtin(reference)`, compare `action.name`, and build the messages from `reference` so their text is unchanged |
+| `relay/workflows/actions/language.py:45` `BUILTINS` | the accepted references | delete; use `builtin()` |
+| `language.py:387`, `:397` `validate_steps` | rejects unknown `uses`; validates inputs of known ones | `builtin(reference) is None` and `builtin(reference) is not None` |
+| `language.py:837` `capture_sources` | captures a loop's child workflow | `is_builtin(reference, "loop")` |
+| `language.py:888` `support_manifest` | `builtins` and `builtin_inputs` | step 3 |
+| `relay/workflows/actions/metadata.py:86` | validates built-in inputs in composite actions | `builtin(step.get("uses")) is not None` |
+| `relay/workflows/actions/compiler.py:255`, `:257` | binds agents; expands loops | `is_builtin(reference, "agent")`, `is_builtin(reference, "loop")` |
+| `compiler.py:386` | checks shared command names | `is_builtin(step.get("uses"), "command")` |
+| `relay/workflows/management.py:36` | blocks deleting a workflow that a loop calls | `is_builtin(step.get("uses"), "loop")` |
+| `relay/execution/preflight.py:42` | collects prompt files from agent steps | `not is_builtin(step.get("uses"), "agent")` |
+| `relay/execution/nodes/actions.py:895`, `:921`, `:937`, `:980`, `:985`, `:1012` | dispatches a step to its executor | step 4 |
+| `nodes/actions.py:619` | runs the cache save that `relay/cache` registered | `current_builtin("save-cache").reference` |
+| `relay/execution/action_products.py:179` | treats cache I/O errors as warnings | `parse_builtin(reference)` name in `{"cache", "restore-cache", "save-cache"}` |
+| `relay/web/actions_products.py:46`, `:75`, `:95`, `:124`, `:136` | artifact and cache products | compare the parsed name |
+| `relay/web/actions_repository.py:558` (persisted row) | records an approval answer | `is_builtin(frozen["step"].get("uses"), "human-wait")` |
+| `relay/web/repositories.py:575`, `:3972`, `:4918` (persisted rows) | treat approval steps specially for evidence and controls | `is_builtin(step.get("uses"), "human-wait")` |
+| `repositories.py:1856-1858` | names the activity type on the run page | map the parsed name: `command` → `command`, `agent` → `agent`, `human-wait` → `human_wait` |
+| `repositories.py:2352` (database filter) | finds agent attempts lost with their worker | `node_run__frozen_def__step__uses__in=builtin_references("agent")` (Django 5.2 supports `__in` on JSON keys) |
+| `frontend/src/workflow-language.ts:74` | offers `steps.<id>.outputs.answer` | `isBuiltin(step.uses, "human-wait")` |
+| `frontend/src/actions-workflow.ts:221`, `:224`, `:229` | canvas card details for loop and agent steps | `isBuiltin(step.uses, "loop")`, `isBuiltin(step.uses, "agent")` |
+| `frontend/src/components/JobFailureEditor.tsx:22`, `:44`, `:73` | finds agent steps | `isBuiltin(step.uses, "agent")` |
+| `JobFailureEditor.tsx:140` | adds a loop step | `currentBuiltin(manifest, "loop")`; pass `manifest` from `ActionJobEditorView.tsx:177`, which already has it |
+| `frontend/src/components/ActionBuiltinFields.tsx:60`, `:71`, `:73`, `:84`, `:179`, `:182`, `:226`, `:263` | chooses the form fields for a step | compare `parseBuiltin(step.uses)?.name` |
+| `frontend/src/components/ActionJobSteps.tsx:115`, `WorkflowCanvas.tsx:199` | menu labels made by stripping `relay/` and `@v1` | `builtinLabel(reference)`; WB-10 later replaces it with `actionLabel` |
+
+Starter YAML, tests, and documentation keep their literal references. They
+are workflow sources and examples, and they must name a version.
+
+**Change.**
+
+1. In `relay/workflows/actions/builtins.py`, replace `CONTRACTS` with:
+
+   ```python
+   BUILTIN_REFERENCE = re.compile(r"relay/([a-z][a-z-]*)@v([1-9][0-9]*)")
+
+
+   @dataclass(frozen=True, slots=True)
+   class BuiltinAction:
+       """One major version of a built-in action and its inputs."""
+
+       name: str
+       major: int
+       allowed: frozenset[str]
+       required: frozenset[str]
+       status: Literal["current", "deprecated"] = "current"
+
+       @property
+       def reference(self) -> str:
+           return f"relay/{self.name}@v{self.major}"
+
+
+   BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (...)  # 11 entries
+   _BY_REFERENCE: dict[str, BuiltinAction] = {
+       action.reference: action for action in BUILTIN_ACTIONS
+   }
+
+
+   def parse_builtin(reference: object) -> tuple[str, int] | None:
+       """Split relay/<name>@v<major>; None for any other value."""
+       if not isinstance(reference, str):
+           return None
+       match = BUILTIN_REFERENCE.fullmatch(reference)
+       return (match[1], int(match[2])) if match else None
+
+
+   def builtin(reference: object) -> BuiltinAction | None:
+       """The registered version a reference names, if Relay has it."""
+       if not isinstance(reference, str):
+           return None
+       return _BY_REFERENCE.get(reference)
+
+
+   def is_builtin(reference: object, name: str) -> bool:
+       """True for any version of one action, registered or not."""
+       parsed = parse_builtin(reference)
+       return parsed is not None and parsed[0] == name
+
+
+   def builtin_references(name: str) -> tuple[str, ...]:
+       """Every registered version of one action, oldest first."""
+       versions = sorted(
+           (action for action in BUILTIN_ACTIONS if action.name == name),
+           key=lambda action: action.major,
+       )
+       return tuple(action.reference for action in versions)
+
+
+   def current_builtin(name: str) -> BuiltinAction:
+       """The current version of one action; KeyError if unknown."""
+       for action in BUILTIN_ACTIONS:
+           if action.name == name and action.status == "current":
+               return action
+       raise KeyError(name)
+   ```
+
+   Create one entry per `CONTRACTS` key today, with the same `allowed` and
+   `required` sets, in the same order. `is_builtin` deliberately accepts an
+   unregistered version: persisted rows must keep their meaning after a
+   version is removed (AV-04), and validation already rejects unregistered
+   versions in new sources. Call sites import the helper functions, never
+   `BUILTIN_ACTIONS` or `_BY_REFERENCE`, so a test can replace the registry
+   in one place.
+2. Replace every Python site in **Code today**. Messages that spell a
+   reference build it from the `reference` they already hold, so every
+   message text stays byte-identical for `@v1`.
+3. In `support_manifest()`:
+
+   ```python
+   "builtins": sorted(
+       action.reference
+       for action in BUILTIN_ACTIONS
+       if action.status == "current"
+   ),
+   "builtin_inputs": {
+       action.reference: {
+           "allowed": sorted(action.allowed),
+           "required": sorted(action.required),
+       }
+       for action in BUILTIN_ACTIONS
+   },
+   "builtin_versions": {
+       action.reference: {
+           "name": action.name,
+           "major": action.major,
+           "status": action.status,
+       }
+       for action in BUILTIN_ACTIONS
+   },
+   ```
+
+   This function is in `language.py`, so it may read `BUILTIN_ACTIONS`
+   directly. Add `builtin_versions: Record<string, { name: string; major:
+   number; status: "current" | "deprecated" }>` to `LanguageManifest` in
+   `frontend/src/workflow-language.ts`.
+4. In `nodes/actions.py`, right after `reference = str(node.step["uses"])`
+   and the input interpolation (line 890), look the entry up once:
+
+   ```python
+   action = builtin(reference)
+   if action is None and parse_builtin(reference) is not None:
+       message = f"{reference} is not included in this Relay version."
+       raise NodeExecutionError(message)
+   name = action.name if action is not None else None
+   ```
+
+   Then change each `if reference == "relay/<name>@v1":` below it to
+   `if name == "<name>":`. The local-action branch (`./`) and the product
+   fallthrough keep receiving `reference`. The guard cannot fire for a
+   source that validated; it protects runs that resume after an upgrade.
+5. Create `frontend/src/builtin-actions.ts`:
+
+   ```ts
+   import type { LanguageManifest } from "./workflow-language";
+
+   const BUILTIN = /^relay\/([a-z][a-z-]*)@v([1-9][0-9]*)$/;
+
+   export function parseBuiltin(
+     uses: unknown,
+   ): { name: string; major: number } | null {
+     const match = typeof uses === "string" ? BUILTIN.exec(uses) : null;
+     return match ? { name: match[1], major: Number(match[2]) } : null;
+   }
+
+   export function isBuiltin(uses: unknown, name: string): boolean {
+     return parseBuiltin(uses)?.name === name;
+   }
+
+   export function builtinLabel(reference: string): string {
+     return parseBuiltin(reference)?.name ?? reference;
+   }
+
+   export function currentBuiltin(
+     manifest: LanguageManifest,
+     name: string,
+   ): string {
+     const entry = Object.entries(manifest.builtin_versions).find(
+       ([, version]) => version.name === name && version.status === "current",
+     );
+     if (!entry) throw new Error(`Unknown built-in action ${name}`);
+     return entry[0];
+   }
+   ```
+
+   Replace every frontend site in **Code today** with these helpers.
+6. Starter YAML is unchanged; every reference in it is already current.
+
+**Tests.**
+
+- `tests/test_actions_builtin_contracts.py::test_registry_holds_one_current_version_per_action`:
+  the 11 references equal the 11 accepted today; references are unique;
+  each name has exactly one `current` entry; each entry's `allowed` and
+  `required` equal a copy of today's `CONTRACTS` written out in the test.
+- `tests/test_actions_builtin_contracts.py::test_builtin_reference_helpers`,
+  parametrized:
+
+  | Call | Result |
+  | --- | --- |
+  | `builtin("relay/agent@v1").name` | `"agent"` |
+  | `builtin("relay/agent@v9")` | `None` |
+  | `builtin(None)` | `None` |
+  | `parse_builtin("relay/save-cache@v1")` | `("save-cache", 1)` |
+  | `parse_builtin("relay/agent@v0")`, `parse_builtin("relay/agent")`, `parse_builtin("./.relay/actions/agent")` | `None` |
+  | `is_builtin("relay/agent@v9", "agent")` | `True` |
+  | `is_builtin("relay/agent@v1", "loop")`, `is_builtin(None, "agent")` | `False` |
+  | `builtin_references("agent")` | `("relay/agent@v1",)` |
+  | `current_builtin("loop").reference` | `"relay/loop@v1"` |
+  | `current_builtin("missing")` | raises `KeyError` |
+
+- `tests/test_actions_builtin_contracts.py::test_no_builtin_reference_is_spelled_outside_the_registry`:
+  with `ROOT = Path(__file__).resolve().parents[1]` (as in
+  `tests/test_ci_python.py`), read every `relay/**/*.py` except
+  `relay/workflows/actions/builtins.py`, and every `frontend/src/**/*.ts`
+  and `*.tsx`; assert that none matches `re.compile(r"@v[0-9]")`. The
+  failure message lists each file and line.
+- `tests/test_actions_builtin_contracts.py::test_an_unregistered_version_never_runs`:
+  with `marker = tmp_path / "ran"`, write a workflow whose job has a
+  `relay/human-wait@v1` step (`prompt: Go?`) followed by a step `id: touch`
+  using `relay/command@v1` with `argv` set to
+  `[sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]`, written
+  into the YAML as `json.dumps(json.dumps(argv))` so it is one JSON string.
+  Launch it with `InlineEngine` and `engine.drain`, as
+  `tests/test_actions_execution_contracts.py:52` does. While it waits, call
+  `monkeypatch.delitem(builtins._BY_REFERENCE, "relay/command@v1")`, then
+  `answer_wait(engine, run_id)`. Assert that the `touch` step's `NodeRun`
+  and the run are `failed`, that the run's `RunEvent` payloads contain
+  `relay/command@v1 is not included in this Relay version.` (as
+  `test_builtin_runtime_errors_settle_the_step_and_keep_failure_evidence`
+  checks), and that `marker` does not exist.
+- `tests/test_workflow_starters.py::test_starters_use_current_builtin_versions`:
+  every `uses` value that `parse_builtin` accepts, in every YAML file under
+  `relay/workflows/starters/`, names a registered `current` entry.
+- `tests/test_relay_language.py::test_manifest_describes_builtin_versions`:
+  `builtin_versions` has 11 entries, all `current`; `builtins` equals their
+  sorted keys; `builtin_inputs` has the same keys.
+- `frontend/unit/builtin-actions.spec.ts`: the same cases as the Python
+  helper table, plus `builtinLabel("relay/save-cache@v1") === "save-cache"`
+  and `currentBuiltin` on a two-entry manifest.
+- The whole Python suite and `make test-frontend` pass with no test edits.
+  That is the proof of no behavior change.
+  `tests/test_engine_failures.py::test_a_worker_exit_does_not_classify_a_workerless_human_wait_as_worker_lost`
+  covers the database filter.
+
+**Docs.**
+
+- In [Workflows](workflows.md), add a section `## Built-in action versions`
+  after "Reusable workflows and local actions":
+
+  > Built-in actions are named `relay/<name>@v<major>`. Each has one current
+  > major version, which the editor offers. A version changes only in
+  > compatible ways: a new optional input that keeps the old behavior when
+  > omitted, a new output, a clearer message, or a fix that restores
+  > documented behavior. Any other change ships as the next major version.
+
+- In [CONTRIBUTING.md](../CONTRIBUTING.md) under "Code boundaries", add:
+
+  > - Name built-in actions only through the registry in
+  >   `relay/workflows/actions/builtins.py`. A breaking change to a built-in
+  >   action adds the next major version beside the current one; see
+  >   Built-in action versions.
+
+  Link "Built-in action versions" to
+  `docs/workflows.md#built-in-action-versions`, which is relative to the
+  repository root where CONTRIBUTING.md lives.
+
+**Done when.**
+
+- [ ] This search prints nothing:
+
+  ```bash
+  rg -n "@v[0-9]" relay frontend/src \
+    -g '!relay/workflows/actions/builtins.py' \
+    -g '!relay/workflows/starters/**'
+  ```
+
+- [ ] The full Python suite and `make test-frontend` pass without changing
+  an existing test.
+- [ ] The manifest has `builtin_versions`, and `LanguageManifest` in
+  `workflow-language.ts` declares it.
+- [ ] Workflows and CONTRIBUTING describe the version rule.
+
+#### AV-02. Run two versions of a built-in action side by side
+
+- **Priority:** P2 until triggered. **PR:** V. **Depends on:** AV-01, F1.
+  **Decisions:** D11, D12.
+- **Trigger:** the first breaking change to a built-in action. Do not build
+  this item without one.
+
+**Problem.** Without this, a breaking change has to edit `@v1` in place.
+Every saved workflow that uses the action then fails or quietly behaves
+differently, and so does a run that was waiting for an approval when Relay
+was upgraded.
+
+**Change.**
+
+1. Add `deprecated_in: str = ""` to `BuiltinAction`: the Relay version that
+   deprecated it, such as `0.4.0`. In the same change, add the new entry
+   (`major` one higher, its own `allowed` and `required`) and set the old
+   entry's `status="deprecated"` and `deprecated_in`. AV-01's registry test
+   keeps exactly one current entry per name.
+2. Implement the difference inside the existing code path (D12). Code that
+   needs the version looks the entry up once and branches on `major` only
+   where the versions differ:
+
+   ```python
+   action = builtin(reference)
+   if action is not None and action.name == "human-wait":
+       ...  # shared behavior
+       if action.major >= 2:
+           ...  # the new behavior
+   ```
+
+   Products, repository code, and forms keep comparing names, so the old
+   version keeps working unchanged. A cache save registered by `relay/cache`
+   uses the current `save-cache`. If `save-cache` itself gets a breaking
+   version, branch on the major of the step that registered the save
+   (`post["node"]["step"]["uses"]`).
+3. Move every starter YAML and every example in [Workflows](workflows.md)
+   that uses the action to the new version. AV-01's starter test fails
+   until this is done.
+4. Validation. A deprecated version still validates, launches, and runs.
+   Add `deprecated_builtin_warnings(value: Mapping[str, Any], prefix: str)
+   -> list[WorkflowValidationError]` to `language.py`. It visits
+   `jobs.<id>.steps[<n>]`, and `runs.steps[<n>]` for action metadata. For
+   each step whose `builtin(uses).status == "deprecated"`, it returns
+   `_warning(f"{prefix}{path}.uses", text)` with
+   **`<old> is deprecated and will be removed in a later Relay release. Use <new>.`**
+   and sets `issue.context["deprecated"] = <old>`. F1's
+   `workflow_warnings(document)` calls it with `prefix=""`. The validate
+   view also calls it for each captured source in `sources` that is a
+   reusable workflow or action metadata, with `prefix="<source key>: "`.
+   Those warnings have no line.
+5. Manifest. `builtins` already lists only current references (AV-01), so
+   completion (WB-02) and the step menus offer only the new version.
+   `builtin_inputs` and `builtin_versions` keep every registered version, so
+   a deprecated step still gets its form. Add `deprecated_in` to each
+   `builtin_versions` entry and to its TypeScript type.
+6. Editor.
+   - `ActionJobSteps.tsx` **Step type**: when `step.uses` is a deprecated
+     built-in, add one `MenuItem` with that value labelled
+     `<label> (older version)`, as the select already does for `./`
+     references (line 117). Otherwise MUI renders an out-of-range value.
+   - `ActionBuiltinFields.tsx`: for a deprecated step, show an info `Alert`
+     with **`This step uses an older version of <label>.`** and the AV-03
+     button.
+7. Retained runs need no change. Frozen definitions keep their reference
+   and the deprecated entry still runs it. Never rewrite stored rows.
+8. Docs. In "Built-in action versions" in [Workflows](workflows.md), add a
+   table: deprecated reference, replacement, the version that deprecated
+   it, and the earliest removal version under D13. The release task records
+   the deprecation under "Deprecated" in `CHANGELOG.md`; this PR does not
+   edit the changelog.
+
+**Tests.** The mechanism tests use a stand-in pair, so they do not depend on
+which action changed. In a new `tests/test_actions_builtin_versions.py`, add
+a fixture `deprecated_command` that monkeypatches `builtins.BUILTIN_ACTIONS`
+and `builtins._BY_REFERENCE` so `relay/command@v1` is deprecated
+(`deprecated_in="0.0.0"`) and `relay/command@v2` is current with the same
+inputs.
+
+- `test_a_deprecated_version_validates_with_a_warning`:
+  `workflow_diagnostics` returns nothing for a `relay/command@v1` step;
+  `workflow_warnings` returns the message above with
+  `context["deprecated"] == "relay/command@v1"`.
+- `test_the_manifest_offers_only_the_current_version`: `builtins` holds
+  `relay/command@v2` and not v1; `builtin_inputs` and `builtin_versions`
+  hold both, and v1 carries `deprecated_in`.
+- `test_a_run_paused_before_an_upgrade_finishes_on_its_version`: launch,
+  without the fixture, the AV-01 guard-test workflow. While it waits, apply
+  the fixture, then `answer_wait`. Assert the run succeeded, `marker`
+  exists, and the `touch` step's `frozen_def["step"]["uses"]` is still
+  `relay/command@v1`.
+- `tests/test_editor_recovery.py::test_validate_reports_deprecated_builtins_in_captured_sources`:
+  with the fixture, a workflow that uses `./.relay/actions/x`, whose
+  `action.yaml` has a `relay/command@v1` step, gets one warning that starts
+  with `.relay/actions/x/action.yaml:` and a space.
+- In the PR that adds the real pair, add
+  `frontend/e2e/workflow-authoring.spec.ts` test
+  `a deprecated step shows the older-version notice`: a source using the
+  old reference shows the warning, **Save** stays enabled, the step form
+  shows the notice, and **Step type** shows `<label> (older version)`.
+
+**Done when.**
+
+- [ ] A workflow that uses the old version validates with one warning, then
+  saves, launches, and succeeds.
+- [ ] A run paused before the upgrade finishes on the old version.
+- [ ] New steps, completion, starters, and examples use only the new
+  version.
+
+#### AV-03. Update a workflow to the current version in one click
+
+- **Priority:** P2 until triggered. **PR:** V, with AV-02. **Depends on:**
+  AV-02, F1. **Decision:** D14.
+
+**Problem.** After AV-02, each workflow that uses the old version shows a
+warning, and fixing it means knowing exactly which inputs changed.
+
+**Change.**
+
+1. Add to `BuiltinAction`:
+
+   ```python
+   upgrade: (
+       Callable[
+           [Mapping[str, object]],
+           tuple[dict[str, object], tuple[str, ...]],
+       ]
+       | None
+   ) = None
+   ```
+
+   Set it on the new entry. It receives the previous version's `with` and
+   returns the new `with` plus one sentence per input it changed or
+   dropped. It raises `WorkflowValidationError(message)` when it cannot
+   convert safely, for example when an input it must transform contains
+   `${{`. Extend AV-01's registry test: every deprecated entry has a newer
+   entry of the same name with `upgrade` set.
+2. Create `relay/workflows/actions/upgrade.py`:
+
+   ```python
+   @dataclass(frozen=True, slots=True)
+   class UpgradeResult:
+       yaml: str
+       changes: tuple[str, ...]
+       unresolved: tuple[str, ...]
+
+
+   def upgrade_builtins(text: str) -> UpgradeResult:
+       """Move deprecated built-in steps to the current version.
+
+       Pure: it never reads other files, fetches, or writes.
+       """
+   ```
+
+   Load the workflow with ruamel round-trip, as WB-37's importer does, so
+   comments and key order survive. Visit `jobs.<id>.steps[<n>]`. For each
+   step whose `uses` is deprecated, apply each newer entry's `upgrade` in
+   turn until the current version, then set `uses` and replace `with`.
+   Record **`Updated step <n> in job <id> from <old> to <new>.`** (`<n>`
+   counts from 1), followed by the sentences the upgrades returned. When an
+   upgrade raises, leave that step unchanged and add
+   **`Step <n> in job <id>: <message> Update it by hand.`** to `unresolved`.
+   Finally run `workflow_diagnostics` on the result and add each remaining
+   message to `unresolved`. A source with nothing deprecated comes back
+   byte-identical with empty lists.
+3. In `relay/web/views/actions_language.py`, add `upgrade()` for
+   `POST /api/workflow-language/upgrade` with `{yaml, source?}`, returning
+   `{yaml, changes, unresolved}`. Use the same decorators, request bounds,
+   and error envelope as `validate()` (line 100). It writes nothing.
+   Register it in `relay/web/urls.py` after the validate route and document
+   it in [HTTP API](http-api.md).
+4. Frontend. Add `WorkflowUpgradeResult` to `types.ts` and
+   `upgradeWorkflowLanguage(yaml: string)` to `api.ts`. In
+   `ActionsWorkflowWorkspaceView.tsx`, when any warning has
+   `context.deprecated`, or after AV-04 any diagnostic has
+   `context.removed`, show a **`Update to current versions`** button above
+   the warnings. It calls the endpoint and passes the returned text to
+   `setText` from `useUndoDocument` (as `addJob` does), so the result is an
+   unsaved draft and **Undo** reverts it. Then it opens a dialog titled
+   **`Updated to current versions`** that lists `changes` under **Changes**
+   and `unresolved` under **`Check by hand`**, with one **Close** button. The
+   AV-02 form notice offers the same button. Nothing is updated on save or
+   in the background (D14).
+5. Captured action metadata (`.relay/actions/*/action.yaml`) is not opened
+   by the editor, so its AV-02 warning names the file and the user edits it
+   by hand.
+
+**Tests.**
+
+- `tests/test_actions_builtin_versions.py::test_upgrade_moves_deprecated_steps_and_keeps_comments`:
+  with the `deprecated_command` fixture and an `upgrade` that renames
+  nothing, a source with a comment and two `relay/command@v1` steps comes
+  back with both on v2, the comment intact, and two `Updated step …`
+  sentences.
+- `test_upgrade_leaves_a_step_it_cannot_convert`: an `upgrade` that raises
+  leaves the step on v1 and adds the `Check by hand` sentence.
+- `test_upgrade_returns_an_up_to_date_source_unchanged`.
+- Extend `tests/test_web_api.py::test_actions_owner_endpoints_keep_csrf_in_both_login_modes`
+  (line 2346) to post the same body to `/api/workflow-language/upgrade`,
+  with the same 403-without-token and 200-with-token checks.
+- `frontend/e2e/workflow-authoring.spec.ts`, in the PR that adds the real
+  pair: `update to current versions rewrites the draft`: click the button,
+  see the dialog, the YAML shows the new reference, **Undo** restores the
+  old text, and nothing is saved until **Save**.
+
+**Done when.**
+
+- [ ] One click moves every deprecated step in the open workflow to the
+  current version as an unsaved draft, and Undo reverts it.
+- [ ] Every change and every step left alone is listed.
+
+#### AV-04. Remove a deprecated version safely
+
+- **Priority:** P2 until triggered. **PR:** W. **Depends on:** AV-02,
+  AV-03. **Decisions:** D13, D15.
+- **Trigger:** the D13 period has passed for a deprecated version.
+
+**Problem.** A deprecated version cannot stay forever, but removing it must
+not leave a saved workflow or a paused run failing without saying why or
+what to do.
+
+**Change.**
+
+1. Delete the deprecated entry from `BUILTIN_ACTIONS` and remove its
+   `major` branches. Add `REMOVED_BUILTINS: dict[str, tuple[str, str]]` to
+   `builtins.py`, mapping the reference to `(removed_in, replacement)`.
+   Keep the newer entry's `upgrade`; `upgrade_builtins` treats a reference
+   in `REMOVED_BUILTINS` like a deprecated one.
+2. `builtin_references(name)` also returns the removed references of that
+   name, so the worker-loss filter (`repositories.py:2352`) still matches
+   rows from older runs. `builtin()` still returns `None` for them.
+3. Validation. In `validate_steps`, when `reference in REMOVED_BUILTINS`,
+   keep the prefix and append, ahead of WB-17's suggestion, the first AV-04
+   validation text in the [message catalogue](#message-catalogue). Set
+   `issue.context["removed"] = <old>` so AV-03's button appears.
+4. Dispatch. The AV-01 guard in `nodes/actions.py` uses the
+   `REMOVED_BUILTINS` entry when there is one, and raises the second AV-04
+   text in the [message catalogue](#message-catalogue) instead of the AV-01
+   text. The step fails with that message and the run follows its normal
+   failure rules. Relay never runs `<new>` in its place (D15).
+5. Docs. In [Workflows](workflows.md), move the row to a removed-versions
+   table with its replacement. In [Execution](execution.md) under
+   "Failure, cancellation, and recovery", add one sentence: a step whose
+   built-in version was removed fails with that message. The release task
+   records the removal under "Removed" in `CHANGELOG.md` and tells owners
+   to finish or cancel runs that use the version before upgrading.
+
+**Tests.** In `tests/test_actions_builtin_versions.py`, add a fixture
+`removed_command` that moves `relay/command@v1` from the registry to
+`REMOVED_BUILTINS` as `("0.0.0", "relay/command@v2")` and registers
+`relay/command@v2`.
+
+- `test_a_removed_version_names_its_replacement`: the validation message
+  and `context["removed"]`.
+- `test_a_paused_run_fails_clearly_when_its_version_was_removed`: the AV-01
+  guard test, applying this fixture instead; the event payloads contain
+  the message in step 4 and `marker` does not exist.
+- `test_the_upgrader_converts_a_removed_version`.
+- `test_removed_references_still_classify_persisted_rows`:
+  `builtin_references("command")` contains `relay/command@v1`, and
+  `is_builtin("relay/command@v1", "command")` stays true.
+
+**Done when.**
+
+- [ ] A saved workflow that uses the removed version shows the error, and
+  **Update to current versions** fixes it.
+- [ ] A run paused across the upgrade fails at its next step with the
+  message, and nothing runs in its place.
+
 ## Message catalogue
 
 All new or changed user-facing text, for review in one place. Paths are
@@ -2426,11 +3040,18 @@ written as `<path>`; the server prefixes them as today.
 | WB-38 | `Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, and workflow_run. Pull request and other hosted events have no local equivalent.` |
 | WB-39 | `… To build the matrix from an expression, set the whole matrix: matrix: ${{ fromJSON(...) }}.` |
 | WB-40 | `Secret <NAME> has no binding, so steps receive an empty value. Add it under Variables, secrets, environments and library.` |
+| AV-01 | `<reference> is not included in this Relay version.` |
+| AV-02 | `<old> is deprecated and will be removed in a later Relay release. Use <new>.` |
+| AV-02 | `<label> (older version)` / `This step uses an older version of <label>.` |
+| AV-03 | `Update to current versions` / `Updated to current versions` / `Changes` / `Check by hand` |
+| AV-03 | `Updated step <n> in job <id> from <old> to <new>.` / `Step <n> in job <id>: <message> Update it by hand.` |
+| AV-04 | `Only frozen local and versioned relay actions are supported. <old> was removed in Relay <removed_in>; use <new>.` |
+| AV-04 | `<old> was removed in Relay <removed_in>. This run started on an earlier Relay version; cancel it and launch the workflow again.` |
 
 ## Appendix A: fields that need descriptions
 
 F3 requires a description for each of these 108 `<definition>.<property>`
-keys, plus the 11 action summaries and 46 action inputs in `CONTRACTS`. If
+keys, plus the 11 action summaries and 46 action inputs in `BUILTIN_ACTIONS`. If
 the schema changes, regenerate the list with this script; the F3 test also
 fails when one is missing.
 

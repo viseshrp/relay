@@ -2654,3 +2654,75 @@ where that familiarity stops, usually without saying so.
 7. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
    the guide.
 8. WB-18, WB-21 to WB-23, WB-28 to WB-30, WB-32, WB-33, WB-38, WB-39.
+
+## Built-in action versions
+
+Raised on 2026-10-18 while reviewing whether built-in actions need versions.
+Every built-in action is still `@v1`, so Relay has nothing to run side by
+side yet. The owner decided (D11 in the handoff) to make a second version
+cheap now and to build side-by-side support at the first breaking change.
+Item numbers use the `AV` prefix. AV-01 is ready to build; AV-02 to AV-04
+wait for their triggers.
+
+The [implementation handoff](workflow-builder-handoff.md#built-in-action-version-items)
+specifies each item. Its delivery plan builds AV-01 before the builder work
+(PR R) and leaves the others to PRs V and W.
+
+- [ ] **AV-01. Keep every built-in action in one versioned registry.**
+  - **Priority:** P1.
+  - **Spec:** [AV-01 in the handoff](workflow-builder-handoff.md#av-01-keep-every-built-in-action-in-one-versioned-registry)
+  - **Evidence:** The 11 built-in actions are spelled as literal
+    `relay/<name>@v1` strings: 56 in 10 Python files and 18 in 6 frontend
+    files. Five of the Python sites read persisted run rows, including the
+    database filter at `repositories.py:2352` that finds agent attempts lost
+    with their worker. A launch snapshot records the Relay version
+    (`snapshot.py:74`), but nothing reads it on resume, so a run's launch
+    version is protected only by `@v1` never changing.
+  - **Fix:** Keep one registry of `BuiltinAction` entries (name, major
+    version, inputs, status) in `builtins.py`, with lookup helpers in Python
+    and the browser. Every site compares action names through them, and a
+    test fails when a reference is spelled anywhere else. Document what
+    counts as a breaking change.
+  - **Done when:** No `@v1` string remains outside the registry, starters,
+    tests, and docs, and every existing test passes unchanged.
+
+- [ ] **AV-02. Run two versions of a built-in action side by side.**
+  - **Priority:** P2 until triggered. **Trigger:** the first breaking change
+    to a built-in action.
+  - **Spec:** [AV-02 in the handoff](workflow-builder-handoff.md#av-02-run-two-versions-of-a-built-in-action-side-by-side)
+  - **Evidence:** Today a breaking change can only edit `@v1` in place.
+    Saved workflows, and runs paused for an approval, would change behavior
+    under the owner after an upgrade.
+  - **Fix:** Add the new major version beside the old one, mark the old one
+    deprecated, and branch on the major version only where behavior
+    differs. Warn on deprecated steps without blocking save, and offer only
+    the current version for new steps.
+  - **Done when:** A workflow on the old version validates with a warning
+    and runs, and a run paused across the upgrade finishes on its launch
+    version.
+
+- [ ] **AV-03. Update a workflow to the current version in one click.**
+  - **Priority:** P2 until triggered. **Trigger:** ships with AV-02.
+  - **Spec:** [AV-03 in the handoff](workflow-builder-handoff.md#av-03-update-a-workflow-to-the-current-version-in-one-click)
+  - **Evidence:** Fixing each deprecation warning by hand means knowing
+    exactly which inputs changed between versions.
+  - **Fix:** Each new version declares how to convert the previous version's
+    inputs. **Update to current versions** rewrites the open workflow as an
+    unsaved draft and lists every change and every step left for the owner.
+  - **Done when:** One click moves every deprecated step, Undo reverts it,
+    and nothing is saved automatically.
+
+- [ ] **AV-04. Remove a deprecated version safely.**
+  - **Priority:** P2 until triggered. **Trigger:** the deprecation period
+    has passed: the release that deprecated the version and the next minor
+    release (D13).
+  - **Spec:** [AV-04 in the handoff](workflow-builder-handoff.md#av-04-remove-a-deprecated-version-safely)
+  - **Evidence:** Without guidance, a removed reference would report only
+    "Only frozen local and versioned relay actions are supported.", and a
+    paused run's next step would reach code that no longer handles it.
+  - **Fix:** Give removed references their own validation error that names
+    the replacement and offers the one-click update. Fail a paused run's
+    step on a removed version with an explanation, and never run the
+    replacement in its place.
+  - **Done when:** Both failures name the replacement, and nothing runs in
+    place of the removed version.
