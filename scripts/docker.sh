@@ -14,7 +14,7 @@ Commands:
   build             Build the Relay container image locally
   smoke             Run end-to-end smoke checks against DOCKER_IMAGE
   up                Start Relay in Docker on 127.0.0.1:DOCKER_PORT
-  push              Build and push a multi-arch image to GHCR
+  push              Smoke-test, then push a multi-arch image to GHCR as TAGS
   push-digest       Push a single-platform image by digest to GHCR
   publish-manifest  Create and verify a multi-arch GHCR manifest from digests
 EOF
@@ -268,13 +268,22 @@ cmd_up() {
 
 cmd_push() {
   local repo="${DOCKER_REPO:-ghcr.io/viseshrp/relay}"
+  local tags="${TAGS:?TAGS is required, for example TAGS=\"0.1.0 latest\"}"
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "❌ docker-push publishes the committed revision; commit or remove local changes first." >&2
+    git status --short >&2
+    return 1
+  fi
   local version
   version="$(resolve_version)"
   local revision
   revision="$(resolve_revision)"
   local created="${DOCKER_CREATED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   local platforms="${DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
-  local tags="${TAGS:-nightly}"
+
+  # Smoke-test this platform with the same version, revision, and creation labels.
+  DOCKER_IMAGE="${DEFAULT_IMAGE}" DOCKER_VERSION="${version}" DOCKER_VCS_REF="${revision}" \
+    DOCKER_CREATED="${created}" cmd_smoke
 
   if [[ -n "${GH_TOKEN:-}" ]]; then
     printf '%s\n' "${GH_TOKEN}" | docker login ghcr.io -u "${DOCKER_USERNAME:-viseshrp}" --password-stdin

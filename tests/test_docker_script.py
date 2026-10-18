@@ -144,3 +144,11 @@ def test_up_mounts_the_repository_and_data_at_their_host_paths(tmp_path: Path) -
     assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
     assert "/workspace" not in run
     assert run.endswith("example.invalid/relay:test up --port 7845")
+
+
+def test_push_requires_explicit_tags(tmp_path: Path) -> None:
+    result, calls = _run(tmp_path, "push", TAGS="")
+
+    assert result.returncode != 0
+    assert "TAGS is required" in result.stderr
+    assert calls == ""
