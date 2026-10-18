@@ -31,6 +31,31 @@ export interface WorkflowDocumentResponse {
   project: ProjectRecord;
 }
 
+/** `POST /api/workflows`: the published file and the lease's base hash. */
+export interface WorkflowCreatedResponse {
+  key: string;
+  yaml: string;
+  base_hash: string;
+}
+
+/** One file directly in `.github/workflows`, from `GET /api/workflow-import`. */
+export interface GitHubWorkflowFile {
+  path: string;
+  name: string;
+}
+
+export interface GitHubWorkflowFilesResponse {
+  files: GitHubWorkflowFile[];
+}
+
+/** `POST /api/workflow-import`: a converted copy; the server writes nothing. */
+export interface GitHubWorkflowImport {
+  yaml: string;
+  changes: string[];
+  unresolved: string[];
+  suggested_key: string;
+}
+
 export interface ProjectRecord {
   id: string;
   canonical_path: string;

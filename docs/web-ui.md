@@ -263,6 +263,28 @@ Choose a saved workflow or **Create workflow**. New sources use `jobs` and
 ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
 seven-starter gallery copies selected sources without overwriting owner files.
 
+**Import from GitHub Actions**, beside **Blank workflow**, lists the YAML files
+in the repository's `.github/workflows/` folder. Choosing one shows **Changes**,
+each edit the conversion made, and **Check by hand**, what it could not
+convert, including any remaining validation messages. The conversion:
+
+- removes `runs-on`, `permissions`, `services`, and `container`;
+- removes triggers that have no local equivalent, such as `pull_request`, and
+  adds `workflow_dispatch` when no trigger remains;
+- removes `actions/checkout` and `actions/setup-*` steps, because jobs run in a
+  working copy with the tools installed on this computer;
+- replaces the artifact and cache actions with `relay/upload-artifact@v1`,
+  `relay/download-artifact@v1`, `relay/cache@v1`, `relay/restore-cache@v1`, and
+  `relay/save-cache@v1`, keeping the inputs that mean the same;
+- points jobs that call `./.github/workflows/<file>` at
+  `./.relay/workflows/<file>`, and asks you to import that file too;
+- rewrites `github` and `runner` expression names and the step file variables
+  to their Relay names, such as `relay.sha`, `host.os`, and `$RELAY_OUTPUT`.
+
+Comments on kept lines survive. The original file never changes. **Create
+workflow** creates a workflow named after the file and opens the converted YAML
+as an unsaved draft, so Save validates it like any other edit.
+
 **Add job** adds a local job. Select its graph node to edit its name,
 dependencies, condition, timeout, environment, matrix, outputs, concurrency,
 cache mode, and failure tolerance. **Ordered step** selects a step. Steps can
