@@ -133,7 +133,7 @@ def isolated_relay(
     from django.conf import settings
     from django.db import connections
 
-    from relay.execution import huey_app
+    from relay.execution import dispatch, huey_app
     from relay.execution.dispatch import set_dispatch_notifier
     from relay.web import views
 
@@ -152,6 +152,9 @@ def isolated_relay(
     monkeypatch.setattr(views, "_PROJECT", None)
     monkeypatch.setattr(huey_app, "_SCHEDULE_CURSOR", None)
     monkeypatch.setattr(huey_app, "_DELIVERY_CURSOR", None)
+    # Busy claims wait in process memory until admission is released. Another
+    # test's leftovers would otherwise be enqueued ahead of this test's tokens.
+    monkeypatch.setattr(dispatch, "_DEFERRED", {})
     yield
     set_dispatch_notifier(None)
     connections.close_all()
