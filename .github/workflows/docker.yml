@@ -42,6 +42,7 @@ jobs:
       github.event_name == 'pull_request' ||
       (github.repository == 'viseshrp/relay' &&
        (github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/feat/fix-scheduled-ci' ||
         github.event_name == 'release'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -107,6 +108,12 @@ jobs:
             build_tag="nightly-${stamp}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
             tags="nightly ${build_tag}"
             primary_tag="nightly"
+            # TEMPORARY: verify GHCR pushes from this branch without moving
+            # :nightly. Revert before merging.
+            if [[ "$GITHUB_REF" == "refs/heads/feat/fix-scheduled-ci" ]]; then
+              tags="ci-test-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+              primary_tag="$tags"
+            fi
             mode="nightly"
             publish="true"
           fi
