@@ -14,6 +14,7 @@ from relay.execution.runner import AttemptContext
 from relay.execution.state import AttemptStopReason
 from relay.workflows.schema import AgentNode
 
+from .usage import AttemptUsage
 from .usage_limits import ProviderUsageLimit
 
 DriverName = Literal["acp", "antigravity"]
@@ -214,6 +215,7 @@ class AgentResult:
     usage_limit: ProviderUsageLimit | None = None
     provider_stop_reason: str | None = None
     error_message: str | None = None
+    usage: AttemptUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +259,7 @@ __all__ = [
     "AgentExecutionContext",
     "AgentProfile",
     "AgentResult",
+    "AttemptUsage",
     "DiscoveredAgent",
     "DriverName",
     "ModelObservation",

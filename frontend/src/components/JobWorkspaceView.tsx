@@ -17,6 +17,7 @@ import {
 
 import { jobDuration } from "../job";
 import { stageLabel, statusLabel } from "../navigation";
+import { attemptUsageLabel } from "../usage";
 
 import { JobLog } from "./JobLog";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
@@ -307,6 +308,12 @@ export function JobWorkspaceView({ state }: { state: JobWorkspaceState }) {
           {attempt?.ended_at && (
             <Typography>
               Finished {new Date(attempt.ended_at).toLocaleString()}
+            </Typography>
+          )}
+          {attempt?.agent_id && (
+            <Typography color="text.secondary">
+              {attemptUsageLabel(attempt.usage) ??
+                "Usage not reported by the provider."}
             </Typography>
           )}
         </AccordionDetails>

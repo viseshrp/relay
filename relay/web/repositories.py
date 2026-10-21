@@ -9,6 +9,7 @@ from functools import lru_cache
 from hashlib import sha256
 import json
 import logging
+import math
 from pathlib import Path
 import shutil
 import tempfile
@@ -24,6 +25,7 @@ from pydantic import ValidationError
 
 from relay.agents.events import AgentEvent, bounded_agent_events
 from relay.agents.models import ModelObservation
+from relay.agents.usage import AttemptUsage
 from relay.constants import (
     API_MAX_PAGE,
     API_MAX_PAGE_BYTES,
@@ -1174,6 +1176,84 @@ def _bounded_page(
     return records, more
 
 
+ATTEMPT_TOKEN_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "thought_tokens",
+    "cached_read_tokens",
+    "cached_write_tokens",
+    "total_tokens",
+)
+ATTEMPT_CURRENCY_MAX_CHARS = 16
+
+
+def _attempt_usage_fields(usage: AttemptUsage | None) -> dict[str, object]:
+    """Map provider usage onto attempt columns, keeping unreported values null.
+
+    For example, a cost of `0.25 USD` with no token counts stores only the
+    cost; an infinite amount or a currency longer than 16 characters is
+    dropped as unreported rather than stored.
+    """
+    reported = usage or AttemptUsage()
+    fields: dict[str, object] = {
+        name: value if isinstance(value, int) and value >= 0 else None
+        for name in ATTEMPT_TOKEN_FIELDS
+        for value in (getattr(reported, name),)
+    }
+    amount = reported.cost_amount
+    currency = reported.cost_currency
+    valid_cost = (
+        isinstance(amount, float | int)
+        and math.isfinite(amount)
+        and isinstance(currency, str)
+        and 0 < len(currency) <= ATTEMPT_CURRENCY_MAX_CHARS
+    )
+    fields["cost_amount"] = float(amount) if valid_cost and amount is not None else None
+    fields["cost_currency"] = currency if valid_cost else None
+    return fields
+
+
+def _attempt_usage_record(attempt: NodeAttempt) -> dict[str, object] | None:
+    """Expose reported attempt usage, or `None` when the provider reported none."""
+    record: dict[str, object] = {name: getattr(attempt, name) for name in ATTEMPT_TOKEN_FIELDS}
+    amount = attempt.cost_amount
+    currency = attempt.cost_currency
+    record["cost"] = (
+        {"amount": amount, "currency": currency}
+        if isinstance(amount, float) and isinstance(currency, str)
+        else None
+    )
+    return record if any(value is not None for value in record.values()) else None
+
+
+def _run_usage(run: Run) -> dict[str, object]:
+    """Total reported usage across a run's attempts without inventing zeros.
+
+    For example, two attempts reporting 10 and 4 input tokens and one silent
+    attempt give `input_tokens: 14`, `attempts_reported: 2`, `attempts: 3`.
+    Costs are totaled per currency because Relay does not convert them.
+    """
+    attempts = NodeAttempt.objects.filter(node_run__run=run)
+    reported = Q(cost_amount__isnull=False)
+    for name in ATTEMPT_TOKEN_FIELDS:
+        reported |= Q(**{f"{name}__isnull": False})
+    totals = attempts.aggregate(
+        attempts=models.Count("pk"),
+        attempts_reported=models.Count("pk", filter=reported),
+        **{name: models.Sum(name) for name in ATTEMPT_TOKEN_FIELDS},
+    )
+    costs = (
+        attempts.filter(cost_amount__isnull=False, cost_currency__isnull=False)
+        .values("cost_currency")
+        .annotate(amount=models.Sum("cost_amount"))
+        .order_by("cost_currency")
+    )
+    return {
+        **totals,
+        "costs": [{"currency": row["cost_currency"], "amount": row["amount"]} for row in costs],
+    }
+
+
 def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
     """Expose attempt facts without worker, process, session, or provider-private fields."""
     ended = (
@@ -1207,6 +1287,7 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
         "provider_message_truncated": truncated,
         "starting_head": _string(attempt, "starting_head"),
         "ending_head": attempt.ending_head,
+        "usage": _attempt_usage_record(attempt),
     }
 
 
@@ -1629,6 +1710,7 @@ class DjangoReadStore:
         result["working_folder"] = _string(run, "worktree_path")
         result["problem"] = _run_problem(run)
         result["recovery"] = _run_recovery(run)
+        result["usage"] = _run_usage(run)
         result["event_cursor"] = _integer(run, "read_event_cursor")
         result["project"] = asdict(_record(_related(run, "project", Project)))
         result["snapshot"] = {
@@ -4393,6 +4475,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         OutcomeKind.FAILED,
                         stop_reason=AttemptStopReason.CANCELED,
                         error_code=AttemptStopReason.CANCELED.value,
+                        usage=outcome.usage,
                     )
                 node_status, node_event, stop_reason = self._finish_node_transition(node, outcome)
                 # A 5,000-character diagnostic retains its first 4,096 characters
@@ -4420,6 +4503,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _set_model_field(attempt, "stop_reason", stop_reason)
                 _set_model_field(attempt, "exit_code", outcome.exit_code)
                 _set_model_field(attempt, "error_code", outcome.error_code)
+                usage_fields = _attempt_usage_fields(outcome.usage)
+                for name, value in usage_fields.items():
+                    _set_model_field(attempt, name, value)
                 attempt.save(
                     update_fields=(
                         "status",
@@ -4428,6 +4514,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "stop_reason",
                         "exit_code",
                         "error_code",
+                        *usage_fields,
                     )
                 )
                 # A terminal session cannot answer an interaction still tied

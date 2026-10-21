@@ -461,7 +461,11 @@ captured prompts remain immutable. See
 [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
 The Runs tab lists history for the selected project. A selected run shows
-its title, number, state, source, duration, and controls. Pending requests appear
+its title, number, state, source, duration, and controls. When providers
+reported usage, the header totals it, for example
+`1,200 tokens in · 80 tokens out · $0.25 (reported by 2 of 3 attempts)`. A
+job's **Result** panel shows the selected attempt's usage or states that the
+provider did not report it. Pending requests appear
 before the graph. Annotations open failed job logs, where **Re-run job**
 retries a job. Agent failures also offer **Re-run with settings**, which lets
 the owner keep the current tool and model or select another installed tool

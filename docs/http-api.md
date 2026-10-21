@@ -448,7 +448,11 @@ Attempts contain `id`, `number`, `status`, `agent_id`, exact `model_value`,
 `started_at`, `ended_at`, `stop_reason`, `provider_stop_reason`, `exit_code`,
 `error_code`,
 `error_message`, public `provider_message`, `provider_message_truncated`,
-`starting_head`, and `ending_head`. Worker IDs, process IDs, live session
+`starting_head`, `ending_head`, and `usage`. `usage` is `null` when the
+provider reported nothing; otherwise it contains nullable `input_tokens`,
+`output_tokens`, `thought_tokens`, `cached_read_tokens`, `cached_write_tokens`,
+and `total_tokens`, plus `cost`, either `null` or `{amount, currency}`. Worker
+IDs, process IDs, live session
 identifiers, and private provider content are omitted. `latest_attempt` is
 returned separately even when it falls outside the requested attempt page.
 Use `since=next` for further attempts; the existing numeric record bounds and
@@ -510,6 +514,11 @@ by `"resets 1:50pm"` becomes `"Limit · resets 1:50pm"`. The notice is capped at
 runs; launch failures without an attempt retain `failure_summary` instead.
 `problem.retry` is `null` or contains `state`, UTC ISO-8601 `reset_at`, and
 `error_message`. States are `scheduled`, `blocked`, `canceled`, and `resumed`.
+Run detail also includes `usage`, totaling provider-reported attempt usage. It
+contains `attempts`, `attempts_reported`, the nullable token totals named
+above, and `costs`, one `{currency, amount}` entry per reported currency in
+code order. A token total is `null` when no attempt reported it, so an
+unreported value never reads as zero. Relay does not convert currencies.
 Only structured provider rejection metadata authorizes `scheduled`. A failed
 run with a pending schedule keeps its SSE stream open so automatic recovery is
 visible without reloading. Canceling or blocking the schedule lets a terminal

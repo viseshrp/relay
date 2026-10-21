@@ -238,6 +238,34 @@ export interface RunNode {
   pending_settings?: RetryConfiguration | null;
 }
 
+export interface UsageCost {
+  amount: number;
+  currency: string;
+}
+
+/** Provider-reported attempt usage; null fields were not reported. */
+export interface AttemptUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  thought_tokens: number | null;
+  cached_read_tokens: number | null;
+  cached_write_tokens: number | null;
+  total_tokens: number | null;
+  cost: UsageCost | null;
+}
+
+export interface RunUsage {
+  attempts: number;
+  attempts_reported: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  thought_tokens: number | null;
+  cached_read_tokens: number | null;
+  cached_write_tokens: number | null;
+  total_tokens: number | null;
+  costs: UsageCost[];
+}
+
 export interface JobAttempt {
   id: string;
   number: number;
@@ -255,6 +283,7 @@ export interface JobAttempt {
   provider_message_truncated: boolean;
   starting_head: string;
   ending_head: string | null;
+  usage?: AttemptUsage | null;
 }
 
 export interface RunJob {
@@ -307,6 +336,7 @@ export interface RunDetail extends RunSummary {
   workflow_name: string;
   working_folder: string;
   problem: RunProblem | null;
+  usage?: RunUsage;
   recovery: {
     enabled: boolean;
     max_retries: number;

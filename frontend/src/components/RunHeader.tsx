@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 
 import { stageLabel } from "../navigation";
+import { runUsageLabel } from "../usage";
 
 import { RunActions } from "./RunActions";
 
@@ -90,6 +91,11 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
           <ActionIcon name="refresh" />
         </Button>
       </Stack>
+      {runUsageLabel(detail.usage) && (
+        <Typography variant="body2" color="text.secondary">
+          Provider usage: {runUsageLabel(detail.usage)}
+        </Typography>
+      )}
       {(detail.title?.length ?? 0) > 100 && (
         <Button onClick={() => setFullTitle(true)}>Show full title</Button>
       )}

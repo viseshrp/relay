@@ -125,6 +125,16 @@ Other adapters and native Antigravity do not currently expose a supported reset
 contract to Relay; their public limit messages remain visible for manual
 recovery. Relay never switches providers or reduces effort to bypass a limit.
 
+Relay records provider-reported usage on each attempt as diagnostic data. Each
+ACP prompt response may report that turn's input, output, thought, cached, and
+total tokens; Relay adds the turns of one attempt, including feedback turns.
+The latest `usage_update` cost is the session's cumulative cost, so Relay keeps
+that amount and its currency. For example, two turns reporting 100 input
+tokens each record 200, and updates of 0.25 then 0.50 USD record 0.50 USD.
+Values a provider does not report stay unknown rather than zero. Antigravity
+reports no usage to Relay. Usage never selects a state transition, retry, or
+quota recovery.
+
 Agent prompts also include the node's declared output selectors. File-backed
 `label`, `json_path`, and `yaml_path` selectors require their referenced files;
 an `exists` selector can return false for an absent file. For example,

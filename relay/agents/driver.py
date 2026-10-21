@@ -529,6 +529,7 @@ class RoutedAgentNodeDriver:
             ),
             usage_limit=result.usage_limit,
             provider_stop_reason=result.provider_stop_reason,
+            usage=result.usage,
         )
 
 

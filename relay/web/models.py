@@ -290,6 +290,27 @@ class NodeAttempt(RelayModel):
     exit_code: models.IntegerField = models.IntegerField(null=True, blank=True)
     error_code: models.TextField = models.TextField(null=True, blank=True)
     heartbeat_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+    # Provider-reported diagnostics; null means unreported, never zero.
+    input_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    output_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    thought_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cached_read_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cached_write_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    total_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cost_amount: models.FloatField = models.FloatField(null=True, blank=True)
+    cost_currency: models.CharField = models.CharField(max_length=16, null=True, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
