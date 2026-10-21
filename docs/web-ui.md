@@ -403,6 +403,13 @@ Relay verifies staged blobs against Git's conversion of the confirmed bytes,
 including configured newline conversion, before committing the reviewed index.
 The panel repeats preflight after the commit.
 
+**Preview step instructions** shows, for the inputs entered so far, each job
+in order and what its steps will be told: the agent and model as written,
+each prompt file with its size and hash, the step prompt, the report contract,
+and command text. Values that only exist once a step runs stay visible as
+`${{ ... }}` with a "Filled in when the step runs" note. Preview starts no run
+and contacts no agent, so launch still checks that the model is available.
+
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. **Start from job** lists declared entry points.
 Cached models are suggestions; Relay

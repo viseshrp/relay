@@ -19,6 +19,7 @@ import { stageLabel } from "../navigation";
 
 import { LaunchInputs } from "./LaunchInputs";
 import { LaunchPreflight } from "./LaunchPreflight";
+import { LaunchPreview } from "./LaunchPreview";
 
 import type { LaunchPanelState } from "./useLaunchPanel";
 export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
@@ -46,6 +47,7 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
     preflight,
     preflightError,
     inputs,
+    supplied,
     inputErrors,
     setInputs,
     setInputErrors,
@@ -149,6 +151,13 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
                 });
               }}
             />
+            {workflowKey !== null && !blockedReason && (
+              <LaunchPreview
+                workflowKey={workflowKey}
+                requestProject={requestProject}
+                inputs={supplied}
+              />
+            )}
             <Accordion>
               <AccordionSummary expandIcon={<ActionIcon name="down" />}>
                 Advanced options

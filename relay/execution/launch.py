@@ -146,6 +146,35 @@ def _validate_entry_point(
     return normalized
 
 
+def launch_relay_context(
+    relay_root: Path,
+    workflow: ValidatedWorkflow,
+    workflow_key: str,
+    launcher: str,
+    typed_inputs: Mapping[str, object],
+    event_context: Mapping[str, object],
+) -> dict[str, object]:
+    """Build the `relay` expression context known before a run exists.
+
+    For example, a manual launch on branch `main` exposes `relay.ref` as
+    `refs/heads/main` and `relay.event.inputs` as the typed launch inputs.
+    """
+    source = project_launch_source(relay_root.parent)
+    return {
+        "workflow": workflow.root.definition.name,
+        "workflow_ref": workflow_key,
+        "actor": launcher,
+        "repository": relay_root.parent.name,
+        "event_name": "workflow_dispatch",
+        "ref": f"refs/heads/{source.branch}" if source.branch else "",
+        "ref_name": source.branch or "",
+        "ref_type": "branch" if source.branch else "",
+        "sha": source.commit,
+        "event": {"inputs": typed_inputs},
+        **event_context,
+    }
+
+
 def launch_workflow(
     store: LaunchStore,
     relay_root: Path,
@@ -179,19 +208,14 @@ def launch_workflow(
             environments=tuple(bindings["environments"]),
         )
         source = project_launch_source(relay_root.parent)
-        actions_context["relay"] = {
-            "workflow": workflow.root.definition.name,
-            "workflow_ref": request.workflow_key,
-            "actor": request.launcher,
-            "repository": relay_root.parent.name,
-            "event_name": "workflow_dispatch",
-            "ref": f"refs/heads/{source.branch}" if source.branch else "",
-            "ref_name": source.branch or "",
-            "ref_type": "branch" if source.branch else "",
-            "sha": source.commit,
-            "event": {"inputs": typed_inputs},
-            **request.event_context,
-        }
+        actions_context["relay"] = launch_relay_context(
+            relay_root,
+            workflow,
+            request.workflow_key,
+            request.launcher,
+            typed_inputs,
+            request.event_context,
+        )
         if request.event_context.get("event_name") == "push" and (
             request.event_context.get("sha") != source.commit
             or (

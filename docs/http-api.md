@@ -152,6 +152,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
 | `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false}` |
+| `POST /api/workflows/{key}/preview` | `{"inputs":{}}`; optional `?project={id}` | `200 {"workflow":"Review","run_name":{"text":"Review api","runtime":[]},"jobs":[...],"truncated":false}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
@@ -188,6 +189,27 @@ Counts cover every changed file. The preview returns at most 200 entries and
 The owner can inspect the complete list with `git status`. Reading preflight
 does not change files, Git history, the index, or editor leases. Launch repeats
 validation and cleanliness checks even after a successful preview.
+
+Launch preview applies the same input rules as launch to the posted `inputs`,
+then resolves each top-level job's launch-static values: `inputs`, `vars`, and
+`relay` facts known before a run exists. Inputs travel in the body so they
+never appear in a URL. Each job has `id`, `name`, `needs`, `matrix`, an optional
+reusable-workflow `uses`, and `steps`. Each step has `id`, `name`, and `kind`
+(`agent`, `command`, or `action`). Agent steps add `agents`, `model`, `effort`,
+`prompt_files`, `prompt_files_runtime`, `prompt`, and `report`; command steps
+add `command`. Text values are `{text, runtime}`. Expressions that need run
+state, such as `steps`, `needs`, `matrix`, `env`, or `hashFiles`, stay in the
+text as `${{ expr }}` and are listed in `runtime`. For example,
+`Fix ${{ inputs.target }} after ${{ steps.plan.outputs.file }}` with
+`target=api` becomes `Fix api after ${{ steps.plan.outputs.file }}`.
+`prompt_files` lists each resolved prompt's `reference`, `sha256`, `bytes`,
+`text` (the first 64 KiB), and `truncated`; when a prompt-file path itself needs
+run state, `prompt_files_runtime` shows it unresolved instead. `report` is the
+selector JSON the agent receives as its output contract. Reusable workflows
+and composite actions are named but not expanded. Whole jobs are kept in order
+up to 512 KiB; `truncated` reports omitted jobs. Preview creates no run,
+snapshot, worktree, or event, and starts no agent, so it never proves that a
+model is available.
 
 Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
 resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.

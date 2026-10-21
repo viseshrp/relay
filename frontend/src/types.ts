@@ -238,6 +238,51 @@ export interface RunNode {
   pending_settings?: RetryConfiguration | null;
 }
 
+/** Launch-static text; `runtime` lists expressions resolved only when the step runs. */
+export interface PreviewText {
+  text: string;
+  runtime: string[];
+}
+
+export interface PreviewPrompt {
+  reference: string;
+  sha256: string;
+  bytes: number;
+  text: string;
+  truncated: boolean;
+}
+
+export interface PreviewStep {
+  id: string;
+  name: string;
+  kind: "agent" | "command" | "action";
+  uses: string | null;
+  agents: PreviewText | null;
+  model: PreviewText | null;
+  effort: PreviewText | null;
+  prompt_files: PreviewPrompt[];
+  prompt_files_runtime: PreviewText | null;
+  prompt: PreviewText | null;
+  report: PreviewText | null;
+  command: PreviewText | null;
+}
+
+export interface PreviewJob {
+  id: string;
+  name: string;
+  needs: string[];
+  matrix: boolean;
+  uses: string | null;
+  steps: PreviewStep[];
+}
+
+export interface LaunchPreview {
+  workflow: string;
+  run_name: PreviewText;
+  jobs: PreviewJob[];
+  truncated: boolean;
+}
+
 export interface UsageCost {
   amount: number;
   currency: string;

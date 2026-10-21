@@ -628,6 +628,25 @@ def launch_run(request: HttpRequest) -> HttpResponse:
     return JsonResponse({"run_id": result.run_id}, status=201)
 
 
+@api_errors
+@owner_required
+@require_POST
+def workflow_launch_preview(request: HttpRequest, key: str) -> HttpResponse:
+    """Render a launch's static step instructions; inputs stay out of the URL."""
+    from relay.execution.launch_preview import preview_launch
+
+    relay_root, project = current_project(request)
+    body = json_body(request)
+    preview = preview_launch(
+        relay_root,
+        key,
+        required_object(body, "inputs"),
+        DjangoExecutionStore().freeze_launch_bindings(project.id),
+        launcher=owner_username(request),
+    )
+    return JsonResponse(asdict(preview))
+
+
 def runs_collection(request: HttpRequest) -> HttpResponseBase:
     """Route the shared `/api/runs` path by its documented HTTP method."""
     if request.method == "POST":

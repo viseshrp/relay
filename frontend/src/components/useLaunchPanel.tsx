@@ -132,6 +132,14 @@ export function useLaunchPanel({
                   ? `${preflight.blocking_count} ${preflight.blocking_count === 1 ? "file blocks" : "files block"} this run. Commit or set aside the listed changes first.`
                   : null);
 
+  // Untouched values stay omitted so defaults are resolved by the service.
+  const supplied = Object.fromEntries(
+    Object.entries(inputs).filter(
+      ([name, value]) =>
+        value !== undefined && Object.hasOwn(workflow?.inputs ?? {}, name),
+    ),
+  );
+
   async function launch(): Promise<void> {
     if (reason || workflowKey === null) return;
     const errors = validateLaunchInputs(workflow?.inputs ?? {}, inputs);
@@ -144,13 +152,6 @@ export function useLaunchPanel({
     setLaunching(true);
     setLaunchError(null);
     try {
-      // Untouched values stay omitted so defaults are resolved by the service.
-      const supplied = Object.fromEntries(
-        Object.entries(inputs).filter(
-          ([name, value]) =>
-            value !== undefined && Object.hasOwn(workflow?.inputs ?? {}, name),
-        ),
-      );
       const response = await api<ReadResponse2>(
         projectPath("/api/runs", requestProject),
         {
@@ -199,6 +200,7 @@ export function useLaunchPanel({
     preflight,
     preflightError,
     inputs,
+    supplied,
     inputErrors,
     setInputs,
     setInputErrors,

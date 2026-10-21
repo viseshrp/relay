@@ -33,6 +33,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflows", actions.workflows_collection, name="workflows"),
     path("api/workflow-templates", pages.workflow_templates, name="workflow-templates"),
     path("api/workflows/<path:key>/preflight", pages.workflow_preflight, name="workflow-preflight"),
+    path(
+        "api/workflows/<path:key>/preview",
+        actions.workflow_launch_preview,
+        name="workflow-launch-preview",
+    ),
     path("api/workflows/<path:key>/draft", actions.autosave_draft, name="workflow-draft"),
     path("api/workflows/<path:key>/draft/discard", actions.discard_workflow_draft),
     path("api/workflows/<path:key>/save", actions.save_workflow, name="workflow-save"),

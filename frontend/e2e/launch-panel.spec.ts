@@ -572,3 +572,43 @@ test("file check failures can be refreshed and later changes still block the lau
     panel.getByRole("button", { name: "Run workflow", exact: true }),
   ).toBeDisabled();
 });
+
+test("the launch preview shows static instructions without starting a run", async ({
+  page,
+}) => {
+  await create(page, "preview-launch", {
+    on: {
+      workflow_dispatch: {
+        inputs: { target: { type: "string", default: "api" } },
+      },
+    },
+    jobs: {
+      check: {
+        steps: [
+          {
+            id: "work",
+            run: "echo ${{ inputs.target }} ${{ steps.prior.outputs.file }}",
+          },
+        ],
+      },
+    },
+  });
+  const runs = (await (await page.request.get("/api/runs")).json()).runs.length;
+  const panel = await open(page);
+  await panel.getByText("Preview step instructions", { exact: true }).click();
+  const previewed = page.waitForResponse(
+    (r) => r.url().includes("/preview") && r.request().method() === "POST",
+  );
+  await panel.getByRole("button", { name: "Preview", exact: true }).click();
+  const response = await previewed;
+  expect(response.url()).not.toContain("target");
+  expect(response.status(), await response.text()).toBe(200);
+  const step = panel.getByRole("region", { name: "Step work" });
+  await expect(step).toContainText("echo api ${{ steps.prior.outputs.file }}");
+  await expect(step).toContainText(
+    "Filled in when the step runs: steps.prior.outputs.file",
+  );
+  expect((await (await page.request.get("/api/runs")).json()).runs.length).toBe(
+    runs,
+  );
+});
