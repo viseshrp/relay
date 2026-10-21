@@ -1,12 +1,20 @@
 """Language contracts independent of provider accounts or owner state."""
 
 from datetime import datetime, timedelta, timezone
+import re
 
 import pytest
 
 from relay.errors import WorkflowValidationError
 from relay.execution.triggers import filter_ref, occurrences, validate_schedule
-from relay.workflows.actions.language import expand_matrix, load, resolve_inputs
+from relay.workflows.actions.language import (
+    capture_sources,
+    expand_matrix,
+    load,
+    resolve_inputs,
+    workflow_diagnostics,
+)
+from tests.support import RelayProject
 
 
 def test_boolean_expression_cannot_silently_clear_an_explicit_agent_effort() -> None:
@@ -159,8 +167,6 @@ def test_action_metadata_rejects_invalid_field_types(field: str) -> None:
 
 
 def test_local_action_missing_required_input_is_rejected_before_launch(project) -> None:
-    from relay.workflows.actions.language import capture_sources
-
     project.write(
         ".relay/actions/required/action.yml",
         "name: Required\ndescription: Local\n"
@@ -173,3 +179,49 @@ def test_local_action_missing_required_input_is_rejected_before_launch(project) 
             load("jobs: {main: {steps: [{uses: ./.relay/actions/required}]}}"),
             project.repository,
         )
+
+
+GREET = (
+    "name: Greet\ndescription: Local\n"
+    "inputs: {who: {description: Who, required: true}}\n"
+    "runs: {using: composite, steps: [{run: echo Hello, shell: bash}]}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "reference, example",
+    [
+        ("./.relay/actions/./greet", "./.relay/actions/greet"),
+        ("./.relay/actions/tools/../greet", "./.relay/actions/greet"),
+        ("./.relay/actions//greet", "./.relay/actions/greet"),
+        ("./.relay/actions/../workflows/greet", "./.relay/actions/<name>"),
+    ],
+)
+def test_local_action_paths_are_written_without_dot_segments(reference: str, example: str) -> None:
+    # Sources are frozen under the normalized path, so any other spelling would
+    # skip the input check here and miss its metadata at run time.
+    text = f"jobs:\n  main:\n    steps:\n      - uses: {reference}\n        with: {{who: me}}\n"
+    message = (
+        "jobs.main.steps[0].uses: Only frozen local and versioned relay actions are supported. "
+        f"Write the action path without ./ or ../ segments, such as {example}."
+    )
+    [issue] = workflow_diagnostics(text)
+    assert (issue.message, issue.context["line"]) == (message, "4")
+    with pytest.raises(WorkflowValidationError, match=re.escape(message)):
+        load(text)
+
+
+@pytest.mark.parametrize("reference", ["./.relay/actions/greet", "./.relay/actions/greet/"])
+def test_local_action_inputs_are_checked_against_the_frozen_metadata(
+    project: RelayProject, reference: str
+) -> None:
+    project.write(".relay/actions/greet/action.yaml", GREET)
+    workflow = "jobs: {main: {steps: [{uses: '%s'%s}]}}"
+    with pytest.raises(WorkflowValidationError, match="missing required or unknown inputs"):
+        capture_sources(load(workflow % (reference, "")), project.repository)
+    with pytest.raises(WorkflowValidationError, match="missing required or unknown inputs"):
+        capture_sources(
+            load(workflow % (reference, ", with: {who: me, extra: x}")), project.repository
+        )
+    sources = capture_sources(load(workflow % (reference, ", with: {who: me}")), project.repository)
+    assert sources[".relay/actions/greet/action.yaml"] == GREET

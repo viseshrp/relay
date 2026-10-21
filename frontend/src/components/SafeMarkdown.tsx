@@ -61,13 +61,18 @@ function inline(text: string, depth = 0): ReactNode[] {
   return nodes;
 }
 
+const LIST_ITEM = /^\s*([-+*]|\d+[.)])\s+(.*)$/;
+
 function cells(line: string): string[] {
+  // A pipe written as \| is cell text, as in GitHub tables.
   return line
     .trim()
+    .split("\\|")
+    .join("\u0000")
     .replace(/^\|/, "")
     .replace(/\|$/, "")
     .split("|")
-    .map((cell) => cell.trim());
+    .map((cell) => cell.trim().split("\u0000").join("|"));
 }
 
 export function SafeMarkdown({ text }: { text: string }) {
@@ -121,14 +126,22 @@ export function SafeMarkdown({ text }: { text: string }) {
       );
       continue;
     }
-    const item = line.match(/^\s*([-+*]|\d+[.)])\s+(.*)$/);
+    const item = line.match(LIST_ITEM);
     if (item) {
       const ordered = /^\d/.test(item[1]);
       const items: ReactNode[] = [];
       for (; index < lines.length; index += 1) {
-        const next = lines[index].match(/^\s*([-+*]|\d+[.)])\s+(.*)$/);
+        const next = lines[index].match(LIST_ITEM);
         if (!next || /^\d/.test(next[1]) !== ordered) break;
-        items.push(<li key={index}>{inline(next[2])}</li>);
+        const itemKey = index;
+        const text = [next[2]];
+        // An indented line that starts no item continues this one.
+        while (
+          /^\s+\S/.test(lines[index + 1] ?? "") &&
+          !LIST_ITEM.test(lines[index + 1])
+        )
+          text.push(lines[++index].trim());
+        items.push(<li key={itemKey}>{inline(text.join(" "))}</li>);
       }
       blocks.push(createElement(ordered ? "ol" : "ul", { key }, items));
       continue;

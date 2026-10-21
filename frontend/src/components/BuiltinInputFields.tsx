@@ -1,15 +1,17 @@
-import { TextField } from "@mui/material";
+import { HelpTextField, type HelpSource } from "./HelpTip";
 import { StructuredValueField } from "./StructuredValueField";
 
 export function BuiltinInputFields({
   fields,
   special,
   inputs,
+  help,
   onChange,
 }: {
   fields: { allowed: string[]; required: string[] };
   special: string[];
   inputs: Record<string, unknown>;
+  help: (input: string, title: string) => HelpSource;
   onChange: (field: string, value: unknown) => void;
 }) {
   return fields.allowed
@@ -26,19 +28,21 @@ export function BuiltinInputFields({
           <StructuredValueField
             key={field}
             label="Workflow input values"
+            help={help(field, "Workflow input values")}
             object
             value={values}
             onChange={(value) => onChange(field, JSON.stringify(value))}
           />
         );
       }
+      const label =
+        field === "inputs" ? "Workflow input expression" : `Action ${field}`;
       return (
-        <TextField
+        <HelpTextField
           key={field}
+          topic={help(field, label)}
           required={fields.required.includes(field)}
-          label={
-            field === "inputs" ? "Workflow input expression" : `Action ${field}`
-          }
+          label={label}
           multiline={["prompt", "options", "command", "allowed-paths"].includes(
             field,
           )}

@@ -30,7 +30,6 @@ export function AppView({ state }: { state: AppState }) {
     projectError,
     openingProject,
     projectReady,
-    dismissSetup,
     setupForced,
     guide,
     welcomeOpen,
@@ -60,12 +59,11 @@ export function AppView({ state }: { state: AppState }) {
       {projectReady && welcomeOpen && (
         <WelcomeCarousel
           onClose={() => {
-            dismissSetup();
+            // The Get started prompt stays until it is opened or dismissed.
             setWelcomeOpen(false);
             helpButton.current?.focus();
           }}
           onShowTour={() => {
-            dismissSetup();
             setWelcomeOpen(false);
             void showTour();
           }}

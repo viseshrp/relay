@@ -1,5 +1,7 @@
 import {
+  actionReference,
   advancedField,
+  openAdvanced,
   openJobSettings,
   closeJobSettings,
   expectRunStatus,
@@ -484,9 +486,7 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
     await page.goto("/?view=workflows&workflow=workflow.yaml");
     await openJobSettings(page);
     for (const reference of references) {
-      await page
-        .getByLabel("Action reference", { exact: true })
-        .fill(reference);
+      await (await actionReference(page)).fill(reference);
       if (reference) await advancedField(page, "Action inputs");
       await expect(
         page.getByRole("textbox", {
@@ -501,6 +501,7 @@ test("script, command, agent, human, loop and reusable forms remain contained", 
       ).toBeTruthy();
     }
     await openJobSettings(page, "General");
+    await openAdvanced(page);
     await page
       .getByLabel("Reusable workflow", { exact: true })
       .fill("./.relay/workflows/child.yaml");

@@ -562,10 +562,27 @@ def test_antigravity_terminal_failures_ignore_duration_and_error_prose(
 @pytest.mark.parametrize("agent_context", ["antigravity"], indirect=True)
 @pytest.mark.parametrize("mode", ["hold", "success-hold"])
 def test_native_deadline_bounds_the_process_even_after_a_success_result(
-    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch, mode: str
+    agent_context: AgentExecutionContext,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
 ) -> None:
     monkeypatch.setenv("FAKE_AGY_MODE", mode)
-    context = replace(agent_context, node=agent_context.node.model_copy(update={"timeout": "2s"}))
+    timeout = "2s"
+    if mode == "success-hold":
+        # A loaded runner can take longer than any short deadline to start the
+        # provider. Pass the deadline only once the provider has written its result.
+        timeout = "15m"
+        real_monotonic = time.monotonic
+
+        def monotonic() -> float:
+            emitted = any(row.get("result_emitted") for row in fake_agents.messages())
+            return real_monotonic() + (3_600 if emitted else 0)
+
+        monkeypatch.setattr(antigravity_driver, "time", SimpleNamespace(monotonic=monotonic))
+    context = replace(
+        agent_context, node=agent_context.node.model_copy(update={"timeout": timeout})
+    )
     driver = AntigravityDriver(PROFILES["antigravity"], context.command)
     _events, result = execute(driver, context)
     assert not result.succeeded

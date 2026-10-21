@@ -1,26 +1,30 @@
-import { StreamLanguage } from "@codemirror/language";
+import { indentWithTab } from "@codemirror/commands";
+import { indentUnit, StreamLanguage } from "@codemirror/language";
 import { shell as shellMode } from "@codemirror/legacy-modes/mode/shell";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { Box, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { useEffect, useRef } from "react";
 import { createCodeMirrorTheme } from "../theme";
 import type { LanguageManifest } from "../workflow-language";
+import { HelpLabel, type HelpSource } from "./HelpTip";
 
 export function ScriptEditor({
   value,
   shell,
   manifest,
   onChange,
+  help,
 }: {
   value: string;
   shell?: string;
   manifest: LanguageManifest;
   onChange: (value: string) => void;
+  help?: HelpSource;
 }) {
   const muiTheme = useTheme();
   const isDark = muiTheme.palette.mode === "dark";
@@ -44,6 +48,8 @@ export function ScriptEditor({
         doc: currentValue.current,
         extensions: [
           basicSetup,
+          keymap.of([indentWithTab]),
+          indentUnit.of("  "),
           themeCompartment.current.of(createCodeMirrorTheme(isDarkRef.current)),
           StreamLanguage.define(
             language === "python"
@@ -93,7 +99,14 @@ export function ScriptEditor({
   }, [value]);
   return (
     <Box>
-      <Typography component="label">Script</Typography>
+      {help ? (
+        // A label element would hand its clicks to the help button.
+        <Typography component="div">
+          <HelpLabel topic={help}>Script</HelpLabel>
+        </Typography>
+      ) : (
+        <Typography component="label">Script</Typography>
+      )}
       <div className="script-editor" ref={parent} />
       {plan && (
         <Box component="details">

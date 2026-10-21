@@ -64,8 +64,11 @@ accept workflow jobs and ordered steps.
 
 | Method and path | Purpose and body |
 | --- | --- |
-| `GET /api/workflow-language` | Relay schema, local contexts/properties, supported fields, and limits |
-| `POST /api/workflow-language/validate` | `{yaml, source?}`; pure validation returns `{valid, diagnostics, definition?, sources?}` |
+| `GET /api/workflow-language` | Relay schema with `property_descriptions` keyed `<definition>.<property>`; built-in action versions and inputs: `builtins` lists the current references, `builtin_versions` gives every registered version's `name`, `major`, `status` (`current` or `deprecated`), and `deprecated_in`, and each `builtin_inputs` entry adds `summary`, per-input `descriptions`, and fixed `values`; `value_hints` (named shells), `cache_modes`, and `platform_names` (the Relay expression names that completion offers for another platform's names); local contexts/properties, supported fields, and limits |
+| `POST /api/workflow-language/validate` | `{yaml, source?, prompts?}`; pure validation returns `{valid, diagnostics, warnings, definition?, sources?}`. A literal agent `prompt-files` entry that does not exist is a diagnostic unless `prompts` lists it as an unsaved draft (at most 32 local names). `warnings` are located envelopes with `context.severity: "warning"` for a valid source and `[]` otherwise; they never set `valid` to false. A step on a deprecated built-in version adds a warning with `context.deprecated` set to its reference; one in a captured reusable workflow or local action also has `context.source` set to that file's key, which starts the message, and no line. A step on a removed version is a diagnostic with `context.removed` set to its reference |
+| `POST /api/workflow-language/upgrade` | `{yaml, source?}`; returns `{yaml, changes, unresolved}` and writes nothing. Each step on a deprecated or removed built-in version moves to the current version, with its inputs converted; comments and key order are kept. `changes` lists each updated step and each converted input, `unresolved` lists each step left unchanged and the remaining validation messages. A source with nothing to update comes back byte-identical |
+| `GET /api/workflow-import` | `{files: [{path, name}]}` for the `*.yml` and `*.yaml` files directly in the repository's `.github/workflows/`, sorted by file name; `name` is the file's top-level `name:` or else its file name. Subfolders, symbolic links, and files over 1 MiB are skipped; at most 100 files are listed |
+| `POST /api/workflow-import` | `{path}`, such as `.github/workflows/ci.yml`; returns `{yaml, changes, unresolved, suggested_key}` and writes nothing. `yaml` is the converted copy, `changes` lists each edit, and `unresolved` lists what still needs a manual fix, including the remaining validation messages. `suggested_key` is the file name, or `<stem>-2<suffix>` and so on when that workflow exists. A path outside the folder or a symbolic link is a `path_safety_error` |
 | `GET, POST /api/workflow-bindings` | List or write `{scope, name, kind, value?, source?, reference?}` |
 | `GET, POST /api/workflow-environments` | List or write `{name, approval_required, wait_minutes, branches, url}` |
 | `POST /api/attempts/<id>/environment` | Approve the exact waiting environment attempt |
@@ -151,7 +154,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `GET /api/workflows/<key>/prompt?reference=prompts/review.md` | — | Local instruction text and `base_hash`; limited to the selected project's prompts folder |
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
-| `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false}` |
+| `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false,"warnings":[]}` |
 | `GET /api/workflows/{key}/notes` | optional `?archived=true`, `?project={id}` | `200 {"notes":[...]}` |
 | `POST /api/workflows/{key}/notes` | `{"cue":"...","lesson":"...","evidence":"...","confidence":"medium","evidence_run_id":"..."}` | `201 {"note":{...}}` |
 | `POST /api/workflows/{key}/notes/{id}/archive` | `{}` | `200 {"note":{...}}` |
@@ -189,6 +192,13 @@ setup-file exemption. No file contents are returned.
 
 Counts cover every changed file. The preview returns at most 200 entries and
 512 KiB of serialized file metadata; `truncated` indicates omitted entries.
+
+`warnings` lists, sorted by name, each secret that the workflow's expressions
+name literally but no binding supplies, as
+`{"code":"unbound_secret","name":"<NAME>","message":"<text>"}`. A job counts
+installation and project secrets plus those of the environment it declares; an
+environment chosen by an expression counts every configured environment.
+Warnings never block launch; such a secret resolves to an empty value.
 The owner can inspect the complete list with `git status`. Reading preflight
 does not change files, Git history, the index, or editor leases. Launch repeats
 validation and cleanliness checks even after a successful preview.
@@ -245,7 +255,9 @@ byte-for-byte. It rejects a supplied `yaml`, an unknown template, an existing
 workflow, or an existing prompt with different bytes. Identical shared starter
 prompts can be reused. All sources validate before copying; a failed copy
 removes only its newly created, unchanged files. Gallery records contain `id`,
-`name`, `description`, `jobs`, `required_agents`, and schema-defined `inputs`.
+`name`, `description`, `jobs`, `required_agents`, `job_count`,
+`approval_count`, and schema-defined `inputs`. `job_count` counts top-level
+jobs; `approval_count` counts human wait steps in the main workflow file.
 New workflow and instruction paths reject Windows device names, reserved
 characters, and trailing spaces or dots on every operating system. For example,
 `NUL.yaml` and `draft:notes.md` are rejected; `nested/review.yaml` is accepted.
@@ -276,7 +288,7 @@ The same holder renews it; another holder gets `409` until expiry.
 | `GET /api/runs/{id}/artifacts` | `?since=0&limit=200` | `200 {"artifacts":[...],"next":...}` |
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
-| `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
+| `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head`, `files`, `files_truncated` |
 | `GET /api/runs/compare?left={id}&right={id}` | none | `200 {"left":{...},"right":{...},"inputs":[...],"hashes":[...],"steps":[...],"truncated":false}` |
 
 Finished-run monitors use `events?summary=true`: at most 50 state events and
@@ -445,12 +457,17 @@ an event persistence failure rolls back the corresponding interaction change.
 }
 ```
 
-`run` has the existing run metadata. Interactions include pending requests;
-optional `interaction={id}` also returns that run's selected historical request
-as `linked_interaction`. Use `nodes_since` and `interactions_since` with the
-returned numeric cursors. `limit` defaults to 200 and cannot raise the existing
-200-record page cap. Further pages have no 1,000-record cutoff. The complete
-JSON response, including metadata and escaped Unicode, stays within 1 MiB.
+`run` has the existing run metadata plus three fields read from the database
+in the same snapshot. `artifact_count` is the total number of visible
+artifacts, the records that `artifacts?visible=true` pages through.
+`recorded_head` is the protected run head, and `has_committed_changes` is true
+when it is set and differs from `source_commit`. Interactions include pending
+requests; optional `interaction={id}` also returns that run's selected
+historical request as `linked_interaction`. Use `nodes_since` and
+`interactions_since` with the returned numeric cursors. `limit` defaults to
+200 and cannot raise the existing 200-record page cap. Further pages have no
+1,000-record cutoff. The complete JSON response, including metadata and
+escaped Unicode, stays within 1 MiB.
 
 `event_cursor` includes output. `state_cursor` excludes output-only events:
 agent messages, thoughts, tool calls and results, plans, provider events,
@@ -460,6 +477,10 @@ state event still advance it. Both cursors describe the same snapshot as the
 returned records. A client rebuilding several pages must restart when their
 state cursors differ. SQLite's single writer orders committed event IDs;
 a future database adapter must preserve that ordering contract.
+
+Before a job resolves its name, its `display_name` is its literal `name:` from
+the source, `Round <n>` for loop iteration `n`, or its job ID. A name that
+contains an expression is shown once the job starts.
 
 Resolving an Actions job or step name emits `node.display_name_changed` with
 its `scope_path` and masked `display_name` in the same transaction. This
@@ -506,6 +527,10 @@ the last page of that exact attempt in ascending event order. In this mode,
 `next` is an older-page cursor: send it as `before=next` with the same filters
 and `latest=true`. Without `latest=true`, `since` and `next` keep their existing
 forward behavior. Event payloads are unchanged.
+
+The whole-run `changes` response also lists the paths changed from
+`source_commit` to `recorded_head` in `files`, at most 200, and sets
+`files_truncated` when more paths changed.
 
 `GET /api/runs/{id}/changes?job=root.check&attempt=2` previews that attempt's
 committed changes, using its recorded starting and ending heads. It adds
@@ -945,10 +970,10 @@ unchanged until restart, including when the saved setting differs.
 `workflow_defaults`; `preferences` reflects project overrides.
 An omitted launch `cleanup_policy` uses the project's resolved setting.
 Current `relay/command@v1` steps select a saved command through `with.command`
-or supply a JSON argument vector through `with.argv`. Workflow, job, and step
-`env` mappings follow Actions precedence. Launch freezes command maps and
-source bytes. An unresolved command name returns `422 workflow_validation_error`
-without creating a run.
+or supply an argument vector through `with.argv`, as a JSON array string or one
+argument per line. Workflow, job, and step `env` mappings follow Actions
+precedence. Launch freezes command maps and source bytes. An unresolved command
+name returns `422 workflow_validation_error` without creating a run.
 
 Storage usage returns `runs`, `artifacts`, `artifact_bytes`, `branches`,
 `attempt_refs`, `cleanup_blocked`, and `working_copies` with `bytes`, `files`,

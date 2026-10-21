@@ -8,6 +8,8 @@ export function WaitingRequests({
   requests,
   runId,
   artifacts,
+  hasChanges,
+  onLoadAll,
   selected,
   hasMore,
   onMore,
@@ -16,6 +18,8 @@ export function WaitingRequests({
   requests: RunInteraction[];
   runId: string;
   artifacts: ArtifactRecord[];
+  hasChanges: boolean;
+  onLoadAll: () => Promise<void>;
   selected: string | null;
   hasMore: boolean;
   onMore: () => void;
@@ -79,6 +83,8 @@ export function WaitingRequests({
             interaction={shown}
             runId={runId}
             artifacts={artifacts}
+            hasChanges={hasChanges}
+            onLoadAll={onLoadAll}
             selected={shown.id === selected}
             onAnswered={onAnswered}
           />

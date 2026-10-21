@@ -133,7 +133,7 @@ def isolated_relay(
     from django.conf import settings
     from django.db import connections
 
-    from relay.execution import huey_app
+    from relay.execution import dispatch, huey_app
     from relay.execution.dispatch import set_dispatch_notifier
     from relay.web import views
 
@@ -152,6 +152,9 @@ def isolated_relay(
     monkeypatch.setattr(views, "_PROJECT", None)
     monkeypatch.setattr(huey_app, "_SCHEDULE_CURSOR", None)
     monkeypatch.setattr(huey_app, "_DELIVERY_CURSOR", None)
+    # Busy claims wait in process memory until admission is released. Another
+    # test's leftovers would otherwise be enqueued ahead of this test's tokens.
+    monkeypatch.setattr(dispatch, "_DEFERRED", {})
     yield
     set_dispatch_notifier(None)
     connections.close_all()
@@ -225,6 +228,22 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
 
     monkeypatch.setattr(actions_repository, "datetime", FrozenDateTime)
     return controlled
+
+
+@pytest.fixture
+def deprecated_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """relay/command@v1 is deprecated beside a stand-in current relay/command@v2."""
+    from tests.support import stand_in_versions
+
+    stand_in_versions(monkeypatch)
+
+
+@pytest.fixture
+def removed_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """relay/command@v1 was removed in Relay 0.0.0 for a stand-in relay/command@v2."""
+    from tests.support import stand_in_versions
+
+    stand_in_versions(monkeypatch, removed=True)
 
 
 @pytest.fixture

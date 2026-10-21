@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 import os
 from pathlib import Path
+import re
+import stat
 from typing import Any, cast
 
 from django.http import FileResponse, HttpRequest, JsonResponse
+from django.http.response import HttpResponseBase
 from django.views.decorators.http import require_GET, require_POST
 
-from relay.errors import ConfigError, RelayError
+from relay.errors import ConfigError, PathSafetyError, RelayError, WorkflowValidationError
+from relay.paths import safe_resolve
 from relay.workflows.actions.language import (
+    MAX_YAML_BYTES,
+    _locate,
+    _read_document,
     capture_sources,
+    deprecated_builtin_warnings,
     load,
+    missing_prompt_files,
     support_manifest,
     workflow_diagnostics,
+    workflow_warnings,
 )
 
 from ..actions_bindings import put_binding, scopes
@@ -97,6 +108,24 @@ def library(request: HttpRequest) -> JsonResponse:
     return JsonResponse(export_template(identity) if identity else {"templates": inventory()})
 
 
+def _captured_warnings(
+    sources: Mapping[str, str], documents: Iterable[str]
+) -> list[WorkflowValidationError]:
+    """Deprecated built-in steps in the reusable workflows and actions a source uses.
+
+    The editor does not open these files, so each warning names its file in the
+    message and in context["source"], and has no line.
+    """
+    found = []
+    for key in sorted(documents):
+        # Capture already validated these files, so they read as mappings.
+        value, _ = _read_document(sources[key])
+        for warning in deprecated_builtin_warnings(value, f"{key}: "):
+            warning.context["source"] = key
+            found.append(warning)
+    return found
+
+
 @api_errors
 @owner_required
 @require_POST
@@ -105,24 +134,205 @@ def validate(request: HttpRequest) -> JsonResponse:
     root, _ = current_project(request)
     text = required_text(body, "yaml")
     source = Path(str(body.get("source", "workflow.yml")))
+    drafts = body.get("prompts", [])
+    if (
+        not isinstance(drafts, list)
+        or len(drafts) > 32
+        or any(not isinstance(item, str) for item in drafts)
+    ):
+        message = "prompts must list at most 32 unsaved local prompt file names."
+        raise WorkflowValidationError(message)
     diagnostics = workflow_diagnostics(text, source=source)
     if diagnostics:
         return JsonResponse(
-            {"valid": False, "diagnostics": [item.to_envelope() for item in diagnostics]}
+            {
+                "valid": False,
+                "diagnostics": [item.to_envelope() for item in diagnostics],
+                "warnings": [],
+            }
         )
     try:
         document = load(text, source=source)
-        sources = capture_sources(document, root.parent)
+        documents: set[str] = set()
+        try:
+            sources = capture_sources(document, root.parent, documents=documents)
+        except WorkflowValidationError as error:
+            _locate(error, document.locations)
+            raise
+        pending = []
+        for reference in drafts:
+            try:
+                pending.append(safe_resolve(root, reference))
+            except PathSafetyError:
+                continue
+        missing = missing_prompt_files(document, root, pending)
+        if missing:
+            return JsonResponse(
+                {
+                    "valid": False,
+                    "diagnostics": [item.to_envelope() for item in missing],
+                    "warnings": [],
+                }
+            )
+        # Warnings never block saving or set valid to false.
+        warnings = workflow_warnings(document)
+        for warning in warnings:
+            _locate(warning, document.locations)
+        warnings.extend(_captured_warnings(sources, documents))
         return JsonResponse(
             {
                 "valid": True,
                 "diagnostics": [],
+                "warnings": [item.to_envelope() for item in warnings],
                 "definition": document.value,
                 "sources": list(sources),
             }
         )
     except RelayError as error:
-        return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()]})
+        return JsonResponse({"valid": False, "diagnostics": [error.to_envelope()], "warnings": []})
+
+
+@api_errors
+@owner_required
+@require_POST
+def upgrade(request: HttpRequest) -> JsonResponse:
+    """Move deprecated built-in steps to the current version; this writes nothing."""
+    from relay.workflows.actions.upgrade import upgrade_builtins
+
+    body = json_body(request)
+    result = upgrade_builtins(
+        required_text(body, "yaml"), source=Path(str(body.get("source", "workflow.yml")))
+    )
+    return JsonResponse(
+        {
+            "yaml": result.yaml,
+            "changes": list(result.changes),
+            "unresolved": list(result.unresolved),
+        }
+    )
+
+
+_GITHUB_WORKFLOWS = ".github/workflows"
+_GITHUB_WORKFLOW_LIMIT = 100
+
+
+def _github_workflows_folder(request: HttpRequest) -> tuple[Path, Path]:
+    """The project's `.relay` root and its repository's `.github/workflows` folder."""
+    from relay.projects.discovery import git_root
+
+    relay_root, _ = current_project(request)
+    return relay_root, safe_resolve(git_root(relay_root.parent), _GITHUB_WORKFLOWS)
+
+
+def _linked(path: Path) -> bool:
+    """True for a symbolic link or a Windows junction."""
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return path.is_symlink() or bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _github_workflow_name(path: Path) -> str:
+    """The file's top-level `name:`, or its file name when it has none."""
+    from relay.workflows.source_text import read_source
+
+    try:
+        document, _ = _read_document(read_source(path, max_bytes=MAX_YAML_BYTES).text)
+    except (OSError, UnicodeDecodeError, WorkflowValidationError):
+        return path.name
+    name = document.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else path.name
+
+
+def _suggested_key(file_name: str, workflows: Path) -> str:
+    """`ci.yml` stays `ci.yml`, or becomes `ci-2.yml` when that workflow exists.
+
+    A name that is not portable, such as `nul.yml` or `build:all.yml`, becomes
+    a lowercase slug like `workflow-nul.yml` or `build-all.yml`.
+    """
+    from relay.workflows.source_files import _require_portable_names
+
+    stem, suffix = Path(file_name).stem, Path(file_name).suffix
+    try:
+        _require_portable_names((file_name,))
+    except WorkflowValidationError:
+        stem = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-") or "workflow"
+        try:
+            _require_portable_names((stem + suffix,))
+        except WorkflowValidationError:
+            stem = f"workflow-{stem}"
+    key, number = stem + suffix, 2
+    while os.path.lexists(workflows / key):
+        key, number = f"{stem}-{number}{suffix}", number + 1
+    return key
+
+
+@api_errors
+@owner_required
+@require_GET
+def github_workflows(request: HttpRequest) -> JsonResponse:
+    """List the YAML files directly in `.github/workflows`, without following links."""
+    _, folder = _github_workflows_folder(request)
+    files: list[dict[str, str]] = []
+    if not folder.is_dir():
+        return JsonResponse({"files": files})
+    for path in sorted(folder.iterdir(), key=lambda item: item.name):
+        if len(files) >= _GITHUB_WORKFLOW_LIMIT:
+            break
+        if (
+            path.suffix not in {".yml", ".yaml"}
+            or _linked(path)
+            or not path.is_file()
+            or path.stat().st_size > MAX_YAML_BYTES
+        ):
+            continue
+        files.append(
+            {"path": f"{_GITHUB_WORKFLOWS}/{path.name}", "name": _github_workflow_name(path)}
+        )
+    return JsonResponse({"files": files})
+
+
+@api_errors
+@owner_required
+@require_POST
+def import_github_workflow(request: HttpRequest) -> JsonResponse:
+    """Convert one `.github/workflows` file for the editor; this writes nothing."""
+    from relay.workflows.importer import convert_github_workflow
+    from relay.workflows.source_text import read_source
+
+    relay_root, folder = _github_workflows_folder(request)
+    relative = required_text(json_body(request), "path").removeprefix(f"{_GITHUB_WORKFLOWS}/")
+    path = safe_resolve(folder, relative)
+    written = Path(os.path.normpath(folder / relative))
+    if os.path.normcase(path) != os.path.normcase(written) or (
+        os.path.lexists(written) and _linked(written)
+    ):
+        message = "The requested workflow file is a symbolic link."
+        raise PathSafetyError(
+            message, next_action="Choose a file stored directly in .github/workflows."
+        )
+    if path.parent != folder or path.suffix not in {".yml", ".yaml"} or not path.is_file():
+        message = "Choose a .yml or .yaml file directly in .github/workflows."
+        raise ConfigError(message)
+    try:
+        text = read_source(path, max_bytes=MAX_YAML_BYTES).text
+    except UnicodeDecodeError:
+        message = "The workflow file is not UTF-8 text."
+        raise ConfigError(message) from None
+    result = convert_github_workflow(text)
+    return JsonResponse(
+        {
+            "yaml": result.yaml,
+            "changes": list(result.changes),
+            "unresolved": list(result.unresolved),
+            "suggested_key": _suggested_key(path.name, relay_root / "workflows"),
+        }
+    )
+
+
+def workflow_import(request: HttpRequest) -> HttpResponseBase:
+    """Route `/api/workflow-import`: list files on GET and convert one on POST."""
+    if request.method == "POST":
+        return import_github_workflow(request)
+    return github_workflows(request)
 
 
 def _scope(request: HttpRequest, body: dict[str, Any]) -> str:

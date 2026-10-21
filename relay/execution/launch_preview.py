@@ -11,6 +11,7 @@ from typing import Any
 from relay.constants import API_MAX_PAGE_BYTES
 from relay.errors import RelayError
 from relay.workflows.actions import expressions
+from relay.workflows.actions.builtins import is_builtin
 from relay.workflows.schema import ActionsJobNode, GlobalPrompt, LocalPrompt
 
 from .launch import launch_relay_context
@@ -158,7 +159,7 @@ def _step(
     name = _render(step.get("name", step_id), values).text
     uses = step.get("uses")
     raw = step.get("with", {})
-    if uses == "relay/agent@v1":
+    if is_builtin(uses, "agent"):
         files, files_runtime = _prompt_files(_render(raw.get("prompt-files", ""), values), root)
         return PreviewStep(
             id=step_id,

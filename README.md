@@ -121,7 +121,7 @@ including serial matrices, local reusable workflows and actions, scoped
 secrets, environment approvals, caches, artifacts, and opt-in local triggers.
 If you know GitHub Actions, see
 [Coming from GitHub Actions](docs/coming-from-github-actions.md) for a side-by-side
-comparison and three runnable examples.
+comparison and runnable examples.
 
 ### Safe Git isolation and clean launch
 
@@ -163,6 +163,7 @@ copies** in **Settings** or **Run workflow**. See
 | Topic | Guide |
 | --- | --- |
 | First run and browser tour | [Getting started](docs/getting-started.md) |
+| A first workflow, built step by step | [Build your first workflow](docs/build-your-first-workflow.md) |
 | GitHub Actions syntax comparison | [Coming from GitHub Actions](docs/coming-from-github-actions.md) |
 | Workflow YAML, starters, and prompts | [Workflows](docs/workflows.md) and [Language compatibility](docs/workflow-language-compatibility.md) |
 | Visual editor, runs view, and login modes | [Web UI](docs/web-ui.md) |

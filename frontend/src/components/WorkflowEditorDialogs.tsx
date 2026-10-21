@@ -14,9 +14,11 @@ import {
   Typography,
 } from "@mui/material";
 
+import { useId } from "react";
 import { moveActionStep, launchView } from "../actions-workflow";
 
 import { CreateWorkflowDialog } from "./CreateWorkflowDialog";
+import { Sentences } from "./GitHubImportPanel";
 import { LaunchPanel } from "./LaunchPanel";
 
 import { ActionJobEditor } from "./ActionJobEditor";
@@ -74,7 +76,17 @@ export function WorkflowEditorDialogs({
     save,
     lease,
     valid,
+    preferences,
+    createdJobs,
+    loopTargets,
+    renameJobId,
+    editYaml,
+    upgrade,
+    upgradeOpen,
+    setUpgradeOpen,
+    upgradeVersions,
   } = state;
+  const heading = useId();
   return (
     <>
       <Drawer
@@ -83,13 +95,19 @@ export function WorkflowEditorDialogs({
         onClose={() => setDrawer(false)}
         slotProps={{
           paper: {
+            "aria-labelledby": heading,
             sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw", p: 2 },
           },
         }}
       >
         <Stack spacing={2}>
-          <Typography component="h2" variant="h6">
-            Job settings
+          <Typography
+            component="h2"
+            variant="h6"
+            id={heading}
+            sx={{ overflowWrap: "anywhere" }}
+          >
+            Job settings: {job?.name || jobId}
           </Typography>
           <Stack direction="row">
             <Button onClick={() => setDrawer(false)}>Close job settings</Button>
@@ -110,6 +128,14 @@ export function WorkflowEditorDialogs({
           </Stack>
           {job && parsed.value && manifest && (
             <ActionJobEditor
+              key={jobId}
+              initialTab={createdJobs.includes(jobId) ? "Steps" : "General"}
+              preferences={preferences}
+              loopTargets={loopTargets}
+              onRename={(id) => renameJobId(jobId, id)}
+              onEditYaml={editYaml}
+              onUpgrade={() => void upgradeVersions()}
+              onOpenGetStarted={props.onOpenGetStarted}
               workflow={parsed.value}
               jobId={jobId}
               index={index}
@@ -191,6 +217,34 @@ export function WorkflowEditorDialogs({
           >
             Apply formatting
           </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Updated to current versions</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1}>
+            {upgrade?.changes.length ? (
+              <Sentences label="Changes" items={upgrade.changes} />
+            ) : (
+              <Typography variant="body2">
+                This workflow needed no changes.
+              </Typography>
+            )}
+            {Boolean(upgrade?.unresolved.length) && (
+              <Sentences
+                label="Check by hand"
+                items={upgrade?.unresolved ?? []}
+              />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUpgradeOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
       <CreateWorkflowDialog

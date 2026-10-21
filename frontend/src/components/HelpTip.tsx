@@ -19,7 +19,32 @@ import {
 } from "react";
 import { help, type HelpTopic } from "../help";
 
-export function HelpTip({ topic }: { topic: HelpTopic }) {
+const GUIDES = "https://github.com/viseshrp/relay/blob/main/docs";
+
+/**
+ * Help for a control: a topic from help.ts, or a title and description taken
+ * from the language manifest. `guide` names a section of the Workflows guide.
+ */
+export type HelpSource =
+  HelpTopic | { title: string; description: string; guide?: string };
+
+function helpText(topic: HelpSource): {
+  title: string;
+  description: string;
+  link: string;
+} {
+  if (typeof topic === "string") {
+    const [title, description] = help[topic];
+    return { title, description, link: `${GUIDES}/web-ui.md` };
+  }
+  return {
+    title: topic.title,
+    description: topic.description,
+    link: `${GUIDES}/workflows.md${topic.guide ? `#${topic.guide}` : ""}`,
+  };
+}
+
+export function HelpTip({ topic }: { topic: HelpSource }) {
   const [open, setOpen] = useState(false);
   const dismissed = useRef(false);
   const icon = useRef<HTMLButtonElement | null>(null);
@@ -28,20 +53,16 @@ export function HelpTip({ topic }: { topic: HelpTopic }) {
     setBoundary(icon.current?.closest<HTMLElement>(".MuiDialog-paper") ?? null);
     setOpen(true);
   }
-  const [title, description] = help[topic];
+  const { title, description, link } = helpText(topic);
   return (
     <ClickAwayListener onClickAway={() => setOpen(false)}>
       <span className="help-tip">
         <Tooltip
           title={
             <span>
-              {description}
+              <span className="help-tip-description">{description}</span>
               <br />
-              <a
-                href="https://github.com/viseshrp/relay/blob/main/docs/web-ui.md"
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a href={link} target="_blank" rel="noreferrer">
                 Read the guide
               </a>
             </span>
@@ -157,7 +178,7 @@ export function HelpField({
   compact = false,
   width = "standard",
 }: {
-  topic: HelpTopic;
+  topic: HelpSource;
   label: ReactNode;
   id: string;
   children: ReactNode;
@@ -170,7 +191,7 @@ export function HelpField({
   return (
     <div
       className={`help-field field-width-${compact ? "short" : width}${grow ? " help-field-grow" : ""}${compact ? " help-field-compact" : ""}`}
-      data-tour={tour ? topic : undefined}
+      data-tour={tour && typeof topic === "string" ? topic : undefined}
     >
       <div className="help-field-heading">
         <label htmlFor={id} id={`${id}-label`}>
@@ -193,7 +214,7 @@ export function HelpTextField({
   width,
   ...props
 }: TextFieldProps & {
-  topic: HelpTopic;
+  topic: HelpSource;
   tour?: boolean;
   label: ReactNode;
   grow?: boolean;
@@ -215,7 +236,8 @@ export function HelpTextField({
         width ??
         (props.multiline
           ? "content"
-          : ["model", "sharedModel", "project", "workflowKey"].includes(topic)
+          : typeof topic === "string" &&
+              ["model", "sharedModel", "project", "workflowKey"].includes(topic)
             ? "wide"
             : "standard")
       }
@@ -236,7 +258,7 @@ export function HelpSelectField<Value>({
   width,
   ...props
 }: SelectProps<Value> & {
-  topic: HelpTopic;
+  topic: HelpSource;
   tour?: boolean;
   label: ReactNode;
   helperText?: ReactNode;
@@ -304,12 +326,15 @@ export function HelpControl({
   children,
   tour = false,
 }: {
-  topic: HelpTopic;
+  topic: HelpSource;
   children: ReactNode;
   tour?: boolean;
 }) {
   return (
-    <div className="help-control" data-tour={tour ? topic : undefined}>
+    <div
+      className="help-control"
+      data-tour={tour && typeof topic === "string" ? topic : undefined}
+    >
       {children}
       <HelpTip topic={topic} />
     </div>
@@ -320,7 +345,7 @@ export function HelpLabel({
   topic,
   children,
 }: {
-  topic: HelpTopic;
+  topic: HelpSource;
   children: ReactNode;
 }) {
   return (
@@ -328,5 +353,38 @@ export function HelpLabel({
       <span>{children}</span>
       <HelpTip topic={topic} />
     </span>
+  );
+}
+
+/**
+ * A labelled group of controls that share one help button, such as a list
+ * editor whose rows are covered by the group's description.
+ */
+export function HelpGroup({
+  topic,
+  label,
+  children,
+  className,
+}: {
+  topic: HelpSource;
+  label: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <div
+      className={`help-group help-group-block${className ? ` ${className}` : ""}`}
+      role="group"
+      aria-labelledby={id}
+    >
+      <div className="help-field-heading">
+        <span id={id} className="help-group-label">
+          {label}
+        </span>
+        <HelpTip topic={topic} />
+      </div>
+      {children}
+    </div>
   );
 }

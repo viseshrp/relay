@@ -15,7 +15,12 @@ import time
 from typing import Any, cast
 import uuid
 
-from relay.errors import NodeExecutionError, OutputValidationError, RelayError
+from relay.errors import (
+    NodeExecutionError,
+    OutputValidationError,
+    RelayError,
+    WorkflowValidationError,
+)
 from relay.execution.action_commands import ActionRuntime, CommandLog
 from relay.execution.action_files import (
     MAX_FILE,
@@ -46,7 +51,14 @@ from relay.vcs.write_scope import (
     require_allowed_changes,
 )
 from relay.workflows.actions import expressions
-from relay.workflows.actions.builtins import parse_allowed_paths
+from relay.workflows.actions.builtins import (
+    builtin,
+    current_builtin,
+    parse_allowed_paths,
+    parse_builtin,
+    parse_list_input,
+    removed_builtin,
+)
 from relay.workflows.actions.compiler import _timeout
 from relay.workflows.actions.compiler import definition as compile_definition
 from relay.workflows.actions.language import (
@@ -638,7 +650,7 @@ class ActionsJobExecutor:
                 try:
                     execute_product(
                         context,
-                        "relay/save-cache@v1",
+                        current_builtin("save-cache").reference,
                         post["inputs"],
                         {},
                         ActionsStepNode.model_validate(post["node"]),
@@ -914,13 +926,25 @@ class ActionsStepExecutor:
             dict[str, Any],
             expressions.interpolate(node.step.get("with", {}), values, workspace=context.worktree),
         )
-        if reference == "relay/command@v1":
+        action = builtin(reference)
+        if action is None and parse_builtin(reference) is not None:
+            # A run that launched before an upgrade keeps its reference; it never
+            # runs the replacement in its place.
+            removed = removed_builtin(reference)
+            message = (
+                f"{reference} was removed in Relay {removed[0]}. This run started on an "
+                "earlier Relay version; cancel it and launch the workflow again."
+                if removed is not None
+                else f"{reference} is not included in this Relay version."
+            )
+            raise NodeExecutionError(message)
+        name = action.name if action is not None else None
+        if name == "command":
             if "argv" in inputs:
                 try:
-                    argv = json.loads(str(inputs["argv"]))
-                except ValueError:
-                    message = "Command argv must be a JSON argument vector."
-                    raise NodeExecutionError(message) from None
+                    argv = parse_list_input(inputs["argv"], "argv")
+                except WorkflowValidationError as error:
+                    raise NodeExecutionError(error.message) from None
             else:
                 launch = _repository().execution_context(context.attempt.attempt_id)["_launch"]
                 argv = (
@@ -940,7 +964,7 @@ class ActionsStepExecutor:
                 context.attempt, frozen_def=command.model_dump(mode="json", by_alias=True)
             )
             return CommandExecutor().execute(replace(context, attempt=attempt))
-        if reference == "relay/human-wait@v1":
+        if name == "human-wait":
             from relay.workflows.actions.builtins import human_wait_options
 
             deadline = (
@@ -956,7 +980,7 @@ class ActionsStepExecutor:
                 human_wait_options(inputs["options"]) if "options" in inputs else [],
             )
             return ExecutionOutcome(OutcomeKind.WAITING, wait_timeout_seconds=deadline)
-        if reference == "relay/agent@v1":
+        if name == "agent":
             if node.bound_agent is None:
                 message = "The agent route was not frozen at launch."
                 raise NodeExecutionError(message)
@@ -1027,12 +1051,12 @@ class ActionsStepExecutor:
                     outcome, outputs={**outcome.outputs, **output}, declared_artifacts=artifacts
                 )
             return outcome
-        if reference == "relay/validate-report@v1":
+        if name == "validate-report":
             outputs, artifacts = parse_report(inputs).read(context.worktree)
             return ExecutionOutcome(
                 OutcomeKind.SUCCEEDED, outputs=outputs, declared_artifacts=artifacts
             )
-        if reference == "relay/validate-input@v1":
+        if name == "validate-input":
             from pydantic import TypeAdapter, ValidationError
 
             from relay.workflows.schema import InputDefinition
@@ -1059,7 +1083,7 @@ class ActionsStepExecutor:
                 {"value": value},
             )
             return ExecutionOutcome(OutcomeKind.SUCCEEDED, outputs={"value": raw, "valid": "true"})
-        if reference == "relay/loop@v1":
+        if name == "loop":
             return self.loop(context, node, inputs, values)
         if reference.startswith("./"):
             return self.local_action(context, node, inputs, values, environment, paths, state_path)

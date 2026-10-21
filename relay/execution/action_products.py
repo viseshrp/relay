@@ -14,6 +14,7 @@ from relay.errors import NodeExecutionError, PathSafetyError
 from relay.execution.resources import _linked
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.paths import data_dir, ensure_private_dir, safe_resolve
+from relay.workflows.actions.builtins import parse_builtin
 from relay.workflows.actions.patterns import select_paths
 from relay.workflows.schema import ActionsStepNode
 
@@ -176,7 +177,8 @@ def execute_product(
     try:
         return persist_product(context, reference, inputs, values, node)
     except OSError:
-        if reference not in {"relay/cache@v1", "relay/restore-cache@v1", "relay/save-cache@v1"}:
+        parsed = parse_builtin(reference)
+        if parsed is None or parsed[0] not in {"cache", "restore-cache", "save-cache"}:
             raise
         from relay.execution.state import EventSource
 

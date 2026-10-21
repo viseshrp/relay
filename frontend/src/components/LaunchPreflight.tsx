@@ -49,6 +49,12 @@ export function LaunchPreflight({
               ? "Project files are ready to run."
               : `${result.blocking_count} ${result.blocking_count === 1 ? "file blocks" : "files block"} this run.`}
           </Typography>
+          {/* Warnings never block the run. */}
+          {result.warnings.map((warning) => (
+            <Alert severity="warning" key={`${warning.code}-${warning.name}`}>
+              {warning.message}
+            </Alert>
+          ))}
           {result.files
             .filter((file) => !file.allowed)
             .map((file) => (
@@ -65,8 +71,9 @@ export function LaunchPreflight({
           {result.allowed_count > 0 && (
             <Box component="details">
               <Box component="summary">
-                {result.allowed_count} allowed{" "}
-                {result.allowed_count === 1 ? "file" : "files"}
+                {result.allowed_count} new workflow{" "}
+                {result.allowed_count === 1 ? "file" : "files"} can stay
+                uncommitted
               </Box>
               {result.files
                 .filter((file) => file.allowed)
@@ -100,11 +107,18 @@ export function LaunchPreflight({
                 file.status === "??" &&
                 /(?:^|\/)\.relay\/(workflows|prompts)\//.test(file.path),
             ) && (
-              <CommitWorkflowFiles
-                workflowKey={workflowKey}
-                project={project}
-                onCommitted={onCheck}
-              />
+              <Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+                <Typography variant="body2" color="text.secondary">
+                  {result.clean
+                    ? "Optional. Commit this workflow so it is saved in your Git history."
+                    : "Commit these workflow files to run."}
+                </Typography>
+                <CommitWorkflowFiles
+                  workflowKey={workflowKey}
+                  project={project}
+                  onCommitted={onCheck}
+                />
+              </Stack>
             )}
           {!result.clean && (
             <Box component="details" className="launch-guidance">

@@ -391,8 +391,16 @@ def _execute_attempt(
                             *(str(path) for path in sources if str(path).startswith(".relay/")),
                         }
                     )
+                    from relay.workflows.schema import declared_job_name
+
                     commit = accept_job_result(
-                        worktree, claim.starting_head, claim.node_id, snapshot_files=snapshot_files
+                        worktree,
+                        claim.starting_head,
+                        claim.node_id,
+                        snapshot_files=snapshot_files,
+                        display_name=declared_job_name(
+                            claim.node_type, claim.scope_path, claim.frozen_def
+                        ),
                     )
                     ending_head = commit.ending_head
             else:

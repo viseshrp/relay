@@ -6,16 +6,20 @@ import {
   useRef,
   useState,
 } from "react";
-import { api, csrfToken, errorMessage } from "../api";
+import { api, csrfToken, errorMessage, upgradeWorkflowLanguage } from "../api";
 import { projectPath } from "../navigation";
 import { editorHolder } from "../editor-session";
+import { stringify } from "yaml";
 import {
   actionsGraph,
   editorYaml,
   editActions,
   parseActions,
+  renameJob,
   type ActionWorkflow,
 } from "../actions-workflow";
+import { defaultStep } from "../action-defaults";
+import { typeReference } from "./StepTypeOptions";
 import type {
   AgentRecord,
   AgentsResponse,
@@ -23,6 +27,7 @@ import type {
   ProviderDefaults,
   WorkflowDocumentResponse,
   WorkflowDraft,
+  WorkflowUpgradeResult,
 } from "../types";
 import type { WorkflowWorkspaceProps } from "./WorkflowWorkspace";
 
@@ -31,14 +36,24 @@ import type { PromptEdits } from "./PromptFilesEditor";
 import { useUndoDocument } from "../useUndoDocument";
 
 import { type WorkflowEntry } from "./WorkflowSidebar";
-import { Diagnostic, Trigger, encoded } from "./ActionsWorkflowWorkspaceShared";
+import {
+  Diagnostic,
+  EMPTY_WORKFLOW,
+  Trigger,
+  Validation,
+  encoded,
+} from "./ActionsWorkflowWorkspaceShared";
 type ReadResponse1 = { workflows: WorkflowEntry[] };
 type ReadResponse2 = {
   lease: unknown;
   conflict?: { message: string };
 };
 type ReadResponse3 = { draft: WorkflowDraft };
-type ReadResponse4 = { valid: boolean; diagnostics: Diagnostic[] };
+type ReadResponse4 = {
+  valid: boolean;
+  diagnostics: Diagnostic[];
+  warnings?: Diagnostic[];
+};
 type ReadResponse5 = { triggers: Trigger[] };
 type ReadResponse6 = { environments: Array<{ name: string }> };
 type ReadResponse7 = { triggers: Trigger[] };
@@ -64,6 +79,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [notice, setNotice] = useState("");
   const [inventoryWarning, setInventoryWarning] = useState("");
   const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [preferences, setPreferences] = useState<string[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [providerDefaults, setProviderDefaults] = useState<
     Record<string, ProviderDefaults>
@@ -79,7 +95,13 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   const [create, setCreate] = useState(Boolean(props.initialCreate));
   const [launch, setLaunch] = useState(props.initialLaunch);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
-  const [valid, setValid] = useState(false);
+  // Warnings never block saving; the server sends them only for valid sources.
+  const [warnings, setWarnings] = useState<Diagnostic[]>([]);
+  // The last version update, listed in a dialog until it is closed.
+  const [upgrade, setUpgrade] = useState<WorkflowUpgradeResult | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [validation, setValidation] = useState<Validation>("checking");
+  const valid = validation === "valid";
   const [triggerRows, setTriggerRows] = useState<Trigger[]>([]);
   const [activation, setActivation] = useState<string | null>(null);
   const [authorize, setAuthorize] = useState(false);
@@ -96,6 +118,13 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
   } | null>(null);
   const [startJob, setStartJob] = useState("");
   const [newKind, setNewKind] = useState("script");
+  // Jobs added with Add job in this editor session open on their steps.
+  const [createdJobs, setCreatedJobs] = useState<string[]>([]);
+  // A new loop job waits here while its workflow is chosen.
+  const [pendingLoop, setPendingLoop] = useState<{
+    source?: string;
+    target?: string;
+  } | null>(null);
   const [settings, setSettings] = useState(false);
   const [environments, setEnvironments] = useState<string[]>([]);
   const holder = useRef(editorHolder());
@@ -129,6 +158,7 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       .then(([inventory, defaults]) => {
         if (!abort.signal.aborted) {
           setAgents(inventory.agents);
+          setPreferences(inventory.preferences ?? []);
           setDefaultModel(defaults.effective.workflow_defaults.model || "");
           setProviderDefaults(defaults.effective.workflow_defaults.providers);
         }
@@ -206,6 +236,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setPromptEdits({});
     setLoadedDocument("");
     setLastValid(null);
+    setCreatedJobs([]);
+    setUpgradeOpen(false);
     const endpoint = projectPath(
       `/api/workflows/${encoded(key)}`,
       requestProject,
@@ -325,10 +357,27 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     }, 600);
     return () => window.clearTimeout(timer);
   }, [flush, loadedDocument]);
+  // Unsaved prompt files count as present; Save writes them with the YAML.
+  const draftPrompts = Object.keys(promptEdits).sort().join("\n");
   useEffect(() => {
-    setValid(false);
     setDiagnostics([]);
-    if (!text || loadedDocument !== path("")) return;
+    setWarnings([]);
+    if (loadedDocument !== path("")) {
+      setValidation("checking");
+      return;
+    }
+    // The server rejects an empty source; say so here instead of waiting on it.
+    if (!text.trim()) {
+      setValidation("empty");
+      setDiagnostics([
+        {
+          message: EMPTY_WORKFLOW,
+          context: { field: "workflow", line: "1", column: "1" },
+        },
+      ]);
+      return;
+    }
+    setValidation("checking");
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
       void api<ReadResponse4>(
@@ -336,24 +385,32 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
         {
           method: "POST",
           signal: abort.signal,
-          body: JSON.stringify({ yaml: text, source: key }),
+          body: JSON.stringify({
+            yaml: text,
+            source: key,
+            prompts: draftPrompts ? draftPrompts.split("\n") : [],
+          }),
         },
       )
         .then((result) => {
           if (!abort.signal.aborted) {
-            setValid(result.valid);
+            setValidation(result.valid ? "valid" : "invalid");
             setDiagnostics(result.diagnostics);
+            setWarnings(result.warnings ?? []);
           }
         })
         .catch((e) => {
-          if (!abort.signal.aborted) setError(errorMessage(e));
+          if (!abort.signal.aborted) {
+            setValidation("invalid");
+            setError(errorMessage(e));
+          }
         });
     }, 300);
     return () => {
       abort.abort();
       window.clearTimeout(timer);
     };
-  }, [text, key, requestProject, loadedDocument, path]);
+  }, [text, key, requestProject, loadedDocument, path, draftPrompts]);
   useEffect(() => {
     setJobId((current) =>
       parsed.value?.jobs[current]
@@ -544,21 +601,19 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setContextMenu(null);
     setDrawer(false);
   }
-  function addJob(source?: string, target?: string) {
+  function addJob(source?: string, target?: string, workflow?: string) {
+    if (newKind === "loop" && !workflow) {
+      setPendingLoop({ source, target });
+      return;
+    }
+    if (newKind !== "script" && !manifest) return;
     let number = 1;
     while (parsed.value?.jobs[`job_${number}`]) number++;
     const id = `job_${number}`;
-    const step =
-      newKind === "script"
-        ? { run: "echo Ready" }
-        : {
-            uses: newKind,
-            with: Object.fromEntries(
-              (manifest?.builtin_inputs[newKind]?.required ?? []).map(
-                (field) => [field, field === "max-iterations" ? "3" : ""],
-              ),
-            ),
-          };
+    const step = defaultStep(
+      manifest ? typeReference(manifest, newKind) : "",
+      workflow,
+    );
     let next = editActions(text, ["jobs", id], {
       ...(source ? { needs: [source] } : {}),
       steps: [step],
@@ -574,9 +629,28 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
       );
     }
     setText(next);
+    setCreatedJobs((current) => [...current, id]);
     setJobId(id);
     setDrawer(true);
   }
+  /** Rename a job and every reference to it in one undoable edit. */
+  function renameJobId(from: string, to: string) {
+    try {
+      setText(renameJob(text, from, to));
+      // The drawer reopens on General, where the rename was made.
+      setJobId(to);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  /** Show the YAML, for values the forms cannot edit. */
+  function editYaml() {
+    setDrawer(false);
+    setMode("YAML");
+  }
+  const loopTargets = inventory
+    .filter((item) => item.key !== key)
+    .map((item) => ({ key: item.key, name: item.name }));
   async function runFromJob(id: string) {
     const point = `root.${id}`;
     const entries = parsed.value?.entrypoints ?? [];
@@ -599,6 +673,39 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setContextMenu(null);
     setDrawer(true);
   }
+  /** Replace an empty source with a named workflow that has one job. */
+  function addFirstJob() {
+    const savedName = savedParsed.value?.name;
+    const name =
+      typeof savedName === "string" && savedName.trim()
+        ? savedName
+        : (key.split("/").at(-1) ?? key).replace(/\.ya?ml$/i, "");
+    setText(
+      stringify({
+        name,
+        on: "workflow_dispatch",
+        jobs: { job_1: { steps: [{ run: "echo Ready" }] } },
+      }),
+    );
+  }
+  // Captured files are not open here, so only this source's steps can update.
+  const outdated =
+    warnings.some((item) => item.context?.deprecated && !item.context.source) ||
+    diagnostics.some((item) => item.context?.removed);
+  /** Move deprecated built-in steps to the current version as an unsaved draft. */
+  async function upgradeVersions(): Promise<void> {
+    const target = path("");
+    try {
+      const result = await upgradeWorkflowLanguage(text);
+      if (currentDocument.current !== target) return;
+      // Like any other edit, Undo reverts it and only Save writes it.
+      setText(result.yaml);
+      setUpgrade(result);
+      setUpgradeOpen(true);
+    } catch (e) {
+      if (currentDocument.current === target) setError(errorMessage(e));
+    }
+  }
   const disabled =
     inventory.find((item) => item.key === key)?.disabled === true;
 
@@ -619,6 +726,8 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     disabled,
     lease,
     valid,
+    validation,
+    addFirstJob,
     text,
     saved,
     promptEdits,
@@ -649,6 +758,12 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     error,
     draft,
     diagnostics,
+    warnings,
+    outdated,
+    upgrade,
+    upgradeOpen,
+    setUpgradeOpen,
+    upgradeVersions,
     setJobId,
     setDrawer,
     lastValid,
@@ -664,6 +779,13 @@ export function useActionsWorkflowWorkspace(props: WorkflowWorkspaceProps) {
     setFocusRequest,
     newKind,
     setNewKind,
+    createdJobs,
+    pendingLoop,
+    setPendingLoop,
+    loopTargets,
+    renameJobId,
+    editYaml,
+    preferences,
     events,
     triggerRows,
     toggleTrigger,

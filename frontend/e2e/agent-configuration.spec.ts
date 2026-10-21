@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "./a11y-test";
 import { parse } from "yaml";
-import { closeJobSettings, expectRunStatus } from "./setup-helpers";
+import {
+  chooseAgent,
+  closeJobSettings,
+  expectRunStatus,
+  openJobSettings,
+} from "./setup-helpers";
 
 async function post(page: Page, path: string, body: object = {}) {
   const cookie = (await page.context().cookies()).find(
@@ -72,8 +77,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/?view=workflows");
   await page.locator(".react-flow__node").filter({ hasText: "work" }).click();
   await page.getByRole("tab", { name: "Steps", exact: true }).click();
-  await page.getByRole("combobox", { name: "Agent", exact: true }).click();
-  await page.getByRole("option", { name: "Codex", exact: true }).click();
+  await chooseAgent(page, "Codex");
   await expect(
     page
       .getByRole("region", { name: "Codex configuration" })
@@ -223,4 +227,60 @@ test("failed capability reads offer retry without writing an override", async ({
   ).toHaveText("Use project and global defaults");
   await save(page);
   expect((await workflow(page)).jobs.work.steps[0].with.effort).toBeUndefined();
+});
+
+/** Create the Ask an agent starter, whose step tries five agents in order. */
+async function askAnAgent(page: Page) {
+  expect((await post(page, "/__test__/starter-project")).ok()).toBeTruthy();
+  await page.goto("/?view=workflows");
+  await page.getByRole("button", { name: "New workflow", exact: true }).click();
+  const gallery = page.getByRole("dialog", { name: "Choose a workflow" });
+  await gallery
+    .getByRole("button", { name: "Use Ask an agent", exact: true })
+    .click();
+  await gallery
+    .getByRole("button", { name: "Create workflow", exact: true })
+    .click();
+  await expect(gallery).toBeHidden();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workflow job navigation" })
+      .getByRole("button", { name: "Main", exact: true }),
+  ).toBeVisible();
+  await openJobSettings(page);
+}
+
+test("Runs on shows the effective agents in one place", async ({ page }) => {
+  await askAnAgent(page);
+  await expect(
+    page.getByRole("button", { name: "Try in order", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const order = page.getByRole("list", { name: "Agents to try in order" });
+  await expect(order.getByRole("listitem")).toHaveCount(5);
+  await expect(order.getByRole("listitem").first()).toContainText("1. Codex");
+  await expect(
+    page.getByRole("combobox", { name: "Agent", exact: true }),
+  ).toHaveCount(0);
+  await chooseAgent(page, "Codex");
+  await closeJobSettings(page);
+  const yaml = page.locator('[aria-label="Workflow YAML"]');
+  await expect(yaml).toContainText("agent: codex");
+  await expect(yaml).not.toContainText("agents:");
+});
+
+test("agent choices show installation status", async ({ page }) => {
+  await askAnAgent(page);
+  await chooseAgent(page, "Codex");
+  await page.getByRole("combobox", { name: "Agent", exact: true }).click();
+  const codex = page.getByRole("option", { name: /^Codex / });
+  await expect(codex).toHaveText("CodexInstalled");
+  await expect(codex).not.toHaveAttribute("aria-disabled", "true");
+  const copilot = page.getByRole("option", { name: /^GitHub Copilot CLI / });
+  await expect(copilot).toHaveText("GitHub Copilot CLINot installed");
+  await expect(copilot).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Open Get started", exact: true }),
+  ).toBeVisible();
 });

@@ -1923,3 +1923,1070 @@ visible but quiet.
 3. DT-13, DT-14, DT-15, FE-11: browser chrome and third-party theming.
 4. QA-16, BR-17, FE-09, FE-12: gates, single token source, and docs.
 5. QA-17, QA-18, QA-19, BR-12 to BR-15, DE-09 to DE-11, FE-10.
+
+## Workflow builder beginner audit
+
+This audit ran on 2026-10-17 against `main` at `62ac59e`. It asks one
+question: can someone new to Relay build or change a workflow, in the visual
+editor or in YAML, without already knowing Relay's schema? A starter runs end
+to end, but its approvals and its results confuse a beginner, and building or
+editing a workflow is harder still. Items are grouped by category
+and carry a priority: **P0** strands or misleads a beginner, **P1** slows them
+down, **P2** is polish. Item numbers use the `WB` prefix.
+
+The [implementation handoff](workflow-builder-handoff.md) specifies every
+item in full, records the owner's decisions (D1 to D4) and the defaults chosen
+for the rest, and gives the delivery order. Each item links to its section.
+
+**Status:** all 41 items are implemented on pull request #26. The handoff's
+[Implementation status](workflow-builder-handoff.md#implementation-status)
+lists the commits for each delivery step and the follow-ups found on the way.
+
+How it was run:
+
+- **Isolated instance only.** `tests/e2e_server.py` on port 8765 with scratch
+  storage and fake agents. The owner's instance and provider accounts were
+  not used.
+- **Validation matrix.** 51 sources (11 freshly added actions and 40 common
+  mistakes) were sent to `POST /api/workflow-language/validate`, which is the
+  endpoint the editor calls. Sources that validated were then saved,
+  committed, and launched through `POST /api/runs` to see where each mistake
+  is actually caught.
+- **Browser pass.** Playwright with Chromium at 1440, 768, and 375 pixels:
+  starter gallery, blank workflow, **Add job** for each type, every job tab,
+  **Workflow settings**, the right-click menu, YAML completion, hover, the
+  Tab key, and clearing the document. axe-core 4 ran on the editor and on
+  the open job drawer.
+- **End-to-end journeys.** Two features were built through the browser
+  alone. The first followed the guided path: welcome slides, **Get started**,
+  the default **AI coding workflow**, three approvals, and the finished run
+  (`/__test__/starter-project` with `full_workflow`, whose fake agents write
+  `feature.py` and `test_feature.py`). The second built a two-job workflow
+  from a blank one with forms only, then saved, launched, and watched it.
+  Approval answers were read from the screen, not from test code.
+- **GitHub Actions comparison.** 37 sources written from GitHub Actions
+  habit, including a typical CI workflow pasted verbatim, went through the
+  validation endpoint; 16 validated. Five of them were launched to see
+  run-time behavior. GitHub behavior was checked against its
+  [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+  and [job variations](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations)
+  references and the `action.yml` files of `actions/upload-artifact` and
+  `actions/cache`.
+- **Source and docs.** The editor components, `support_manifest()`, the
+  action contracts, `docs/getting-started.md`,
+  `docs/coming-from-github-actions.md`, and the authoring sections of
+  `docs/web-ui.md`.
+- **Not covered:** live providers, macOS and Windows, screen readers, dark
+  mode, and editing the nine-job **AI coding workflow** starter visually.
+
+What already works: seven starters with job sequences, required agents, and
+input types; a blank workflow that starts valid; line-anchored server errors
+with the canvas kept at the last valid version; tailored messages for GitHub
+Actions habits such as `runs-on`, `permissions`, and `services`; Split view
+that keeps comments; undo, redo, and draft autosave; no horizontal overflow
+at 375 pixels.
+
+### YAML editor
+
+- [x] **WB-01. Make completion follow the cursor position.**
+  - **Priority:** P0.
+  - **Spec:** [WB-01 in the handoff](workflow-builder-handoff.md#wb-01-make-completion-follow-the-cursor-position)
+  - **Evidence:** `YamlEditor.tsx:61` merges every property of all 115
+    schema definitions, every action input, and every context property into
+    one list, whatever the cursor position. Typing `ru` under a job offers
+    `run`, `run-id`, `run-name`, `relay.run_id`, `workflow_run`, and
+    `relay.run_number`. Ctrl+Space after `- uses:` fills CodeMirror's
+    100-option list with field names, starting with `agent`, `agents`,
+    `argv`, and `artifacts`.
+  - **Fix:** Resolve the YAML path at the cursor from the parsed document.
+    Offer only the properties of that path's definition, action inputs only
+    inside the `with:` of a known `uses:`, and context names only inside
+    `${{ }}`.
+  - **Done when:** A browser test checks completion at the root, a job, a
+    step, an agent step's `with:`, and inside an expression, and each list
+    contains only fields valid there.
+  - **Verified:** `workflow-authoring.spec.ts` "YAML completion offers only
+    fields valid at the cursor" (root, job, step, agent `with:`, and
+    expression); the label cases and the expression cases in
+    `frontend/unit/yaml-completion.spec.ts`, which also limit expression names
+    to the contexts and functions the field accepts; `yamlCursorAt` in
+    `frontend/unit/yaml-path.spec.ts` and `definitionAt` in
+    `frontend/unit/workflow-language.spec.ts`.
+
+- [x] **WB-02. Suggest values, starting with action names.**
+  - **Priority:** P0.
+  - **Spec:** [WB-02 in the handoff](workflow-builder-handoff.md#wb-02-suggest-values-starting-with-action-names)
+  - **Evidence:** Completion only offers keys. The 11 `relay/*@v1` actions in
+    `manifest.builtins` are never offered after `uses:`, so a beginner must
+    already know they exist. `shell`, input `type`, report `format`,
+    `cache-mode`, and agent IDs have fixed values that are not offered
+    either.
+  - **Fix:** Add value completion for those fields, with a one-line
+    description for each action. Selecting an action could insert a `with:`
+    block containing its required inputs (see WB-07).
+  - **Done when:** Ctrl+Space after `uses:` lists the 11 actions, and each
+    fixed-value field lists its values.
+  - **Verified:** `workflow-authoring.spec.ts` "Ctrl+Space after uses lists
+    the built-in actions"; "uses on a step offers every built-in action",
+    "fixed values are offered in their own order", and "choosing an action for
+    a step without with adds its required inputs" in
+    `frontend/unit/yaml-completion.spec.ts`;
+    `test_manifest_offers_fixed_values_for_completion` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-03. Give hover and completion real descriptions.**
+  - **Priority:** P0.
+  - **Spec:** [WB-03 in the handoff](workflow-builder-handoff.md#wb-03-give-hover-and-completion-real-descriptions)
+  - **Evidence:** Only 6 of 115 definitions in the served manifest have a
+    `description` (`workflow-root`, `on`, `strategy`, `steps`,
+    `entrypoints`, `recovery`). Hover (`YamlEditor.tsx:103`) uses the first
+    definition that contains the key, then falls back to the parent's
+    description or to `key: type`. As a result:
+    - `needs` reads `needs: needs`, `if` reads `if: job-if`,
+      `timeout-minutes` reads `timeout-minutes: number-strategy-context`.
+    - A step's `run` reads `run: workflow-defaults-run`, the description of a
+      different field.
+    - `name` and `env` read "Relay workflow: local jobs and ordered steps."
+    - `agent`, `prompt`, `argv`, and every other action input have no hover.
+      Completion describes them only as "Local action input".
+  - **Fix:** Describe every definition a user can type in `schema.json`, and
+    every action input next to the contracts in `builtins.py`. Resolve hover
+    by YAML path, not by the first matching definition. Link each
+    description to its section in [Workflows](workflows.md).
+  - **Done when:** A test fails when a property reachable from
+    `workflow-root`, or an action input, has no description. A hover test
+    distinguishes a step's `run` from `defaults.run`.
+  - **Verified:**
+    `test_every_reachable_property_and_action_input_has_a_description` in
+    `tests/test_relay_language.py` (108 fields, 11 action summaries, and 46
+    action inputs); "hover describes the field under the pointer by its
+    place" and "key completion describes each field and inserts its colon" in
+    `frontend/unit/yaml-completion.spec.ts`.
+
+- [x] **WB-04. Make Tab indent in the YAML editor.**
+  - **Priority:** P1.
+  - **Spec:** [WB-04 in the handoff](workflow-builder-handoff.md#wb-04-make-tab-indent-in-the-yaml-editor)
+  - **Evidence:** The editor uses `basicSetup` without `indentWithTab`.
+    Pressing Tab in the YAML editor changes nothing, and focus leaves the
+    editor for the page body. YAML forbids tabs for indentation, so beginners
+    rely on an editor that indents for them.
+  - **Fix:** Bind `indentWithTab` with a two-space indent unit, following
+    CodeMirror's Tab example. CodeMirror's tab focus mode keeps a keyboard
+    exit: Escape then Tab within two seconds, or Ctrl+M (Shift+Alt+M on
+    macOS) to toggle. Document both in
+    [Keyboard shortcuts](keyboard-shortcuts.md).
+  - **Done when:** A browser test checks that Tab indents by two spaces,
+    Shift+Tab outdents, and Escape followed by Tab moves focus out of the
+    editor.
+  - **Verified:** `accessibility.spec.ts` "Tab indents in the YAML editor and
+    Escape then Tab leaves it". The script editor uses the same binding.
+
+- [x] **WB-05. Explain an empty YAML document.**
+  - **Priority:** P1.
+  - **Spec:** [WB-05 in the handoff](workflow-builder-handoff.md#wb-05-explain-an-empty-yaml-document)
+  - **Evidence:** After selecting all and deleting, the page still shows
+    "Validating workflow…" 10 seconds later, and the canvas shows loading
+    placeholders. No error explains the state. The validation effect returns
+    early for empty text (`useActionsWorkflowWorkspace.tsx:331`), and the
+    endpoint rejects it anyway ("yaml must be a non-empty string.").
+  - **Fix:** Treat an empty draft as invalid with a message such as "This
+    workflow is empty. Restore the saved source or add a job." End the
+    loading state.
+  - **Done when:** A browser test clears the document and sees that message
+    in both Visual and YAML modes.
+  - **Verified:** `workflow-authoring.spec.ts` "clearing the YAML explains the
+    empty workflow" (Split, Visual, and YAML modes; **Add a job** returns to
+    **Ready to edit**; an invalid source reads "Fix the problems above to
+    save.").
+
+### Visual editor
+
+- [x] **WB-06. Keep the command form and the YAML in agreement.**
+  - **Priority:** P0.
+  - **Spec:** [WB-06 in the handoff](workflow-builder-handoff.md#wb-06-keep-the-command-form-and-the-yaml-in-agreement)
+  - **Evidence:** `ActionCommandFields.tsx:40` displays
+    `inputs.argv ?? '["echo","Ready"]'` but never writes that value. Adding
+    a command job writes `with: {}`, so the form shows `echo` and `Ready`
+    while the banner says "relay/command@v1 requires exactly one of argv or
+    command." and the canvas falls back to "Showing the last valid version".
+    An `argv` that is not valid JSON is displayed as an empty list.
+  - **Fix:** Write the default into the document when the step is created,
+    or show empty fields with placeholder text. Show a parse error for an
+    unparsable `argv` instead of an empty list.
+  - **Done when:** A test adds a command job and checks that the form, the
+    YAML, and validation agree.
+  - **Verified:** `workflow-authoring.spec.ts` "a new command job shows the
+    same arguments in the form and the YAML" and "a command step with
+    unreadable arguments says so instead of an empty list".
+
+- [x] **WB-07. Make newly added jobs and steps valid.**
+  - **Priority:** P0.
+  - **Spec:** [WB-07 in the handoff](workflow-builder-handoff.md#wb-07-make-newly-added-jobs-and-steps-valid)
+  - **Evidence:** **Add job** (`useActionsWorkflowWorkspace.tsx:547`) and the
+    **Step type** menu (`ActionJobSteps.tsx:84`) fill only an action's
+    required inputs, using empty strings. A fresh `command`, `loop`, or
+    `validate-report` step fails validation immediately. A fresh
+    `human-wait` step validates with an empty question. A fresh `agent` step
+    is `with: {}`.
+  - **Fix:** Give each action a valid starting configuration, or open a
+    short setup form that focuses the missing fields. `loop` needs a picker
+    for an existing reusable workflow rather than an empty path.
+  - **Done when:** For each of the 11 actions, **Add job** and **Step type**
+    produce a source that passes validation, or the form says which field to
+    fill.
+  - **Verified:** `workflow-authoring.spec.ts` "every new job type validates
+    as soon as it is added" and "a new loop job repeats the workflow chosen in
+    its dialog"; "new steps start with values that validate" in
+    `frontend/unit/visual-editor.spec.ts`. **Step type** and **Add step** use
+    the same `defaultStep`.
+
+- [x] **WB-08. Let Add step choose the step type.**
+  - **Priority:** P1.
+  - **Spec:** [WB-08 in the handoff](workflow-builder-handoff.md#wb-08-let-add-step-choose-the-step-type)
+  - **Evidence:** **Add step** (`ActionJobSteps.tsx:263`) always appends
+    `run: echo Ready`; the user must then change its type. BX-07 promised
+    that built-in actions are exposed through **Add step**.
+  - **Fix:** Make **Add step** a menu: Agent, Script, Command, Approval,
+    Check a report, Upload artifact, and More.
+  - **Done when:** A browser test adds each listed type in one action.
+  - **Verified:** `workflow-authoring.spec.ts` "Add step inserts each primary
+    step type"; the remaining types are listed under **More**.
+
+- [x] **WB-09. Show a job's steps as a list.**
+  - **Priority:** P1.
+  - **Spec:** [WB-09 in the handoff](workflow-builder-handoff.md#wb-09-show-a-jobs-steps-as-a-list)
+  - **Evidence:** The drawer edits one step at a time through an **Ordered
+    step** select (`ActionJobSteps.tsx:54`). Canvas cards show the job and a
+    single summary, for example "work · Agent · m1" or "relay/command@v1".
+    Six of the seven starters have one job, so their canvas shows one box
+    and none of the steps.
+  - **Fix:** Show an ordered step list with type icons, names, and drag or
+    move controls in the drawer, and list step names on each card.
+  - **Done when:** A user can see and reorder every step of a job without
+    opening a select.
+  - **Verified:** `workflow-authoring.spec.ts` "a job's steps appear as a list
+    in the drawer and on the card"; "a step is labelled by name, ID, type, then
+    its first script line" and "canvas cards list five steps, then how many
+    more" in `frontend/unit/visual-editor.spec.ts`. Visual baselines are
+    regenerated in CI.
+
+- [x] **WB-10. Describe step types in plain words.**
+  - **Priority:** P1.
+  - **Spec:** [WB-10 in the handoff](workflow-builder-handoff.md#wb-10-describe-step-types-in-plain-words)
+  - **Evidence:** **New job type** and **Step type** list bare slugs:
+    `agent`, `cache`, `command`, `download-artifact`, `human-wait`, `loop`,
+    `restore-cache`, `save-cache`, `upload-artifact`, `validate-input`, and
+    `validate-report`. The **Action reference** field below **Step type**
+    (`ActionJobSteps.tsx:123`) repeats the same choice as raw text.
+  - **Fix:** Use labels from the vocabulary map (for example, **Approval**
+    for `human-wait`), add a one-line description, and group them: Agents,
+    Scripts and commands, Approvals, Reports, Artifacts and caches,
+    Advanced. Keep **Action reference** under Advanced for local `./`
+    actions.
+  - **Done when:** Every menu entry has a label and a description, and no
+    slug appears outside Advanced.
+  - **Verified:** `workflow-authoring.spec.ts` "step type menus use plain
+    labels"; "every step type has one plain label for every version" in
+    `frontend/unit/visual-editor.spec.ts`.
+
+- [x] **WB-11. Lead with the basics in job and step forms.**
+  - **Priority:** P1.
+  - **Spec:** [WB-11 in the handoff](workflow-builder-handoff.md#wb-11-lead-with-the-basics-in-job-and-step-forms)
+  - **Evidence:**
+    - The **General** tab, which opens first, shows the condition with its
+      expression builder, timeout, **Reusable workflow**, matrix axes and
+      include (each with **Advanced JSON**), and concurrency. Steps are on
+      the second tab.
+    - An agent step's first control is **Advanced JSON: Action inputs**
+      (`ActionBuiltinFields.tsx:78`).
+    - Command arguments show type selectors for every item ("Program and
+      arguments value type: List", "item 1 value type: Text or expression").
+  - **Fix:** Open new jobs on **Steps**. Move matrix, concurrency, reusable
+    workflow, **Advanced JSON**, and value-type selectors under an
+    **Advanced** section. Show a value-type selector only when the value is
+    not plain text.
+  - **Done when:** A new job's drawer shows only name, start after, and steps
+    until **Advanced** is opened.
+  - **Verified:** `workflow-authoring.spec.ts` "new jobs open on Steps and
+    General shows the basics first", and "matrix, concurrency, comparisons,
+    and bounded retry controls round trip without JSON", which now opens
+    **Advanced**, **Change type**, and **Build a condition**. The condition
+    helpers offer only names that validate in their field: "condition helpers
+    offer only expressions that validate" in the same file, and "condition
+    helpers offer only names the field accepts" in
+    `frontend/unit/visual-editor.spec.ts`.
+
+- [x] **WB-12. Use one control for the agent choice.**
+  - **Priority:** P1.
+  - **Spec:** [WB-12 in the handoff](workflow-builder-handoff.md#wb-12-use-one-control-for-the-agent-choice)
+  - **Evidence:** The **Agent** select (`ActionBuiltinFields.tsx:88`) is blank
+    whenever a step uses an `agents` list, which six of the seven starters
+    do. The list itself is in **Agent order** (`ActionBuiltinFields.tsx:256`),
+    below the prompt editors.
+  - **Fix:** Replace both with one **Runs on** control that picks a single
+    agent or an ordered fallback list, and shows the effective choice,
+    including saved defaults.
+  - **Done when:** Opening any starter's agent step shows which agents it
+    will try, in order, in one place.
+  - **Verified:** `agent-configuration.spec.ts` "Runs on shows the effective
+    agents in one place".
+
+- [x] **WB-31. Show job names, not only IDs, when connecting jobs.**
+  - **Priority:** P1.
+  - **Spec:** [WB-31 in the handoff](workflow-builder-handoff.md#wb-31-show-job-names-not-only-ids-when-connecting-jobs)
+  - **Evidence:** In the second journey the blank workflow's job was renamed
+    **Review**, but **Start after** on the next job offered only `check`, its
+    ID. The added job stayed `job_1` in the YAML after being named **Test**.
+    The finished run's artifact table then listed `REVIEW.md` under the jobs
+    "Check" and "Job 1".
+  - **Fix:** Label **Start after** choices as "Review (`check`)". When a job
+    is created or first named, offer to derive its ID from the name. Use job
+    names in the artifact **Job** column.
+  - **Done when:** A user who only types job names never sees a generated ID
+    in the editor or the run's artifact table.
+  - **Verified:** `workflow-authoring.spec.ts` "dependencies show job names
+    and job IDs can be renamed safely"; "renaming a job moves every reference
+    to it in one edit" in `frontend/unit/visual-editor.spec.ts`. Job IDs never
+    change on their own (D10); the artifact table's job names came with
+    WB-28.
+
+- [x] **WB-32. Mark agents that are not installed.**
+  - **Priority:** P2.
+  - **Spec:** [WB-32 in the handoff](workflow-builder-handoff.md#wb-32-mark-agents-that-are-not-installed)
+  - **Evidence:** With only Codex installed, the agent step's **Agent** select
+    listed Codex, Claude Code, GitHub Copilot CLI, Cursor CLI, and
+    Antigravity with no status, although the **Get started** checklist marks
+    such agents "Not installed".
+  - **Fix:** Show the checklist's status in the select and disable agents
+    that are not installed, with a link to the checklist.
+  - **Done when:** An agent that cannot run is visibly marked wherever it can
+    be chosen.
+  - **Verified:** `agent-configuration.spec.ts` "agent choices show
+    installation status". **Open Get started** sits below the choices rather
+    than inside a disabled option, which could not hold a working link.
+
+- [x] **WB-33. Keep canvas cards in view after the drawer closes.**
+  - **Priority:** P2.
+  - **Spec:** [WB-33 in the handoff](workflow-builder-handoff.md#wb-33-keep-canvas-cards-in-view-after-the-drawer-closes)
+  - **Evidence:** After adding a second job and closing its drawer, both
+    cards sat cut off at the left edge of the canvas with their labels
+    hidden. The canvas follows the selected job while the drawer is open
+    (`followSelection` in `WorkflowCanvas.tsx`), which is the likely cause.
+  - **Fix:** Fit the view to the graph when the drawer closes, or keep the
+    selected card centred in the uncovered area.
+  - **Done when:** A browser test adds a job, closes the drawer, and finds
+    every card fully inside the canvas.
+  - **Verified:** `workflow-authoring.spec.ts` "closing the drawer keeps
+    every card in view".
+
+### Validation and error messages
+
+- [x] **WB-13. Name the field and suggest the closest match.**
+  - **Priority:** P0.
+  - **Spec:** [WB-13 in the handoff](workflow-builder-handoff.md#wb-13-name-the-field-and-suggest-the-closest-match)
+  - **Evidence:**
+    - `prmpt:` in an agent step reports "relay/agent@v1 has missing
+      required or unknown action inputs." (`builtins.py:49`) without naming
+      `prmpt`.
+    - `stpes:` reports "steps: Required field is missing." before
+      "stpes: Unknown workflow field.". `rnu:` and `Jobs:` behave the same
+      way.
+  - **Fix:** Name each unknown and missing input. Suggest the nearest allowed
+    key ("Did you mean `steps`?"). Report the unknown key before the missing
+    key it causes.
+  - **Done when:** Tests cover a misspelled root, job, step, and action-input
+    key.
+  - **Verified:** `test_closest_suggests_one_nearby_name` and
+    `test_unknown_keys_suggest_the_nearest_field` in
+    `tests/test_relay_language.py`; `test_action_input_errors_name_the_inputs`
+    in `tests/test_actions_builtin_contracts.py`.
+
+- [x] **WB-14. Accept one value per line for list inputs.**
+  - **Priority:** P0. **Decided** (D1): accept a JSON array string or one value
+    per line; YAML sequences stay rejected.
+  - **Spec:** [WB-14 in the handoff](workflow-builder-handoff.md#wb-14-accept-one-value-per-line-for-list-inputs)
+  - **Evidence:** `agents: [codex, claude]`, `argv: [git, status]`, and
+    `options: [yes, no]` each report "Expected a scalar string.". Starters
+    and docs write `'["codex", "claude"]'`, and
+    [Coming from GitHub Actions](coming-from-github-actions.md) shows
+    `options: '["Approve", "Reject"]'` without explaining why.
+  - **Fix:** Accept one item per line, as Relay already does for `path`,
+    `prompt-files`, and `restore-keys`, while JSON array strings keep
+    working. GitHub Actions users already write lists this way, because
+    GitHub's grammar, which Relay's schema copies, types `with` values as
+    strings. A YAML sequence gets a message naming both accepted forms.
+  - **Done when:** Each of the three inputs works in both forms, and a YAML
+    list gets the new message, with a test for each input.
+  - **Verified:** `test_list_inputs_accept_json_or_one_value_per_line` and
+    `test_list_inputs_reject_a_malformed_json_array` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_with_lists_explain_the_accepted_forms` in
+    `tests/test_relay_language.py`; `frontend/unit/list-input.spec.ts`.
+
+- [x] **WB-15. Catch literal mistakes while editing, not mid-run.**
+  - **Priority:** P0.
+  - **Spec:** [WB-15 in the handoff](workflow-builder-handoff.md#wb-15-catch-literal-mistakes-while-editing-not-mid-run)
+  - **Evidence:** Each source below validated, saved, and was committed on
+    the isolated server:
+    - `argv: git status` launched, then the step failed with "Command argv
+      must be a JSON argument vector." (`relay/execution/nodes/actions.py:900`).
+    - `shell: zsh` launched, then the step failed with "A custom shell must
+      contain exactly one {0} script placeholder."
+      (`relay/execution/action_files.py:263`).
+    - `prompt-files: prompts/missing.md` was refused at launch: "Local prompt
+      'prompts/missing.md' does not exist."
+    - `agent: chatgpt` was refused at launch: "Agent 'chatgpt' is outside
+      Relay's Phase 1 compatibility scope."
+  - **Fix:** In editor validation, parse a literal `argv` as JSON (as
+    `human_wait_options` already does for `options`), check a literal shell
+    name or `{0}` placeholder, check that literal local prompt files exist,
+    and check literal agent IDs against the supported providers. These are
+    read-only checks; keep the existing runtime checks.
+  - **Done when:** Each source above shows a line-anchored error in the
+    editor, and the runtime checks remain covered.
+  - **Verified:** `test_literal_mistakes_fail_validation`,
+    `test_literal_default_shells_fail_validation`, and
+    `test_literal_checks_accept_valid_and_runtime_values` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_validate_reports_missing_prompt_files` in
+    `tests/test_editor_recovery.py`. Runtime checks stay covered by
+    `test_builtin_runtime_errors_settle_the_step_and_keep_failure_evidence`
+    and `test_custom_shell_requires_exactly_one_placeholder`.
+
+- [x] **WB-16. Warn about references to names that do not exist.**
+  - **Priority:** P1.
+  - **Spec:** [WB-16 in the handoff](workflow-builder-handoff.md#wb-16-warn-about-references-to-names-that-do-not-exist)
+  - **Evidence:** `${{ inputs.task }}` with no `task` input,
+    `${{ steps.nope.outputs.x }}`, and `${{ needs.b.outputs.x }}` without
+    `needs: b` all validate. The first two also launched and succeeded;
+    missing properties yield the empty value. An agent step with neither
+    `prompt` nor `prompt-files` also validated, and its run succeeded. BX-33
+    promised that invalid references show the server's error inline.
+  - **Fix:** Report these as warnings rather than errors, to keep GitHub
+    Actions' empty-value semantics. Add a warning severity to diagnostics;
+    `YamlEditor.tsx` currently marks everything as an error.
+  - **Done when:** Each case shows a warning in the editor and still
+    launches.
+  - **Verified:** `tests/test_workflow_warnings.py` (each message and its
+    severity, declared names producing none, source order, bounds, and
+    unparsed matrix values);
+    `test_validate_reports_warnings_without_invalidating` in
+    `tests/test_editor_recovery.py`; `warnings appear beside the editor
+    without blocking save` in `frontend/e2e/workflow-authoring.spec.ts`; and
+    the **Open job** check for `workflow.jobs.<id>` errors in `removed
+    platform syntax blocks saving and clears when removed` in
+    `frontend/e2e/workflow-opening.spec.ts`.
+
+- [x] **WB-17. List the valid choices in errors.**
+  - **Priority:** P1.
+  - **Spec:** [WB-17 in the handoff](workflow-builder-handoff.md#wb-17-list-the-valid-choices-in-errors)
+  - **Evidence:**
+    - `type: text` on a dispatch input reports "Expected one of string."
+      The schema allows string, boolean, number, environment, and choice,
+      but `language.py:269` reports only the first `one-of` branch.
+    - `uses: relay/agent`, `relay/agent@v2`, and `actions/checkout@v4` all
+      report "Only frozen local and versioned relay actions are supported."
+      without listing them.
+    - `if: inputs.x == "y"` reports "Unexpected expression symbol." without
+      saying that strings use single quotes.
+    - A step with both `run` and `uses` reports "run: Unknown workflow
+      field."; a step with neither reports "run: Required field is
+      missing."
+  - **Fix:** Merge the constants of `one-of` alternatives into one list.
+    List the actions and suggest the closest. Say "Use single quotes for
+    strings" for a double-quoted literal. Say "A step needs either run or
+    uses" for both step-shape errors.
+  - **Done when:** Tests assert each message above.
+  - **Verified:** `test_errors_list_the_valid_choices` and
+    `test_someone_elses_action_lists_every_current_builtin` in
+    `tests/test_relay_language.py`; the existing `Expected one of` cases in
+    `tests/test_actions_language_boundaries.py` still pass.
+
+- [x] **WB-18. Give every diagnostic a location.**
+  - **Priority:** P2.
+  - **Spec:** [WB-18 in the handoff](workflow-builder-handoff.md#wb-18-give-every-diagnostic-a-location)
+  - **Evidence:** A duplicate YAML key and "with.workflow: Loop requires a
+    static reusable workflow." arrive without a line. `YamlEditor.tsx` then
+    underlines line 1 (`Number(item.context?.line) || 1`), which points at
+    the wrong place.
+  - **Fix:** Attach a line and column to these errors. When none is known,
+    show the banner without underlining line 1.
+  - **Done when:** No diagnostic in the WB validation matrix lacks a line,
+    and an unlocated diagnostic underlines nothing.
+  - **Verified:** `test_every_diagnostic_has_a_line` and
+    `test_unsupported_events_share_one_message` in
+    `tests/test_relay_language.py`;
+    `test_source_errors_point_at_the_step_that_names_them` in
+    `tests/test_editor_recovery.py`; and `workflow-opening.spec.ts`
+    "diagnostics underline their own line and never guess one". Unknown keys
+    whose value starts on the next line point at the key, not the value:
+    `test_unknown_keys_point_at_the_key_when_the_value_is_on_the_next_line`.
+
+### Help, docs, and vocabulary
+
+- [x] **WB-19. Add help buttons to job and step controls.**
+  - **Priority:** P1.
+  - **Spec:** [WB-19 in the handoff](workflow-builder-handoff.md#wb-19-add-help-buttons-to-job-and-step-controls)
+  - **Evidence:** In the job and step editor, only the agent effort select
+    (`AgentConfiguration.tsx:130`) has a help button. The **General**,
+    **Outputs**, **Environment**, and **When it fails** tabs, the step
+    fields, **Workflow settings**, and the canvas have none.
+    [Local web runtime](web-ui.md#get-started) says question-mark buttons
+    sit beside workflow controls.
+  - **Fix:** Add a help button to each field, reusing the descriptions from
+    WB-03, or correct the documentation.
+  - **Done when:** Every field in the job drawer and **Workflow settings**
+    has help, and a browser test checks a sample from each tab.
+  - **Verified:** `help-layout.spec.ts` "every job and step field has help"
+    (every tab, with a sample checked against the manifest description) and
+    "every workflow settings field has help" (both **Workflow settings**
+    dialogs).
+
+- [x] **WB-20. Write a "Build your first workflow" guide.**
+  - **Priority:** P1.
+  - **Spec:** [WB-20 in the handoff](workflow-builder-handoff.md#wb-20-write-a-build-your-first-workflow-guide)
+  - **Evidence:** [Getting started](getting-started.md) (18 lines) covers
+    running a starter, not editing one. There is no reference table of the
+    11 actions with their purpose, required inputs, and outputs;
+    [Workflows](workflows.md) describes them in prose.
+  - **Fix:** Add a guide that adds a job, an agent step, and a test command,
+    connects them, saves, runs, and fixes one validation error. Add an
+    action table derived from the action contracts and checked by
+    `scripts/check_workflow_examples.py`. Link both from the Help menu.
+  - **Done when:** A new user can follow the guide end to end on a
+    disposable repository.
+  - **Verified:** [Build your first workflow](build-your-first-workflow.md)
+    builds, runs, and fixes a two-job workflow, with an action table.
+    `first-workflow-guide.spec.ts` "following Build your first workflow
+    produces a successful run" follows its steps and labels on the isolated
+    server, matches the saved YAML, and reads the `stpes:` suggestion; "the
+    Help menu shows the guides as readable steps and tables" opens it from
+    Help. `test_action_table_matches_contracts` in
+    `tests/test_relay_language.py` compares the table with the registry and
+    the editor's step type labels, and `scripts/check_workflow_examples.py`
+    checks its examples.
+
+- [x] **WB-21. Use the YAML words in the gallery.**
+  - **Priority:** P2.
+  - **Spec:** [WB-21 in the handoff](workflow-builder-handoff.md#wb-21-use-the-yaml-words-in-the-gallery)
+  - **Evidence:** Gallery cards show inputs such as "test_runner (enum)" and
+    "agent (enum)", while the YAML says `type: choice`; `compiler.py:58`
+    maps `choice` to an internal `enum`. `docs/web-ui.md` says each card
+    shows a "job graph preview"; it is a line of job names joined by arrows.
+  - **Fix:** Show `choice` in gallery metadata, and describe the preview as
+    a job sequence.
+  - **Done when:** No gallery text uses an internal type name.
+  - **Verified:** `get-started.spec.ts` test `gallery cards show their size,
+    needs, and YAML input types` reads `Inputs: task (string), test_runner
+    (choice)` on **Implement and test** and finds no `(enum)` in the gallery.
+
+- [x] **WB-22. Label starter size and requirements.**
+  - **Priority:** P2. **Decided** (D3): keep **AI coding workflow**
+    preselected.
+  - **Spec:** [WB-22 in the handoff](workflow-builder-handoff.md#wb-22-label-starter-size-and-requirements)
+  - **Evidence:** The gallery and the checklist preselect **AI coding
+    workflow**, which has nine jobs (six phases on its card) and four
+    inputs, and requires "A coding agent and Claude Code with an Opus
+    model". **Ask an agent** needs one agent and one input.
+  - **Fix:** Label every starter with its job and approval counts, for
+    example "1 job" and "9 jobs · 3 approvals", and say under the default
+    card what it needs and which smaller starter to choose instead.
+  - **Done when:** Every card shows its size, and the default card says what
+    it needs.
+  - **Verified:**
+    `test_gallery_has_seven_templates_and_schema_defined_inputs` checks 9 jobs
+    and 3 approvals for **AI coding workflow** and 1 and 0 for **Ask an
+    agent**. `get-started.spec.ts` test `gallery cards show their size, needs,
+    and YAML input types` checks each card's size line and the default card's
+    requirement note.
+
+### First run and results
+
+- [x] **WB-24. Offer approval answers as buttons.**
+  - **Priority:** P0.
+  - **Spec:** [WB-24 in the handoff](workflow-builder-handoff.md#wb-24-offer-approval-answers-as-buttons)
+  - **Evidence:** The default starter's three approvals are free-text
+    `relay/human-wait@v1` steps without `options`, each followed by a
+    `relay/validate-input@v1` enum check (`ai-coding-workflow.yaml:71-83`).
+    The cards ask for "Reply IMPLEMENT", then "Reply FOLLOWUP" or "Reply
+    TESTS", then "Reply ACCEPT". Answering the first one with `yes` failed the
+    run with "Workflow validation failed: - input 'value' must be one of the
+    declared enum values", and all five later jobs were skipped. **Re-run
+    failed jobs** offered only "Implement · Step 2", the check rather than
+    the question, and the step page said neither what was typed nor what was
+    expected.
+  - **Fix:** Pass the allowed answers as `options` so the card shows buttons
+    and a wrong word cannot be sent. Where free text stays, check the answer
+    in the card before accepting it, and name the expected answers in any
+    later failure.
+  - **Done when:** Each starter approval offers buttons, and a browser test
+    shows that no answer can fail the run.
+  - **Verified:** `get-started.spec.ts` test `the full AI coding workflow is
+    preselected and runs from one task` answers with the **IMPLEMENT**,
+    **TESTS**, and **ACCEPT** buttons and finds no **Your response** box.
+    `Plan, approve, implement stops without implementing when Stop is chosen`
+    shows the implementation step skipped and `Stopped at plan review.` in the
+    log; `runStarter` approves with **Approve**.
+    `test_ai_starter_says_it_pushes_and_offers_approval_buttons`,
+    `test_plan_starter_offers_approve_and_stop`, and
+    `test_a_rejected_choice_names_the_allowed_values` cover the sources and the
+    new `must be one of <values>` message.
+
+- [x] **WB-25. Show the code a finished run produced.**
+  - **Priority:** P0.
+  - **Spec:** [WB-25 in the handoff](workflow-builder-handoff.md#wb-25-show-the-code-a-finished-run-produced)
+  - **Evidence:** After the guided run succeeded, its summary said "Work is
+    complete. Review the saved documents and code changes below.", but
+    **Review material** offered only five early planning documents and no
+    **Committed code changes**. The run had 320 visible artifacts; the page
+    loads the first 50, oldest first (`useRunWorkspace.tsx:237`), and
+    decides whether changes exist from that page alone
+    (`RunReviewShared.tsx:99`). The first non-empty `commits` record was the
+    74th. The summary also read "Artifacts 50"
+    (`RunSummaryOverview.tsx:75` counts loaded records). Meanwhile
+    `GET /api/runs/{id}/changes` returned the diff for `feature.py` and
+    `test_feature.py`. During the first approval the same control defaulted
+    to `INITIAL_OPUS_PLANNING_PROMPT.md`
+    (`RunReviewShared.tsx:111` picks the first loaded document), although the
+    request named three other documents.
+  - **Fix:** Decide whether changes exist from the run, not from a loaded
+    page, show the server's artifact total, and default to the documents the
+    request names or else the newest.
+  - **Done when:** A run with more than 50 artifacts shows **Committed code
+    changes** and its true artifact count without **Load more artifacts**.
+  - **Verified:** `test_monitor_reports_artifact_total_and_committed_changes`
+    checks `artifact_count`, `recorded_head`, and `has_committed_changes`.
+    `get-started.spec.ts` test `the full AI coding workflow is preselected and
+    runs from one task` finds more than 50 visible artifacts, a summary count
+    equal to the API total, and **Committed code changes** selected with a
+    diff naming `feature.py`. `unit/run-results.spec.ts` covers the default
+    selection order.
+
+- [x] **WB-26. Say where the code is and how to take it.**
+  - **Priority:** P1.
+  - **Spec:** [WB-26 in the handoff](workflow-builder-handoff.md#wb-26-say-where-the-code-is-and-how-to-take-it)
+  - **Evidence:** The guided run committed `feature.py` and `test_feature.py`
+    to `relay/run/<run id>`; `main` was unchanged, as Relay's rules require.
+    The finished page names neither that branch nor the changed files, and
+    never mentions merging. Its summary shows the source commit and `main`.
+  - **Fix:** Add a result line such as "2 files changed on branch
+    `relay/run/…`", with the commands to inspect and merge it, and point to
+    the **merge on success** option for the next run.
+  - **Done when:** A user can bring a finished run's code into their branch
+    without reading the docs.
+  - **Verified:** `test_run_changes_lists_changed_files` checks `files` and
+    `files_truncated`. The full AI coding workflow browser test reads
+    `2 files changed on branch relay/run/…`, lists `feature.py` and
+    `test_feature.py`, and shows both commands and the merge hint.
+
+- [x] **WB-27. Say plainly that the default starter pushes and opens a pull
+  request.**
+  - **Priority:** P1.
+  - **Spec:** [WB-27 in the handoff](workflow-builder-handoff.md#wb-27-say-plainly-that-the-default-starter-pushes-and-opens-a-pull-request)
+  - **Evidence:** The starter's prompts tell the agent to push the branch and
+    create a pull request with GitHub CLI when none exists
+    (`01_initial_exploration_any_model.md:548-551`). The first approval
+    mentions this only as "commits, push, and PR creation when missing",
+    next to "the locked implementation". The second asks for "explicit
+    RESOLVE and verified GitHub Viewed state" and an "explicit AGREE" per
+    follow-up item.
+  - **Fix:** State on the starter card and in the first approval that the
+    agent will push and open a pull request if the repository has a remote.
+    Rewrite the approval texts in plain words, and consider a local-only
+    input.
+  - **Done when:** A beginner can tell before approving what will leave
+    their computer.
+  - **Verified:** `test_ai_starter_says_it_pushes_and_offers_approval_buttons`
+    checks the new description and that every approval prompt says `Choose`
+    and never `Reply`; `test_ai_starter_preserves_upstream_prompt_bytes` still
+    passes.
+
+- [x] **WB-28. Use display names in run views.**
+  - **Priority:** P2.
+  - **Spec:** [WB-28 in the handoff](workflow-builder-handoff.md#wb-28-use-display-names-in-run-views)
+  - **Evidence:** While queued, the guided run's sidebar listed `refine_plan`,
+    `implement`, `review`, `refresh`, `human_review`, `tests`, and
+    `final_review`, plus loop scopes labelled `iteration` and `cycle` ("Step
+    1 › Iteration 1"). The job count changed from 9 to 11 to 15 as loop
+    scopes appeared. Commit messages read "Relay: complete job cycle". The
+    artifact table repeats one file once per scope, for example
+    `INITIAL_OPUS_PLANNING_PROMPT.md` under "Step 1", "Explore", "Read", and
+    "Instruction".
+  - **Fix:** Show each job's display name from launch, group loop scopes
+    under their job, count jobs consistently, and collapse repeated
+    artifacts to the latest copy, with the others under details.
+  - **Done when:** No generated scope name appears in the default run view.
+  - **Verified:** `test_queued_jobs_use_their_declared_names` covers queued
+    names, interpolated names, and `Round <n>`;
+    `test_a_job_commit_names_the_job` covers the commit subject, and
+    `unit/run-results.spec.ts` covers job list context names.
+    `run-presentation.spec.ts` test `run views show names, rounds, and one row
+    per file` keeps `Started manually · 9 jobs` throughout the full starter,
+    shows no `iteration` or `cycle`, and collapses
+    `INITIAL_OPUS_PLANNING_PROMPT.md` into one row with earlier copies.
+
+- [x] **WB-29. Keep the Get started prompt after the slides close.**
+  - **Priority:** P2. **Decided** (D4): keep the banner.
+  - **Spec:** [WB-29 in the handoff](workflow-builder-handoff.md#wb-29-keep-the-get-started-prompt-after-the-slides-close)
+  - **Evidence:** Pressing Escape on the welcome slides also removed the
+    **Get started** banner behind them, as
+    [Local web runtime](web-ui.md#get-started) documents. The checklist then
+    lives only under the account menu.
+  - **Fix:** Keep the banner until the checklist is opened or the banner is
+    dismissed on its own.
+  - **Done when:** Skipping the slides still leaves one visible next step.
+  - **Verified:** `onboarding.spec.ts` test `welcome navigation and keyboard
+    controls introduce features, then a skipped tour stays dismissed` finds the
+    **Welcome to Relay** prompt after the slides close and a reload, and finds
+    it gone after **Dismiss welcome** and another reload.
+
+- [x] **WB-30. Explain the optional commit in the launch dialog.**
+  - **Priority:** P2.
+  - **Spec:** [WB-30 in the handoff](workflow-builder-handoff.md#wb-30-explain-the-optional-commit-in-the-launch-dialog)
+  - **Evidence:** For a new workflow the dialog said "Project files are ready
+    to run. 1 allowed file" and still offered **Commit workflow files**,
+    which opens a separate confirmation. Nothing says whether committing is
+    needed.
+  - **Fix:** Label it as optional, explain what "allowed file" means, or
+    hide the button when the run can start without it.
+  - **Done when:** A user can tell from the dialog alone whether to commit
+    before running.
+  - **Verified:** `launch-panel.spec.ts` test `a new workflow can run without
+    committing and says the commit is optional` reads `1 new workflow file can
+    stay uncommitted` and the optional-commit text, then launches the run
+    without committing.
+
+### Coming from GitHub Actions
+
+Much carries over unchanged and validated as written: `jobs`, `steps`,
+`needs`, `if` with `success()`, `failure()`, and `always()`, `env`, job and
+step outputs, static matrices with `include` and `exclude`,
+`timeout-minutes`, `continue-on-error`, `defaults.run`, `workflow_dispatch`
+inputs including `choice`, `workflow_call`, `schedule`, `push` filters,
+`concurrency`, and `environment`. Default shells match GitHub's (`bash -e`,
+or `bash --noprofile --norc -eo pipefail` when named; `pwsh` on Windows),
+and expressions use GitHub's own grammar and fixtures. The gaps below are
+where that familiarity stops, usually without saying so.
+
+- [x] **WB-34. Point `github` and `runner` expressions to their Relay
+  names.**
+  - **Priority:** P0.
+  - **Spec:** [WB-34 in the handoff](workflow-builder-handoff.md#wb-34-point-github-and-runner-expressions-to-their-relay-names)
+  - **Evidence:** `${{ github.sha }}`, `github.ref_name`, `github.event_name`,
+    `github.workspace`, `github.actor` in `run-name`, `github.workflow` in a
+    concurrency group, and `github.event.inputs.task` all report
+    "Unrecognized named-value: github."; `runner.os` reports the same for
+    `runner`. The replacements exist: `relay` offers `sha`, `ref_name`,
+    `event_name`, `workspace`, `actor`, and `workflow`, and `host` offers
+    `os`. Nearly every GitHub workflow uses at least one of these.
+  - **Fix:** Replace the bare error with the Relay name, for example "Use
+    `relay.sha`", and suggest `inputs.task` for `github.event.inputs.task`.
+    Add the mapping to completion (WB-01).
+  - **Done when:** Each `github.*` and `runner.*` property that has a Relay
+    equivalent produces a message naming it.
+  - **Verified:** `test_platform_names_point_to_relay_names` and
+    `test_platform_expression_roots_and_placeholders_are_removed` in
+    `tests/test_relay_language.py`. Completion offers the Relay name for a
+    `github.*` or `runner.*` name typed in an expression (WB-01): "expression
+    completion offers names valid in the expression" in
+    `frontend/unit/yaml-completion.spec.ts`.
+
+- [x] **WB-35. Reject the GitHub file variables in scripts.**
+  - **Priority:** P0. **Decided** (D2): a hard validation error; no warning,
+    no alias, and messages name only the `RELAY_*` variable.
+  - **Spec:** [WB-35 in the handoff](workflow-builder-handoff.md#wb-35-reject-the-github-file-variables-in-scripts)
+  - **Evidence:** A job that sets an output with
+    `echo "version=1.2.3" >> "$GITHUB_OUTPUT"` validated, launched, and
+    failed with "script.sh: line 1: : No such file or directory"; the
+    dependent job was skipped. `$GITHUB_ENV` failed the same way. The same
+    workflow using `$RELAY_OUTPUT` succeeded. The
+    [language audit](workflow-language-compatibility.md) records that no
+    `GITHUB_*` alias is provided, but nothing tells the user.
+  - **Fix:** Fail validation when a `run` script names `GITHUB_OUTPUT`,
+    `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STATE`, or `GITHUB_STEP_SUMMARY`,
+    naming the `RELAY_*` variable to use. Treat `RELAY_*` as the only names
+    that have ever existed.
+  - **Done when:** Each of the five names is a validation error naming its
+    `RELAY_*` variable.
+  - **Verified:** `test_unknown_file_variables_are_rejected` and
+    `test_relay_file_variables_and_other_github_names_validate` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-36. Say what replaces each common GitHub action.**
+  - **Priority:** P1.
+  - **Spec:** [WB-36 in the handoff](workflow-builder-handoff.md#wb-36-say-what-replaces-each-common-github-action)
+  - **Evidence:** `actions/checkout@v4`, `actions/setup-python@v5`,
+    `actions/upload-artifact@v4`, `actions/cache@v4`, `docker://alpine:3.20`,
+    and `./.github/actions/setup` all report "Only frozen local and
+    versioned relay actions are supported.". Yet checkout is unnecessary,
+    because jobs already run in a copy of the repository.
+    `relay/upload-artifact@v1` and `relay/cache@v1` accept the same core
+    inputs (`name`, `path`, `retention-days`; `key`, `path`,
+    `restore-keys`), and local actions work under `./.relay/actions/`
+    (`language.py:388`). In a file with two rejected actions, both errors
+    name `steps[0]`; the second is `steps[1]` on the reported line.
+  - **Fix:** Give specific guidance: remove checkout, use the installed
+    toolchain instead of `setup-*`, switch to the matching `relay/*@v1`
+    action, or move local actions to `./.relay/actions/`. Otherwise list the
+    built-in actions (WB-17). Report each step's real index.
+  - **Done when:** Each action above produces its specific guidance with the
+    correct step path.
+  - **Verified:** `test_common_actions_get_specific_guidance` and
+    `test_each_rejected_step_reports_its_own_index` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-37. Help an existing GitHub workflow become a Relay workflow.**
+  - **Priority:** P1.
+  - **Spec:** [WB-37 in the handoff](workflow-builder-handoff.md#wb-37-import-an-existing-github-workflow)
+  - **Evidence:** A typical 15-line CI file (`push` and `pull_request`,
+    `runs-on`, checkout, `setup-python`, two `run` steps) produced four
+    errors. Removing those four things (six lines) made it valid; the `run`
+    steps needed no change. The `runs-on` message says "select an agent in
+    the step", which misleads for a job that only runs tests. Relay reads only
+    `.relay/workflows/`; nothing imports from `.github/workflows/`.
+  - **Fix:** Offer **Import from GitHub Actions**: copy a chosen
+    `.github/workflows` file, remove or translate the known fields, and show
+    what changed before saving. Reword `runs-on`: "Jobs run on this
+    computer. Remove `runs-on`. To have an AI agent do the work, add a
+    `relay/agent@v1` step."
+  - **Done when:** Importing the CI file above yields a valid workflow and a
+    list of every change made.
+  - **Verified:** `test_typical_ci_converts_to_a_valid_workflow`,
+    `test_every_rule_reports_its_change_once`, the path-safety tests
+    `test_import_refuses_paths_that_leave_the_folder` and
+    `test_import_refuses_a_symlinked_file` in `tests/test_workflow_import.py`,
+    and `frontend/e2e/workflow-import.spec.ts`. The `runs-on` message now
+    reads as the Fix asks, checked by
+    `test_runner_selector_points_to_the_agent_action` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-38. Answer every unsupported trigger the same way.**
+  - **Priority:** P2.
+  - **Spec:** [WB-38 in the handoff](workflow-builder-handoff.md#wb-38-answer-every-unsupported-trigger-the-same-way)
+  - **Evidence:** `on: pull_request_target` reports "Expected one of
+    workflow_dispatch, workflow_call, schedule, push, repository_dispatch,
+    workflow_run.", but `pull_request:` inside an `on:` mapping reports only
+    "workflow.on.pull_request: Unknown workflow field." on the line after
+    it.
+  - **Fix:** List the supported events for both forms, say that pull
+    request events have no local equivalent, and point at the key's own
+    line.
+  - **Done when:** The scalar, list, and mapping forms of an unsupported
+    event produce the same message on the right line.
+  - **Verified:** `test_unsupported_events_share_one_message` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-39. Explain how to build a matrix from an expression.**
+  - **Priority:** P2. Default (D5): message only.
+  - **Spec:** [WB-39 in the handoff](workflow-builder-handoff.md#wb-39-explain-how-to-build-a-matrix-from-an-expression)
+  - **Evidence:** `matrix: {v: ${{ fromJSON('["a","b"]') }}}` reports "A
+    matrix axis must be a nonempty sequence.". GitHub documents this form,
+    for example `color: ${{ fromJSON(needs.define-matrix.outputs.colors) }}`.
+    Relay documents only a whole-object dynamic matrix
+    ([Workflows](workflows.md#matrix-jobs)).
+  - **Fix:** Say "To build the matrix from an expression, set the whole
+    matrix: `matrix: ${{ fromJSON(...) }}`". Per-axis expressions are not
+    added.
+  - **Done when:** The message shows the accepted form.
+  - **Verified:** `test_expression_axis_explains_the_whole_matrix_form` in
+    `tests/test_relay_language.py`.
+
+- [x] **WB-40. Warn about secrets that are never bound.**
+  - **Priority:** P1. Default (D6): one generic warning for every name.
+  - **Spec:** [WB-40 in the handoff](workflow-builder-handoff.md#wb-40-warn-about-secrets-that-are-never-bound)
+  - **Evidence:** `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` validated and ran.
+    The step printed "token length 0", and the run succeeded. Relay issues
+    no GitHub token
+    ([language audit](workflow-language-compatibility.md)), so a GitHub user
+    gets an empty credential with no warning.
+  - **Fix:** At launch, warn about each referenced secret without a binding,
+    `GITHUB_TOKEN` included, and say where to add it.
+  - **Done when:** Launching with an unbound secret shows a warning naming
+    it.
+  - **Verified:** `test_preflight_warns_about_unbound_secrets` in
+    `tests/test_launch_preflight.py`;
+    `test_referenced_secrets_are_literal_names_per_job` in
+    `tests/test_workflow_warnings.py`; `an unbound secret shows a warning and
+    the workflow still runs` in `frontend/e2e/launch-panel.spec.ts`.
+
+- [x] **WB-41. Complete the GitHub Actions mapping in the guide.**
+  - **Priority:** P1.
+  - **Spec:** [WB-41 in the handoff](workflow-builder-handoff.md#wb-41-complete-the-github-actions-mapping-in-the-guide)
+  - **Evidence:** [Coming from GitHub Actions](coming-from-github-actions.md)
+    maps eight concepts. It omits `github` to `relay`, `runner` to `host`,
+    the `RELAY_*` file variables, checkout and `setup-*`, the artifact
+    and cache actions, `.github/workflows` to `.relay/workflows`, local
+    action paths, unsupported pull request events, and list inputs.
+  - **Fix:** Add those rows, with a before-and-after version of the CI file
+    from WB-37. Check the examples with
+    `scripts/check_workflow_examples.py`.
+  - **Done when:** Every GitHub construct named in WB-34 to WB-40 appears in
+    the guide with its Relay equivalent or "not supported".
+  - **Verified:** [Coming from GitHub Actions](coming-from-github-actions.md)
+    maps every construct from WB-34 to WB-40 and shows the WB-37 CI file
+    before (`invalid github-ci`) and after import (`valid imported-ci`),
+    checked by `scripts/check_workflow_examples.py`. The Help dialog renders
+    its escaped `|` cell in "the Help menu shows the guides as readable steps
+    and tables" in `first-workflow-guide.spec.ts`.
+
+### Accessibility
+
+- [x] **WB-23. Name the job settings drawer.**
+  - **Priority:** P2.
+  - **Spec:** [WB-23 in the handoff](workflow-builder-handoff.md#wb-23-name-the-job-settings-drawer)
+  - **Evidence:** axe-core 4 reports `aria-dialog-name` (serious) on the job
+    settings drawer, an MUI `role="dialog"` with no `aria-label` or
+    `aria-labelledby`. The editor page itself has no violations. BX-31
+    requires no serious axe issues.
+  - **Fix:** Point `aria-labelledby` at the **Job settings** heading and
+    include the job name.
+  - **Done when:** axe passes with the drawer open, and browser tests find
+    the drawer by its name.
+  - **Verified:** `accessibility.spec.ts` "the job settings drawer has an
+    accessible name"; `openJobSettings` in `frontend/e2e/setup-helpers.ts`
+    finds the drawer by that name.
+
+### Suggested order for these findings
+
+1. WB-24, WB-25: a first run cannot fail on a typed word, and its result is
+   visible.
+2. WB-06, WB-07, WB-15, WB-35: the editor stops saying one thing while the
+   workflow does another.
+3. WB-34, WB-36, WB-37, WB-40, WB-41: a GitHub Actions user knows what to
+   change.
+4. WB-26, WB-27, WB-31: the user knows where the code is, what leaves their
+   computer, and which job is which.
+5. WB-01, WB-02, WB-03, WB-13, WB-14: YAML help and errors that teach the
+   schema.
+6. WB-08 to WB-12 and WB-19: a visual editor that starts simple.
+7. WB-04, WB-05, WB-16, WB-17, WB-20: keyboard, empty state, warnings, and
+   the guide.
+8. WB-18, WB-21 to WB-23, WB-28 to WB-30, WB-32, WB-33, WB-38, WB-39.
+
+## Built-in action versions
+
+Raised on 2026-10-18 while reviewing whether built-in actions need versions.
+Every built-in action is still `@v1`, so Relay has nothing to run side by
+side yet. The owner decided (D11 in the handoff) to make a second version
+cheap now and to build side-by-side support at the first breaking change.
+Item numbers use the `AV` prefix. All four are built. AV-02 to AV-04 are
+proven with a stand-in second version in the tests and wait for the first real
+breaking change to a built-in.
+
+The [implementation handoff](workflow-builder-handoff.md#built-in-action-version-items)
+specifies each item. Its delivery plan builds AV-01 before the builder work
+(PR R) and leaves the others to PRs V and W.
+
+**Status:** all four items are implemented on pull request #26. AV-02 to
+AV-04 were built ahead of their trigger at the owner's request and are proven
+with a stand-in version that only tests register.
+
+- [x] **AV-01. Keep every built-in action in one versioned registry.**
+  - **Priority:** P1.
+  - **Spec:** [AV-01 in the handoff](workflow-builder-handoff.md#av-01-keep-every-built-in-action-in-one-versioned-registry)
+  - **Evidence:** The 11 built-in actions are spelled as literal
+    `relay/<name>@v1` strings: 56 in 10 Python files and 18 in 6 frontend
+    files. Five of the Python sites read persisted run rows, including the
+    database filter at `repositories.py:2352` that finds agent attempts lost
+    with their worker. A launch snapshot records the Relay version
+    (`snapshot.py:74`), but nothing reads it on resume, so a run's launch
+    version is protected only by `@v1` never changing.
+  - **Fix:** Keep one registry of `BuiltinAction` entries (name, major
+    version, inputs, status) in `builtins.py`, with lookup helpers in Python
+    and the browser. Every site compares action names through them, and a
+    test fails when a reference is spelled anywhere else. Document what
+    counts as a breaking change.
+  - **Done when:** No `@v1` string remains outside the registry, starters,
+    tests, and docs, and every existing test passes unchanged.
+  - **Verified:** `test_registry_holds_one_current_version_per_action`,
+    `test_builtin_reference_helpers`,
+    `test_no_builtin_reference_is_spelled_outside_the_registry`, and
+    `test_an_unregistered_version_never_runs` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_starters_use_current_builtin_versions` in
+    `tests/test_workflow_starters.py`;
+    `test_manifest_describes_builtin_versions` in
+    `tests/test_relay_language.py`; and `frontend/unit/builtin-actions.spec.ts`.
+
+- [x] **AV-02. Run two versions of a built-in action side by side.**
+  - **Priority:** P2 until triggered. **Trigger:** the first breaking change
+    to a built-in action.
+  - **Spec:** [AV-02 in the handoff](workflow-builder-handoff.md#av-02-run-two-versions-of-a-built-in-action-side-by-side)
+  - **Evidence:** Today a breaking change can only edit `@v1` in place.
+    Saved workflows, and runs paused for an approval, would change behavior
+    under the owner after an upgrade.
+  - **Fix:** Add the new major version beside the old one, mark the old one
+    deprecated, and branch on the major version only where behavior
+    differs. Warn on deprecated steps without blocking save, and offer only
+    the current version for new steps.
+  - **Done when:** A workflow on the old version validates with a warning
+    and runs, and a run paused across the upgrade finishes on its launch
+    version.
+  - **Status:** The mechanism is built and proven with a stand-in
+    `relay/command@v2` that only the tests register. No shipped action has a
+    second version yet, so the step that moves starters and examples to a new
+    version waits for the first real breaking change.
+  - **Verified:** `test_a_deprecated_version_validates_with_a_warning`,
+    `test_deprecated_steps_in_action_metadata_name_their_file`,
+    `test_the_manifest_offers_only_the_current_version`,
+    `test_a_deprecated_version_launches_and_runs`, and
+    `test_a_run_paused_before_an_upgrade_finishes_on_its_version` in
+    `tests/test_actions_builtin_versions.py`;
+    `test_validate_reports_deprecated_builtins_in_captured_sources` in
+    `tests/test_editor_recovery.py`; `isDeprecatedBuiltin` in
+    `frontend/unit/builtin-actions.spec.ts`; and
+    `a deprecated step shows the older-version notice` in
+    `frontend/e2e/workflow-authoring.spec.ts`, which registers the stand-in
+    through `/__test__/builtin-versions`.
+
+- [x] **AV-03. Update a workflow to the current version in one click.**
+  - **Priority:** P2 until triggered. **Trigger:** ships with AV-02.
+  - **Spec:** [AV-03 in the handoff](workflow-builder-handoff.md#av-03-update-a-workflow-to-the-current-version-in-one-click)
+  - **Evidence:** Fixing each deprecation warning by hand means knowing
+    exactly which inputs changed between versions.
+  - **Fix:** Each new version declares how to convert the previous version's
+    inputs. **Update to current versions** rewrites the open workflow as an
+    unsaved draft and lists every change and every step left for the owner.
+  - **Done when:** One click moves every deprecated step, Undo reverts it,
+    and nothing is saved automatically.
+  - **Status:** The mechanism is built and proven with the stand-in
+    `relay/command@v2` and its test conversions. The first real new version
+    supplies its own `upgrade`.
+  - **Verified:** `test_upgrade_moves_deprecated_steps_and_keeps_comments`,
+    `test_upgrade_applies_each_conversion_and_lists_what_it_changed`,
+    `test_upgrade_leaves_a_step_it_cannot_convert`,
+    `test_upgrade_needs_a_conversion_into_every_newer_version`, and
+    `test_upgrade_returns_an_up_to_date_source_unchanged` in
+    `tests/test_actions_builtin_versions.py`;
+    `test_registry_holds_one_current_version_per_action` in
+    `tests/test_actions_builtin_contracts.py`;
+    `test_actions_owner_endpoints_keep_csrf_in_both_login_modes` in
+    `tests/test_web_api.py`; and
+    `update to current versions rewrites the draft` in
+    `frontend/e2e/workflow-authoring.spec.ts`.
+
+- [x] **AV-04. Remove a deprecated version safely.**
+  - **Priority:** P2 until triggered. **Trigger:** the deprecation period
+    has passed: the release that deprecated the version and the next minor
+    release (D13).
+  - **Spec:** [AV-04 in the handoff](workflow-builder-handoff.md#av-04-remove-a-deprecated-version-safely)
+  - **Evidence:** Without guidance, a removed reference would report only
+    "Only frozen local and versioned relay actions are supported.", and a
+    paused run's next step would reach code that no longer handles it.
+  - **Fix:** Give removed references their own validation error that names
+    the replacement and offers the one-click update. Fail a paused run's
+    step on a removed version with an explanation, and never run the
+    replacement in its place.
+  - **Done when:** Both failures name the replacement, and nothing runs in
+    place of the removed version.
+  - **Status:** The mechanism is built and proven with the stand-in
+    `relay/command@v2` replacing a removed `relay/command@v1`.
+    `REMOVED_BUILTINS` is empty until a real version completes its D13
+    deprecation period.
+  - **Verified:** `test_a_removed_version_names_its_replacement`,
+    `test_a_paused_run_fails_clearly_when_its_version_was_removed`,
+    `test_the_upgrader_converts_a_removed_version`, and
+    `test_removed_references_still_classify_persisted_rows` in
+    `tests/test_actions_builtin_versions.py`; and
+    `a removed version names its replacement and updates in one click` in
+    `frontend/e2e/workflow-authoring.spec.ts`.

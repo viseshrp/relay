@@ -46,7 +46,7 @@ the files directly from the installed package.
 The source-distribution target includes `frontend/**`, `hatch_build.py`, the
 Python package, and package metadata. In particular, it carries both
 `frontend/package.json` and `frontend/package-lock.json`. It does not run npm
-during source-distribution assembly. The three Markdown guides imported by
+during source-distribution assembly. The four Markdown guides imported by
 `HelpGuides.tsx` also ship as build inputs so the installed browser can display
 its in-app help without fetching external documentation.
 Installed frontend dependencies, browser test reports, and generated static
@@ -237,3 +237,10 @@ rather than the pushed digest. `make docker-publish-manifest` then tags
   release tag, the nightly image carries that release version.
 - Published GitHub releases (`release: [published]`, created after the tag test
   suite succeeds) publish `:vX.Y.Z`, `:X.Y.Z`, and `:latest`.
+
+Publishing jobs log in to GHCR with the `GHCR_TOKEN` repository secret when it
+is set, and otherwise with the workflow's `GITHUB_TOKEN`. `GITHUB_TOKEN` can
+push only when the `relay` package grants this repository write access under
+its "Manage Actions access" settings; a package first pushed from outside
+Actions rejects it with `permission_denied`. `GHCR_TOKEN` is then a classic
+personal access token with `write:packages` scope for the package owner.

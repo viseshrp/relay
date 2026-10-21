@@ -10,6 +10,8 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflow-language", actions_language.manifest),
     path("api/workflow-library", actions_language.library),
     path("api/workflow-language/validate", actions_language.validate),
+    path("api/workflow-language/upgrade", actions_language.upgrade),
+    path("api/workflow-import", actions_language.workflow_import, name="workflow-import"),
     path("api/workflow-bindings", actions_language.bindings),
     path("api/workflow-environments", actions_language.environments),
     path("api/workflow-triggers", actions_language.triggers),

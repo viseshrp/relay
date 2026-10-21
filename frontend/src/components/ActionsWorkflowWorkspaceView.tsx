@@ -25,6 +25,39 @@ import { formatWorkflowYaml } from "../source-format";
 import { WorkflowSidebar } from "./WorkflowSidebar";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
+import {
+  VALIDATION_STATUS,
+  type Diagnostic,
+} from "./ActionsWorkflowWorkspaceShared";
+
+// Schema errors name fields from workflow.jobs; other diagnostics from jobs.
+const JOB_FIELD = /^(?:workflow\.)?jobs\.([^.[]+)/;
+
+function DiagnosticAlert({
+  item,
+  severity,
+  onOpenJob,
+}: {
+  item: Diagnostic;
+  severity: "error" | "warning";
+  onOpenJob: (job: string) => void;
+}) {
+  const job = item.context?.field?.match(JOB_FIELD)?.[1];
+  return (
+    <Alert
+      severity={severity}
+      action={
+        job ? (
+          <Button onClick={() => onOpenJob(job)}>Open job</Button>
+        ) : undefined
+      }
+    >
+      {item.context?.line ? `Line ${item.context.line}: ` : ""}
+      {item.message}
+    </Alert>
+  );
+}
+
 export function ActionsWorkflowWorkspaceView({
   state,
 }: {
@@ -42,7 +75,7 @@ export function ActionsWorkflowWorkspaceView({
     parsed,
     disabled,
     lease,
-    valid,
+    validation,
     text,
     saved,
     promptEdits,
@@ -68,10 +101,17 @@ export function ActionsWorkflowWorkspaceView({
     error,
     draft,
     diagnostics,
+    warnings,
+    outdated,
+    upgradeVersions,
     setJobId,
     setDrawer,
   } = state;
   const [notesOpen, setNotesOpen] = useState(false);
+  const openJob = (job: string) => {
+    setJobId(job);
+    setDrawer(true);
+  };
   if (
     (!state.inventoryLoaded || !manifest || (key && !state.loadedDocument)) &&
     !error
@@ -186,11 +226,7 @@ export function ActionsWorkflowWorkspaceView({
           onEnvironments={setEnvironments}
         />
         <Typography>
-          {lease && valid
-            ? "Ready to edit"
-            : lease
-              ? "Validating workflow…"
-              : "Connecting editor…"}
+          {lease ? VALIDATION_STATUS[validation] : "Connecting editor…"}
         </Typography>
         {notice && <Alert severity="success">{notice}</Alert>}
         {inventoryWarning && (
@@ -237,28 +273,32 @@ export function ActionsWorkflowWorkspaceView({
             </Box>
           </Alert>
         )}
-        {diagnostics.map((item, i) => (
-          <Alert
-            severity="error"
-            key={i}
-            action={
-              item.context?.field?.match(/^jobs\.([^.[]+)/) ? (
-                <Button
-                  onClick={() => {
-                    setJobId(item.context!.field!.match(/^jobs\.([^.[]+)/)![1]);
-                    setDrawer(true);
-                  }}
-                >
-                  Open job
-                </Button>
-              ) : undefined
-            }
-          >
-            {item.context?.line ? `Line ${item.context.line}: ` : ""}
-            {item.message}
-          </Alert>
+        {outdated && (
+          <Box>
+            <Button variant="outlined" onClick={() => void upgradeVersions()}>
+              Update to current versions
+            </Button>
+          </Box>
+        )}
+        {/* An empty source explains itself beside its fixes, below. */}
+        {validation !== "empty" &&
+          diagnostics.map((item, i) => (
+            <DiagnosticAlert
+              key={`error-${i}`}
+              item={item}
+              severity="error"
+              onOpenJob={openJob}
+            />
+          ))}
+        {warnings.map((item, i) => (
+          <DiagnosticAlert
+            key={`warning-${i}`}
+            item={item}
+            severity="warning"
+            onOpenJob={openJob}
+          />
         ))}
-        {key && !text && !error ? (
+        {key && !text && !error && validation !== "empty" ? (
           <ViewSkeleton view="workflows" header={false} />
         ) : (
           <WorkflowCanvas state={state} />

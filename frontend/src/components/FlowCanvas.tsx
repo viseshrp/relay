@@ -63,6 +63,18 @@ function FocusStep({
   return null;
 }
 
+/** Fit every card in view once the drawer stops covering the canvas. */
+function RefitAfterFollow({ follow }: { follow: boolean }) {
+  const { fitView } = useReactFlow();
+  const followed = useRef(follow);
+  useEffect(() => {
+    if (followed.current && !follow)
+      void fitView({ padding: 0.1, minZoom: 0.25, maxZoom: 1, duration: 0 });
+    followed.current = follow;
+  }, [follow, fitView]);
+  return null;
+}
+
 function InitialViewport({
   container,
   runMode,
@@ -235,6 +247,7 @@ export function FlowCanvas({
         maxZoom={1.75}
       >
         <InitialViewport container={container} runMode={runMode} />
+        {!runMode && <RefitAfterFollow follow={followSelection} />}
         {/* Authoring can focus a stage while retaining manually dragged positions. */}
         {(followSelection || initialFocusId) && (
           <FocusStep

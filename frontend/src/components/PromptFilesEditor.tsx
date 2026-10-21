@@ -9,6 +9,7 @@ import {
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
+import { HelpLabel, type HelpSource } from "./HelpTip";
 import { MarkdownEditor } from "./MarkdownEditor";
 type ReadResponse1 = { prompts: Array<{ reference: string }> };
 type ReadResponse2 = { reference: string; text: string; base_hash: string };
@@ -25,7 +26,9 @@ export function PromptFilesEditor({
   edits,
   onEdits,
   onReferences,
+  help,
 }: {
+  help?: HelpSource;
   references: string;
   workflowKey: string;
   project: string | null;
@@ -93,9 +96,14 @@ export function PromptFilesEditor({
   const document =
     edits[selected] ?? (loaded?.reference === selected ? loaded : null);
   return (
-    <Stack spacing={1.5}>
+    // The help for the prompt files also covers the controls that add them.
+    <Stack spacing={1.5} className={help ? "help-group" : undefined}>
       <Typography component="h3" variant="subtitle1">
-        Ordered prompt files
+        {help ? (
+          <HelpLabel topic={help}>Ordered prompt files</HelpLabel>
+        ) : (
+          "Ordered prompt files"
+        )}
       </Typography>
       <Stack component="ol" spacing={1} sx={{ p: 0, listStyle: "none" }}>
         {refs.map((reference, index) => (

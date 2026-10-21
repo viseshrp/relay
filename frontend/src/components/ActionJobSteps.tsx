@@ -3,13 +3,22 @@ import {
   Button,
   Checkbox,
   FormControlLabel,
+  ListItemText,
   MenuItem,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
+import { useState } from "react";
 
 import { ActionBuiltinFields } from "./ActionBuiltinFields";
+import { actionLabel, actionName, actionType } from "../action-labels";
+import { defaultStep } from "../action-defaults";
+import { isDeprecatedBuiltin } from "../builtin-actions";
+import { propertyHelp, stepHelp } from "../field-help";
+import { HelpControl, HelpSelectField, HelpTextField } from "./HelpTip";
+import { LoopWorkflowDialog } from "./LoopWorkflowDialog";
+import { StepAdvanced, StepList } from "./StepList";
+import { groupedTypeOptions, typeReference } from "./StepTypeOptions";
 
 import { StructuredValueField } from "./StructuredValueField";
 
@@ -27,6 +36,7 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
     jobId,
     manifest,
     agents,
+    preferences,
     defaults,
     defaultModel,
     project,
@@ -35,43 +45,80 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
     edits,
     onEdits,
     input,
-    suggestions,
+    stepSuggestions,
     onMove,
+    loopTargets,
+    onEditYaml,
+    onUpgrade,
+    onOpenGetStarted,
   } = state;
+  // Where a chosen loop goes: in place of the current step, or at the end.
+  const [loop, setLoop] = useState<"replace" | "append" | null>(null);
+  const steps = job.steps ?? [];
+  const current = Math.min(index, steps.length - 1);
+  const uses = step?.uses;
+  // An older version keeps its own item, so the select shows what the step runs.
+  const older = isDeprecatedBuiltin(manifest, uses);
+  const stepType = older
+    ? `${actionLabel(uses)} (older version)`
+    : actionLabel(uses);
+  const help = (property: string, title: string) =>
+    stepHelp(manifest, uses, property, title);
+  function replaceStep(reference: string, workflow?: string): void {
+    change(["jobs", jobId, "steps", index], {
+      name: step?.name,
+      id: step?.id,
+      ...defaultStep(reference, workflow),
+    });
+  }
+  function appendStep(reference: string, workflow?: string): void {
+    change(
+      ["jobs", jobId, "steps", steps.length],
+      defaultStep(reference, workflow),
+    );
+    onIndex(steps.length);
+  }
   return (
     <Stack spacing={2}>
       {job.uses ? (
         <StructuredValueField
           label="Reusable inputs"
+          help={propertyHelp(
+            manifest,
+            "workflow-job.with",
+            "Reusable inputs",
+            "reusable-workflows-and-local-actions",
+          )}
           value={job.with}
           object
           onChange={(value) => field("with", value)}
         />
       ) : (
         <>
-          <TextField
-            select
-            label="Ordered step"
-            value={Math.min(index, (job.steps?.length ?? 1) - 1)}
-            onChange={(event) => onIndex(Number(event.target.value))}
-          >
-            {job.steps?.map((item, offset) => (
-              <MenuItem key={offset} value={offset}>
-                {offset + 1}.{" "}
-                {item.name || item.id || item.uses || "Run script"}
-              </MenuItem>
-            ))}
-          </TextField>
+          <StepList
+            steps={steps}
+            current={current}
+            manifest={manifest}
+            loopAvailable={loopTargets.length > 0}
+            onIndex={onIndex}
+            onMove={onMove}
+            onAdd={(name) => {
+              if (name === "loop") setLoop("append");
+              else appendStep(typeReference(manifest, name));
+            }}
+          />
           {step && (
             <>
-              <TextField
+              <HelpTextField
+                topic={help("id", "Step ID")}
                 label="Step ID"
                 value={step.id ?? ""}
                 onChange={(event) =>
                   stepField("id", event.target.value || undefined)
                 }
               />
-              <TextField
+              <HelpTextField
+                topic={help("name", "Step name")}
                 label="Step name"
                 slotProps={{ htmlInput: { maxLength: 256 } }}
                 value={step.name ?? ""}
@@ -79,66 +126,42 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                   stepField("name", event.target.value || undefined)
                 }
               />
-              <TextField
-                select
+              <HelpSelectField
+                topic={propertyHelp(manifest, "regular-step.uses", "Step type")}
                 label="Step type"
-                value={step.uses ?? "script"}
-                onChange={(event) =>
-                  change(
-                    ["jobs", jobId, "steps", index],
-                    event.target.value === "script"
-                      ? {
-                          name: step.name,
-                          id: step.id,
-                          run: "echo Ready",
-                        }
-                      : {
-                          name: step.name,
-                          id: step.id,
-                          uses: event.target.value,
-                          with: Object.fromEntries(
-                            (
-                              manifest.builtin_inputs[event.target.value]
-                                ?.required ?? []
-                            ).map((key) => [
-                              key,
-                              key === "max-iterations" ? "3" : "",
-                            ]),
-                          ),
-                        },
-                  )
-                }
+                width="wide"
+                value={older ? step.uses : actionName(step.uses)}
+                renderValue={() => stepType}
+                onChange={(event) => {
+                  const name = String(event.target.value);
+                  if (name === step.uses) return;
+                  if (name === "loop") setLoop("replace");
+                  else replaceStep(typeReference(manifest, name));
+                }}
               >
-                <MenuItem value="script">Run a script</MenuItem>
-                {manifest.builtins.map((reference) => (
-                  <MenuItem key={reference} value={reference}>
-                    {reference.replace("relay/", "").replace("@v1", "")}
+                {groupedTypeOptions(manifest, loopTargets.length > 0)}
+                {older && (
+                  <MenuItem value={step.uses}>
+                    <ListItemText
+                      primary={stepType}
+                      secondary={actionType(step.uses)?.description}
+                    />
                   </MenuItem>
-                ))}
-                {step.uses?.startsWith("./") && (
-                  <MenuItem value={step.uses}>{step.uses}</MenuItem>
                 )}
-              </TextField>
-              <TextField
-                label="Action reference"
-                value={step.uses ?? ""}
-                onChange={(event) =>
-                  change(
-                    ["jobs", jobId, "steps", index],
-                    event.target.value
-                      ? {
-                          ...step,
-                          uses: event.target.value,
-                          run: undefined,
-                        }
-                      : { ...step, uses: undefined, run: "echo Ready" },
-                  )
-                }
-              />
+                {actionName(step.uses) === "local" && (
+                  <MenuItem value="local">
+                    <ListItemText
+                      primary={actionLabel(step.uses)}
+                      secondary={actionType(step.uses)?.description}
+                    />
+                  </MenuItem>
+                )}
+              </HelpSelectField>
               {step.uses ? (
                 <ActionBuiltinFields
                   step={step}
                   agents={agents}
+                  preferences={preferences}
                   defaults={defaults}
                   defaultModel={defaultModel}
                   manifest={manifest}
@@ -149,6 +172,9 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                   edits={edits}
                   onEdits={onEdits}
                   onChange={input}
+                  onEditYaml={onEditYaml}
+                  onUpgrade={onUpgrade}
+                  onOpenGetStarted={onOpenGetStarted}
                 />
               ) : (
                 <>
@@ -156,14 +182,18 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                     value={step.run ?? ""}
                     shell={step.shell}
                     manifest={manifest}
+                    help={help("run", "Script")}
                     onChange={(value) => stepField("run", value)}
                   />
-                  <TextField
-                    select
+                  <HelpSelectField
+                    topic={help("shell", "Shell")}
                     label="Shell"
                     value={step.shell ?? ""}
                     onChange={(event) =>
-                      stepField("shell", event.target.value || undefined)
+                      stepField(
+                        "shell",
+                        String(event.target.value) || undefined,
+                      )
                     }
                   >
                     <MenuItem value="">Host default</MenuItem>
@@ -174,8 +204,9 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                         </MenuItem>
                       ),
                     )}
-                  </TextField>
-                  <TextField
+                  </HelpSelectField>
+                  <HelpTextField
+                    topic={help("working-directory", "Working directory")}
                     label="Working directory"
                     value={step["working-directory"] ?? ""}
                     onChange={(event) =>
@@ -193,11 +224,16 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
               )}
               <ExpressionField
                 label="Step condition"
+                help={help("if", "Step condition")}
                 value={step.if ?? ""}
-                suggestions={suggestions}
+                suggestions={stepSuggestions}
                 onChange={(value) => stepField("if", value || undefined)}
               />
-              <TextField
+              <HelpTextField
+                topic={help(
+                  "timeout-minutes",
+                  "Timeout (minutes or expression)",
+                )}
                 label="Timeout (minutes or expression)"
                 value={step["timeout-minutes"] ?? ""}
                 onChange={(event) =>
@@ -213,20 +249,34 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
               />
               <StructuredValueField
                 label="Step environment variables"
+                help={help("env", "Step environment variables")}
                 object
                 value={step.env}
                 onChange={(value) => stepField("env", value)}
               />
-              <FormControlLabel
-                label="Continue after this step fails"
-                control={
-                  <Checkbox
-                    checked={step["continue-on-error"] === true}
-                    onChange={(event) =>
-                      stepField("continue-on-error", event.target.checked)
-                    }
-                  />
-                }
+              <HelpControl
+                topic={help(
+                  "continue-on-error",
+                  "Continue after this step fails",
+                )}
+              >
+                <FormControlLabel
+                  label="Continue after this step fails"
+                  control={
+                    <Checkbox
+                      checked={step["continue-on-error"] === true}
+                      onChange={(event) =>
+                        stepField("continue-on-error", event.target.checked)
+                      }
+                    />
+                  }
+                />
+              </HelpControl>
+              <StepAdvanced
+                step={step}
+                manifest={manifest}
+                onStep={(next) => change(["jobs", jobId, "steps", index], next)}
+                onInputs={(value) => input("__all__", value)}
               />
               <Stack direction="row" spacing={1}>
                 <Button
@@ -236,7 +286,7 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
                   Move earlier
                 </Button>
                 <Button
-                  disabled={index >= (job.steps?.length ?? 0) - 1}
+                  disabled={index >= steps.length - 1}
                   onClick={() => onMove(index, index + 1)}
                 >
                   Move later
@@ -252,16 +302,17 @@ export function ActionJobSteps({ state }: { state: ActionJobEditorState }) {
               </Stack>
             </>
           )}
-          <Button
-            onClick={() => {
-              change(["jobs", jobId, "steps", job.steps?.length ?? 0], {
-                run: "echo Ready",
-              });
-              onIndex(job.steps?.length ?? 0);
+          <LoopWorkflowDialog
+            open={loop !== null}
+            workflows={loopTargets}
+            onClose={() => setLoop(null)}
+            onChoose={(key) => {
+              const reference = typeReference(manifest, "loop");
+              if (loop === "replace") replaceStep(reference, key);
+              else appendStep(reference, key);
+              setLoop(null);
             }}
-          >
-            Add step
-          </Button>
+          />
         </>
       )}
     </Stack>

@@ -1,8 +1,12 @@
+import { projectPath } from "./navigation";
 import { invalidateReads, sharedRead } from "./read-cache";
 import type {
   ApiErrorBody,
   DashboardResponse,
   DashboardSection,
+  GitHubWorkflowFilesResponse,
+  GitHubWorkflowImport,
+  WorkflowUpgradeResult,
 } from "./types";
 
 export class RelayApiError extends Error {
@@ -99,4 +103,36 @@ export function readDashboard(
   if (section) parameters.set("section", section);
   if (cursor) parameters.set("cursor", cursor);
   return api<DashboardResponse>(`/api/dashboard?${parameters}`, { signal });
+}
+
+/** List the `.github/workflows` files that can be imported. */
+export function readGitHubWorkflows(
+  project: string | null,
+  signal?: AbortSignal,
+): Promise<GitHubWorkflowFilesResponse> {
+  return api<GitHubWorkflowFilesResponse>(
+    projectPath("/api/workflow-import", project),
+    { signal, share: false },
+  );
+}
+
+/** Convert one listed file; nothing is written until the workflow is saved. */
+export function importGitHubWorkflow(
+  project: string | null,
+  path: string,
+): Promise<GitHubWorkflowImport> {
+  return api<GitHubWorkflowImport>(
+    projectPath("/api/workflow-import", project),
+    { method: "POST", body: JSON.stringify({ path }) },
+  );
+}
+
+/** Move deprecated built-in steps to the current version; nothing is saved. */
+export function upgradeWorkflowLanguage(
+  yaml: string,
+): Promise<WorkflowUpgradeResult> {
+  return api<WorkflowUpgradeResult>("/api/workflow-language/upgrade", {
+    method: "POST",
+    body: JSON.stringify({ yaml }),
+  });
 }

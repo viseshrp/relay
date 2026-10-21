@@ -1,0 +1,3193 @@
+# Workflow builder implementation handoff
+
+This is the implementation specification for the 41 items in the
+[workflow builder beginner audit](todo.md#workflow-builder-beginner-audit)
+(WB-01 to WB-41) and the four
+[built-in action version](todo.md#built-in-action-versions) items (AV-01 to
+AV-04). The backlog entry for each item records what was observed. This
+document says exactly what to change, where, with which wording, and how to
+prove it. Work through it in the order given in
+[Delivery plan](#delivery-plan).
+
+## Implementation status
+
+As of 2026-10-18, every item in this document is implemented on branch
+`claude/workflow-builder-beginner-ux-1kfot4` (pull request #26), and each
+backlog entry in [todo.md](todo.md) is checked with a **Verified** bullet
+that names its tests. Deviations from a spec are recorded in that item's
+backlog entry.
+
+| PR | Items | Commits |
+| --- | --- | --- |
+| R | AV-01 | `67825d3` |
+| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 | `a96366f`, `9399b5a` and `60116c1` (WB-18 key positions) |
+| B | F5, WB-14, WB-15 | `2e9b2d2`, `2e0f381` |
+| C | F1, WB-16, WB-40 | `d34234d` |
+| D | F2, F3, WB-01 to WB-05 | `c83f724` |
+| E | WB-06 to WB-12, WB-19, WB-23, WB-31 to WB-33 | `f32e485`, `a378d54` |
+| F | WB-21, WB-22, WB-24 to WB-30 | `633e3ca`, merged in `8546ac4`; `12eedf5`, `2631666`, `d5f3c67` (gallery size module) |
+| G | WB-37 | `95d581e`, merged in `3a8e228`; `f498ea5`, `7c7a6d9` (tests and comment fix) |
+| H | WB-20, WB-41 | `669a98f` (runs-on hint, matrix field), `a10f5eb` |
+| V, W | AV-02 to AV-04 | `4c8f429`, `2fb896d`, merged in `70e0a88` |
+
+`ae3f514` added this section. `be756fe` updates the Linux visual baselines
+for approvals (WB-24) and canvas cards (WB-12); the Main workflow's baseline
+job generated them on `9399b5a`, and they were compared with the old images
+before commit. `ebdc7da` merges the Docker image from `main` and adds
+[Build your first workflow](build-your-first-workflow.md) to its build
+context, because the Help dialog imports it.
+
+Verification:
+
+- Pull request CI on `be756fe` passed the quality job, the Python suite on
+  Python 3.10 to 3.14 on Ubuntu, macOS, and Windows, CodeQL, and browser
+  shards 1, 3, and 4. Shard 4 also runs the complete no-login and visual
+  suites. Codecov reported 99.8% patch and 88.3% project coverage.
+- Browser shard 2 passed 90 of 91 tests. "Home reads once under StrictMode
+  and hidden tabs make no polling requests" in `data-layer.spec.ts` failed
+  once because the test hides the tab before the first dashboard read
+  settles. That code is unchanged by this work. It passed on `a5758fe`, and
+  `b7ced0a` (pull request #29) now settles that read before hiding the tab.
+- The complete browser suite (`make test-frontend`) passed on `9399b5a` in
+  the Main workflow's baseline run.
+- Locally, `uv run pytest tests -q` and `make check` passed, except four
+  `test_native_tox_runs_both_lanes_and_preserves_failure` cases that need
+  packages missing from the offline uv cache; they pass in CI. `deptry` does
+  not start locally and was skipped there; the CI quality job runs it.
+
+PRs V and W were built ahead of their trigger at the owner's request. They
+are proven with a stand-in `relay/command@v2` that only tests register; no
+shipped action has a second version yet. When the first breaking change
+lands, follow AV-02 step 3 (move starters and examples to the new version)
+and add the browser tests against the real pair.
+
+Known follow-ups found during implementation, outside the items:
+
+- A local action whose folder under `.relay/actions/` is a symbolic link
+  passes validation but fails at run time with "Local action metadata was
+  not frozen": validation captures it under the link target's path, and the
+  run looks it up by the path as written.
+- Rewriting a document with ruamel (the importer and **Update to current
+  versions**) turns a one-key flow mapping inside a flow list, such as
+  `[{uses: x}]`, into `[uses: x]`. The YAML means the same.
+
+## How to use this document
+
+1. Read [Ground rules](#ground-rules) and [Owner decisions](#owner-decisions)
+   before writing code. They override anything an item seems to imply.
+2. Build the [shared foundations](#shared-foundations) first. Many items depend
+   on them and must not reimplement them.
+3. For each item, follow its **Change** steps, add its **Tests**, update its
+   **Docs**, and confirm every **Done when** box.
+4. Line numbers were taken at `main` `62ac59e` plus this branch. If a line has
+   moved, find the code by the quoted symbol or string. If the behavior itself
+   differs from **Code today**, stop and report it instead of improvising.
+5. When an item is finished, change its audit checkbox in `docs/todo.md` from
+   `- [ ]` to `- [x]` and add a `- **Verified:**` bullet naming the tests that
+   prove it, as the BX and QA items do.
+
+Message text in **bold monospace** or in the
+[message catalogue](#message-catalogue) is normative: use it verbatim,
+including punctuation. Everything else in this document is prescriptive, not
+illustrative.
+
+## Ground rules
+
+These come from [AGENTS.md](../AGENTS.md) and apply to every item.
+
+- Keep workflow and execution rules in Python services under `relay/`. The
+  browser displays and edits; the server validates and decides.
+- Keep [types.ts](../frontend/src/types.ts) and
+  [api.ts](../frontend/src/api.ts) aligned with every backend payload you
+  change. Update [HTTP API](http-api.md) in the same change.
+- Preserve strict schema validation. Never relax a rule to make a message
+  nicer; only add guidance to the existing rejection.
+- Existing tests match message prefixes such as `Unrecognized`,
+  `runs-on: Unknown workflow field`, and `Expected one of`. New wording must
+  keep each existing prefix and add guidance after it.
+- Do not edit the upstream expression fixtures in
+  `tests/fixtures/actions/expressions/` or the parser messages they pin in
+  `relay/workflows/actions/expressions.py`. Add hints in
+  `relay/workflows/actions/language.py`, which wraps the parser.
+- Do not edit the prompt files under
+  `relay/workflows/starters/ai-coding-workflow/*.md`. Their bytes are pinned by
+  `provenance.json` and `test_ai_starter_preserves_upstream_prompt_bytes`.
+- Launch subprocesses with argument vectors and `shell=False`, as today.
+- Tests use the fixtures in `tests/conftest.py`, the helpers in
+  `tests/support.py`, the fake providers in `tests/fake_agent.py`, and the
+  isolated browser server in `tests/e2e_server.py`. Never use real provider
+  accounts or the owner's running Relay instance.
+- Edit sources under `frontend/src`; `relay/static/` is generated by
+  `npm --prefix frontend run build` and is not committed.
+- Persistence changes need a migration under `relay/web/migrations/`. No item
+  in this plan needs one; if you find you need one, stop and report.
+- Markdown prose and code blocks wrap at 80 columns; table rows may be wider.
+- Write Python compatible with 3.10, with parameter and return types on every
+  changed function.
+- After PR R (AV-01), code never spells a built-in reference such as
+  `relay/cache@v1`. Python uses `current_builtin("cache").reference`, the
+  browser uses `currentBuiltin(manifest, "cache")`, and tables are keyed by
+  action name. Message text in this document shows the rendered result.
+  Only `builtins.py`, starter YAML, tests, and documentation contain the
+  literal strings; a test enforces this.
+
+## Owner decisions
+
+These were decided by the owner on 2026-10-18 and are binding.
+
+| ID | Item | Decision |
+| --- | --- | --- |
+| D1 | WB-14 | Accept list inputs (`agents`, `argv`, `options`) as a JSON array string **or** one value per line. YAML sequences stay rejected. Forms keep writing JSON strings. |
+| D2 | WB-35 | `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, and `$GITHUB_STEP_SUMMARY` in a `run` script are a hard validation error. No warning, no alias, no compatibility path. Messages name only the `RELAY_*` variable and never describe GitHub or a migration. Treat `RELAY_*` as the only names that have ever existed. |
+| D3 | WB-22 | Keep **AI coding workflow** as the preselected starter. Add size labels and a clear requirements note. |
+| D4 | WB-29 | Keep the **Get started** banner after the welcome slides close. It disappears only when the checklist is opened or **Dismiss welcome** is pressed. |
+| D11 | AV-01 to AV-04 | Built-in action versions: name every built-in through one registry now (AV-01). At the first breaking change to a built-in, ship the new major version beside the old one (AV-02) with a one-click update in the editor (AV-03). After a deprecation period, remove the old version (AV-04). A run keeps the version it launched with. |
+
+The following defaults were chosen while writing this plan so that nothing is
+left open. The owner may override them; until then, implement them as written.
+
+| ID | Item | Default |
+| --- | --- | --- |
+| D5 | WB-39 | Message only. Do not add per-axis matrix expressions. |
+| D6 | WB-40 | One generic unbound-secret warning for every name, `GITHUB_TOKEN` included, consistent with D2. |
+| D7 | WB-37 | The importer rewrites the five `GITHUB_*` file variables to `RELAY_*`, maps `github.*` and `runner.*` expressions, and lists every rewrite. |
+| D8 | WB-34 | Messages name the Relay replacement and do not mention GitHub. |
+| D9 | WB-24 | Starter approvals gain `options` buttons; the `relay/validate-input@v1` steps stay as a second check. |
+| D10 | WB-31 | Job IDs never change on their own. Labels show names; a separate **Rename job ID** action updates references. |
+| D12 | AV-02 | Versions of one built-in share one implementation and branch on the major version only where behavior differs. Do not copy modules per version. |
+| D13 | AV-04 | A deprecated version stays in the Relay release that deprecates it and in the next minor release. It may be removed from the minor release after that at the earliest: deprecated in 0.4.0, removable in 0.6.0. |
+| D14 | AV-03 | **Update to current versions** rewrites only the open document, as an unsaved draft. Nothing is updated on save or in the background. |
+| D15 | AV-04 | A removed version is an error that names its replacement. Relay never runs the replacement in its place. |
+
+## Environment and reproduction
+
+Set up once:
+
+```bash
+uv sync --frozen
+uv run pre-commit install
+npm --prefix frontend ci
+npm --prefix frontend exec playwright install chromium
+npm --prefix frontend run build
+```
+
+Run the isolated browser server in a separate terminal. It uses scratch
+storage, a scratch Git repository, and fake agents (`codex`, `claude`, and
+`antigravity`; model values `m1` and `m2`):
+
+```bash
+uv run python -m tests.e2e_server --port 8765
+```
+
+Open `http://127.0.0.1:8765/` and sign in as `owner` with password
+`Relay-Test-Passphrase-2026!`. The server also exposes test-only routes:
+
+| Route | Effect |
+| --- | --- |
+| `POST /__test__/reset` | Restore the fixture project, its `workflow.yaml`, and fake agents |
+| `POST /__test__/starter-project` with `{"full_workflow": true}` | Fresh project whose fake agents play the full **AI coding workflow** |
+| `POST /__test__/commit` | Commit the scratch project's current files |
+
+To reproduce a validation or launch result by hand, save this as a scratch
+file outside the repository and run it with `python3`:
+
+```python
+"""Validate or launch a workflow on the isolated test server."""
+
+import http.cookiejar
+import json
+import time
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8765"
+PASSWORD = "Relay-Test-Passphrase-2026!"
+jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(jar)
+)
+
+
+def call(path, data=None):
+    token = next(
+        (c.value for c in jar if c.name == "relay_csrftoken"), ""
+    )
+    body = None if data is None else json.dumps(data).encode()
+    request = urllib.request.Request(
+        BASE + path,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+            "Referer": BASE,
+        },
+    )
+    try:
+        response = opener.open(request)
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
+    return response.status, json.load(response)
+
+
+def validate(text):
+    return call(
+        "/api/workflow-language/validate",
+        {"yaml": text, "source": "w.yaml"},
+    )[1]
+
+
+def launch(text):
+    """Save text as workflow.yaml, commit it, launch, and wait."""
+    call("/__test__/reset", {})
+    _, doc = call("/api/workflows/workflow.yaml")
+    holder = f"repro-{time.time()}"
+    call("/api/workflows/workflow.yaml/lease", {"holder": holder})
+    status, saved = call(
+        "/api/workflows/workflow.yaml/save",
+        {
+            "yaml": text,
+            "prompts": {},
+            "base_hash": doc["base_hash"],
+            "holder": holder,
+        },
+    )
+    if status >= 300:
+        return "save", saved
+    call("/api/workflows/workflow.yaml/lease/release", {"holder": holder})
+    call("/__test__/commit", {})
+    project = call("/api/workflows")[1]["project"]["id"]
+    status, run = call(
+        "/api/runs",
+        {"workflow_key": "workflow.yaml", "project_id": project},
+    )
+    if status >= 300:
+        return "launch", run
+    for _ in range(60):
+        detail = call(f"/api/runs/{run['run_id']}")[1]["run"]
+        if detail["status"] in ("succeeded", "failed", "canceled"):
+            return "run", detail
+        time.sleep(0.5)
+    return "timeout", run
+
+
+call("/api/auth")
+call("/api/auth/login", {"username": "owner", "password": PASSWORD})
+call("/__test__/reset", {})
+print(validate("jobs:\n  a:\n    stpes:\n      - run: echo\n"))
+```
+
+Run focused checks while working, then the gates in
+[Final gates](#final-gates):
+
+```bash
+uv run pytest tests/test_relay_language.py -q
+npm --prefix frontend run build
+npm --prefix frontend run test:unit
+cd frontend && npx playwright test e2e/workflow-authoring.spec.ts
+```
+
+## Shared foundations
+
+Build these five pieces first, each in its own commit, with tests. Items name
+them as F1 to F5.
+
+### F1. Validation warnings and normalized fields
+
+Purpose: let the server report a problem that does not block saving, and let
+every diagnostic open its job.
+
+1. In `relay/workflows/actions/language.py`, add:
+
+   ```python
+   def _warning(path: str, message: str) -> WorkflowValidationError:
+       issue = _issue(path, message)
+       issue.context["severity"] = "warning"
+       return issue
+
+
+   def workflow_warnings(
+       document: ActionsDocument,
+   ) -> list[WorkflowValidationError]:
+       """Non-blocking findings for a source that already validates."""
+       return []
+   ```
+
+   Items WB-16 and WB-40 add checks to `workflow_warnings`. It runs only on a
+   source that `load()` accepted, never raises, and never reads files or
+   credentials.
+2. In `relay/web/views/actions_language.py` `validate()` (line 103), after
+   `load()` succeeds, call `workflow_warnings(document)`, run `_locate` on each
+   result (import it from `language.py`), and return
+   `{"valid": True, "diagnostics": [], "warnings": [...], "definition": ...,
+   "sources": ...}`. When the source is invalid, return `"warnings": []`. A
+   warning never sets `valid` to false.
+3. Update the `POST /api/workflow-language/validate` row in
+   [HTTP API](http-api.md) to
+   `{valid, diagnostics, warnings, definition?, sources?}`.
+4. In `frontend/src/components/ActionsWorkflowWorkspaceShared.tsx`, add
+   `severity?: "error" | "warning"` to `Diagnostic["context"]`. In
+   `useActionsWorkflowWorkspace.tsx` (validation effect near line 328), store
+   `result.warnings ?? []` in a new `warnings` state, exported from the hook.
+5. In `ActionsWorkflowWorkspaceView.tsx` (diagnostics map near line 226),
+   render warnings after errors with `severity="warning"`. In `YamlEditor`,
+   accept `warnings` and pass `severity: "warning"` for them to
+   `setDiagnostics`.
+6. In the same view, change the **Open job** regular expression from
+   `/^jobs\.([^.[]+)/` to `/^(?:workflow\.)?jobs\.([^.[]+)/` so schema errors,
+   whose fields start with `workflow.`, also get the button.
+
+Tests:
+
+- `tests/test_editor_recovery.py::test_validate_reports_warnings_without_invalidating`:
+  monkeypatch `workflow_warnings` to return one warning; post a valid source;
+  assert `valid` is true, `diagnostics == []`, and the warning has
+  `context.severity == "warning"` with a line and column.
+- `frontend/e2e/workflow-authoring.spec.ts`, new test
+  `warnings appear beside the editor without blocking save`: use a source that
+  triggers WB-16 (`run: echo ${{ inputs.missing }}`); expect one warning alert,
+  **Save** enabled, and save success.
+- In the same file, extend an existing invalid-source test to assert that a
+  schema error under `workflow.jobs.<id>` shows **Open job**.
+
+### F2. YAML context at the cursor
+
+Purpose: one tolerant function that tells completion and hover where the cursor
+is, even while the YAML is incomplete.
+
+1. Create `frontend/src/yaml-path.ts` exporting:
+
+   ```ts
+   export type YamlSegment = string | number;
+   export interface YamlCursor {
+     path: YamlSegment[];
+     position: "key" | "value";
+     key: string | null;
+     prefix: string;
+     siblings: string[];
+     expression: { text: string } | null;
+   }
+   export function yamlCursorAt(text: string, offset: number): YamlCursor;
+   ```
+
+   - `path` is the mapping path of the line's parent, with list items as
+     numeric indexes. For `- ru|` under `jobs.a.steps`, `path` is
+     `["jobs", "a", "steps", 0]`.
+   - `position` is `"value"` when the cursor is after `key:` on the same line,
+     otherwise `"key"`. `key` is that key, or null.
+   - `prefix` is the word being typed (`[\w./@-]*` before the cursor).
+   - `siblings` are the keys already present in the same mapping, so
+     completion does not offer them again.
+   - `expression` is set when the cursor is inside an unclosed `${{`; `text`
+     is the expression text up to the cursor.
+2. Use indentation, not the YAML parser, so half-typed lines work. Walk lines
+   upward from the cursor. A line whose content indent is smaller than the
+   current limit, and which matches `^(\s*)(- )?([^\s:#][^:#]*):`, is a
+   parent. A `-` marker contributes a list index, counted from earlier `-`
+   lines at the same indent under the same parent. Skip blank and comment
+   lines, and treat lines inside a `|` or `>` block scalar as text.
+3. In `frontend/src/workflow-language.ts`, add:
+
+   ```ts
+   export function definitionAt(
+     path: YamlSegment[],
+     manifest: LanguageManifest,
+   ): string | null;
+   ```
+
+   Start at `workflow-root`. For each segment, follow
+   `mapping.properties[segment]`, else `mapping["loose-value-type"]`, else
+   `sequence["item-type"]` for numbers. For a `one-of`, choose the variant
+   that has a mapping or sequence. For `job`, choose `workflow-job` when the
+   job mapping has `uses`, else `job-factory`. For `steps-item`, choose
+   `regular-step` when the step has `uses`, `run-step` when it has `run`, and
+   otherwise a merged view of both property sets.
+
+Tests: `frontend/unit/yaml-path.spec.ts`. In each case the text ends at the
+cursor, and `\n` is a newline:
+
+| Text before the cursor | `path` | `position` | `key` | `prefix` | `expression` |
+| --- | --- | --- | --- | --- | --- |
+| `jobs:\n  a:\n    steps:\n      - ru` | `["jobs","a","steps",0]` | key | null | `ru` | null |
+| `jobs:\n  a:\n    steps:\n      - run: echo\n        sh` | `["jobs","a","steps",0]` | key | null | `sh` | null |
+| `jobs:\n  a:\n    ne` | `["jobs","a"]` | key | null | `ne` | null |
+| `jobs:\n  a:\n    steps:\n      - uses: relay/agent@v1\n        with:\n          mo` | `["jobs","a","steps",0,"with"]` | key | null | `mo` | null |
+| `on:\n  wor` | `["on"]` | key | null | `wor` | null |
+| `jobs:\n  a:\n    steps:\n      - uses:` | `["jobs","a","steps",0]` | value | `uses` | empty | null |
+| `jobs:\n  a:\n    steps:\n      - run: \|\n          echo ${{ inp` | `["jobs","a","steps",0]` | value | `run` | `inp` | `{ text: " inp" }` |
+
+Add `frontend/unit/workflow-language.spec.ts` cases for `definitionAt`:
+root `[]` → `workflow-root`; `["jobs","a"]` → `job-factory`;
+`["jobs","a","steps",0]` with a `run` sibling → `run-step`;
+`["defaults","run"]` → `workflow-defaults-run`.
+
+### F3. Descriptions for every field and action input
+
+Purpose: one source of help text for hover, completion, and form help.
+
+1. Add a top-level `"property_descriptions"` object to
+   `relay/workflows/actions/schema.json`, keyed `"<definition>.<property>"`.
+   Fill all 108 pairs listed in
+   [Appendix A](#appendix-a-fields-that-need-descriptions).
+2. In `relay/workflows/actions/builtins.py`, add two fields to
+   `BuiltinAction` (the registry from [AV-01](#av-01-keep-every-built-in-action-in-one-versioned-registry)):
+
+   ```python
+   summary: str = ""
+   descriptions: Mapping[str, str] = field(default_factory=dict)
+   ```
+
+   Fill `summary` for each of the 11 entries in `BUILTIN_ACTIONS` and one
+   `descriptions` entry per input in its `allowed` set (46 in all).
+3. In `language.py`, add a cached loader
+   `language_property_descriptions() -> dict[str, str]` next to
+   `language_definitions()`. In `support_manifest()` (line 879), add
+   `"property_descriptions"` and, for each `builtin_inputs[ref]`, add
+   `"summary"` and `"descriptions"`.
+4. Extend `LanguageManifest` in `frontend/src/workflow-language.ts` with
+   `property_descriptions: Record<string, string>` and, per builtin,
+   `summary: string` and `descriptions: Record<string, string>`.
+
+Writing rules for every description:
+
+- One or two sentences, at most 240 characters, plain words.
+- Say what the field does on this computer, its default, and its effect.
+- Use the Relay terms in the vocabulary map: job, step, run, approval.
+- Do not mention GitHub, hosted runners, or other products.
+
+Style anchors (use these exact texts for these keys):
+
+| Key | Text |
+| --- | --- |
+| `run-step.run` | Script to run in the job's working copy. Relay writes it to a private file and starts the selected shell; a non-zero exit fails the step. |
+| `run-step.shell` | Program that runs the script: bash, sh, pwsh, powershell, cmd, python, or a command containing {0} for the script path. Defaults to the host's shell. |
+| `job-factory.needs` | Jobs that must finish before this one starts. If one fails, this job is skipped unless its if condition allows the failure. |
+| `job-factory.steps` | Ordered steps. They share one working copy; changed files are committed once when the job succeeds. |
+| `regular-step.uses` | Action to run: a built-in relay/…@v1 action or a local action under ./.relay/actions/. |
+| `relay/agent@v1` (summary) | Ask an installed coding agent to do work in the job's working copy. |
+| `relay/agent@v1.prompt` | Instructions sent to the agent after any prompt files. Expressions such as ${{ inputs.task }} are filled in at launch. |
+| `relay/agent@v1.agents` | Agents to try in order, as a JSON array or one per line. The first available agent runs the step. |
+| `relay/command@v1.argv` | Program and arguments, as a JSON array or one argument per line. Arguments are passed exactly; no shell is involved. |
+| `relay/human-wait@v1.options` | Answer buttons, as a JSON array or one per line. Without options the answer is free text. |
+
+Tests: in `tests/test_relay_language.py`, add
+`test_every_reachable_property_and_action_input_has_a_description`. It walks
+`support_manifest()["definitions"]` for every `mapping.properties` key and
+every input of every `BUILTIN_ACTIONS` entry, and asserts a non-empty
+description of at most 240
+characters that does not contain `GitHub`.
+
+### F4. Closest-match suggestions
+
+1. Create `relay/workflows/actions/suggest.py`:
+
+   ```python
+   from collections.abc import Iterable
+   from difflib import get_close_matches
+
+
+   def closest(name: str, candidates: Iterable[str]) -> str | None:
+       """Return the single nearest candidate, ignoring case, or None."""
+       options = {item.lower(): item for item in candidates}
+       match = get_close_matches(
+           name.lower(), sorted(options), n=1, cutoff=0.6
+       )
+       return options[match[0]] if match else None
+   ```
+
+2. Tests in `tests/test_relay_language.py`, with the candidate lists taken
+   from the manifest: `closest("stpes", job-factory properties) == "steps"`,
+   `closest("rnu", run-step properties) == "run"`,
+   `closest("need", job-factory properties) == "needs"`,
+   `closest("Jobs", ["jobs"]) == "jobs"`,
+   `closest("prmpt", agent inputs) == "prompt"`,
+   `closest("xyz", job-factory properties) is None`, and
+   `closest("agent", regular-step properties) is None`. The cutoff of 0.6 is
+   the lowest value that finds `run` for `rnu` without false matches in these
+   cases; do not lower it further.
+
+### F5. List-valued inputs
+
+Implements decision D1.
+
+1. In `relay/workflows/actions/builtins.py`, add:
+
+   ```python
+   def parse_list_input(value: object, field: str) -> list[str]:
+       """Read a JSON array of strings or one non-blank value per line."""
+       text = str(value).strip()
+       if not text:
+           return []
+       if text.startswith("["):
+           try:
+               items = json.loads(text)
+           except ValueError:
+               items = None
+           if not isinstance(items, list) or not all(
+               isinstance(item, str) for item in items
+           ):
+               raise WorkflowValidationError(
+                   f"{field}: Write a JSON array of strings or one value "
+                   "per line."
+               )
+           return items
+       return [line.strip() for line in text.splitlines() if line.strip()]
+   ```
+
+2. Use it in all three readers:
+   - `relay/workflows/actions/compiler.py` `bind_agent`, lines 147 to 152:
+     replace the `json.loads(...)` branch with
+     `parse_list_input(agents, "agents")` when `agents` is a string. Keep the
+     type check that follows it for non-string values.
+   - `relay/execution/nodes/actions.py`, lines 896 to 900: replace
+     `json.loads(str(inputs["argv"]))` with
+     `parse_list_input(inputs["argv"], "argv")`, catching
+     `WorkflowValidationError` and raising `NodeExecutionError` with the same
+     message.
+   - `builtins.human_wait_options` (line 81): for a string, call
+     `parse_list_input(value, "options")` before the existing checks.
+3. In the browser, add `frontend/src/list-input.ts` with
+   `parseListInput(raw: unknown): string[] | null` implementing the same rules
+   (null for an invalid JSON array). Use it wherever the forms now call
+   `JSON.parse` on `agents`, `argv`, or `options`
+   (`ActionBuiltinFields.tsx`, `ActionCommandFields.tsx`). Forms still write
+   JSON strings.
+
+Tests:
+
+- `tests/test_actions_builtin_contracts.py::test_list_inputs_accept_json_or_one_value_per_line`,
+  parametrized over `'["codex", "claude"]'`, `"codex\nclaude\n"`, and
+  `"codex"`, for each of `agents`, `argv`, and `options`, through
+  `compile`/`bind_agent`, the command node, and `human_wait_options`.
+- `tests/test_actions_builtin_contracts.py::test_list_inputs_reject_a_malformed_json_array`
+  for `'["codex",'` and `'[1, 2]'`.
+- `frontend/unit/list-input.spec.ts` with the same cases.
+
+## Delivery plan
+
+Ship in this order. Each row is one pull request; finish and merge one before
+starting the next unless the row says otherwise.
+
+| PR | Content | Depends on |
+| --- | --- | --- |
+| R | AV-01 (built-in action registry; no behavior change) | none |
+| A | F4, WB-13, WB-17, WB-18, WB-34, WB-35, WB-36, WB-38, WB-39 (validation messages) | R |
+| B | F5, WB-14, WB-15 (list inputs and literal checks) | A |
+| C | F1, WB-16, WB-40 (warnings) | A |
+| D | F2, F3, WB-01, WB-02, WB-03, WB-04, WB-05 (YAML editor) | A, C |
+| E | WB-06 to WB-12, WB-19, WB-23, WB-31, WB-32, WB-33 (visual editor) | B, D |
+| F | WB-21, WB-22, WB-24 to WB-30 (first run and results) | none; may run beside A to E |
+| G | WB-37 (import) | A, B, C |
+| H | WB-20, WB-41 (guides) | all others, so they describe shipped behavior |
+| V | AV-02, AV-03 (two versions side by side, with a one-click update) | R, C. Not scheduled: start only at the trigger in AV-02 |
+| W | AV-04 (remove a deprecated version) | V. Not scheduled: start only after the D13 period |
+
+PRs V and W are not part of the builder work. They are specified now so the
+first breaking change to a built-in follows a known path. Stop after PR H
+unless the owner asks for V.
+
+## Item specifications
+
+Each item uses the same parts. **Problem** restates the observed failure.
+**Code today** names the code to change. **Change** is the required work, in
+order. **Tests**, **Docs**, and **Done when** define completion.
+
+### YAML editor items
+
+#### WB-01. Make completion follow the cursor position
+
+- **Priority:** P0. **PR:** D. **Depends on:** F2, F3.
+
+**Problem.** Completion offers every field in the language at every position.
+Typing `ru` under a job offers `run`, `run-id`, `run-name`, `relay.run_id`,
+`workflow_run`, and `relay.run_number`.
+
+**Code today.** `frontend/src/components/YamlEditor.tsx:61-97` builds one map
+from every `definitions[*].mapping.properties` key, every
+`builtin_inputs[*].allowed` input, and every `context_properties` entry,
+without looking at the cursor.
+
+**Change.**
+
+1. Create `frontend/src/yaml-completion.ts` exporting a pure function:
+
+   ```ts
+   export function completionsAt(
+     text: string,
+     offset: number,
+     manifest: LanguageManifest,
+     extra: { agents: string[] },
+   ): { from: number; options: Completion[] } | null;
+   ```
+
+   `Completion` is the type from `@codemirror/autocomplete`.
+2. Inside it, call `yamlCursorAt(text, offset)` (F2) and branch:
+   - **Expression.** If `cursor.expression` is set, offer
+     `expressionSuggestions(parseActions(text).value, jobId)` from
+     `workflow-language.ts` with the `${{ }}` wrapper removed, plus every
+     `"<context>.<property>"` from `manifest.context_properties`. Filter by
+     `cursor.prefix`. `jobId` is `cursor.path[1]` when `cursor.path[0]` is
+     `"jobs"`. Use `type: "variable"`.
+   - **Key inside an action's `with`.** If the path ends in `"with"` and the
+     step at `cursor.path.slice(0, -1)` has a `uses` value listed in
+     `manifest.builtins`, offer that action's `builtin_inputs[uses].allowed`
+     inputs that are not in `cursor.siblings`. `info` is the input's
+     description (F3).
+   - **Any other key.** Resolve `definitionAt(cursor.path, manifest)` (F2) and
+     offer that definition's `mapping.properties` keys not in
+     `cursor.siblings`. `info` is
+     `property_descriptions["<definition>.<key>"]`.
+   - **Value.** Return `valueCompletionsAt(...)` from WB-02. Until WB-02
+     lands, return null.
+   - Use `type: "property"` and `apply: "<key>: "` for keys. Set
+     `from = offset - cursor.prefix.length`. Return null when no option
+     matches the prefix.
+3. In `YamlEditor.tsx`, replace the body of the `override` source with a call
+   to `completionsAt(context.state.doc.toString(), context.pos, ...)`. When
+   `context.explicit` is false and `cursor.prefix` is empty, return null so the
+   list does not open on every new line.
+
+**Tests.**
+
+- `frontend/unit/yaml-completion.spec.ts`, one test per row; the labels must
+  match exactly and in this order:
+
+  | Text before the cursor | Labels |
+  | --- | --- |
+  | `jobs:\n  a:\n    steps:\n      - ru` | `run` |
+  | `jobs:\n  a:\n    ti` | `timeout-minutes` |
+  | `ru` | `run-name` |
+  | `jobs:\n  a:\n    steps:\n      - uses: relay/agent@v1\n        with:\n          mo` | `model` |
+  | `on:\n  wor` | `workflow_dispatch`, `workflow_call`, `workflow_run` |
+  | `jobs:\n  a:\n    name: x\n    na` | none (returns null) |
+
+- `frontend/e2e/workflow-authoring.spec.ts`, new test
+  `YAML completion offers only fields valid at the cursor`: switch to YAML,
+  type `ru` on a new step line, and assert the completion listbox contains
+  exactly `run`.
+
+**Docs.** In [Local web runtime](web-ui.md#author-workflows), replace "YAML
+completion and hover help use the server language manifest" with "YAML
+completion offers the fields, action inputs, and expression names that are
+valid at the cursor, and hover shows each field's description. Both come from
+the server language manifest."
+
+**Done when.**
+
+- [ ] The six unit cases and the browser test pass.
+- [ ] No completion lists a field that would fail validation at that place.
+
+#### WB-02. Suggest values, starting with action names
+
+- **Priority:** P0. **PR:** D. **Depends on:** WB-01.
+
+**Problem.** Completion never offers values. The 11 `relay/*@v1` actions are
+not suggested after `uses:`, and fixed values such as shells are not offered.
+
+**Code today.** `YamlEditor.tsx:61-97` offers keys only.
+`support_manifest()` (`relay/workflows/actions/language.py:879`) has no value
+lists other than `cache_modes`.
+
+**Change.**
+
+1. In `relay/workflows/actions/builtins.py`, add a module constant
+   `SHELLS = ("bash", "sh", "pwsh", "powershell", "cmd", "python")`. Import it
+   in `relay/execution/action_files.py` and assert in a test that it equals
+   the `suffix` keys in `shell_script` (line 208). In `support_manifest()`,
+   add `"value_hints": {"shell": list(SHELLS)}`. WB-15 reuses `SHELLS`.
+2. In `relay/workflows/actions/builtins.py`, add a field to `BuiltinAction`
+   (AV-01):
+
+   ```python
+   values: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+   ```
+
+   Fill it on three entries:
+
+   | Entry | `values` |
+   | --- | --- |
+   | `agent` v1 | `{"format": ("exists", "label", "json", "yaml"), "auto-retry": ("true", "false")}` |
+   | `validate-report` v1 | `{"format": ("exists", "label", "json", "yaml")}` |
+   | `validate-input` v1 | `{"type": ("string", "integer", "number", "boolean", "enum")}` |
+
+   Expose it as `builtin_inputs[ref]["values"]` (lists) in
+   `support_manifest()`.
+3. In `frontend/src/yaml-completion.ts`, add `valueCompletionsAt` with these
+   rules, checked in order:
+   - `uses` on a step: the 11 `manifest.builtins`, sorted, each with its
+     `summary` as `info`, then `./.relay/actions/` with info
+     `Local action directory`.
+   - `uses` on a job: `./.relay/workflows/`.
+   - `shell`: `manifest.value_hints.shell`.
+   - `cache-mode`: `manifest.cache_modes`.
+   - A key inside a built-in action's `with`: `builtin_inputs[uses].values[key]`
+     when present; for `agent`, the agent IDs in `extra.agents`.
+   - Any other key: resolve the property's type definition. If it is a
+     `one-of` whose variants all have `string.constant`, offer those constants
+     in schema order. If it has `allowed-values`, offer them. If it is a
+     boolean definition, offer `true` and `false`.
+4. When an action from the `uses` list is applied and the step has no `with`
+   key, insert a snippet (use `snippet()` from `@codemirror/autocomplete`)
+   that adds `with:` and one line per required input from
+   `builtin_inputs[ref].required`, with an empty value, except
+   `max-iterations: 3`.
+5. Add an `agentIds?: string[]` prop to `YamlEditor` and pass the same agent
+   list the job drawer receives from the workspace state.
+
+**Tests.**
+
+- `frontend/unit/yaml-completion.spec.ts`:
+  - `- uses:` returns the 11 built-ins first, sorted, then
+    `./.relay/actions/`.
+  - `shell:` returns the six shells in the order above.
+  - A `workflow_dispatch` input `type:` returns `string`, `boolean`,
+    `number`, `environment`, `choice`, in the schema's `one-of` order.
+  - Applying `relay/human-wait@v1` to a step without `with` produces
+    `uses: relay/human-wait@v1\n        with:\n          prompt:`.
+- `frontend/e2e/workflow-authoring.spec.ts`, new test
+  `Ctrl+Space after uses lists the built-in actions`.
+
+**Done when.**
+
+- [ ] All built-in action names, shells, input types, and report formats can
+  be chosen from completion.
+
+#### WB-03. Give hover and completion real descriptions
+
+- **Priority:** P0. **PR:** D. **Depends on:** F2, F3.
+
+**Problem.** Only 6 of 115 definitions have descriptions. Hover shows internal
+type names such as `needs: needs`, shows the wrong field's description for a
+step's `run`, and shows nothing for action inputs.
+
+**Code today.** `YamlEditor.tsx:103-131` takes the first definition anywhere
+in the schema that has the hovered word as a property, then falls back to the
+parent's description or `"<key>: <type>"`.
+
+**Change.**
+
+1. Complete F3: write all 108 property descriptions, 11 action summaries, and
+   46 input descriptions.
+2. Export `hoverTextAt(text, offset, manifest): string | null` from
+   `yaml-completion.ts`. Find the key token under the pointer, call
+   `yamlCursorAt` at the start of that key, and look up:
+   - a built-in action's input description when the key is inside its `with`;
+   - otherwise `property_descriptions["<definitionAt(path)>.<key>"]`;
+   - for the value of `uses`, the action's `summary`.
+   Return null when nothing matches. Never return a type name.
+3. Replace the body of `hoverTooltip` in `YamlEditor.tsx` with a call to
+   `hoverTextAt`. Completion `info` (WB-01) uses the same lookup.
+
+**Tests.**
+
+- F3's Python test.
+- `frontend/unit/yaml-completion.spec.ts`, `hoverTextAt` cases:
+  - `run` in a step returns the `run-step.run` text.
+  - `run` under top-level `defaults:` returns the `workflow-defaults.run` text.
+  - `needs` returns the `job-factory.needs` text.
+  - `prompt` inside an agent step's `with` returns the manifest's
+    `builtin_inputs["relay/agent@v1"].descriptions.prompt`.
+  - An unknown key returns null.
+
+**Done when.**
+
+- [ ] Every field and action input shows a description on hover, and no hover
+  shows an internal type name.
+
+#### WB-04. Make Tab indent in the YAML editor
+
+- **Priority:** P1. **PR:** D.
+
+**Problem.** Tab inserts nothing in the YAML editor, and focus leaves the
+editor.
+
+**Code today.** `YamlEditor.tsx` and `ScriptEditor.tsx` use `basicSetup`,
+which does not bind Tab.
+
+**Change.**
+
+1. In both editors, add `keymap.of([indentWithTab])` (from
+   `@codemirror/commands`) and `indentUnit.of("  ")` (from
+   `@codemirror/language`) after `basicSetup` in the extensions list. Do not
+   change `MarkdownEditor.tsx`.
+2. CodeMirror keeps a keyboard exit: after Escape, the next Tab within two
+   seconds moves focus (`@codemirror/view`, `tabFocusMode`), and Ctrl+M
+   (Shift+Alt+M on macOS) toggles Tab focus mode. Do not override either.
+
+**Tests.**
+
+- `frontend/e2e/accessibility.spec.ts`, new test
+  `Tab indents in the YAML editor and Escape then Tab leaves it`: focus the
+  YAML editor, press End, Enter, Tab, and assert the document gained two
+  spaces and no tab character; press Escape then Tab and assert that focus is
+  outside `.yaml-editor`.
+- Run every browser test that tabs through the editor page. Where one now
+  stops inside an editor, press Escape before the Tab that leaves it.
+
+**Docs.** In [Keyboard shortcuts](keyboard-shortcuts.md), change the action
+of the existing `Tab / Shift+Tab` row to "Move through controls and navigation
+links outside editors", and add these rows:
+
+| Keys | Action |
+| --- | --- |
+| Tab / Shift+Tab in the YAML or script editor | Indent or outdent the selected lines by two spaces |
+| Escape, then Tab within two seconds | Leave the YAML or script editor |
+| Ctrl+M (Shift+Alt+M on macOS) | Switch Tab between indenting and moving focus in an editor |
+
+**Done when.**
+
+- [ ] Tab indents with spaces in YAML and script editors, and keyboard users
+  can always leave them.
+
+#### WB-05. Explain an empty YAML document
+
+- **Priority:** P1. **PR:** D.
+
+**Problem.** After deleting all YAML, the page shows "Validating workflow…"
+indefinitely and the canvas shows loading placeholders. The same status text
+also appears for every invalid workflow, because it is shown whenever the
+workflow is not valid.
+
+**Code today.**
+
+- `useActionsWorkflowWorkspace.tsx:328-332`: the validation effect sets
+  `valid` false, clears diagnostics, and returns early for empty text.
+- `ActionsWorkflowWorkspaceView.tsx:174-178`: the status reads
+  "Validating workflow…" whenever a lease is held and `valid` is false.
+
+**Change.**
+
+1. In the hook, replace the boolean with
+   `validation: "checking" | "valid" | "invalid" | "empty"` and keep
+   `valid = validation === "valid"` for existing consumers.
+   - Text that is empty after trimming: set `"empty"` and one diagnostic
+     `{ message: EMPTY, context: { field: "workflow", line: "1",
+     column: "1" } }`. Send no request.
+   - Otherwise set `"checking"`, send the request, then set `"valid"` or
+     `"invalid"` from the response.
+2. Status text in the view:
+
+   | State | Text |
+   | --- | --- |
+   | checking | `Validating workflow…` |
+   | valid | `Ready to edit` |
+   | invalid | `Fix the problems above to save.` |
+   | empty | `This workflow is empty.` |
+
+3. In `WorkflowCanvas.tsx`, when the state is `"empty"`, show an info `Alert`
+   with the text EMPTY instead of the canvas skeleton, plus two buttons:
+   **Restore saved source** (the same action as the draft notice's button)
+   and **Add a job**, which replaces the text with:
+
+   ```yaml
+   name: <the workflow's saved name, or its file name without .yaml>
+   on: workflow_dispatch
+   jobs:
+     job_1:
+       steps:
+         - run: echo Ready
+   ```
+
+EMPTY is **`This workflow is empty. Restore the saved source or add a job.`**
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`clearing the YAML explains the empty workflow`: select all and delete; within
+two seconds expect the status `This workflow is empty.`, the alert, and both
+buttons; click **Add a job** and expect `Ready to edit`. Also assert that an
+invalid (not empty) source shows `Fix the problems above to save.`.
+
+**Done when.**
+
+- [ ] No state shows "Validating workflow…" for longer than one validation
+  request.
+
+### Visual editor items
+
+#### WB-06. Keep the command form and the YAML in agreement
+
+- **Priority:** P0. **PR:** E. **Depends on:** F5, WB-07.
+
+**Problem.** A new command step's form shows `echo` and `Ready`, but its YAML
+is `with: {}` and fails validation.
+
+**Code today.** `frontend/src/components/ActionCommandFields.tsx:40` displays
+`inputs.argv ?? '["echo","Ready"]'` without writing it, and shows a parse
+failure as an empty list.
+
+**Change.**
+
+1. Remove the `?? '["echo","Ready"]'` display fallback. Read the value with
+   `parseListInput` (F5).
+2. When `argv` is absent, show an empty list with helper text
+   **`Add the program, then one argument per item.`**
+3. When `parseListInput` returns null, show an error `Alert`:
+   **`This argument list is not valid. Fix it in YAML or replace it here.`**
+   The first edit in the list replaces the invalid value.
+4. WB-07 makes new command steps write a real `argv`, so the form and YAML
+   start equal.
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`a new command job shows the same arguments in the form and the YAML`: add a
+command job, open **Steps**, and assert the items `echo` and `Ready`, YAML
+containing `argv: '["echo","Ready"]'`, and no error alert.
+
+**Done when.**
+
+- [ ] The command form never displays a value the YAML does not contain.
+
+#### WB-07. Make newly added jobs and steps valid
+
+- **Priority:** P0. **PR:** E.
+
+**Problem.** New `command`, `loop`, and `validate-report` steps fail
+validation at once; `human-wait` starts with an empty question; `agent`
+starts as `with: {}`.
+
+**Code today.** `useActionsWorkflowWorkspace.tsx:547-562` (`addJob`) and
+`ActionJobSteps.tsx:89-111` (**Step type**) both fill only required inputs
+with empty strings.
+
+**Change.**
+
+1. Create `frontend/src/action-defaults.ts` exporting
+   `defaultStep(reference: string): ActionStep`, and use it from both places.
+   Key the table by action name and read the name with `parseBuiltin`
+   (AV-01); `uses` is the `reference` passed in, which the menus take from
+   the manifest. Values (YAML shown; `with` values are strings):
+
+   | Name | `with` |
+   | --- | --- |
+   | `script` | none; the step is `run: echo Ready` |
+   | `agent` | `prompt: Describe the change you want.` |
+   | `command` | `argv: '["echo","Ready"]'` |
+   | `human-wait` | `prompt: Review the work so far, then choose an answer.` and `options: '["Continue","Stop"]'` |
+   | `validate-report` | `path: REPORT.md` and `format: exists` |
+   | `validate-input` | `value: ready` and `type: string` |
+   | `upload-artifact` | `name: report` and `path: REPORT.md` |
+   | `download-artifact` | `name: report` |
+   | `cache`, `restore-cache`, `save-cache` | `key: deps-${{ hashFiles('requirements.txt') }}` and `path: .venv` |
+   | `loop` | see step 2 |
+
+2. `relay/loop@v1` needs an existing reusable workflow. When it is chosen,
+   open a dialog titled **`Choose the workflow to repeat`** with a select of
+   the project's other workflows (from the workflow list the sidebar already
+   loads). On confirm, write `workflow: ./.relay/workflows/<key>` and
+   `max-iterations: '3'`. If the project has no other workflow, show the menu
+   item disabled with secondary text
+   **`Needs another workflow to repeat`**.
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`every new job type validates as soon as it is added`: for each reference
+except `relay/loop@v1`, choose it in **New job type**, click **Add job**,
+wait for validation, and assert no error alert and the status
+`Ready to edit`. A second test adds a loop by choosing the fixture's other
+workflow in the dialog.
+
+**Done when.**
+
+- [ ] Adding any job or step type never leaves the workflow invalid.
+
+#### WB-08. Let Add step choose the step type
+
+- **Priority:** P1. **PR:** E. **Depends on:** WB-07, WB-10.
+
+**Problem.** **Add step** always appends `run: echo Ready`.
+
+**Code today.** `ActionJobSteps.tsx:255-265`.
+
+**Change.** Replace the button with a menu button labelled **Add step**. List
+the primary types first (Agent, Script, Command, Approval, Check a report,
+Upload artifact), then a divider and the remaining types under **More**. Use
+the labels from WB-10. Each entry appends `defaultStep(reference)` (WB-07)
+and selects the new step.
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`Add step inserts each primary step type`: for each primary entry, assert the
+YAML gains the matching `uses` or `run` and stays valid.
+
+**Done when.**
+
+- [ ] Every step type can be added from **Add step**.
+
+#### WB-09. Show a job's steps as a list
+
+- **Priority:** P1. **PR:** E. **Depends on:** WB-10.
+
+**Problem.** Steps are edited one at a time through a select, and canvas cards
+show the job but not its steps.
+
+**Code today.**
+
+- `ActionJobSteps.tsx:50-63`: the **Ordered step** select.
+- `frontend/src/actions-workflow.ts:207` (`actionsGraph`): builds card data
+  with one `detail` line.
+- `frontend/src/components/EditorGraphNode.tsx`: renders `label` and
+  `detail`.
+
+**Change.**
+
+1. Add `stepLabel(step: ActionStep): string` to `actions-workflow.ts`:
+   `step.name`, else `step.id`, else the WB-10 label of `step.uses`, else the
+   first line of `step.run` cut to 40 characters, else `Script`.
+2. Replace the **Ordered step** select with a list labelled
+   `Steps in this job`. Each row shows `<n>. <stepLabel>` and the step's type
+   label, with icon buttons labelled `Move step <n> earlier` and
+   `Move step <n> later`. Selecting a row selects the step. Keep the existing
+   `onIndex` and `onMove` handlers.
+3. In `actionsGraph`, add `data.steps: string[]` (the first five
+   `stepLabel` values, then `+<k> more`). `EditorGraphNode` renders them as a
+   compact list under the job label in place of `detail`.
+
+**Tests.**
+
+- `frontend/e2e/workflow-authoring.spec.ts`, new test
+  `a job's steps appear as a list in the drawer and on the card`: three
+  steps give three rows and three card lines; **Move step 3 earlier** moves
+  it in the YAML.
+- Update the visual baselines with
+  `npx playwright test --config playwright.visual.config.ts --update-snapshots`
+  from `frontend/`, and review each changed image.
+
+**Done when.**
+
+- [ ] A job's steps are visible without opening a select.
+
+#### WB-10. Describe step types in plain words
+
+- **Priority:** P1. **PR:** E.
+
+**Problem.** **New job type** and **Step type** show slugs such as
+`validate-report`. The **Action reference** field repeats the choice as raw
+text.
+
+**Code today.** `WorkflowCanvas.tsx` (the **New job type** select) and
+`ActionJobSteps.tsx:84-124` (**Step type** and **Action reference**).
+
+**Change.**
+
+1. Create `frontend/src/action-labels.ts` exporting `ACTION_TYPES`, one entry
+   per row below, and `actionLabel(reference: string | undefined): string`.
+   Key the entries by action name, not by reference: `actionLabel` reads the
+   name with `parseBuiltin` from AV-01, so every version of an action gets
+   the same label, and no `@v1` string appears in the frontend.
+
+   | Group | Name | Label | Description |
+   | --- | --- | --- | --- |
+   | Agents | `agent` | Agent | Ask a coding agent to do the work. |
+   | Scripts and commands | `script` | Script | Run commands in a shell. |
+   | Scripts and commands | `command` | Command | Run one program with exact arguments. |
+   | Approvals | `human-wait` | Approval | Pause until you answer. |
+   | Reports and checks | `validate-report` | Check a report | Read a report file and pass its verdict on. |
+   | Reports and checks | `validate-input` | Check a value | Stop when a value is not the expected type. |
+   | Artifacts and caches | `upload-artifact` | Upload artifact | Keep files from this run. |
+   | Artifacts and caches | `download-artifact` | Download artifact | Bring back files kept by a run. |
+   | Artifacts and caches | `cache` | Cache | Restore files now and save them after the job. |
+   | Artifacts and caches | `restore-cache` | Restore cache | Restore files saved earlier. |
+   | Artifacts and caches | `save-cache` | Save cache | Save files for later runs. |
+   | Advanced | `loop` | Repeat a workflow | Run another workflow until it reports done. |
+
+2. Render both selects and the WB-08 menu with group subheaders and
+   two-line items (label and description).
+3. Move **Action reference** into an **Advanced** accordion at the bottom of
+   the step form. It stays the way to enter a local `./.relay/actions/...`
+   reference.
+4. Show `actionLabel(uses)` instead of the raw reference on canvas cards.
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`step type menus use plain labels`: the options of **New job type** and
+**Step type** equal the labels above, and no option text matches
+`/^relay\//` or `/@v1$/`.
+
+**Done when.**
+
+- [ ] No raw action reference appears outside **Advanced** and the YAML.
+
+#### WB-11. Lead with the basics in job and step forms
+
+- **Priority:** P1. **PR:** E.
+
+**Problem.** The first tab is crowded with matrix, concurrency, and reusable
+workflow fields; agent steps start with **Advanced JSON**; command arguments
+show a type selector per item.
+
+**Code today.**
+
+- `useActionJobEditor.tsx:40`: the drawer always opens on **General**.
+- `ActionJobEditorView.tsx:52-147`: the General tab's fields.
+- `ActionBuiltinFields.tsx:78`: **Advanced JSON: Action inputs** first.
+- `StructuredValueField.tsx:51-75`: the per-value type select.
+
+**Change.**
+
+1. Open the drawer on **Steps** when the job was created by **Add job** in
+   this editor session; otherwise open on **General**. Track the new job's ID
+   in the workspace state set by `addJob`.
+2. On **General**, show only **Job name**, **Start after**, **Job condition**,
+   and **Job timeout (minutes)**. Put **Reusable workflow**, the matrix
+   editor, the concurrency editor, and `SchemaFields` in an accordion titled
+   **Advanced**. Open it by default only when one of those fields has a
+   value. Collapse the expression helper under a text button
+   **Build a condition**.
+3. Move `AdvancedJsonField` in `ActionBuiltinFields.tsx` into the step's
+   **Advanced** accordion (WB-10).
+4. In `StructuredValueField`, add `showType?: boolean`, default false. Render
+   the type select only when `showType` is true or the value is not text.
+   Add a text button **Change type** that reveals it.
+
+**Tests.**
+
+- `frontend/e2e/workflow-authoring.spec.ts`, new test
+  `new jobs open on Steps and General shows the basics first`.
+- Update the existing test
+  `matrix, concurrency, comparisons, and bounded retry controls round trip
+  without JSON` (line 244) to open **Advanced** first.
+
+**Done when.**
+
+- [ ] A new job's drawer shows name, dependencies, condition, timeout, and
+  steps, with everything else one click away.
+
+#### WB-12. Use one control for the agent choice
+
+- **Priority:** P1. **PR:** E. **Depends on:** F5, WB-32.
+
+**Problem.** The **Agent** select is blank when a step uses an `agents` list,
+which six of the seven starters do. The list itself is in **Agent order**,
+lower down.
+
+**Code today.** `ActionBuiltinFields.tsx:84-106` (**Agent**) and `:236-270`
+(**Agent order**).
+
+**Change.**
+
+1. Create `frontend/src/components/AgentRouteField.tsx` and use it in place of
+   both controls. Label **Runs on**, with an exclusive toggle:
+
+   | Choice | Shown when | Writes |
+   | --- | --- | --- |
+   | Saved order | neither `agent` nor `agents` is set | removes both; helper text `Uses the order from Settings: <names>` from `/api/agents` `preferences` |
+   | One agent | `agent` is set | `agent: <id>`; removes `agents` |
+   | Try in order | `agents` is set | `agents: '<JSON array>'`; removes `agent` |
+
+2. **One agent** shows a select (with WB-32 status). **Try in order** shows an
+   ordered list with add, remove, and move buttons.
+3. When `agent` or `agents` contains `${{`, show read-only text
+   `Set by an expression: <value>` and a link **Edit in YAML** that switches
+   the editor mode to YAML.
+4. Keep clearing `effort` whenever the route changes, as today.
+
+**Tests.** `frontend/e2e/agent-configuration.spec.ts`, new test
+`Runs on shows the effective agents in one place`: create **Ask an agent**;
+open its step; expect **Try in order** with five agents; choose **One agent**
+and **Codex**, and assert the YAML has `agent: codex` and no `agents`.
+
+**Done when.**
+
+- [ ] Every starter's agent step shows its agents in one control.
+
+### Validation and error message items
+
+#### WB-13. Name the field and suggest the closest match
+
+- **Priority:** P0. **PR:** A. **Depends on:** F4.
+
+**Problem.** A misspelled agent input reports
+"relay/agent@v1 has missing required or unknown action inputs." without
+naming it. A misspelled `stpes:` first reports "steps: Required field is
+missing.", which hides the real cause.
+
+**Code today.**
+
+- `relay/workflows/actions/language.py:83` (`_unknown_field`): adds a fixed
+  hint for six keys and nothing else.
+- `language.py:690-705` (`workflow_diagnostics`, mapping branch): appends
+  missing-required errors before unknown-field errors.
+- `relay/workflows/actions/builtins.py:48-49` (`validate_inputs`): one
+  combined message.
+
+**Change.**
+
+1. Give `_unknown_field` a `candidates: Iterable[str] = ()` parameter. When
+   no fixed hint applies and `closest(key, candidates)` (F4) returns a name,
+   append `Did you mean <name>?`. Pass the mapping's property names from both
+   callers in `_validate_type` and `workflow_diagnostics`.
+2. In the `workflow_diagnostics` mapping branch, collect unknown keys and
+   missing required keys first. Emit unknown-key errors first. Drop a
+   missing-required error when an unknown key's suggestion is that key.
+3. In `validate_inputs`, replace the combined message with:
+   - unknown: `<ref> does not accept input <name>.` or
+     `<ref> does not accept inputs <a>, <b>.` (sorted), followed by
+     `Did you mean <name>?` when exactly one input is unknown and `closest`
+     finds an allowed input;
+   - missing: `<ref> requires input <name>.` or
+     `<ref> requires inputs <a>, <b>.` (sorted);
+   - when both apply, the unknown sentence, a space, then the missing
+     sentence.
+
+**Tests.**
+
+- `tests/test_relay_language.py::test_unknown_keys_suggest_the_nearest_field`,
+  using `workflow_diagnostics`. Each case asserts one diagnostic containing
+  the text, and no `Required field is missing` diagnostic for the suggested
+  key:
+
+  | Source | Expected text |
+  | --- | --- |
+  | `Jobs:` at the root | `workflow.Jobs: Unknown workflow field. Did you mean jobs?` |
+  | `need: b` in a job | `workflow.jobs.a.need: Unknown workflow field. Did you mean needs?` |
+  | `rnu: echo` in a step | `workflow.jobs.a.steps[0].rnu: Unknown workflow field. Did you mean run?` |
+  | `stpes:` in a job | `workflow.jobs.a.stpes: Unknown workflow field. Did you mean steps?` |
+
+- `tests/test_actions_builtin_contracts.py::test_action_input_errors_name_the_inputs`:
+
+  | `with` | Exact message |
+  | --- | --- |
+  | `{prmpt: hi}` on `relay/agent@v1` | `relay/agent@v1 does not accept input prmpt. Did you mean prompt?` |
+  | `{}` on `relay/human-wait@v1` | `relay/human-wait@v1 requires input prompt.` |
+  | `{}` on `relay/loop@v1` | `relay/loop@v1 requires inputs max-iterations, workflow.` |
+
+**Done when.**
+
+- [ ] Every unknown or missing key and input is named, with a suggestion when
+  one is close.
+
+#### WB-14. Accept one value per line for list inputs
+
+- **Priority:** P0. **PR:** B. **Depends on:** F5. **Decision:** D1.
+
+**Problem.** `agents: [codex, claude]`, `argv: [git, status]`, and
+`options: [yes, no]` report "Expected a scalar string." with no hint, and the
+only accepted form is a JSON array inside a string.
+
+**Code today.** `language.py:259` (`_validate_type`, string branch) raises
+"Expected a scalar string." for any list. The readers are listed in F5.
+
+**Change.**
+
+1. Complete F5, so `agents`, `argv`, and `options` accept a JSON array
+   string or one value per line.
+2. In the string branch of `_validate_type`, when the value is a list and the
+   path contains `.with.`, use the message
+   **`Expected a scalar string. Write a list as one value per line under
+   "|", or as a JSON array string.`** Other paths keep
+   `Expected a scalar string.`
+3. Leave YAML sequences rejected; GitHub's grammar, which the schema copies,
+   also types `with` values as strings.
+
+**Tests.**
+
+- F5's tests.
+- `tests/test_relay_language.py::test_with_lists_explain_the_accepted_forms`:
+  `agents: [codex, claude]` gives the new message at the `agents` line.
+
+**Docs.** In [Workflows](workflows.md), under "Agent nodes", "Scripts and
+command actions", and "Human waits", state that `agents`, `argv`, and
+`options` accept a JSON array string or one value per line. Add this tagged
+example under "Agent nodes" and run `scripts/check_workflow_examples.py`:
+
+````markdown
+<!-- relay-example: valid agent-list-lines -->
+```yaml
+jobs:
+  ask:
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agents: |
+            codex
+            claude
+          model: exact-model-value
+          prompt: Explain the main module.
+```
+````
+
+(The outer fence only frames the example for this document; the guide gets
+the comment and the inner `yaml` block.)
+
+**Done when.**
+
+- [ ] Each of the three inputs works in both forms through validation,
+  launch, and execution, and a YAML list gets the new message.
+
+#### WB-15. Catch literal mistakes while editing, not mid-run
+
+- **Priority:** P0. **PR:** B. **Depends on:** F5.
+
+**Problem.** These pass validation and fail later: `argv: git status` and
+`shell: zsh` fail mid-run; a missing prompt file and an unknown agent ID fail
+at launch.
+
+**Code today.**
+
+- `relay/execution/nodes/actions.py:896-900`: `argv` parsed only at run time.
+- `relay/execution/action_files.py:259-263`: custom shell checked only at run
+  time.
+- `relay/workflows/actions/compiler.py:160`: prompt references resolved at
+  launch.
+- `relay/agents/driver.py:120`: unknown agent rejected at launch.
+
+**Change.** Add these checks to validation. Each applies only to a literal
+value (no `${{`). Runtime checks stay as they are.
+
+1. **`argv`** (in `builtins.validate_inputs` for `relay/command@v1`): parse
+   with `parse_list_input` (F5).
+   - An empty list: **`argv: Add the program to run.`**
+   - Exactly one item that contains whitespace, from a one-line value:
+     **`argv: "<item>" is a single argument. Put each argument on its own
+     line, or use a JSON array.`** (This catches `argv: git status`.)
+2. **`shell`** (in `validate_steps` for run steps, and for
+   `defaults.run.shell` on the workflow and each job): allowed if it is in
+   `SHELLS` (WB-02) or contains exactly one `{0}`. Otherwise
+   **`shell: Use bash, sh, pwsh, powershell, cmd, or python, or a command
+   that contains {0} for the script path.`**
+3. **Prompt files** (in `relay/web/views/actions_language.py` `validate()`,
+   after `capture_sources` succeeds): for each literal `prompt-files` line in
+   each `relay/agent@v1` step, resolve `prompts/...` under the project's
+   `.relay` folder with `safe_resolve`, and `global:<name>` under
+   `relay.paths.global_prompts_dir()`. A missing file gives a diagnostic at
+   `jobs.<job>.steps[<i>].with.prompt-files`:
+   **`Prompt file <reference> does not exist.`** The response is then
+   invalid, so **Save** stays disabled.
+4. **Agent IDs** (in `builtins.validate_inputs` for `relay/agent@v1`): every
+   literal `agent` and each literal `agents` entry must be a key of
+   `relay.agents.profiles.PROFILES`. Otherwise
+   **`<field>: Unknown agent <id>. Use one of antigravity, claude, codex,
+   copilot, cursor.`** (sorted keys of `PROFILES`).
+
+**Tests.** `tests/test_actions_builtin_contracts.py::test_literal_mistakes_fail_validation`,
+parametrized; each case asserts exactly one diagnostic with the message
+above and a line number:
+
+| Step | Message starts with |
+| --- | --- |
+| `relay/command@v1` with `argv: git status` | `argv: "git status" is a single argument.` |
+| `relay/command@v1` with `argv: ''` | `argv: Add the program to run.` |
+| `run: echo` with `shell: zsh` | `shell: Use bash, sh, pwsh` |
+| `relay/agent@v1` with `agent: chatgpt` | `agent: Unknown agent chatgpt.` |
+
+Add `tests/test_editor_recovery.py::test_validate_reports_missing_prompt_files`
+through the validate endpoint with the `owner` fixture. Also assert
+`shell: "bash -l {0}"` and `argv: |\n  git\n  status` are valid.
+
+**Done when.**
+
+- [ ] The four mistakes are reported in the editor before saving.
+
+#### WB-16. Warn about references to names that do not exist
+
+- **Priority:** P1. **PR:** C. **Depends on:** F1.
+
+**Problem.** `${{ inputs.task }}` with no `task` input, `${{ steps.nope... }}`,
+and `${{ needs.b... }}` without `needs: b` validate and become empty at run
+time. An agent step with no instructions also validates.
+
+**Code today.** No such check exists.
+
+**Change.** Add the checks to `workflow_warnings` (F1). Walk every string in
+`document.value` together with its path. For each `${{ }}` segment
+(`expressions.segments`), and for each bare `if` value, parse it with
+`expressions.parse` and walk the tree. A property access appears as
+`("index", ("context", "<root>"), ("literal", "<name>"))`.
+
+| Reference | Warn when | Message |
+| --- | --- | --- |
+| `inputs.<name>` | `<name>` is not declared under `on.workflow_dispatch.inputs` or `on.workflow_call.inputs` | **`inputs.<name> is not a declared input. It will be empty at run time.`** |
+| `steps.<id>` | used in a step whose job has no earlier step with that `id` | **`steps.<id> does not name an earlier step in this job. It will be empty at run time.`** |
+| `needs.<job>` | `<job>` is not in the job's `needs` | **`needs.<job> is not listed in this job's needs. It will be empty at run time.`** |
+| agent step | `with` has neither `prompt` nor `prompt-files` | **`This agent step has no prompt or prompt-files, so the agent receives no instructions.`** |
+
+Skip expressions whose tree cannot be walked without evaluation, and never
+warn about `vars`, `env`, `matrix`, or `secrets` (WB-40 covers secrets).
+
+**Tests.** Create `tests/test_workflow_warnings.py`. Assert each warning's
+exact message and severity, a clean source with no warnings, and a source
+that declares the input or `id` producing none.
+
+**Docs.** In [Workflows](workflows.md#expressions-and-conditions), add:
+"The editor warns when an expression names an input, an earlier step, or a
+needed job that cannot supply a value; such references are empty at run
+time."
+
+**Done when.**
+
+- [ ] Each case shows a warning in the editor and the workflow still saves
+  and launches.
+
+#### WB-17. List the valid choices in errors
+
+- **Priority:** P1. **PR:** A. **Depends on:** F4.
+
+**Problem.** `type: text` reports "Expected one of string."; unsupported
+`uses` values list nothing; a double-quoted string in an expression reports
+only "Unexpected expression symbol."; a step with both or neither of `run`
+and `uses` gets a misleading error.
+
+**Code today.**
+
+- `language.py:191-223` (`_validate_type`, `one-of` branch) re-raises the
+  first variant's error.
+- `language.py:384-395` (`validate_steps`): one message for every
+  unsupported `uses`.
+- `language.py:151` (`_expression_check`): wraps parser errors without
+  hints.
+
+**Change.**
+
+1. In the `one-of` branch, before `raise errors[0]`, when every variant has
+   `string.constant`, raise `Expected one of <a>, <b>, ….` with all constants
+   in variant order. A dispatch input `type: text` then reports
+   `Expected one of string, boolean, number, environment, choice.`
+2. In `validate_steps`, for an unsupported `uses`:
+   - WB-36's specific guidance wins when it matches.
+   - If the value starts with `relay/` and `closest` (F4) finds a built-in,
+     append `Did you mean <built-in>?`.
+   - Otherwise append `Use one of <sorted built-ins>, or a local action
+     under ./.relay/actions/.`
+   The prefix `Only frozen local and versioned relay actions are supported.`
+   stays.
+3. In `_expression_check`, when the parser message is
+   `Unexpected expression symbol.` and the expression text contains `"`,
+   append `Strings use single quotes, for example 'main'.`
+4. Step shape: in `workflow_diagnostics` before choosing a `steps-item`
+   variant, and in `_validate_type` for `steps-item`, report one error at the
+   step path and skip variant errors:
+   - both `run` and `uses`: **`A step needs either run or uses, not both.`**
+   - neither: **`A step needs run (a script) or uses (an action).`**
+
+**Tests.** `tests/test_relay_language.py::test_errors_list_the_valid_choices`,
+parametrized, asserting the message text:
+
+| Source fragment | Expected text |
+| --- | --- |
+| dispatch input `type: text` | `Expected one of string, boolean, number, environment, choice.` |
+| `uses: relay/agent` | `Did you mean relay/agent@v1?` |
+| `uses: relay/agent@v9` | `Did you mean relay/agent@v1?` |
+| `uses: someone/thing@v1` | `Use one of relay/agent@v1, relay/cache@v1,` |
+| `if: inputs.x == "y"` | `Strings use single quotes, for example 'main'.` |
+| step with `run` and `uses` | `A step needs either run or uses, not both.` |
+| step with only `name` | `A step needs run (a script) or uses (an action).` |
+
+The existing tests that match `Expected one of`
+(`tests/test_actions_language_boundaries.py:63`,
+`tests/test_relay_language.py:256`) must still pass.
+
+**Done when.**
+
+- [ ] Every enum-like error lists its valid values.
+
+#### WB-18. Give every diagnostic a location
+
+- **Priority:** P2. **PR:** A.
+
+**Problem.** A duplicate YAML key and the loop's
+"Loop requires a static reusable workflow." have no line, and the editor
+then underlines line 1. A key with an empty value, such as `pull_request:`,
+is reported on the following line.
+
+**Code today.**
+
+- `language.py:96-131` (`_inspect_tree`): raises on a duplicate key before
+  recording its location; records each node's own start mark, which for an
+  empty value is the next token.
+- `language.py:584-617` (`_read_document`): re-raises `_inspect_tree` errors
+  without calling `_locate`.
+- `language.py:821-842` (`capture_sources` inner `visit`): raises with the
+  path `with.workflow`, which `_locate` cannot resolve; the validate view
+  does not locate `capture_sources` errors.
+- `frontend/src/components/YamlEditor.tsx` diagnostics effect: uses line 1
+  when no line is given.
+
+**Change.**
+
+1. In `_inspect_tree`, before raising `Duplicate YAML key.`, store the
+   duplicate key's own mark in `locations[f"{path}.{key.value}"]`.
+2. In `_inspect_tree`, after recursing into a child that is an empty null
+   scalar (tag `null`, value `""`), store the key's mark for that child path.
+3. In `_read_document`, call `_locate(error, locations)` before re-raising a
+   `WorkflowValidationError` from `_inspect_tree`.
+4. In `capture_sources`'s `visit`, iterate with the job ID and step index and
+   raise loop and local-source errors at
+   `jobs.<job>.steps[<i>].with.workflow` and `jobs.<job>.steps[<i>].uses`. In
+   the validate view, call `_locate(error, document.locations)` on errors from
+   `capture_sources`.
+5. In the editor, skip the underline when a diagnostic has no line; the
+   banner still shows it.
+
+**Tests.** `tests/test_relay_language.py::test_every_diagnostic_has_a_line`,
+parametrized over a duplicate key, `on: {push: {}, pull_request: }` (expects
+the `pull_request` key's own line), and a loop without `workflow` (expects
+the step's line); assert `context["line"]` equals the expected line.
+
+**Done when.**
+
+- [ ] No diagnostic from the audit's validation matrix lacks a line, and none
+  points at the wrong one.
+
+### Help, docs, and vocabulary items
+
+#### WB-19. Add help buttons to job and step controls
+
+- **Priority:** P1. **PR:** E. **Depends on:** F3.
+
+**Problem.** In the job and step editor only the agent effort select has a
+help button.
+
+**Code today.** `frontend/src/components/HelpTip.tsx` exports `HelpTip`,
+`HelpTextField`, and `HelpSelectField`, which take a `topic` key from
+`frontend/src/help.ts`. None of `ActionJobEditorView.tsx`,
+`ActionJobSteps.tsx`, `ActionBuiltinFields.tsx`, `WorkflowCanvas.tsx`,
+`WorkflowSettingsView.tsx`, or `WorkflowInputsEditor.tsx` uses them.
+
+**Change.**
+
+1. Extend `HelpTip`, `HelpTextField`, and `HelpSelectField` to accept either
+   `topic` or `{ title: string; description: string }`. Keep the "Read the
+   guide" link, pointing to the matching section of
+   [Workflows](workflows.md).
+2. Replace each plain field in those six components with its help variant.
+   Take the description from the manifest: `property_descriptions` for
+   workflow and job fields and `builtin_inputs[ref].descriptions` for action
+   inputs (F3). Use the field's visible label as the title.
+3. Help is required for every field on the **General**, **Outputs**,
+   **Environment**, and **When it fails** tabs, every step field, and every
+   **Workflow settings** field.
+
+**Tests.** `frontend/e2e/help-layout.spec.ts`, new test
+`every job and step field has help`: open a job; on each tab, assert that
+every visible text field, select, and switch has a help button, open one per
+tab, and check its text equals the manifest description.
+
+**Docs.** The sentence at [Local web runtime](web-ui.md#get-started) about
+question-mark buttons stays true; no change.
+
+**Done when.**
+
+- [ ] Every field in the job drawer and **Workflow settings** has help.
+
+#### WB-20. Write a "Build your first workflow" guide
+
+- **Priority:** P1. **PR:** H. **Depends on:** all editor items.
+
+**Problem.** [Getting started](getting-started.md) covers running a starter,
+not building one, and no table lists the built-in actions.
+
+**Change.**
+
+1. Create `docs/build-your-first-workflow.md`:
+   1. Create a blank workflow named `Review and test`.
+   2. Rename its job to `Review` and make it an **Agent** step with the
+      prompt `Review README.md and list anything unclear.`
+   3. **Add job**: a **Command** job named `Test` running `python -m pytest`,
+      with **Start after** set to `Review`.
+   4. Save, choose **Run workflow**, follow both jobs, and read the result.
+   5. Break it on purpose (type `stpes:` in YAML), read the error and its
+      suggestion, and fix it.
+   Show each step's resulting YAML as a tagged `relay-example` block.
+2. Add a "Built-in actions" section with one row per action: label (WB-10),
+   reference, purpose (the registry entry's `summary`), required inputs,
+   optional inputs, and outputs. Add
+   `tests/test_relay_language.py::test_action_table_matches_contracts`, which
+   parses that table and compares it with the current entries in
+   `BUILTIN_ACTIONS`.
+3. Link the guide from [Getting started](getting-started.md); from
+   [README.md](../README.md), after the sentence that links
+   [Coming from GitHub Actions](coming-from-github-actions.md) (around line
+   32), with the sentence "To build a workflow step by step, see Build your
+   first workflow." where the last three words link to
+   `docs/build-your-first-workflow.md`; and from
+   the Help menu (`frontend/src/components/HelpGuides.tsx`), in the same way
+   as [Getting started](getting-started.md).
+
+**Tests.** `uv run python scripts/check_workflow_examples.py
+docs/build-your-first-workflow.md`, the link checker, and the new table
+test.
+
+**Done when.**
+
+- [ ] Following the guide on the isolated server produces a successful run.
+
+#### WB-21. Use the YAML words in the gallery
+
+- **Priority:** P2. **PR:** F.
+
+**Problem.** Gallery cards show "test_runner (enum)" while the YAML says
+`type: choice`. [Local web runtime](web-ui.md) calls the job line a "job
+graph preview".
+
+**Code today.** `frontend/src/components/CreateWorkflowDialog.tsx:158` prints
+`input.type`, and `relay/workflows/actions/compiler.py:58` maps `choice` to
+the internal `enum` type that `starter_inventory()` dumps.
+
+**Change.**
+
+1. In `CreateWorkflowDialog.tsx`, display `choice` when `input.type` is
+   `enum`.
+2. In [Local web runtime](web-ui.md) line 248, replace "job graph preview"
+   with "job sequence".
+
+**Tests.** `frontend/e2e/get-started.spec.ts`: the **Implement and test** card
+reads `Inputs: task (string), test_runner (choice)`.
+
+**Done when.**
+
+- [ ] No gallery text shows an internal type name.
+
+#### WB-22. Label starter size and requirements
+
+- **Priority:** P2. **PR:** F. **Decision:** D3.
+
+**Problem.** The preselected **AI coding workflow** is the largest starter,
+and nothing on its card says how large it is.
+
+**Change.** Keep it preselected.
+
+1. In `relay/workflows/starters.py` `starter_inventory()`, add
+   `"job_count": len(definition.nodes)` and `"approval_count"`, the number of
+   `relay/human-wait@v1` steps in the starter's main YAML. Add both fields to
+   `WorkflowTemplate` in `frontend/src/types.ts`.
+2. On each gallery card, show a line `<n> jobs · <k> approvals` (omit the
+   approvals part when it is zero; use `1 job` for one).
+3. Under the preselected card's **Requires** line, add **`Needs Claude Code
+   with an Opus model and one other coding agent. Choose Ask an agent for a
+   smaller first run.`**
+
+**Tests.** `tests/test_workflow_starters.py::test_gallery_has_seven_templates_and_schema_defined_inputs`
+gains assertions: `ai-coding-workflow` has `job_count == 9` and
+`approval_count == 3`; `ask-agent` has `1` and `0`. The existing assertion
+that only `ai-coding-workflow` is the default stays.
+
+**Done when.**
+
+- [ ] Every card shows its size, and the default card says what it needs.
+
+### Accessibility items
+
+#### WB-23. Name the job settings drawer
+
+- **Priority:** P2. **PR:** E.
+
+**Problem.** axe-core reports `aria-dialog-name` (serious) on the job
+settings drawer.
+
+**Code today.** `frontend/src/components/WorkflowEditorDialogs.tsx:80-92`
+renders the MUI `Drawer` and a `Job settings` heading without linking them.
+
+**Change.** Give the heading an `id` from `useId()` and the text
+`Job settings: <job name or ID>`, and pass
+`slotProps.paper["aria-labelledby"]` with that `id`.
+
+**Tests.** `frontend/e2e/accessibility.spec.ts`, new test
+`the job settings drawer has an accessible name`, running axe with the drawer
+open and finding it with `getByRole("dialog", { name: /^Job settings/ })`.
+Update helpers that call `getByRole("dialog")` for the drawer, such as
+`closeJobSettings` in `frontend/e2e/setup-helpers.ts`, only if they now match
+two dialogs.
+
+**Done when.**
+
+- [ ] axe reports no serious issue with the drawer open.
+
+### First run and results items
+
+#### WB-24. Offer approval answers as buttons
+
+- **Priority:** P0. **PR:** F. **Decision:** D9.
+
+**Problem.** The **AI coding workflow** approvals are free text. Typing `yes`
+at the first one failed the whole run with "Workflow validation failed: -
+input 'value' must be one of the declared enum values". The
+**Plan, approve, implement** starter has the opposite flaw: its approval
+accepts any text, so answering `no` still runs the implementation.
+
+**Code today.**
+
+- `relay/workflows/starters/ai-coding-workflow.yaml:71-83`, `:129-142`, and
+  `:168-177`: `relay/human-wait@v1` without `options`, each followed by
+  `relay/validate-input@v1` with an enum.
+- `relay/workflows/starters/plan-approve-implement.yaml:18-20`: a human wait
+  with no `id`, no `options`, and no condition on the next step.
+- `relay/workflows/validation.py:86`: the message
+  `must be one of the declared enum values`.
+- Answer buttons already render when `options` is set
+  (`frontend/e2e/run-presentation.spec.ts:173`).
+
+**Change.**
+
+1. In `ai-coding-workflow.yaml`, add `options` to the three waits and keep the
+   `validate-input` steps:
+   - `implement` → `approval`: `options: '["IMPLEMENT"]'`
+   - `human_review` → `decision`: `options: '["FOLLOWUP", "TESTS"]'`
+   - `final_review` → `approval`: `options: '["ACCEPT"]'`
+   Rewrite the three `prompt` texts as WB-27 specifies.
+2. In `plan-approve-implement.yaml`, give the wait `id: approval` and
+   `options: '["Approve", "Stop"]'`; add
+   `if: steps.approval.outputs.answer == 'Approve'` to the implementation
+   step; and add a final step:
+
+   ```yaml
+       - if: steps.approval.outputs.answer == 'Stop'
+         run: echo Stopped at plan review.
+   ```
+
+3. In `relay/workflows/validation.py:86`, change the message to
+   `f"must be one of {', '.join(item.constraints.values)}"`, so a rejected
+   value names the allowed ones (for example
+   `input 'value' must be one of IMPLEMENT`).
+4. Existing owner copies of these starters are not changed; starters never
+   overwrite owner files.
+
+**Tests.**
+
+- `frontend/e2e/get-started.spec.ts:247`: answer by clicking the buttons
+  `IMPLEMENT`, `TESTS`, and `ACCEPT` inside the card; assert that the card has
+  no **Your response** text box.
+- `frontend/e2e/setup-helpers.ts:191-202`: click **Approve** instead of
+  typing `Approved`.
+- New test in `frontend/e2e/get-started.spec.ts`:
+  `Plan, approve, implement stops without implementing when Stop is chosen`;
+  assert the run succeeds, the implementation step is skipped, and the log
+  contains `Stopped at plan review.`
+- `tests/test_workflow_starters.py::test_full_starter_executes_handoffs_gates_and_bounded_loops`
+  keeps passing with its answers, which are all allowed options.
+- Any test that matches `declared enum values` must be updated to the new
+  text.
+
+**Docs.** [Local web runtime](web-ui.md#get-started): state that the AI
+coding workflow's approvals are answered with buttons.
+
+**Done when.**
+
+- [ ] No starter approval can be answered with a word that fails the run,
+  and every refusal choice stops before implementation.
+
+#### WB-25. Show the code a finished run produced
+
+- **Priority:** P0. **PR:** F.
+
+**Problem.** After a successful guided run, **Review material** offered five
+early planning documents and no **Committed code changes**, and the summary
+said "Artifacts 50" although the run had 320.
+
+**Code today.**
+
+- `frontend/src/components/useRunWorkspace.tsx:237`: artifacts load in pages
+  of 50, oldest first.
+- `frontend/src/components/RunReviewShared.tsx:99`: `hasChanges` is true only
+  if a non-empty `commits` artifact is among the loaded records.
+- `RunReviewShared.tsx:111`: without changes, the default selection is the
+  first, which is the oldest, loaded document.
+- `frontend/src/components/RunSummaryOverview.tsx:75`: the count is the
+  number of loaded visible artifacts.
+- `relay/web/repositories.py:1622` (`_run_metadata`): builds the monitor's
+  run record; `:1965` (`page_artifacts`): defines what is visible.
+
+**Change.**
+
+1. Server, `relay/web/repositories.py`:
+   - Move the visible-artifact filter in `page_artifacts` into a helper
+     `_visible_artifacts(query)` and use it there.
+   - In `_run_metadata`, add
+     `"artifact_count"`: the count of `_visible_artifacts(...)` for the run;
+     `"has_committed_changes"`: `recorded_head` is non-empty and differs from
+     `source_commit`; and `"recorded_head"`. These are database reads inside
+     the existing snapshot; do not call Git here.
+2. Add the three fields to `RunDetail` in `frontend/src/types.ts` and to
+   [HTTP API](http-api.md).
+3. `RunSummaryOverview.tsx`: show `detail.artifact_count`.
+4. `ReviewEvidence` in `RunReviewShared.tsx`:
+   - take `hasChanges` from a new prop set to `detail.has_committed_changes`;
+   - when the select opens, load the remaining artifact pages through a new
+     `onLoadAll` prop backed by `useRunWorkspace` (append pages until the
+     cursor is null, at most 20 pages);
+   - default selection: for a pending review, the first document whose
+     label appears in the request's prompt text; otherwise **Committed code
+     changes** when `hasChanges`; otherwise the newest document (highest
+     `id`).
+
+**Tests.**
+
+- `tests/test_run_monitor.py::test_monitor_reports_artifact_total_and_committed_changes`:
+  a run with more than 50 visible artifacts and a recorded head after its
+  source commit reports the full `artifact_count` and
+  `has_committed_changes: true`; a run whose head equals its source commit
+  reports false.
+- `frontend/e2e/get-started.spec.ts`, the test
+  `the full AI coding workflow is preselected and runs from one task`
+  (line 161): after success, assert **Review material** includes
+  **Committed code changes**, that it is selected, that the diff mentions
+  `feature.py`, and that the summary count equals the API total.
+
+**Done when.**
+
+- [ ] A run of any size shows its committed changes and true artifact count
+  without **Load more artifacts**.
+
+#### WB-26. Say where the code is and how to take it
+
+- **Priority:** P1. **PR:** F. **Depends on:** WB-25.
+
+**Problem.** A finished run's page never names the branch that holds the code
+or the changed files, and never says how to merge.
+
+**Code today.** `relay/web/repositories.py:1453` (`run_changes`) returns the
+diff text only. Run branches persist until the owner's data cleanup
+(`repositories.py:2863`).
+
+**Change.**
+
+1. In `run_changes` (whole-run form, `scope_path is None`), also run
+   `git diff --name-only <source_commit>..<recorded_head> --` with
+   `run_git_to_file` and return `"files"` (at most 200 paths) and
+   `"files_truncated"`. Document both in [HTTP API](http-api.md).
+2. In the run summary (`RunSummaryOverview.tsx`), for a run in a terminal
+   state with `has_committed_changes`, fetch `/api/runs/{id}/changes` once
+   and show:
+   - when `merged_commit` is set: **`Merged into <source_branch> at <first 7
+     characters of merged_commit>.`**
+   - otherwise: **`<n> files changed on branch <run_branch>.`**, the first ten
+     paths, and two commands with copy buttons:
+
+     ```bash
+     git switch <source_branch>
+     git merge --ff-only <run_branch>
+     ```
+
+     followed by **`To merge automatically next time, choose "Merge into the
+     active branch, then delete working copies" under Advanced options when
+     you run the workflow.`**
+3. If the request fails (for example, the branch was cleaned up), show
+   nothing.
+
+**Tests.** Extend the WB-25 browser test: the summary shows
+`2 files changed on branch relay/run/`, lists `feature.py` and
+`test_feature.py`, and shows both commands. Add
+`tests/test_web_api.py::test_run_changes_lists_changed_files`.
+
+**Done when.**
+
+- [ ] A user can bring a finished run's code into their branch from the
+  summary alone.
+
+#### WB-27. Say plainly that the default starter pushes and opens a pull request
+
+- **Priority:** P1. **PR:** F. **Depends on:** WB-24.
+
+**Problem.** The starter's prompts tell the agent to push and to create a pull
+request with GitHub CLI (`01_initial_exploration_any_model.md:548-551`), but
+the approvals mention this only in passing and in jargon.
+
+**Code today.** The three `prompt` texts in `ai-coding-workflow.yaml` (see
+WB-24) and the `Starter` record in `relay/workflows/starters.py:41-79`. Do not
+edit the prompt files (see [Ground rules](#ground-rules)).
+
+**Change.**
+
+1. In `starters.py`, change the AI coding workflow's `description` to
+   **`Enter a task once. Agents explore, plan, implement, review, and test,
+   with your approval at three points. Approving lets the agent commit, push
+   its branch, and open a pull request if the repository has a remote.`**
+2. Replace the three wait prompts in `ai-coding-workflow.yaml`:
+   - `implement` → `approval`: **`Read FEATURE_SPEC_AND_PLAN.md,
+     EXECUTION_PROMPT.md, and PLAN_REVISION_VERIFICATION.md. Choose IMPLEMENT
+     to let the agent build the plan, fix valid review findings, and write
+     focused tests. The agent may commit, push its branch, and open a pull
+     request. Nothing is merged. To stop, cancel the run.`**
+   - `human_review` → `decision`: **`Finish the walkthrough first: mark each
+     changed file as reviewed and agree to each item in FOLLOWUP.md that
+     should be done. Choose FOLLOWUP to have the agent do the agreed items, or
+     TESTS when nothing more is needed.`**
+   - `final_review` → `approval`: **`Review the final test changes and
+     TEST_AUDIT.md. Choose ACCEPT to finish the run. Nothing is merged.`**
+
+**Tests.** `tests/test_workflow_starters.py`: assert the new description, and
+that each wait prompt contains `Choose` and no `Reply`. The provenance test
+must still pass.
+
+**Done when.**
+
+- [ ] Before approving, a user can tell that the agent may push and open a
+  pull request.
+
+#### WB-28. Use display names in run views
+
+- **Priority:** P2. **PR:** F.
+
+**Problem.** Queued jobs show IDs such as `refine_plan`; loop scopes show as
+`iteration` and `cycle`; the job count changes from 9 to 11 to 15; commits
+read "Relay: complete job cycle"; the artifact table repeats one file once
+per scope.
+
+**Code today.**
+
+- `relay/web/repositories.py:1044-1046` (`_node_record`): `display_name`
+  falls back to the node ID until a runtime name is recorded.
+- `relay/execution/nodes/actions.py:1035`: loop iterations use the job ID
+  `iteration` and scopes `iteration_<n>`.
+- The child workflows `relay/workflows/starters/ai-coding-workflow/*-cycle.yaml`
+  name their job `cycle` without `name:`.
+- `frontend/src/components/RunMain.tsx:158`: counts every loaded job scope.
+- `frontend/src/components/RunArtifacts.tsx:166,190`:
+  `stageLabel(scope_path)`.
+- `relay/vcs/commits.py:77`: `f"Relay: complete job {job_id}"`, called from
+  `relay/execution/runner.py:381` with `claim.node_id`.
+
+**Change.**
+
+1. In `_node_record`, fall back to `frozen_def["job"]["name"]` when it is a
+   string without `${{`, before the node ID.
+2. Show loop iteration scopes as **`Round <n>`**: in `_node_record`, when
+   `node_id == "iteration"` and the scope ends in `iteration_<n>`, return
+   `Round <n>` as the default display name.
+3. Add `name:` to the `cycle` job in each cycle file:
+   `Plan round` (`plan-cycle.yaml`), `Review round` (`review-cycle.yaml`),
+   `Test round` (`test-cycle.yaml`).
+4. `RunMain.tsx:158`: count only jobs whose parent scope is `root`, so the
+   count matches the workflow's top-level jobs.
+5. `RunArtifacts.tsx`: label the **Job** column with the node's
+   `display_name` (pass a scope-to-name map from the run's nodes). Group rows
+   with the same file name and the same worktree path, show the newest, and
+   put older copies under a disclosure **`<k> earlier copies`**.
+6. `accept_job_result`: add a `display_name: str | None = None` parameter;
+   the commit message becomes `Relay: complete job <display_name> (<job_id>)`
+   when a display name is known, else unchanged. Pass the job's resolved
+   name from `runner.py:381`.
+
+**Tests.**
+
+- `tests/test_run_monitor.py::test_queued_jobs_use_their_declared_names`.
+- `frontend/e2e/run-presentation.spec.ts`, new test
+  `run views show names, rounds, and one row per file`, using the full
+  starter fixture: no visible text equals `iteration` or `cycle`; the header
+  reads `Started manually · 9 jobs` throughout.
+
+**Done when.**
+
+- [ ] No generated scope name or repeated artifact row appears in the default
+  run view.
+
+#### WB-29. Keep the Get started prompt after the slides close
+
+- **Priority:** P2. **PR:** F. **Decision:** D4.
+
+**Problem.** Closing the welcome slides also removes the **Get started**
+banner.
+
+**Code today.** `frontend/src/AppView.tsx:62-68`: both `WelcomeCarousel`
+callbacks (`onClose` and `onShowTour`) call `dismissSetup()`.
+
+**Change.**
+
+1. Remove the two `dismissSetup()` calls. The banner then hides only through
+   **Dismiss welcome** or **Get started** (`useApp.tsx:371-382`), or after a
+   successful run, as today.
+2. In [Local web runtime](web-ui.md#get-started), replace "Closing the welcome
+   slides also hides the setup welcome prompt; the agent checklist remains
+   available from **Help > Get started**." with "Closing the welcome slides
+   leaves the setup welcome prompt in place until you open the checklist or
+   choose **Dismiss welcome**."
+
+**Tests.** `frontend/e2e/onboarding.spec.ts`, test
+`welcome navigation and keyboard controls introduce features, then a skipped
+tour stays dismissed` (line 22): at line 79, expect the
+`Welcome to Relay` region to be visible after reload, then click
+**Dismiss welcome** and expect it gone after another reload.
+
+**Done when.**
+
+- [ ] Skipping the slides always leaves a visible next step.
+
+#### WB-30. Explain the optional commit in the launch dialog
+
+- **Priority:** P2. **PR:** F.
+
+**Problem.** The dialog says "Project files are ready to run. 1 allowed file"
+and still offers **Commit workflow files**, without saying whether it is
+needed.
+
+**Code today.** `frontend/src/components/LaunchPreflight.tsx:47-50`
+(readiness text), `:66-70` (the allowed-files summary), and `:94-101` (the
+condition that shows `CommitWorkflowFiles`).
+
+**Change.**
+
+1. Change the allowed-files summary text to
+   **`<n> new workflow file can stay uncommitted`** (plural:
+   **`<n> new workflow files can stay uncommitted`**).
+2. When `result.clean` is true, render `CommitWorkflowFiles` with the helper
+   text **`Optional. Commit this workflow so it is saved in your Git
+   history.`** When `result.clean` is false, keep it as the fix for the
+   blocking files, with **`Commit these workflow files to run.`**
+
+**Tests.** `frontend/e2e/launch-panel.spec.ts`, new test
+`a new workflow can run without committing and says the commit is optional`.
+
+**Done when.**
+
+- [ ] The dialog says whether committing is needed.
+
+### More visual editor items
+
+#### WB-31. Show job names, not only IDs, when connecting jobs
+
+- **Priority:** P1. **PR:** E. **Decision:** D10.
+
+**Problem.** **Start after** lists `check` for a job named **Review**. The
+artifact table labels jobs "Check" and "Job 1".
+
+**Code today.** `frontend/src/components/ActionJobEditorView.tsx:59-75`
+(**Start after** `Autocomplete` with job IDs as option labels);
+`RunArtifacts.tsx:166` (see WB-28).
+
+**Change.**
+
+1. **Start after**: set `getOptionLabel` to `name ? "<name> (<id>)" : id`,
+   keeping the ID as the option value.
+2. On the **General** tab, add a read-only **Job ID** field with a button
+   **Rename job ID**. It opens a dialog with one text field validated by
+   `^[A-Za-z_][A-Za-z0-9_-]*$` and uniqueness. On confirm, in one undoable
+   source edit: rename the key under `jobs`, replace the ID in every `needs`
+   (string or list), and replace `needs.<old>.` with `needs.<new>.` inside
+   `${{ }}` expressions in the document.
+3. The artifact table uses display names (WB-28, step 5).
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`dependencies show job names and job IDs can be renamed safely`: create two
+jobs, name the first `Review`, and assert the **Start after** option text
+`Review (check)`; rename `check` to `review`, and assert both `needs` and a
+`${{ needs.check.outputs.x }}` reference were updated and undo restores them.
+
+**Done when.**
+
+- [ ] A user who only types job names never has to read a generated ID.
+
+#### WB-32. Mark agents that are not installed
+
+- **Priority:** P2. **PR:** E.
+
+**Problem.** The agent select lists all five agents with no status.
+
+**Code today.** `ActionBuiltinFields.tsx:84-106` maps `agents` to plain menu
+items. `AgentRecord` (`frontend/src/types.ts:75`) has `installed` and
+`reason`.
+
+**Change.** In the select (and in WB-12's **Runs on** control), render each
+agent with secondary text: **`Installed`**, or **`Not installed`** plus a
+link **Open Get started** that opens the checklist. Disable agents that are
+not installed unless the step already uses them.
+
+**Tests.** `frontend/e2e/agent-configuration.spec.ts`, new test
+`agent choices show installation status`: with the starter-project fixture,
+Codex shows `Installed` and GitHub Copilot CLI shows `Not installed` and is
+disabled.
+
+**Done when.**
+
+- [ ] An agent that cannot run is visibly marked wherever it can be chosen.
+
+#### WB-33. Keep canvas cards in view after the drawer closes
+
+- **Priority:** P2. **PR:** E.
+
+**Problem.** After adding a job and closing its drawer, the cards sit cut off
+at the canvas's left edge.
+
+**Code today.** `frontend/src/components/FlowCanvas.tsx` `FocusStep` fits
+the selected node while the drawer covers the right side;
+`WorkflowCanvas.tsx:89` passes `followSelection={drawer}`.
+
+**Change.** In `FlowCanvas`, add an effect that, when `followSelection`
+changes from true to false, calls
+`fitView({ padding: 0.1, minZoom: 0.25, maxZoom: 1, duration: 0 })`.
+
+**Tests.** `frontend/e2e/workflow-authoring.spec.ts`, new test
+`closing the drawer keeps every card in view`: add a job, close the drawer,
+and assert each `.editor-graph-node` bounding box lies inside the canvas's
+bounding box.
+
+**Done when.**
+
+- [ ] No card is cut off after the drawer closes.
+
+### Coming from GitHub Actions items
+
+#### WB-34. Point `github` and `runner` expressions to their Relay names
+
+- **Priority:** P0. **PR:** A. **Decision:** D8.
+
+**Problem.** `${{ github.sha }}` and similar report only "Unrecognized
+named-value: github."
+
+**Code today.** `relay/workflows/actions/expressions.py:409` raises the parser
+error (pinned by upstream fixtures; do not change).
+`relay/workflows/actions/language.py:151-171` (`_expression_check`) re-raises
+it with the field path.
+
+**Change.** In `_expression_check`'s `except` block, when the parser message
+starts with `Unrecognized named-value: github` or
+`Unrecognized named-value: runner`, find the first match of
+`\b(github|runner)\.([A-Za-z_]+)(?:\.([A-Za-z_]+)\.([A-Za-z_]+))?` in the
+expression text and append a hint from
+[Appendix B](#appendix-b-expression-names):
+
+- a mapped property: `Use <replacement>.`
+  (for example `Use relay.sha.`, `Use inputs.task.`, `Use host.os.`);
+- `github.token`: `Relay does not issue a token; bind a secret instead.`;
+- any other `github` property: `Use relay, which provides <the sorted
+  relay properties>.`;
+- any other `runner` property: `Use host, which provides arch, name, os,
+  temp.`
+
+The final message keeps the parser's text first, for example
+`workflow.jobs.a.steps[0].run: Unrecognized named-value: github. Use
+relay.sha.`
+
+**Tests.** `tests/test_relay_language.py::test_platform_names_point_to_relay_names`,
+parametrized over every row of Appendix B plus `github.token`,
+`github.server_url`, and `runner.tool_cache`, asserting the full appended
+hint. The existing `test_platform_expression_roots_and_placeholders_are_removed`
+must still pass.
+
+**Done when.**
+
+- [ ] Every `github.*` and `runner.*` property with a Relay equivalent names
+  it.
+
+#### WB-35. Reject the GitHub file variables in scripts
+
+- **Priority:** P0. **PR:** A. **Decision:** D2.
+
+**Problem.** A script writing to `$GITHUB_OUTPUT` or `$GITHUB_ENV` validates,
+then fails mid-run with "script.sh: line 1: : No such file or directory".
+
+**Code today.** `language.py:370-403` (`validate_steps`) does not read `run`
+text. Composite actions share `validate_steps`.
+
+**Change.** In `validate_steps`, for every step with a string `run`, search
+the text for `\bGITHUB_(OUTPUT|ENV|PATH|STATE|STEP_SUMMARY)\b`. This catches
+`$GITHUB_OUTPUT`, `${GITHUB_ENV}`, `$env:GITHUB_PATH`, `%GITHUB_STATE%`, and
+`os.environ["GITHUB_STEP_SUMMARY"]`. For the first match, raise at
+`jobs.<job>.steps[<i>].run`:
+
+| Name | Message after the path |
+| --- | --- |
+| `GITHUB_OUTPUT` | **`GITHUB_OUTPUT is not a Relay variable. Write step outputs to $RELAY_OUTPUT.`** |
+| `GITHUB_ENV` | **`GITHUB_ENV is not a Relay variable. Set variables for later steps in $RELAY_ENV.`** |
+| `GITHUB_PATH` | **`GITHUB_PATH is not a Relay variable. Add search paths in $RELAY_PATH.`** |
+| `GITHUB_STATE` | **`GITHUB_STATE is not a Relay variable. Save action state in $RELAY_STATE.`** |
+| `GITHUB_STEP_SUMMARY` | **`GITHUB_STEP_SUMMARY is not a Relay variable. Write the step summary to $RELAY_STEP_SUMMARY.`** |
+
+Do not provide aliases, warnings, or any GitHub wording. Other `GITHUB_*`
+names, such as a `GITHUB_TOKEN` exported by the owner's shell, are ordinary
+environment variables and stay allowed. JavaScript actions are not scanned.
+
+**Tests.** `tests/test_relay_language.py::test_unknown_file_variables_are_rejected`,
+parametrized over the five names in bash (`>> "$NAME"`), PowerShell
+(`$env:NAME`), and Python (`os.environ['NAME']`) scripts, asserting the
+exact message. Also assert that `$RELAY_OUTPUT` and `echo $GITHUB_TOKEN`
+validate, and that a composite action with `$GITHUB_ENV` is rejected.
+
+**Docs.** In the `docs/todo.md` audit entry, WB-35 already records D2. Add no
+`GITHUB_*` text to other guides; WB-41 lists only the `RELAY_*` names.
+
+**Done when.**
+
+- [ ] Each of the five names is a validation error naming its `RELAY_*`
+  variable.
+
+#### WB-36. Say what replaces each common GitHub action
+
+- **Priority:** P1. **PR:** A. **Depends on:** WB-17.
+
+**Problem.** `actions/checkout@v4`, `actions/setup-python@v5`,
+`actions/upload-artifact@v4`, `actions/cache@v4`, `docker://…`, and
+`./.github/actions/…` all report "Only frozen local and versioned relay
+actions are supported." In a file with two of them, both errors say
+`steps[0]`.
+
+**Code today.**
+
+- `language.py:384-395` (`validate_steps`): one message.
+- `language.py:720-735` (`workflow_diagnostics`): validates each step as
+  `validate_steps([step], ...)` and fixes `context["field"]` but not the
+  message text, which keeps `steps[0]`.
+
+**Change.**
+
+1. Add `start: int = 0` to `validate_steps` and use `index + start` in every
+   path it builds. `workflow_diagnostics` passes `start=index` and stops
+   rewriting the field.
+2. Add guidance after the existing prefix for these references (match on
+   the part before `@`). Build each `relay/…` reference in the text with
+   `current_builtin(name).reference`:
+
+   | Reference | Guidance |
+   | --- | --- |
+   | `actions/checkout` | `Remove this step: jobs already run in a working copy of this repository.` |
+   | `actions/setup-<tool>` | `Remove this step and use the tool installed on this computer.` |
+   | `actions/upload-artifact` | `Use relay/upload-artifact@v1 with the same name, path, and retention-days inputs.` |
+   | `actions/download-artifact` | `Use relay/download-artifact@v1 with the same name and path inputs.` |
+   | `actions/cache` | `Use relay/cache@v1 with the same key, path, and restore-keys inputs.` |
+   | `actions/cache/restore` | `Use relay/restore-cache@v1 with the same key, path, and restore-keys inputs.` |
+   | `actions/cache/save` | `Use relay/save-cache@v1 with the same key and path inputs.` |
+   | starts with `docker://` | `Run the program with a run step or relay/command@v1 instead of a container image.` |
+   | starts with `./.github/actions/` | `Move the action to ./.relay/actions/<name> and use that path.` |
+
+   Anything else falls through to WB-17.
+
+**Tests.** `tests/test_relay_language.py::test_common_actions_get_specific_guidance`,
+parametrized over the table; plus
+`test_each_rejected_step_reports_its_own_index`, where a file with
+`actions/checkout@v4` and `actions/setup-python@v5` as steps 0 and 1 reports
+`steps[0]` and `steps[1]`.
+
+**Done when.**
+
+- [ ] Each listed action gets its guidance at the correct step path.
+
+#### WB-37. Import an existing GitHub workflow
+
+- **Priority:** P1. **PR:** G. **Depends on:** WB-13, WB-34, WB-35, WB-36.
+  **Decision:** D7.
+
+**Problem.** A typical CI file produces four errors, and nothing helps convert
+it. Relay reads only `.relay/workflows/`.
+
+**Change.**
+
+1. Create `relay/workflows/importer.py`:
+
+   ```python
+   @dataclass(frozen=True, slots=True)
+   class ImportResult:
+       yaml: str
+       changes: tuple[str, ...]
+       unresolved: tuple[str, ...]
+
+
+   def convert_github_workflow(text: str) -> ImportResult:
+       """Translate known fields; never execute or fetch anything."""
+   ```
+
+   Use ruamel round-trip loading so comments survive. Apply these rules in
+   order, adding one `changes` sentence per edit:
+
+   | Rule | Edit | Change sentence |
+   | --- | --- | --- |
+   | `runs-on` on a job | remove | `Removed runs-on from job <id>; jobs run on this computer.` |
+   | `permissions`, `services`, `container` | remove | `Removed <field> from the workflow.` or `Removed <field> from job <id>.` |
+   | trigger not in `EVENTS` | remove | `Removed the <event> trigger; it has no local equivalent.` |
+   | no trigger left | add `workflow_dispatch` | `Added workflow_dispatch so the workflow can be run by hand.` |
+   | `actions/checkout@*` step | remove | `Removed actions/checkout from job <id>; jobs already run in a working copy.` |
+   | `actions/setup-*@*` step | remove | `Removed <ref> from job <id>; use the tool installed on this computer.` |
+   | `actions/upload-artifact@*` | `relay/upload-artifact@v1`, keep `name`, `path`, `retention-days` | `Replaced <ref> with relay/upload-artifact@v1 in job <id>.` plus `Dropped input <name>.` per removed input |
+   | `actions/download-artifact@*` | `relay/download-artifact@v1`, keep `name`, `path` | as above |
+   | `actions/cache@*`, `/restore`, `/save` | matching `relay/*cache@v1`, keep `key`, `path`, `restore-keys` | as above |
+   | job `uses: ./.github/workflows/<f>` | `./.relay/workflows/<f>` | `Pointed job <id> at ./.relay/workflows/<f>.` and an `unresolved` entry `Import .github/workflows/<f> too.` |
+   | `github.*` / `runner.*` in `${{ }}` or a bare `if` | Appendix B replacements | `Replaced <old> with <new> (<n> places).` |
+   | the five `GITHUB_*` file variables in `run` | `RELAY_*` | `Replaced $<old> with $<new> (<n> places).` |
+   | any other `uses` | leave | `unresolved`: `Step <n> in job <id> uses <ref>. Replace it with a run step or a relay action.` |
+
+   Build each `relay/…` reference in the rules with
+   `current_builtin(name).reference`. Finally run `workflow_diagnostics` on
+   the result and add each remaining message to `unresolved`.
+2. In `relay/web/views/actions_language.py`, add two owner-only views, and
+   register them in `relay/web/urls.py`:
+   - `GET /api/workflow-import`: list `*.yml` and `*.yaml` files directly in
+     `<git root>/.github/workflows/` (no recursion, no symlinks, at most 100
+     files, each at most 1 MiB), as
+     `{"files": [{"path": ".github/workflows/ci.yml", "name": "CI"}]}`
+     (`name` from the file's `name:` or its file name).
+   - `POST /api/workflow-import` with `{"path": ".github/workflows/ci.yml"}`:
+     resolve with `safe_resolve` under that folder, call
+     `convert_github_workflow`, and return
+     `{"yaml", "changes", "unresolved", "suggested_key"}`. It writes nothing.
+   Document both in [HTTP API](http-api.md).
+3. In `CreateWorkflowDialog.tsx`, add a third choice
+   **Import from GitHub Actions** beside **Blank workflow**. It lists the
+   files from step 2; choosing one shows the `changes` and `unresolved`
+   lists. **Create workflow** then creates a blank workflow with
+   `suggested_key` and the file's name through the existing
+   `POST /api/workflows`, opens it, and replaces the editor text with the
+   converted YAML as an unsaved draft, so the normal save rules apply.
+
+**Tests.**
+
+- `tests/test_workflow_import.py::test_typical_ci_converts_to_a_valid_workflow`
+  converts this fixture:
+
+  ```yaml
+  name: CI
+  on:
+    push:
+      branches: [main]
+    pull_request:
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with:
+            python-version: '3.12'
+        - run: pip install -r requirements.txt
+        - run: pytest
+  ```
+
+  It asserts that `workflow_diagnostics` accepts the result, that
+  `unresolved` is empty, and that `changes` equals, in this order:
+  `Removed runs-on from job test; jobs run on this computer.`,
+  `Removed the pull_request trigger; it has no local equivalent.`,
+  `Removed actions/checkout from job test; jobs already run in a working
+  copy.`, and `Removed actions/setup-python@v5 from job test; use the tool
+  installed on this computer.`
+- In the same file, a fixture that exercises every rule produces each change
+  sentence once; a comment on a kept line survives; and `POST` with a `../`
+  path or a symlinked file is refused with the existing path-safety error.
+- `frontend/e2e/workflow-import.spec.ts`: write the CI file into the fixture
+  repository's `.github/workflows/`, import it, check the change list, save,
+  and see `Ready to edit`.
+
+**Docs.** In [Local web runtime](web-ui.md#author-workflows), describe
+**Import from GitHub Actions** and what it changes.
+
+**Done when.**
+
+- [ ] Importing the audit's CI file yields a valid workflow and lists every
+  change.
+
+#### WB-38. Answer every unsupported trigger the same way
+
+- **Priority:** P2. **PR:** A. **Depends on:** WB-18.
+
+**Problem.** `on: pull_request_target` lists the supported events, but
+`pull_request:` inside an `on:` mapping reports only "Unknown workflow field."
+on the line after the key.
+
+**Code today.** `_unknown_field` (`language.py:83`) for mapping keys under
+`on`; `_validate_contracts` (`language.py:425`) for list forms; WB-18 fixes the
+line.
+
+**Change.** For an unknown key directly under `workflow.on`, use the hint
+**`Relay supports workflow_dispatch, workflow_call, schedule, push,
+repository_dispatch, and workflow_run. Pull request and other hosted events
+have no local equivalent.`** after `Unknown workflow field.` Use the same
+sentence after the existing message in `_validate_contracts`, and after
+`Expected one of …` for the scalar form.
+
+**Tests.** `tests/test_relay_language.py::test_unsupported_events_share_one_message`
+for the scalar, list, and mapping forms of `pull_request`, asserting the
+sentence and the key's own line. The existing `Expected one of` tests still
+pass.
+
+**Done when.**
+
+- [ ] All three forms give the same guidance on the right line.
+
+#### WB-39. Explain how to build a matrix from an expression
+
+- **Priority:** P2. **PR:** A. **Decision:** D5.
+
+**Problem.** `matrix: {v: ${{ fromJSON('["a","b"]') }}}` reports "A matrix
+axis must be a nonempty sequence."
+
+**Code today.** `language.py:536-545` (`expand_matrix`).
+
+**Change.** When an axis value is a string containing `${{`, use
+**`A matrix axis must be a nonempty sequence. To build the matrix from an
+expression, set the whole matrix: matrix: ${{ fromJSON(...) }}.`** Do not add
+per-axis expressions.
+
+**Tests.** `tests/test_relay_language.py::test_expression_axis_explains_the_whole_matrix_form`.
+
+**Done when.**
+
+- [ ] The message shows the accepted form.
+
+#### WB-40. Warn about secrets that are never bound
+
+- **Priority:** P1. **PR:** C. **Depends on:** F1. **Decision:** D6.
+
+**Problem.** `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` ran with an empty value
+and the run succeeded.
+
+**Code today.** Secret references resolve at run time
+(`relay/web/actions_bindings.py:65`); a missing secret expression becomes
+empty. Bindings are `WorkflowBinding` rows with `kind == "secret"`
+(`relay/web/models.py:326`) in the scopes from
+`relay/web/binding_snapshots.py:14`.
+
+**Change.**
+
+1. Add `referenced_secrets(document) -> set[str]` in `language.py`: walk
+   expression trees (as in WB-16) for `secrets.<NAME>` and
+   `secrets['<NAME>']`.
+2. In `relay/web/views/pages.py` `workflow_preflight` (line 179), compute the
+   bound names: secret bindings in the installation and project scopes, plus
+   the environment scopes of every environment the workflow's jobs declare.
+   Return `"warnings": [{"code": "unbound_secret", "name": "<NAME>",
+   "message": "<text>"}]` for each referenced name without a binding, sorted.
+   Text: **`Secret <NAME> has no binding, so steps receive an empty value.
+   Add it under Variables, secrets, environments and library.`**
+3. Add `warnings` to `LaunchCleanliness` in `frontend/src/types.ts` and to
+   [HTTP API](http-api.md). Show each warning in `LaunchPreflight.tsx` as a
+   warning `Alert`. Warnings never disable **Run workflow**.
+
+**Tests.** `tests/test_launch_preflight.py::test_preflight_warns_about_unbound_secrets`:
+an unbound `GITHUB_TOKEN` and a bound `API_KEY` yield exactly one warning for
+`GITHUB_TOKEN`; an environment-scoped binding counts only for jobs that
+declare that environment.
+
+**Done when.**
+
+- [ ] Launching with an unbound secret shows a warning naming it.
+
+#### WB-41. Complete the GitHub Actions mapping in the guide
+
+- **Priority:** P1. **PR:** H. **Depends on:** WB-34 to WB-40.
+
+**Problem.** [Coming from GitHub Actions](coming-from-github-actions.md)
+maps eight concepts and omits most of what a GitHub user hits.
+
+**Change.** Add these rows to its table. The right column uses only Relay
+names (D2):
+
+| GitHub Actions | Relay |
+| --- | --- |
+| `github` context | `relay` context; see the table in [Workflows](workflows.md#expressions-and-conditions) |
+| `runner` context | `host` context: `os`, `arch`, `name`, `temp` |
+| Step output, environment, path, state, and summary files | `$RELAY_OUTPUT`, `$RELAY_ENV`, `$RELAY_PATH`, `$RELAY_STATE`, `$RELAY_STEP_SUMMARY` |
+| `actions/checkout` | Not needed; jobs run in a working copy of the repository |
+| `actions/setup-*` | Use the tools installed on this computer |
+| `actions/upload-artifact`, `actions/download-artifact` | `relay/upload-artifact@v1`, `relay/download-artifact@v1` |
+| `actions/cache` | `relay/cache@v1`, `relay/restore-cache@v1`, `relay/save-cache@v1` |
+| `.github/workflows/` | `.relay/workflows/`; **Import from GitHub Actions** converts a file |
+| Local actions in `.github/actions/` | `./.relay/actions/<name>` |
+| `pull_request` and other hosted events | Not supported; use `push`, `schedule`, or `workflow_dispatch` |
+| Lists in `with:` | One value per line under `\|`, or a JSON array string |
+| `secrets.GITHUB_TOKEN` | Not created; bind a secret or rely on the tool's own sign-in |
+
+Then add a before-and-after pair: the audit's CI file as a tagged
+`relay-example: invalid github-ci` block and its converted form as
+`relay-example: valid imported-ci`.
+
+**Tests.** `uv run python scripts/check_workflow_examples.py
+docs/coming-from-github-actions.md` and the link checker.
+
+**Done when.**
+
+- [ ] Every construct named in WB-34 to WB-40 appears with its Relay
+  equivalent or "Not supported".
+
+### Built-in action version items
+
+These items implement D11. AV-01 ships first, as PR R. AV-02 and AV-03 wait
+for the first breaking change to a built-in action, and AV-04 waits for the
+D13 period after that. Do not start an item before its trigger.
+
+A change to a built-in action is **breaking** when a workflow that validated
+and ran before the change would afterwards fail validation, fail at run
+time, or behave differently with the same inputs. For example:
+
+- removing or renaming an input or output;
+- making an optional input required, or accepting fewer values for an input;
+- changing a default, the format or meaning of an output, or what the step
+  commits, retains, or waits for.
+
+A **compatible** change stays in the current version: a new optional input
+whose absence keeps today's behavior, a new output, a clearer message, or a
+fix that restores documented behavior.
+
+#### AV-01. Keep every built-in action in one versioned registry
+
+- **Priority:** P1. **PR:** R. **Decision:** D11.
+
+**Problem.** The 11 built-in actions are named by literal `relay/<name>@v1`
+strings: 56 in 10 Python files and 18 in 6 frontend files. Adding a second
+version means finding each one by hand, and a missed one silently treats the
+new version as a different action. Five of them read persisted run rows, so
+they also decide how retained runs resume.
+
+**Code today.** Every site, with its replacement. Line numbers are at
+`main` `d4cd0ec`.
+
+| Location | What it does | Replace with |
+| --- | --- | --- |
+| `relay/workflows/actions/builtins.py:11` `CONTRACTS` | allowed and required inputs per reference | `BUILTIN_ACTIONS` (step 1) |
+| `builtins.py:46-80` `validate_inputs` | five `reference == "relay/<name>@v1"` checks; two messages spell the reference | look the entry up once with `builtin(reference)`, compare `action.name`, and build the messages from `reference` so their text is unchanged |
+| `relay/workflows/actions/language.py:45` `BUILTINS` | the accepted references | delete; use `builtin()` |
+| `language.py:387`, `:397` `validate_steps` | rejects unknown `uses`; validates inputs of known ones | `builtin(reference) is None` and `builtin(reference) is not None` |
+| `language.py:837` `capture_sources` | captures a loop's child workflow | `is_builtin(reference, "loop")` |
+| `language.py:888` `support_manifest` | `builtins` and `builtin_inputs` | step 3 |
+| `relay/workflows/actions/metadata.py:86` | validates built-in inputs in composite actions | `builtin(step.get("uses")) is not None` |
+| `relay/workflows/actions/compiler.py:255`, `:257` | binds agents; expands loops | `is_builtin(reference, "agent")`, `is_builtin(reference, "loop")` |
+| `compiler.py:386` | checks shared command names | `is_builtin(step.get("uses"), "command")` |
+| `relay/workflows/management.py:36` | blocks deleting a workflow that a loop calls | `is_builtin(step.get("uses"), "loop")` |
+| `relay/execution/preflight.py:42` | collects prompt files from agent steps | `not is_builtin(step.get("uses"), "agent")` |
+| `relay/execution/nodes/actions.py:895`, `:921`, `:937`, `:980`, `:985`, `:1012` | dispatches a step to its executor | step 4 |
+| `nodes/actions.py:619` | runs the cache save that `relay/cache` registered | `current_builtin("save-cache").reference` |
+| `relay/execution/action_products.py:179` | treats cache I/O errors as warnings | `parse_builtin(reference)` name in `{"cache", "restore-cache", "save-cache"}` |
+| `relay/web/actions_products.py:46`, `:75`, `:95`, `:124`, `:136` | artifact and cache products | compare the parsed name |
+| `relay/web/actions_repository.py:558` (persisted row) | records an approval answer | `is_builtin(frozen["step"].get("uses"), "human-wait")` |
+| `relay/web/repositories.py:575`, `:3972`, `:4918` (persisted rows) | treat approval steps specially for evidence and controls | `is_builtin(step.get("uses"), "human-wait")` |
+| `repositories.py:1856-1858` | names the activity type on the run page | map the parsed name: `command` → `command`, `agent` → `agent`, `human-wait` → `human_wait` |
+| `repositories.py:2352` (database filter) | finds agent attempts lost with their worker | `node_run__frozen_def__step__uses__in=builtin_references("agent")` (Django 5.2 supports `__in` on JSON keys) |
+| `frontend/src/workflow-language.ts:74` | offers `steps.<id>.outputs.answer` | `isBuiltin(step.uses, "human-wait")` |
+| `frontend/src/actions-workflow.ts:221`, `:224`, `:229` | canvas card details for loop and agent steps | `isBuiltin(step.uses, "loop")`, `isBuiltin(step.uses, "agent")` |
+| `frontend/src/components/JobFailureEditor.tsx:22`, `:44`, `:73` | finds agent steps | `isBuiltin(step.uses, "agent")` |
+| `JobFailureEditor.tsx:140` | adds a loop step | `currentBuiltin(manifest, "loop")`; pass `manifest` from `ActionJobEditorView.tsx:177`, which already has it |
+| `frontend/src/components/ActionBuiltinFields.tsx:60`, `:71`, `:73`, `:84`, `:179`, `:182`, `:226`, `:263` | chooses the form fields for a step | compare `parseBuiltin(step.uses)?.name` |
+| `frontend/src/components/ActionJobSteps.tsx:115`, `WorkflowCanvas.tsx:199` | menu labels made by stripping `relay/` and `@v1` | `builtinLabel(reference)`; WB-10 later replaces it with `actionLabel` |
+
+Starter YAML, tests, and documentation keep their literal references. They
+are workflow sources and examples, and they must name a version.
+
+**Change.**
+
+1. In `relay/workflows/actions/builtins.py`, replace `CONTRACTS` with:
+
+   ```python
+   BUILTIN_REFERENCE = re.compile(r"relay/([a-z][a-z-]*)@v([1-9][0-9]*)")
+
+
+   @dataclass(frozen=True, slots=True)
+   class BuiltinAction:
+       """One major version of a built-in action and its inputs."""
+
+       name: str
+       major: int
+       allowed: frozenset[str]
+       required: frozenset[str]
+       status: Literal["current", "deprecated"] = "current"
+
+       @property
+       def reference(self) -> str:
+           return f"relay/{self.name}@v{self.major}"
+
+
+   BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (...)  # 11 entries
+   _BY_REFERENCE: dict[str, BuiltinAction] = {
+       action.reference: action for action in BUILTIN_ACTIONS
+   }
+
+
+   def parse_builtin(reference: object) -> tuple[str, int] | None:
+       """Split relay/<name>@v<major>; None for any other value."""
+       if not isinstance(reference, str):
+           return None
+       match = BUILTIN_REFERENCE.fullmatch(reference)
+       return (match[1], int(match[2])) if match else None
+
+
+   def builtin(reference: object) -> BuiltinAction | None:
+       """The registered version a reference names, if Relay has it."""
+       if not isinstance(reference, str):
+           return None
+       return _BY_REFERENCE.get(reference)
+
+
+   def is_builtin(reference: object, name: str) -> bool:
+       """True for any version of one action, registered or not."""
+       parsed = parse_builtin(reference)
+       return parsed is not None and parsed[0] == name
+
+
+   def builtin_references(name: str) -> tuple[str, ...]:
+       """Every registered version of one action, oldest first."""
+       versions = sorted(
+           (action for action in BUILTIN_ACTIONS if action.name == name),
+           key=lambda action: action.major,
+       )
+       return tuple(action.reference for action in versions)
+
+
+   def current_builtin(name: str) -> BuiltinAction:
+       """The current version of one action; KeyError if unknown."""
+       for action in BUILTIN_ACTIONS:
+           if action.name == name and action.status == "current":
+               return action
+       raise KeyError(name)
+   ```
+
+   Create one entry per `CONTRACTS` key today, with the same `allowed` and
+   `required` sets, in the same order. `is_builtin` deliberately accepts an
+   unregistered version: persisted rows must keep their meaning after a
+   version is removed (AV-04), and validation already rejects unregistered
+   versions in new sources. Call sites import the helper functions, never
+   `BUILTIN_ACTIONS` or `_BY_REFERENCE`, so a test can replace the registry
+   in one place.
+2. Replace every Python site in **Code today**. Messages that spell a
+   reference build it from the `reference` they already hold, so every
+   message text stays byte-identical for `@v1`.
+3. In `support_manifest()`:
+
+   ```python
+   "builtins": sorted(
+       action.reference
+       for action in BUILTIN_ACTIONS
+       if action.status == "current"
+   ),
+   "builtin_inputs": {
+       action.reference: {
+           "allowed": sorted(action.allowed),
+           "required": sorted(action.required),
+       }
+       for action in BUILTIN_ACTIONS
+   },
+   "builtin_versions": {
+       action.reference: {
+           "name": action.name,
+           "major": action.major,
+           "status": action.status,
+       }
+       for action in BUILTIN_ACTIONS
+   },
+   ```
+
+   This function is in `language.py`, so it may read `BUILTIN_ACTIONS`
+   directly. Add `builtin_versions: Record<string, { name: string; major:
+   number; status: "current" | "deprecated" }>` to `LanguageManifest` in
+   `frontend/src/workflow-language.ts`.
+4. In `nodes/actions.py`, right after `reference = str(node.step["uses"])`
+   and the input interpolation (line 890), look the entry up once:
+
+   ```python
+   action = builtin(reference)
+   if action is None and parse_builtin(reference) is not None:
+       message = f"{reference} is not included in this Relay version."
+       raise NodeExecutionError(message)
+   name = action.name if action is not None else None
+   ```
+
+   Then change each `if reference == "relay/<name>@v1":` below it to
+   `if name == "<name>":`. The local-action branch (`./`) and the product
+   fallthrough keep receiving `reference`. The guard cannot fire for a
+   source that validated; it protects runs that resume after an upgrade.
+5. Create `frontend/src/builtin-actions.ts`:
+
+   ```ts
+   import type { LanguageManifest } from "./workflow-language";
+
+   const BUILTIN = /^relay\/([a-z][a-z-]*)@v([1-9][0-9]*)$/;
+
+   export function parseBuiltin(
+     uses: unknown,
+   ): { name: string; major: number } | null {
+     const match = typeof uses === "string" ? BUILTIN.exec(uses) : null;
+     return match ? { name: match[1], major: Number(match[2]) } : null;
+   }
+
+   export function isBuiltin(uses: unknown, name: string): boolean {
+     return parseBuiltin(uses)?.name === name;
+   }
+
+   export function builtinLabel(reference: string): string {
+     return parseBuiltin(reference)?.name ?? reference;
+   }
+
+   export function currentBuiltin(
+     manifest: LanguageManifest,
+     name: string,
+   ): string {
+     const entry = Object.entries(manifest.builtin_versions).find(
+       ([, version]) => version.name === name && version.status === "current",
+     );
+     if (!entry) throw new Error(`Unknown built-in action ${name}`);
+     return entry[0];
+   }
+   ```
+
+   Replace every frontend site in **Code today** with these helpers.
+6. Starter YAML is unchanged; every reference in it is already current.
+
+**Tests.**
+
+- `tests/test_actions_builtin_contracts.py::test_registry_holds_one_current_version_per_action`:
+  the 11 references equal the 11 accepted today; references are unique;
+  each name has exactly one `current` entry; each entry's `allowed` and
+  `required` equal a copy of today's `CONTRACTS` written out in the test.
+- `tests/test_actions_builtin_contracts.py::test_builtin_reference_helpers`,
+  parametrized:
+
+  | Call | Result |
+  | --- | --- |
+  | `builtin("relay/agent@v1").name` | `"agent"` |
+  | `builtin("relay/agent@v9")` | `None` |
+  | `builtin(None)` | `None` |
+  | `parse_builtin("relay/save-cache@v1")` | `("save-cache", 1)` |
+  | `parse_builtin("relay/agent@v0")`, `parse_builtin("relay/agent")`, `parse_builtin("./.relay/actions/agent")` | `None` |
+  | `is_builtin("relay/agent@v9", "agent")` | `True` |
+  | `is_builtin("relay/agent@v1", "loop")`, `is_builtin(None, "agent")` | `False` |
+  | `builtin_references("agent")` | `("relay/agent@v1",)` |
+  | `current_builtin("loop").reference` | `"relay/loop@v1"` |
+  | `current_builtin("missing")` | raises `KeyError` |
+
+- `tests/test_actions_builtin_contracts.py::test_no_builtin_reference_is_spelled_outside_the_registry`:
+  with `ROOT = Path(__file__).resolve().parents[1]` (as in
+  `tests/test_ci_python.py`), read every `relay/**/*.py` except
+  `relay/workflows/actions/builtins.py`, and every `frontend/src/**/*.ts`
+  and `*.tsx`; assert that none matches `re.compile(r"@v[0-9]")`. The
+  failure message lists each file and line.
+- `tests/test_actions_builtin_contracts.py::test_an_unregistered_version_never_runs`:
+  with `marker = tmp_path / "ran"`, write a workflow whose job has a
+  `relay/human-wait@v1` step (`prompt: Go?`) followed by a step `id: touch`
+  using `relay/command@v1` with `argv` set to
+  `[sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]`, written
+  into the YAML as `json.dumps(json.dumps(argv))` so it is one JSON string.
+  Launch it with `InlineEngine` and `engine.drain`, as
+  `tests/test_actions_execution_contracts.py:52` does. While it waits, call
+  `monkeypatch.delitem(builtins._BY_REFERENCE, "relay/command@v1")`, then
+  `answer_wait(engine, run_id)`. Assert that the `touch` step's `NodeRun`
+  and the run are `failed`, that the run's `RunEvent` payloads contain
+  `relay/command@v1 is not included in this Relay version.` (as
+  `test_builtin_runtime_errors_settle_the_step_and_keep_failure_evidence`
+  checks), and that `marker` does not exist.
+- `tests/test_workflow_starters.py::test_starters_use_current_builtin_versions`:
+  every `uses` value that `parse_builtin` accepts, in every YAML file under
+  `relay/workflows/starters/`, names a registered `current` entry.
+- `tests/test_relay_language.py::test_manifest_describes_builtin_versions`:
+  `builtin_versions` has 11 entries, all `current`; `builtins` equals their
+  sorted keys; `builtin_inputs` has the same keys.
+- `frontend/unit/builtin-actions.spec.ts`: the same cases as the Python
+  helper table, plus `builtinLabel("relay/save-cache@v1") === "save-cache"`
+  and `currentBuiltin` on a two-entry manifest.
+- The whole Python suite and `make test-frontend` pass with no test edits.
+  That is the proof of no behavior change.
+  `tests/test_engine_failures.py::test_a_worker_exit_does_not_classify_a_workerless_human_wait_as_worker_lost`
+  covers the database filter.
+
+**Docs.**
+
+- In [Workflows](workflows.md), add a section `## Built-in action versions`
+  after "Reusable workflows and local actions":
+
+  > Built-in actions are named `relay/<name>@v<major>`. Each has one current
+  > major version, which the editor offers. A version changes only in
+  > compatible ways: a new optional input that keeps the old behavior when
+  > omitted, a new output, a clearer message, or a fix that restores
+  > documented behavior. Any other change ships as the next major version.
+
+- In [CONTRIBUTING.md](../CONTRIBUTING.md) under "Code boundaries", add:
+
+  > - Name built-in actions only through the registry in
+  >   `relay/workflows/actions/builtins.py`. A breaking change to a built-in
+  >   action adds the next major version beside the current one; see
+  >   Built-in action versions.
+
+  Link "Built-in action versions" to
+  `docs/workflows.md#built-in-action-versions`, which is relative to the
+  repository root where CONTRIBUTING.md lives.
+
+**Done when.**
+
+- [ ] This search prints nothing:
+
+  ```bash
+  rg -n "@v[0-9]" relay frontend/src \
+    -g '!relay/workflows/actions/builtins.py' \
+    -g '!relay/workflows/starters/**'
+  ```
+
+- [ ] The full Python suite and `make test-frontend` pass without changing
+  an existing test.
+- [ ] The manifest has `builtin_versions`, and `LanguageManifest` in
+  `workflow-language.ts` declares it.
+- [ ] Workflows and CONTRIBUTING describe the version rule.
+
+#### AV-02. Run two versions of a built-in action side by side
+
+- **Priority:** P2 until triggered. **PR:** V. **Depends on:** AV-01, F1.
+  **Decisions:** D11, D12.
+- **Trigger:** the first breaking change to a built-in action. Do not build
+  this item without one.
+
+**Problem.** Without this, a breaking change has to edit `@v1` in place.
+Every saved workflow that uses the action then fails or quietly behaves
+differently, and so does a run that was waiting for an approval when Relay
+was upgraded.
+
+**Change.**
+
+1. Add `deprecated_in: str = ""` to `BuiltinAction`: the Relay version that
+   deprecated it, such as `0.4.0`. In the same change, add the new entry
+   (`major` one higher, its own `allowed` and `required`) and set the old
+   entry's `status="deprecated"` and `deprecated_in`. AV-01's registry test
+   keeps exactly one current entry per name.
+2. Implement the difference inside the existing code path (D12). Code that
+   needs the version looks the entry up once and branches on `major` only
+   where the versions differ:
+
+   ```python
+   action = builtin(reference)
+   if action is not None and action.name == "human-wait":
+       ...  # shared behavior
+       if action.major >= 2:
+           ...  # the new behavior
+   ```
+
+   Products, repository code, and forms keep comparing names, so the old
+   version keeps working unchanged. A cache save registered by `relay/cache`
+   uses the current `save-cache`. If `save-cache` itself gets a breaking
+   version, branch on the major of the step that registered the save
+   (`post["node"]["step"]["uses"]`).
+3. Move every starter YAML and every example in [Workflows](workflows.md)
+   that uses the action to the new version. AV-01's starter test fails
+   until this is done.
+4. Validation. A deprecated version still validates, launches, and runs.
+   Add `deprecated_builtin_warnings(value: Mapping[str, Any], prefix: str)
+   -> list[WorkflowValidationError]` to `language.py`. It visits
+   `jobs.<id>.steps[<n>]`, and `runs.steps[<n>]` for action metadata. For
+   each step whose `builtin(uses).status == "deprecated"`, it returns
+   `_warning(f"{prefix}{path}.uses", text)` with
+   **`<old> is deprecated and will be removed in a later Relay release. Use <new>.`**
+   and sets `issue.context["deprecated"] = <old>`. F1's
+   `workflow_warnings(document)` calls it with `prefix=""`. The validate
+   view also calls it for each captured source in `sources` that is a
+   reusable workflow or action metadata, with `prefix="<source key>: "`.
+   Those warnings have no line.
+5. Manifest. `builtins` already lists only current references (AV-01), so
+   completion (WB-02) and the step menus offer only the new version.
+   `builtin_inputs` and `builtin_versions` keep every registered version, so
+   a deprecated step still gets its form. Add `deprecated_in` to each
+   `builtin_versions` entry and to its TypeScript type.
+6. Editor.
+   - `ActionJobSteps.tsx` **Step type**: when `step.uses` is a deprecated
+     built-in, add one `MenuItem` with that value labelled
+     `<label> (older version)`, as the select already does for `./`
+     references (line 117). Otherwise MUI renders an out-of-range value.
+   - `ActionBuiltinFields.tsx`: for a deprecated step, show an info `Alert`
+     with **`This step uses an older version of <label>.`** and the AV-03
+     button.
+7. Retained runs need no change. Frozen definitions keep their reference
+   and the deprecated entry still runs it. Never rewrite stored rows.
+8. Docs. In "Built-in action versions" in [Workflows](workflows.md), add a
+   table: deprecated reference, replacement, the version that deprecated
+   it, and the earliest removal version under D13. The release task records
+   the deprecation under "Deprecated" in `CHANGELOG.md`; this PR does not
+   edit the changelog.
+
+**Tests.** The mechanism tests use a stand-in pair, so they do not depend on
+which action changed. In a new `tests/test_actions_builtin_versions.py`, add
+a fixture `deprecated_command` that monkeypatches `builtins.BUILTIN_ACTIONS`
+and `builtins._BY_REFERENCE` so `relay/command@v1` is deprecated
+(`deprecated_in="0.0.0"`) and `relay/command@v2` is current with the same
+inputs.
+
+- `test_a_deprecated_version_validates_with_a_warning`:
+  `workflow_diagnostics` returns nothing for a `relay/command@v1` step;
+  `workflow_warnings` returns the message above with
+  `context["deprecated"] == "relay/command@v1"`.
+- `test_the_manifest_offers_only_the_current_version`: `builtins` holds
+  `relay/command@v2` and not v1; `builtin_inputs` and `builtin_versions`
+  hold both, and v1 carries `deprecated_in`.
+- `test_a_run_paused_before_an_upgrade_finishes_on_its_version`: launch,
+  without the fixture, the AV-01 guard-test workflow. While it waits, apply
+  the fixture, then `answer_wait`. Assert the run succeeded, `marker`
+  exists, and the `touch` step's `frozen_def["step"]["uses"]` is still
+  `relay/command@v1`.
+- `tests/test_editor_recovery.py::test_validate_reports_deprecated_builtins_in_captured_sources`:
+  with the fixture, a workflow that uses `./.relay/actions/x`, whose
+  `action.yaml` has a `relay/command@v1` step, gets one warning that starts
+  with `.relay/actions/x/action.yaml:` and a space.
+- In the PR that adds the real pair, add
+  `frontend/e2e/workflow-authoring.spec.ts` test
+  `a deprecated step shows the older-version notice`: a source using the
+  old reference shows the warning, **Save** stays enabled, the step form
+  shows the notice, and **Step type** shows `<label> (older version)`.
+
+**Done when.**
+
+- [ ] A workflow that uses the old version validates with one warning, then
+  saves, launches, and succeeds.
+- [ ] A run paused before the upgrade finishes on the old version.
+- [ ] New steps, completion, starters, and examples use only the new
+  version.
+
+#### AV-03. Update a workflow to the current version in one click
+
+- **Priority:** P2 until triggered. **PR:** V, with AV-02. **Depends on:**
+  AV-02, F1. **Decision:** D14.
+
+**Problem.** After AV-02, each workflow that uses the old version shows a
+warning, and fixing it means knowing exactly which inputs changed.
+
+**Change.**
+
+1. Add to `BuiltinAction`:
+
+   ```python
+   upgrade: (
+       Callable[
+           [Mapping[str, object]],
+           tuple[dict[str, object], tuple[str, ...]],
+       ]
+       | None
+   ) = None
+   ```
+
+   Set it on the new entry. It receives the previous version's `with` and
+   returns the new `with` plus one sentence per input it changed or
+   dropped. It raises `WorkflowValidationError(message)` when it cannot
+   convert safely, for example when an input it must transform contains
+   `${{`. Extend AV-01's registry test: every deprecated entry has a newer
+   entry of the same name with `upgrade` set.
+2. Create `relay/workflows/actions/upgrade.py`:
+
+   ```python
+   @dataclass(frozen=True, slots=True)
+   class UpgradeResult:
+       yaml: str
+       changes: tuple[str, ...]
+       unresolved: tuple[str, ...]
+
+
+   def upgrade_builtins(text: str) -> UpgradeResult:
+       """Move deprecated built-in steps to the current version.
+
+       Pure: it never reads other files, fetches, or writes.
+       """
+   ```
+
+   Load the workflow with ruamel round-trip, as WB-37's importer does, so
+   comments and key order survive. Visit `jobs.<id>.steps[<n>]`. For each
+   step whose `uses` is deprecated, apply each newer entry's `upgrade` in
+   turn until the current version, then set `uses` and replace `with`.
+   Record **`Updated step <n> in job <id> from <old> to <new>.`** (`<n>`
+   counts from 1), followed by the sentences the upgrades returned. When an
+   upgrade raises, leave that step unchanged and add
+   **`Step <n> in job <id>: <message> Update it by hand.`** to `unresolved`.
+   Finally run `workflow_diagnostics` on the result and add each remaining
+   message to `unresolved`. A source with nothing deprecated comes back
+   byte-identical with empty lists.
+3. In `relay/web/views/actions_language.py`, add `upgrade()` for
+   `POST /api/workflow-language/upgrade` with `{yaml, source?}`, returning
+   `{yaml, changes, unresolved}`. Use the same decorators, request bounds,
+   and error envelope as `validate()` (line 100). It writes nothing.
+   Register it in `relay/web/urls.py` after the validate route and document
+   it in [HTTP API](http-api.md).
+4. Frontend. Add `WorkflowUpgradeResult` to `types.ts` and
+   `upgradeWorkflowLanguage(yaml: string)` to `api.ts`. In
+   `ActionsWorkflowWorkspaceView.tsx`, when any warning has
+   `context.deprecated`, or after AV-04 any diagnostic has
+   `context.removed`, show a **`Update to current versions`** button above
+   the warnings. It calls the endpoint and passes the returned text to
+   `setText` from `useUndoDocument` (as `addJob` does), so the result is an
+   unsaved draft and **Undo** reverts it. Then it opens a dialog titled
+   **`Updated to current versions`** that lists `changes` under **Changes**
+   and `unresolved` under **`Check by hand`**, with one **Close** button. The
+   AV-02 form notice offers the same button. Nothing is updated on save or
+   in the background (D14).
+5. Captured action metadata (`.relay/actions/*/action.yaml`) is not opened
+   by the editor, so its AV-02 warning names the file and the user edits it
+   by hand.
+
+**Tests.**
+
+- `tests/test_actions_builtin_versions.py::test_upgrade_moves_deprecated_steps_and_keeps_comments`:
+  with the `deprecated_command` fixture and an `upgrade` that renames
+  nothing, a source with a comment and two `relay/command@v1` steps comes
+  back with both on v2, the comment intact, and two `Updated step …`
+  sentences.
+- `test_upgrade_leaves_a_step_it_cannot_convert`: an `upgrade` that raises
+  leaves the step on v1 and adds the `Check by hand` sentence.
+- `test_upgrade_returns_an_up_to_date_source_unchanged`.
+- Extend `tests/test_web_api.py::test_actions_owner_endpoints_keep_csrf_in_both_login_modes`
+  (line 2346) to post the same body to `/api/workflow-language/upgrade`,
+  with the same 403-without-token and 200-with-token checks.
+- `frontend/e2e/workflow-authoring.spec.ts`, in the PR that adds the real
+  pair: `update to current versions rewrites the draft`: click the button,
+  see the dialog, the YAML shows the new reference, **Undo** restores the
+  old text, and nothing is saved until **Save**.
+
+**Done when.**
+
+- [ ] One click moves every deprecated step in the open workflow to the
+  current version as an unsaved draft, and Undo reverts it.
+- [ ] Every change and every step left alone is listed.
+
+#### AV-04. Remove a deprecated version safely
+
+- **Priority:** P2 until triggered. **PR:** W. **Depends on:** AV-02,
+  AV-03. **Decisions:** D13, D15.
+- **Trigger:** the D13 period has passed for a deprecated version.
+
+**Problem.** A deprecated version cannot stay forever, but removing it must
+not leave a saved workflow or a paused run failing without saying why or
+what to do.
+
+**Change.**
+
+1. Delete the deprecated entry from `BUILTIN_ACTIONS` and remove its
+   `major` branches. Add `REMOVED_BUILTINS: dict[str, tuple[str, str]]` to
+   `builtins.py`, mapping the reference to `(removed_in, replacement)`.
+   Keep the newer entry's `upgrade`; `upgrade_builtins` treats a reference
+   in `REMOVED_BUILTINS` like a deprecated one.
+2. `builtin_references(name)` also returns the removed references of that
+   name, so the worker-loss filter (`repositories.py:2352`) still matches
+   rows from older runs. `builtin()` still returns `None` for them.
+3. Validation. In `validate_steps`, when `reference in REMOVED_BUILTINS`,
+   keep the prefix and append, ahead of WB-17's suggestion, the first AV-04
+   validation text in the [message catalogue](#message-catalogue). Set
+   `issue.context["removed"] = <old>` so AV-03's button appears.
+4. Dispatch. The AV-01 guard in `nodes/actions.py` uses the
+   `REMOVED_BUILTINS` entry when there is one, and raises the second AV-04
+   text in the [message catalogue](#message-catalogue) instead of the AV-01
+   text. The step fails with that message and the run follows its normal
+   failure rules. Relay never runs `<new>` in its place (D15).
+5. Docs. In [Workflows](workflows.md), move the row to a removed-versions
+   table with its replacement. In [Execution](execution.md) under
+   "Failure, cancellation, and recovery", add one sentence: a step whose
+   built-in version was removed fails with that message. The release task
+   records the removal under "Removed" in `CHANGELOG.md` and tells owners
+   to finish or cancel runs that use the version before upgrading.
+
+**Tests.** In `tests/test_actions_builtin_versions.py`, add a fixture
+`removed_command` that moves `relay/command@v1` from the registry to
+`REMOVED_BUILTINS` as `("0.0.0", "relay/command@v2")` and registers
+`relay/command@v2`.
+
+- `test_a_removed_version_names_its_replacement`: the validation message
+  and `context["removed"]`.
+- `test_a_paused_run_fails_clearly_when_its_version_was_removed`: the AV-01
+  guard test, applying this fixture instead; the event payloads contain
+  the message in step 4 and `marker` does not exist.
+- `test_the_upgrader_converts_a_removed_version`.
+- `test_removed_references_still_classify_persisted_rows`:
+  `builtin_references("command")` contains `relay/command@v1`, and
+  `is_builtin("relay/command@v1", "command")` stays true.
+
+**Done when.**
+
+- [ ] A saved workflow that uses the removed version shows the error, and
+  **Update to current versions** fixes it.
+- [ ] A run paused across the upgrade fails at its next step with the
+  message, and nothing runs in its place.
+
+## Message catalogue
+
+All new or changed user-facing text, for review in one place. Paths are
+written as `<path>`; the server prefixes them as today.
+
+| Item | Text |
+| --- | --- |
+| F5 | `<field>: Write a JSON array of strings or one value per line.` |
+| WB-05 | `This workflow is empty. Restore the saved source or add a job.` |
+| WB-05 | `Fix the problems above to save.` / `This workflow is empty.` |
+| WB-06 | `Add the program, then one argument per item.` |
+| WB-06 | `This argument list is not valid. Fix it in YAML or replace it here.` |
+| WB-07 | `Choose the workflow to repeat` / `Needs another workflow to repeat` |
+| WB-13 | `<path>: Unknown workflow field. Did you mean <name>?` |
+| WB-13 | `<ref> does not accept input <name>. Did you mean <name>?` / `<ref> requires input <name>.` |
+| WB-14 | `<path>: Expected a scalar string. Write a list as one value per line under "\|", or as a JSON array string.` |
+| WB-15 | `argv: Add the program to run.` |
+| WB-15 | `argv: "<item>" is a single argument. Put each argument on its own line, or use a JSON array.` |
+| WB-15 | `shell: Use bash, sh, pwsh, powershell, cmd, or python, or a command that contains {0} for the script path.` |
+| WB-15 | `Prompt file <reference> does not exist.` |
+| WB-15 | `<field>: Unknown agent <id>. Use one of antigravity, claude, codex, copilot, cursor.` |
+| WB-16 | `inputs.<name> is not a declared input. It will be empty at run time.` |
+| WB-16 | `steps.<id> does not name an earlier step in this job. It will be empty at run time.` |
+| WB-16 | `needs.<job> is not listed in this job's needs. It will be empty at run time.` |
+| WB-16 | `This agent step has no prompt or prompt-files, so the agent receives no instructions.` |
+| WB-17 | `Expected one of <values>.` (all constants) |
+| WB-17 | `… Did you mean <built-in>?` / `… Use one of <built-ins>, or a local action under ./.relay/actions/.` |
+| WB-17 | `… Strings use single quotes, for example 'main'.` |
+| WB-17 | `A step needs either run or uses, not both.` / `A step needs run (a script) or uses (an action).` |
+| WB-22 | `Needs Claude Code with an Opus model and one other coding agent. Choose Ask an agent for a smaller first run.` |
+| WB-24 | `input 'value' must be one of <values>` |
+| WB-26 | `<n> files changed on branch <run_branch>.` / `Merged into <source_branch> at <sha>.` |
+| WB-26 | `To merge automatically next time, choose "Merge into the active branch, then delete working copies" under Advanced options when you run the workflow.` |
+| WB-27 | Starter description and three approval prompts (see WB-27) |
+| WB-30 | `<n> new workflow file(s) can stay uncommitted` / `Optional. Commit this workflow so it is saved in your Git history.` / `Commit these workflow files to run.` |
+| WB-34 | `… Use <replacement>.` / `… Relay does not issue a token; bind a secret instead.` |
+| WB-35 | `<NAME> is not a Relay variable. <instruction>` (five rows) |
+| WB-36 | Nine guidance sentences (see WB-36) |
+| WB-38 | `Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, and workflow_run. Pull request and other hosted events have no local equivalent.` |
+| WB-39 | `… To build the matrix from an expression, set the whole matrix: matrix: ${{ fromJSON(...) }}.` |
+| WB-40 | `Secret <NAME> has no binding, so steps receive an empty value. Add it under Variables, secrets, environments and library.` |
+| AV-01 | `<reference> is not included in this Relay version.` |
+| AV-02 | `<old> is deprecated and will be removed in a later Relay release. Use <new>.` |
+| AV-02 | `<label> (older version)` / `This step uses an older version of <label>.` |
+| AV-03 | `Update to current versions` / `Updated to current versions` / `Changes` / `Check by hand` |
+| AV-03 | `Updated step <n> in job <id> from <old> to <new>.` / `Step <n> in job <id>: <message> Update it by hand.` |
+| AV-04 | `Only frozen local and versioned relay actions are supported. <old> was removed in Relay <removed_in>; use <new>.` |
+| AV-04 | `<old> was removed in Relay <removed_in>. This run started on an earlier Relay version; cancel it and launch the workflow again.` |
+
+## Appendix A: fields that need descriptions
+
+F3 requires a description for each of these 108 `<definition>.<property>`
+keys, plus the 11 action summaries and 46 action inputs in `BUILTIN_ACTIONS`. If
+the schema changes, regenerate the list with this script; the F3 test also
+fails when one is missing.
+
+```python
+from relay.workflows.actions.language import support_manifest
+
+definitions = support_manifest()["definitions"]
+for name, definition in sorted(definitions.items()):
+    properties = (definition.get("mapping") or {}).get("properties")
+    if properties:
+        print(name, ", ".join(properties))
+```
+
+| Definition | Properties |
+| --- | --- |
+| `concurrency-mapping` | `group`, `cancel-in-progress`, `queue` |
+| `cron-mapping` | `cron`, `timezone` |
+| `entry-artifact` | `path`, `sha256` |
+| `entrypoint` | `scope_path`, `inputs`, `artifacts` |
+| `job-defaults` | `run` |
+| `job-defaults-run` | `shell`, `working-directory` |
+| `job-environment-mapping` | `name`, `url` |
+| `job-factory` | `needs`, `if`, `strategy`, `name`, `timeout-minutes`, `continue-on-error`, `env`, `environment`, `concurrency`, `outputs`, `defaults`, `steps`, `cache-mode` |
+| `matrix` | `include`, `exclude` |
+| `on-mapping` | `workflow_dispatch`, `workflow_call`, `schedule`, `push`, `repository_dispatch`, `workflow_run` |
+| `push-mapping` | `branches`, `branches-ignore`, `tags`, `tags-ignore`, `paths`, `paths-ignore` |
+| `recovery` | `enabled`, `max_retries` |
+| `regular-step` | `name`, `id`, `if`, `continue-on-error`, `timeout-minutes`, `uses`, `with`, `env` |
+| `repository-dispatch-mapping` | `types` |
+| `run-step` | `name`, `id`, `if`, `timeout-minutes`, `run`, `continue-on-error`, `env`, `working-directory`, `shell` |
+| `strategy` | `fail-fast`, `matrix` |
+| `workflow-call-input-definition` | `description`, `type`, `required`, `default` |
+| `workflow-call-mapping` | `inputs`, `secrets`, `outputs` |
+| `workflow-call-output-definition` | `description`, `value` |
+| `workflow-call-secret-mapping-definition` | `description`, `required` |
+| `workflow-defaults` | `run` |
+| `workflow-defaults-run` | `shell`, `working-directory` |
+| `workflow-dispatch-input` | `description`, `type`, `required`, `default`, `options` |
+| `workflow-dispatch-mapping` | `inputs` |
+| `workflow-job` | `name`, `uses`, `with`, `secrets`, `needs`, `if`, `concurrency`, `strategy`, `cache-mode` |
+| `workflow-root` | `on`, `name`, `description`, `run-name`, `defaults`, `env`, `concurrency`, `jobs`, `cache-mode`, `entrypoints`, `recovery` |
+| `workflow-run-mapping` | `workflows`, `branches`, `branches-ignore`, `conclusions` |
+
+## Appendix B: expression names
+
+Used by WB-34 and WB-37.
+
+| Written | Replacement |
+| --- | --- |
+| `github.sha`, `github.ref`, `github.ref_name`, `github.ref_type` | `relay.sha`, `relay.ref`, `relay.ref_name`, `relay.ref_type` |
+| `github.event`, `github.event_name` | `relay.event`, `relay.event_name` |
+| `github.event.inputs.<name>` | `inputs.<name>` |
+| `github.workspace`, `github.repository` | `relay.workspace`, `relay.repository` |
+| `github.actor`, `github.triggering_actor` | `relay.actor` |
+| `github.workflow`, `github.workflow_ref` | `relay.workflow`, `relay.workflow_ref` |
+| `github.run_id`, `github.run_number`, `github.run_attempt` | `relay.run_id`, `relay.run_number`, `relay.attempt_number` |
+| `github.job`, `github.action`, `github.action_path` | `relay.job`, `relay.action`, `relay.action_path` |
+| `runner.os`, `runner.arch`, `runner.name`, `runner.temp` | `host.os`, `host.arch`, `host.name`, `host.temp` |
+
+## Final gates
+
+Before marking a pull request ready, run and report:
+
+```bash
+make check
+uv run pytest tests -q
+npm --prefix frontend run build
+make test-frontend
+uv run python scripts/check_doc_links.py README.md CONTRIBUTING.md docs/*.md
+uv run python scripts/check_workflow_examples.py docs/workflows.md
+uv run python scripts/check_workflow_examples.py \
+  docs/coming-from-github-actions.md
+```
+
+`make check` may rewrite files; review the diff. A local pass does not cover
+the full OS and Python matrix; CI does. Record anything you could not run and
+why.

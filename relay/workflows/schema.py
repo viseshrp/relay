@@ -287,6 +287,23 @@ class ActionsJobNode(NodeBase):
 
 NodeDefinition = Annotated[ActionsJobNode | ActionsStepNode, Field(discriminator="type")]
 
+LOOP_ITERATION_PATTERN = re.compile(r"iteration_([1-9][0-9]*)")
+
+
+def declared_job_name(node_type: str, scope_path: str, frozen: object) -> str | None:
+    """Name a job from its literal source name, or a loop iteration by its round."""
+    if node_type != "actions_job" or not isinstance(frozen, Mapping):
+        return None
+    job = frozen.get("job")
+    name = job.get("name") if isinstance(job, Mapping) else None
+    if isinstance(name, str) and name.strip() and "${{" not in name:
+        return name
+    # Loop rounds run job "iteration" at scope "...iteration_<n>".
+    iteration = LOOP_ITERATION_PATTERN.fullmatch(scope_path.rsplit(".", 1)[-1])
+    if frozen.get("job_id") == "iteration" and iteration is not None:
+        return f"Round {iteration.group(1)}"
+    return None
+
 
 class EntryArtifact(StrictModel):
     """Hash-pinned artifact required by a midstream entry point."""

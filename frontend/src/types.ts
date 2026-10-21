@@ -31,6 +31,38 @@ export interface WorkflowDocumentResponse {
   project: ProjectRecord;
 }
 
+/** `POST /api/workflows`: the published file and the lease's base hash. */
+export interface WorkflowCreatedResponse {
+  key: string;
+  yaml: string;
+  base_hash: string;
+}
+
+/** One file directly in `.github/workflows`, from `GET /api/workflow-import`. */
+export interface GitHubWorkflowFile {
+  path: string;
+  name: string;
+}
+
+export interface GitHubWorkflowFilesResponse {
+  files: GitHubWorkflowFile[];
+}
+
+/** `POST /api/workflow-import`: a converted copy; the server writes nothing. */
+export interface GitHubWorkflowImport {
+  yaml: string;
+  changes: string[];
+  unresolved: string[];
+  suggested_key: string;
+}
+
+/** `POST /api/workflow-language/upgrade`: the updated text; the server writes nothing. */
+export interface WorkflowUpgradeResult {
+  yaml: string;
+  changes: string[];
+  unresolved: string[];
+}
+
 export interface ProjectRecord {
   id: string;
   canonical_path: string;
@@ -62,6 +94,14 @@ export interface LaunchCleanliness {
     reasons: string[];
   }>;
   truncated: boolean;
+  /** Non-blocking findings, such as a referenced secret without a binding. */
+  warnings: LaunchWarning[];
+}
+
+export interface LaunchWarning {
+  code: "unbound_secret";
+  name: string;
+  message: string;
 }
 
 export interface ModelObservation {
@@ -117,6 +157,8 @@ export interface WorkflowTemplate {
   jobs: string[];
   required_agents: string;
   default?: boolean;
+  job_count: number;
+  approval_count: number;
   inputs: Record<
     string,
     {
@@ -451,8 +493,23 @@ export interface RunDetail extends RunSummary {
     hashes: Record<string, JsonValue>;
     created_at: string;
   };
+  /** Total visible artifacts, not only the loaded page. */
+  artifact_count: number;
+  recorded_head: string;
+  has_committed_changes: boolean;
   nodes: RunNode[];
   interactions: RunInteraction[];
+}
+
+export interface RunChanges {
+  text: string;
+  truncated: boolean;
+  source_commit: string;
+  recorded_head: string;
+  /** Whole-run reads list at most 200 changed paths. */
+  files?: string[];
+  files_truncated?: boolean;
+  commits?: { sha: string; title: string }[];
 }
 
 export interface RetryConfiguration {

@@ -1,5 +1,7 @@
 import {
+  actionReference,
   advancedField,
+  openAdvanced,
   openJobSettings,
   closeJobSettings,
 } from "./setup-helpers";
@@ -432,14 +434,14 @@ for (const type of ["condition", "loop", "subworkflow"] as const) {
     await openJobSettings(page, type === "loop" ? "Steps" : "General");
     if (type === "condition")
       await page.getByLabel("Job condition", { exact: true }).fill("true");
-    if (type === "subworkflow")
+    if (type === "subworkflow") {
+      await openAdvanced(page);
       await page
         .getByLabel("Reusable workflow", { exact: true })
         .fill(`./.relay/workflows/${childKey}.yaml`);
+    }
     if (type === "loop") {
-      await page
-        .getByLabel("Action reference", { exact: true })
-        .fill("relay/loop@v1");
+      await (await actionReference(page)).fill("relay/loop@v1");
       const inputs = await advancedField(page, "Action inputs");
       await inputs.fill(
         JSON.stringify({

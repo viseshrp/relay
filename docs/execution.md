@@ -382,6 +382,11 @@ exceptions expose a generic Relay description while their trace stays in the
 application log. The run monitor combines this diagnostic with the failed
 attempt's exit code and last public provider message. A rerun clears the run
 summary and shows only the new attempt's failure if it fails again.
+A step whose built-in action version was removed after its run launched
+fails with `<reference> was removed in Relay <version>. This run started on an
+earlier Relay version; cancel it and launch the workflow again.`; Relay never
+runs the replacement version in its place. See
+[Built-in action versions](workflows.md#built-in-action-versions).
 
 A failed step settles its raw outcome and effective conclusion. The owning
 job evaluates later step conditions and `continue-on-error`; other jobs retain

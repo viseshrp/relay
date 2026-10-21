@@ -1,6 +1,8 @@
-import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Button, MenuItem, Stack, Typography } from "@mui/material";
 import { useState } from "react";
+import { propertyHelp } from "../field-help";
 import type { LanguageManifest } from "../workflow-language";
+import { HelpSelectField } from "./HelpTip";
 import { schemaKind } from "../workflow-language";
 import { isRecord } from "../workflow";
 import { StructuredValueField } from "./StructuredValueField";
@@ -38,6 +40,11 @@ export function SchemaFields({
             <Stack key={key} spacing={1}>
               <StructuredValueField
                 label={label ? `${label}.${key}` : key}
+                help={propertyHelp(
+                  manifest,
+                  `${type}.${key}`,
+                  label ? `${label}.${key}` : key,
+                )}
                 value={record[key]}
                 onChange={(next) => onChange(key, next)}
                 object={
@@ -62,21 +69,25 @@ export function SchemaFields({
           );
         })}
       {missing.length > 0 && (
-        <Stack direction="row" spacing={1}>
-          <TextField
-            select
+        <Stack direction="row" spacing={1} sx={{ alignItems: "end" }}>
+          <HelpSelectField
+            topic={{
+              title: label ? `Add ${label} field` : "Add workflow field",
+              description:
+                "Fields this part of the workflow also accepts. Choose one, then Add field to edit its value here.",
+            }}
             label={label ? `Add ${label} field` : "Add workflow field"}
             size="small"
             value={add}
-            onChange={(event) => setAdd(event.target.value)}
-            sx={{ flex: 1 }}
+            placeholder="Choose a field"
+            onChange={(event) => setAdd(String(event.target.value))}
           >
             {missing.map((key) => (
               <MenuItem key={key} value={key}>
                 {key}
               </MenuItem>
             ))}
-          </TextField>
+          </HelpSelectField>
           <Button
             disabled={!add}
             onClick={() => {

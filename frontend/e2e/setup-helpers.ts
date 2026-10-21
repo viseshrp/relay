@@ -68,9 +68,7 @@ export async function openJobSettings(page: Page, tab = "Steps") {
       .getByRole("button")
       .first()
       .click();
-  const dialog = page.getByRole("dialog").filter({
-    has: page.getByRole("heading", { name: "Job settings", exact: true }),
-  });
+  const dialog = page.getByRole("dialog", { name: /^Job settings: / });
   // Target the tab after the drawer reaches its final position.
   await dialog.evaluate(async (element) => {
     await Promise.all(
@@ -89,12 +87,41 @@ export async function openJobSettings(page: Page, tab = "Steps") {
   ).toBeVisible();
 }
 
+/** Expand the open job tab's Advanced section, where rarer fields live. */
+export async function openAdvanced(page: Page) {
+  const toggle = page
+    .getByRole("tabpanel")
+    .getByRole("button", { name: "Advanced", exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true")
+    await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+/** The step's raw action reference, under Advanced. */
+export async function actionReference(page: Page) {
+  await openAdvanced(page);
+  return page.getByLabel("Action reference", { exact: true });
+}
+
+/** Run the open agent step on one agent. */
+export async function chooseAgent(page: Page, name: string) {
+  const one = page.getByRole("button", { name: "One agent", exact: true });
+  if ((await one.getAttribute("aria-pressed")) !== "true") await one.click();
+  const agent = page.getByRole("combobox", { name: "Agent", exact: true });
+  if ((await agent.textContent()) !== name) {
+    await agent.click();
+    await page.getByRole("option", { name: new RegExp(`^${name} `) }).click();
+  }
+  await expect(agent).toHaveText(name);
+}
+
 export async function advancedField(page: Page, label: string, tab = "Steps") {
   await openJobSettings(page, tab);
   const toggle = page.getByRole("button", {
     name: `Advanced JSON: ${label}`,
     exact: true,
   });
+  if (!(await toggle.isVisible())) await openAdvanced(page);
   const accordion = toggle.locator(
     "xpath=ancestor::*[contains(@class, 'MuiAccordion-root')][1]",
   );
@@ -121,7 +148,8 @@ export async function runStarter(
   name: string,
   testInfo: TestInfo,
   freshOwner = false,
-) {
+  approval = "Approve",
+): Promise<string> {
   expect(
     (
       await post(page, "/__test__/starter-project", { fresh_owner: freshOwner })
@@ -196,10 +224,12 @@ export async function runStarter(
     await expect(
       page.getByRole("heading", { name: "Your review is needed" }),
     ).toBeVisible();
-    await page.getByLabel("Your response", { exact: true }).fill("Approved");
-    await page
-      .getByRole("button", { name: "Send response and continue", exact: true })
-      .click();
+    const request = page.locator(".interaction-card");
+    // Declared answers are buttons; no free-text answer can fail the run.
+    await expect(
+      request.getByLabel("Your response", { exact: true }),
+    ).toHaveCount(0);
+    await request.getByRole("button", { name: approval, exact: true }).click();
   }
   await expectRunStatus(page, runId, "succeeded");
   await expect(
@@ -230,4 +260,5 @@ export async function runStarter(
     .getByRole("button", { name: "Close checklist", exact: true })
     .click();
   await expect(setup).toHaveCount(0);
+  return runId;
 }

@@ -8,7 +8,22 @@ export interface JobListRow {
   attention: boolean;
 }
 
+/** Label a scope by its job's display name, falling back to the scope. */
+export function jobScopeLabel(nodes: RunNode[]): (scope: string) => string {
+  const byScope = new Map(nodes.map((node) => [node.scope_path, node]));
+  return function label(scope: string): string {
+    let node = byScope.get(scope);
+    // A step's context is the job that runs it, such as a loop's job.
+    if (node?.node_type === "actions_step" && node.parent_scope)
+      node = byScope.get(node.parent_scope) ?? node;
+    return node?.node_type === "actions_job" && node.display_name
+      ? node.display_name
+      : stageLabel(node?.scope_path ?? scope);
+  };
+}
+
 export function jobListRows(nodes: RunNode[]): JobListRow[] {
+  const label = jobScopeLabel(nodes);
   const records = new Map(
     runJobs(nodes).map((node) => [node.scope_path, node]),
   );
@@ -33,14 +48,14 @@ export function jobListRows(nodes: RunNode[]): JobListRow[] {
       attention: ["failed", "waiting"].includes(node.status),
     });
     for (const child of children.get(node.scope_path) ?? [])
-      visit(child, depth + 1, [...ancestors, stageLabel(node.scope_path)]);
+      visit(child, depth + 1, [...ancestors, label(node.scope_path)]);
   }
   for (const node of children.get(null) ?? []) {
     const parent = node.parent_scope;
     visit(
       node,
       parent && parent !== "root" ? parent.split(".").length - 1 : 0,
-      parent && parent !== "root" ? [stageLabel(parent)] : [],
+      parent && parent !== "root" ? [label(parent)] : [],
     );
   }
   // A partial page must retain every loaded job even if its parent is absent

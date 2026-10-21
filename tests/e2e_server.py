@@ -100,10 +100,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         create_project,
         fake_executable,
         git,
+        stand_in_versions,
     )
 
     apply_migrations()
     patch = pytest.MonkeyPatch()
+    # Stand-in built-in versions, which each reset removes.
+    versions = pytest.MonkeyPatch()
     patch.setattr(folders, "_home_directory", lambda: root)
     if assets_root := os.environ.get("RELAY_TEST_ASSETS_ROOT"):
         from relay.web import static_view
@@ -171,6 +174,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
                     {"message": "The preceding fixture has not stopped."}, status=503
                 )
             clear_ui_fixtures(root)
+            versions.undo()
             WorkflowControl.objects.all().delete()
             # The feedback scenario replaces Codex and the shared ACP mode.
             # Restore its configuration so later tests get the normal capabilities.
@@ -300,6 +304,19 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         project.commit("Add browser-test review material")
         return JsonResponse({"ok": True})
 
+    @api_errors
+    @owner_required
+    @require_POST
+    def github_workflow(request: HttpRequest) -> JsonResponse:
+        text = json_body(request).get("yaml")
+        if not isinstance(text, str):
+            message = "The browser-test GitHub workflow requires YAML text."
+            raise ConfigError(message)
+        # Commit it so later launches still see a clean checkout.
+        project.write(".github/workflows/ci.yml", text)
+        project.commit("Add browser-test GitHub workflow")
+        return JsonResponse({"ok": True})
+
     @owner_required
     @require_POST
     def feedback_provider(request: HttpRequest) -> JsonResponse:
@@ -394,6 +411,20 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     @api_errors
     @owner_required
     @require_POST
+    def builtin_versions(request: HttpRequest) -> JsonResponse:
+        """Put a stand-in relay/command@v2 beside the shipped version until the next reset."""
+        mode = json_body(request).get("mode")
+        if mode not in {"current", "deprecated", "removed"}:
+            message = "Choose current, deprecated, or removed built-in versions."
+            raise ConfigError(message)
+        versions.undo()
+        if mode != "current":
+            stand_in_versions(versions, removed=mode == "removed")
+        return JsonResponse({"ok": True})
+
+    @api_errors
+    @owner_required
+    @require_POST
     def worst_case(request: HttpRequest) -> JsonResponse:
         from tests.ui_fixtures import seed_ui_fixture
 
@@ -409,11 +440,13 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
     urlpatterns.insert(0, path("__test__/resource-remnant", resource_remnant))
     urlpatterns.insert(0, path("__test__/launch-files", launch_files))
     urlpatterns.insert(0, path("__test__/report", report))
+    urlpatterns.insert(0, path("__test__/github-workflow", github_workflow))
     urlpatterns.insert(0, path("__test__/feedback-provider", feedback_provider))
     urlpatterns.insert(0, path("__test__/elicitation-provider", elicitation_provider))
     urlpatterns.insert(0, path("__test__/recovery-provider", recovery_provider))
     urlpatterns.insert(0, path("__test__/native-result-provider", native_result_provider))
     urlpatterns.insert(0, path("__test__/activity", activity))
+    urlpatterns.insert(0, path("__test__/builtin-versions", builtin_versions))
 
     # Close each SDK callback's database connection in its owning thread.
     original_to_thread = asyncio.to_thread
@@ -461,6 +494,7 @@ def serve(root: Path, port: int, *, login_required: bool = True) -> None:
         fixture_ready.set()
         consumer.join(timeout=10)
         connections.close_all()
+        versions.undo()
         patch.undo()
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from relay.constants import API_MAX_PAGE, API_MAX_PAGE_BYTES
 from relay.projects.discovery import git_root
 from relay.vcs.cleanliness import RepositoryChange, execution_status
+from relay.workflows.actions.builtins import is_builtin
 from relay.workflows.loader import load_workflow, resolve_workflow_path
 from relay.workflows.schema import ActionsJobNode
 from relay.workflows.validation import ValidatedWorkflow, validate_loaded_workflow
@@ -39,7 +40,7 @@ def _static_action_prompts(workflow: ValidatedWorkflow, relay_root: Path) -> Val
                 steps.extend(action["runs"].get("steps", []))
     prompts = []
     for step in steps:
-        if step.get("uses") != "relay/agent@v1":
+        if not is_builtin(step.get("uses"), "agent"):
             continue
         references = str(step.get("with", {}).get("prompt-files", ""))
         if "${{" in references:

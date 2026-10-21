@@ -608,6 +608,7 @@ def agy_main(arguments: list[str]) -> None:
     if mode in {"hold", "success-hold"}:
         if mode == "success-hold":
             emit({"event": "result", "result": {"status": "SUCCESS"}})
+            trace({"result_emitted": True})
         while True:
             time.sleep(0.1)
     if mode == "malformed":
