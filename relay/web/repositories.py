@@ -132,6 +132,7 @@ from relay.paths import (
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import (
+    EVIDENCE_INDEX_SOURCE,
     PreservationResult,
     validate_attempt_evidence,
 )
@@ -4264,7 +4265,14 @@ class DjangoExecutionStore(DjangoAgentStore):
             state, reason = "blocked", "This failure requires an owner decision or safe recovery."
         elif used >= retry_limit:
             state, reason = "exhausted", "The automatic retry budget for this step is exhausted."
-        instruction, digest = recovery_instruction(_string(node, "scope_path"), error_code, message)
+        index = (
+            Artifact.objects.filter(attempt=attempt, source_path=EVIDENCE_INDEX_SOURCE)
+            .values_list("retained_path", flat=True)
+            .first()
+        )
+        instruction, digest = recovery_instruction(
+            _string(node, "scope_path"), error_code, message, evidence_index=index
+        )
         retry, _created = AutomaticRetry.objects.update_or_create(
             attempt=attempt,
             defaults={

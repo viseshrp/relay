@@ -215,8 +215,13 @@ Relay appends the error and the following instruction as a separate prompt:
 
 The text and its SHA-256 hash are recorded in the recovery decision and event.
 Original prompt bytes, snapshot hashes, routes, and settings stay unchanged.
-Run metadata points the agent to the retained attempt evidence. Model-switch
-handoff instructions remain a separate owner-selected control.
+Run metadata points the agent to the retained attempt evidence. When the
+failed attempt retained an evidence index, the instruction also contains an
+`Evidence index: <path>` line before the failure text, so the agent can read
+the full failure and the retained diff, untracked files, and rejected report
+instead of searching for them. A path longer than a quarter of the 8 KiB
+instruction limit is omitted rather than cut. Model-switch handoff
+instructions remain a separate owner-selected control.
 
 The per-run kernel recovery lock serializes automatic, quota, and manual
 retries. The decision is rechecked after workspace preparation. Duplicate

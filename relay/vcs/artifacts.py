@@ -52,6 +52,14 @@ class PreservationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AttemptFailure:
+    """The terminal failure an evidence index explains to a later repair."""
+
+    error_code: str
+    message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryReport:
     """A retained root report that can safely be restored to a run worktree."""
 
@@ -272,6 +280,69 @@ def _write_manifest(
         os.fsync(stream.fileno())
 
 
+EVIDENCE_INDEX_NAME = "INDEX.md"
+EVIDENCE_INDEX_SOURCE = "relay:evidence-index"
+EVIDENCE_INDEX_MESSAGE_MAX_BYTES = 64 * 1024
+_INDEX_PURPOSES = {
+    "commits": "commit IDs the attempt created",
+    "diff": "uncommitted tracked changes, as `git diff --binary HEAD`",
+    "untracked": "a copy of an untracked file",
+    "untracked_symlink_target": "the target text of an untracked symbolic link",
+    "declared": "a declared artifact or rejected report, copied as written",
+}
+
+
+def _write_evidence_index(
+    staging: Path,
+    target: Path,
+    files: list[PreservedArtifact],
+    failure: AttemptFailure,
+) -> PreservedArtifact:
+    """Map every retained file so a repair can read evidence instead of guessing.
+
+    For example, a rejected `REVIEW.md` is listed as `declared/report` with its
+    size and purpose, followed by the full validation message.
+    """
+    message = (failure.message or "").encode("utf-8")[:EVIDENCE_INDEX_MESSAGE_MAX_BYTES]
+    lines = [
+        "# Retained attempt evidence",
+        "",
+        f"Error code: {failure.error_code}",
+        "",
+        "Every path below is relative to this directory. Read the files that",
+        "explain the failure before changing the worktree.",
+        "",
+        "| Path | Bytes | Contents |",
+        "| --- | --- | --- |",
+    ]
+    for item in files:
+        relative = Path(item.retained_path).relative_to(target).as_posix()
+        purpose = _INDEX_PURPOSES.get(item.kind, item.kind)
+        if item.kind == "declared":
+            purpose = f"{purpose} (`{item.name}`)"
+        cell = relative.replace("|", "\\|")
+        lines.append(f"| `{cell}` | {item.bytes} | {purpose} |")
+    lines += [
+        "",
+        "## Failure message",
+        "",
+        "```text",
+        message.decode("utf-8", errors="ignore").replace("```", "` ` `") or "(none)",
+        "```",
+        "",
+    ]
+    destination = staging / EVIDENCE_INDEX_NAME
+    digest, size = _write_text(destination, "\n".join(lines))
+    return _record(
+        name="evidence_index",
+        source=EVIDENCE_INDEX_SOURCE,
+        retained=target / EVIDENCE_INDEX_NAME,
+        digest=digest,
+        size=size,
+        kind="index",
+    )
+
+
 def _require_new_ref(repository: Path, reference: str) -> None:
     existing_ref = run_git(
         repository,
@@ -295,8 +366,13 @@ def preserve_attempt_evidence(
     *,
     declared_artifacts: dict[str, str] | None = None,
     root: Path | None = None,
+    failure: AttemptFailure | None = None,
 ) -> PreservationResult:
-    """Atomically retain every recoverable attempt byte before reset or removal."""
+    """Atomically retain every recoverable attempt byte before reset or removal.
+
+    A failed attempt also gets an `INDEX.md` that lists the retained files and
+    the full failure message; it is hashed in the manifest like any other file.
+    """
     safe_run = _component(run_id, "run id")
     safe_attempt = _component(attempt_id, "attempt id")
     base = ensure_private_dir(root) if root is not None else artifacts_dir(create=True)
@@ -325,6 +401,8 @@ def preserve_attempt_evidence(
             )
             for item in files
         ]
+        if failure is not None:
+            final_files.append(_write_evidence_index(staging, target, final_files, failure))
         _write_manifest(
             staging,
             run_id=safe_run,
@@ -530,6 +608,8 @@ def restore_recovery_reports(worktree: Path, reports: tuple[RecoveryReport, ...]
 
 
 __all__ = [
+    "EVIDENCE_INDEX_SOURCE",
+    "AttemptFailure",
     "PreservationResult",
     "PreservedArtifact",
     "RecoveryReport",

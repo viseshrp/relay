@@ -132,6 +132,7 @@ It contains:
 | `untracked/` | Exact bytes and relative paths of regular untracked files. |
 | `untracked-symlinks/` | Symlink target text, stored as inert text rather than a live link. |
 | `declared/` | Copies of workflow-declared artifact files. |
+| `INDEX.md` | Failed attempts only: error code, every retained path with its size and purpose, and the failure message. |
 
 For run `abc-123`, attempt `12`, the ending commit is also protected by:
 
@@ -145,6 +146,14 @@ copied in 1 MiB chunks, and SHA-256 is calculated over the retained bytes.
 Symlink targets that point outside the worktree are never followed. A declared
 artifact is accepted only when its resolved target is a regular file inside
 the attempt worktree.
+
+`INDEX.md` is written for failed attempts and recorded in `manifest.json` with
+its hash, so changing it fails verification like any other retained file. Its
+failure message keeps at most 64 KiB, masks registered run secrets, and cannot
+close its own code fence. For example, a rejected report appears as
+`declared/report` with the label `` (`report`) `` next to the full
+validation error. Automatic recovery names this file in its repair
+instruction.
 
 The files are written to a private staging directory, flushed, and renamed to
 the final attempt directory. The retained ref is created first, so partial
