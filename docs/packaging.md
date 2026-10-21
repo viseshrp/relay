@@ -237,3 +237,10 @@ rather than the pushed digest. `make docker-publish-manifest` then tags
   release tag, the nightly image carries that release version.
 - Published GitHub releases (`release: [published]`, created after the tag test
   suite succeeds) publish `:vX.Y.Z`, `:X.Y.Z`, and `:latest`.
+
+Publishing jobs log in to GHCR with the `GHCR_TOKEN` repository secret when it
+is set, and otherwise with the workflow's `GITHUB_TOKEN`. `GITHUB_TOKEN` can
+push only when the `relay` package grants this repository write access under
+its "Manage Actions access" settings; a package first pushed from outside
+Actions rejects it with `permission_denied`. `GHCR_TOKEN` is then a classic
+personal access token with `write:packages` scope for the package owner.
