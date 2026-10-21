@@ -105,6 +105,7 @@ def _check_sdist(path: Path, names: tuple[str, ...]) -> None:
         "frontend/package-lock.json",
         "hatch_build.py",
         "docs/getting-started.md",
+        "docs/build-your-first-workflow.md",
         "docs/coming-from-github-actions.md",
         "docs/keyboard-shortcuts.md",
     }

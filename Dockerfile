@@ -35,7 +35,8 @@ RUN mkdir -p /dist \
     && /opt/relay/venv/bin/python -m pip install --require-hashes -r /dist/requirements.txt
 
 COPY hatch_build.py README.md LICENSE CHANGELOG.md ./
-COPY docs/getting-started.md docs/coming-from-github-actions.md docs/keyboard-shortcuts.md docs/
+COPY docs/getting-started.md docs/build-your-first-workflow.md \
+    docs/coming-from-github-actions.md docs/keyboard-shortcuts.md docs/
 COPY frontend/ frontend/
 COPY relay/ relay/
 COPY scripts/check_distribution_contents.py scripts/check_distribution_contents.py

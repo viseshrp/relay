@@ -50,6 +50,7 @@ def test_distribution_template_allow_list_is_exact(
     [
         (None, None),
         (None, "docs/getting-started.md"),
+        (None, "docs/build-your-first-workflow.md"),
         ("frontend/node_modules/dependency/index.js", None),
         ("frontend/test-results/result.json", None),
         ("frontend/playwright-report/index.html", None),
@@ -65,6 +66,7 @@ def test_sdist_requires_the_guides_imported_by_the_frontend(
         "frontend/package-lock.json",
         "hatch_build.py",
         "docs/getting-started.md",
+        "docs/build-your-first-workflow.md",
         "docs/coming-from-github-actions.md",
         "docs/keyboard-shortcuts.md",
     }

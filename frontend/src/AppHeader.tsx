@@ -195,6 +195,7 @@ export function AppHeader({ state }: { state: AppState }) {
           {(
             [
               "Getting started",
+              "Build your first workflow",
               "Coming from GitHub Actions",
               "Keyboard shortcuts",
             ] as HelpGuide[]

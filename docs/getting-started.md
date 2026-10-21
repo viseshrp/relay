@@ -16,3 +16,6 @@ while running work finishes. Cancel stops the run and retains its evidence.
 Edit workflows visually, as YAML, or in Split mode. One Save writes the workflow
 and edited local prompt files together. The Run workflow panel uses saved
 sources; unsaved drafts stay available for later editing.
+
+To build a workflow of your own step by step, see
+[Build your first workflow](build-your-first-workflow.md).

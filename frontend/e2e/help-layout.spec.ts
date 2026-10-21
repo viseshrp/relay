@@ -1,5 +1,5 @@
-import { expect, test } from "./a11y-test";
-import { post } from "./setup-helpers";
+import { expect, test, type Locator, type Page } from "./a11y-test";
+import { openAdvanced, openJobSettings, post } from "./setup-helpers";
 
 test.beforeEach(async ({ page }) => {
   await page.request.get("/api/auth");
@@ -179,4 +179,113 @@ test("welcome screenshots are decoded, highlighted accurately, and use a desktop
     path: info.outputPath("welcome-mobile.png"),
     animations: "disabled",
   });
+});
+
+/** Visible fields in `area` that no help button covers. */
+async function unhelped(area: Locator): Promise<string[]> {
+  const fields = await area.evaluate(
+    (root) =>
+      [
+        ...root.querySelectorAll(
+          ".MuiFormControl-root, .MuiFormControlLabel-root, .MuiToggleButtonGroup-root",
+        ),
+      ].filter((field) => field.checkVisibility({ visibilityProperty: true }))
+        .length,
+  );
+  // An empty tab would pass without checking anything.
+  expect(fields).toBeGreaterThan(0);
+  return area.evaluate((root) =>
+    [
+      ...root.querySelectorAll(
+        ".MuiFormControl-root, .MuiFormControlLabel-root, .MuiToggleButtonGroup-root",
+      ),
+    ]
+      .filter((field) => field.checkVisibility({ visibilityProperty: true }))
+      .filter(
+        (field) =>
+          !field
+            .closest(".help-field, .help-control, .help-group")
+            ?.querySelector(".help-tip button"),
+      )
+      .map(
+        (field) =>
+          field.getAttribute("aria-label") ||
+          field.textContent ||
+          field.outerHTML.slice(0, 120),
+      ),
+  );
+}
+
+async function expectHelp(page: Page, title: string, description: string) {
+  await page
+    .getByRole("button", { name: `About ${title}`, exact: true })
+    .click();
+  await expect(
+    page.getByRole("tooltip").locator(".help-tip-description"),
+  ).toHaveText(description);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toBeHidden();
+}
+
+test("every job and step field has help", async ({ page }) => {
+  const { property_descriptions: descriptions } = await (
+    await page.request.get("/api/workflow-language")
+  ).json();
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  const samples: Array<[string, string, string]> = [
+    ["General", "Job name", "job-factory.name"],
+    ["Steps", "Step name", "regular-step.name"],
+    ["Outputs", "Job outputs", "job-factory.outputs"],
+    ["Environment", "Job environment variables", "job-factory.env"],
+    [
+      "When it fails",
+      "Continue after this job fails",
+      "job-factory.continue-on-error",
+    ],
+  ];
+  for (const [tab, title, key] of samples) {
+    await openJobSettings(page, tab);
+    if (tab === "General" || tab === "Steps") await openAdvanced(page);
+    // An empty outputs table has only its Add button.
+    if (tab === "Outputs")
+      await page
+        .getByRole("button", { name: "Add Job outputs entry", exact: true })
+        .click();
+    const panel = page.getByRole("tabpanel");
+    expect(await unhelped(panel), tab).toEqual([]);
+    await expectHelp(page, title, descriptions[key]);
+  }
+});
+
+test("every workflow settings field has help", async ({ page }) => {
+  const { property_descriptions: descriptions } = await (
+    await page.request.get("/api/workflow-language")
+  ).json();
+  await page.goto("/?view=workflows&workflow=workflow.yaml");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Workflow settings", exact: true })
+    .click();
+  const source = page.getByRole("dialog", { name: "Workflow settings" });
+  await source.getByRole("button", { name: "Add workflow input" }).click();
+  await source.getByText("Advanced workflow schema fields").click();
+  expect(await unhelped(source)).toEqual([]);
+  await expectHelp(page, "Workflow name", descriptions["workflow-root.name"]);
+  await source.getByRole("button", { name: "Done", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "Variables, secrets, environments and library",
+      exact: true,
+    })
+    .click();
+  const settings = page.getByRole("dialog", { name: "Workflow settings" });
+  for (const tab of [
+    "Variables and secrets",
+    "Environments",
+    "Workflow library",
+  ]) {
+    await settings.getByRole("tab", { name: tab, exact: true }).click();
+    expect(await unhelped(settings), tab).toEqual([]);
+  }
 });

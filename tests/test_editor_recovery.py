@@ -130,6 +130,34 @@ def test_independent_language_errors_are_reported_together_with_locations(owner:
 
 
 @pytest.mark.parametrize(
+    "text, line, message",
+    [
+        (
+            "jobs:\n  check:\n    steps:\n      - run: echo Ready\n"
+            "      - uses: relay/loop@v1\n        with:\n          max-iterations: 2\n"
+            "          workflow: other.yaml\n",
+            "8",
+            "Loop requires a static reusable workflow.",
+        ),
+        (
+            "jobs:\n  check:\n    steps:\n      - run: echo Ready\n"
+            "      - uses: ./.relay/actions/missing\n",
+            "5",
+            "Local action directory is missing.",
+        ),
+    ],
+)
+def test_source_errors_point_at_the_step_that_names_them(
+    owner: Client, text: str, line: str, message: str
+) -> None:
+    result = post(owner, "/api/workflow-language/validate", {"yaml": text}).json()
+    assert result["valid"] is False
+    [diagnostic] = result["diagnostics"]
+    assert message in diagnostic["message"]
+    assert diagnostic["context"]["line"] == line
+
+
+@pytest.mark.parametrize(
     "text",
     [
         'jobs:\n  check:\n    steps:\n      - run: echo "Task: example"\n',
@@ -149,3 +177,130 @@ def test_common_yaml_mistakes_include_a_reason_and_location(text: str) -> None:
     assert issues
     assert issues[0].message != "Invalid YAML document."
     assert issues[0].context.get("line") or "Duplicate YAML key" in issues[0].message
+
+
+def test_validate_reports_missing_prompt_files(owner: Client, project: RelayProject) -> None:
+    from relay.paths import global_prompts_dir
+
+    project.write(".relay/prompts/present.md", "Review the code.\n")
+    shared = global_prompts_dir(create=True) / "shared.md"
+    shared.write_text("Shared instructions.\n", encoding="utf-8")
+    text = (
+        "jobs:\n  ask:\n    steps:\n      - uses: relay/agent@v1\n        with:\n"
+        "          agent: codex\n"
+        "          prompt-files: |\n"
+        "            prompts/present.md\n"
+        "            .relay/prompts/present.md\n"
+        "            global:shared.md\n"
+        "            prompts/missing.md\n"
+        "            global:absent.md\n"
+        "            ${{ inputs.prompt }}\n"
+    )
+    result = post(owner, "/api/workflow-language/validate", {"yaml": text}).json()
+    assert result["valid"] is False
+    assert [
+        (item["message"], item["context"]["field"], item["context"]["line"])
+        for item in result["diagnostics"]
+    ] == [
+        (
+            "Prompt file prompts/missing.md does not exist.",
+            "jobs.ask.steps[0].with.prompt-files",
+            "7",
+        ),
+        (
+            "Prompt file global:absent.md does not exist.",
+            "jobs.ask.steps[0].with.prompt-files",
+            "7",
+        ),
+    ]
+    # An unsaved prompt in the open draft counts as present.
+    drafts = {"yaml": text, "prompts": ["prompts/missing.md"]}
+    [remaining] = post(owner, "/api/workflow-language/validate", drafts).json()["diagnostics"]
+    assert remaining["message"] == "Prompt file global:absent.md does not exist."
+    (global_prompts_dir() / "absent.md").write_text("Now present.\n", encoding="utf-8")
+    assert post(owner, "/api/workflow-language/validate", drafts).json()["valid"] is True
+    rejected = post(owner, "/api/workflow-language/validate", {"yaml": text, "prompts": "x"})
+    assert rejected.status_code == 422
+
+
+def test_validate_reports_warnings_without_invalidating(
+    owner: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from relay.web.views import actions_language
+    from relay.workflows.actions.language import _warning
+
+    monkeypatch.setattr(
+        actions_language,
+        "workflow_warnings",
+        lambda document: [_warning("jobs.check.steps[0].run", "A note.")],
+    )
+    result = post(owner, "/api/workflow-language/validate", {"yaml": SOURCE}).json()
+    assert result["valid"] is True
+    assert result["diagnostics"] == []
+    [warning] = result["warnings"]
+    assert warning["message"] == "jobs.check.steps[0].run: A note."
+    assert warning["context"]["severity"] == "warning"
+    assert warning["context"]["line"] == "2"
+    assert warning["context"]["column"]
+    invalid = post(owner, "/api/workflow-language/validate", {"yaml": "jobs: [\n"}).json()
+    assert invalid["valid"] is False
+    assert invalid["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    "key, source, uses",
+    [
+        pytest.param(
+            ".relay/actions/x/action.yaml",
+            "name: X\ndescription: Local\nruns:\n  using: composite\n  steps:\n"
+            "    - uses: relay/command@v1\n      with: {argv: '[\"true\"]'}\n",
+            "steps: [{uses: ./.relay/actions/x}]",
+            id="action",
+        ),
+        pytest.param(
+            ".relay/workflows/child.yaml",
+            "on: workflow_call\njobs:\n  inner:\n    steps:\n"
+            "      - uses: relay/command@v1\n        with: {argv: '[\"true\"]'}\n",
+            "uses: ./.relay/workflows/child.yaml",
+            id="reusable-workflow",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("deprecated_command")
+def test_validate_reports_deprecated_builtins_in_captured_sources(
+    owner: Client, project: RelayProject, key: str, source: str, uses: str
+) -> None:
+    project.write(key, source)
+    result = post(
+        owner, "/api/workflow-language/validate", {"yaml": f"jobs: {{check: {{{uses}}}}}\n"}
+    ).json()
+    assert result["valid"] is True
+    [warning] = result["warnings"]
+    assert warning["message"].startswith(f"{key}: ")
+    assert warning["message"].endswith(
+        "relay/command@v1 is deprecated and will be removed in a later Relay release. "
+        "Use relay/command@v2."
+    )
+    assert warning["context"]["source"] == key
+    assert warning["context"]["deprecated"] == "relay/command@v1"
+    assert "line" not in warning["context"]
+
+
+def test_validate_leaves_prompt_paths_outside_their_folder_to_launch(owner: Client) -> None:
+    text = (
+        "jobs:\n  ask:\n    steps:\n      - uses: relay/agent@v1\n        with:\n"
+        "          agent: codex\n"
+        "          prompt-files: |\n"
+        "            prompts/../../outside.md\n"
+        "            global:../outside.md\n"
+        "            prompts/missing.md\n"
+    )
+    # Draft names that leave the prompt folder never count as present.
+    body = {"yaml": text, "prompts": ["../missing.md", "prompts/../../missing.md"]}
+    result = post(owner, "/api/workflow-language/validate", body).json()
+    assert result["valid"] is False
+    assert [item["message"] for item in result["diagnostics"]] == [
+        "Prompt file prompts/missing.md does not exist."
+    ]
+    body["prompts"] = ["prompts/missing.md"]
+    assert post(owner, "/api/workflow-language/validate", body).json()["valid"] is True

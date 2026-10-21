@@ -1,17 +1,35 @@
-import { MenuItem, Stack, TextField } from "@mui/material";
+import { Alert, MenuItem, Stack } from "@mui/material";
+import { inputHelp } from "../field-help";
+import { parseListInput } from "../list-input";
+import type { LanguageManifest } from "../workflow-language";
+import { HelpSelectField, HelpTextField } from "./HelpTip";
 import { StructuredValueField } from "./StructuredValueField";
+
 export function ActionCommandFields({
   inputs,
+  reference,
+  manifest,
   onChange,
 }: {
   inputs: Record<string, unknown>;
+  reference: string | undefined;
+  manifest: LanguageManifest;
   onChange: (field: string, value: unknown) => void;
 }) {
+  // Show exactly what the YAML holds: nothing when argv is absent, and an
+  // error rather than an empty list when it cannot be read.
+  const argv = inputs.argv === undefined ? [] : parseListInput(inputs.argv);
   return (
     <Stack spacing={1}>
-      <TextField
-        select
+      <HelpSelectField
+        topic={{
+          title: "Command source",
+          description:
+            "Program and arguments runs the argv input exactly. Shared command runs a command saved by name in global or project defaults.",
+          guide: "scripts-and-command-actions",
+        }}
         label="Command source"
+        size="small"
         value={inputs.command !== undefined ? "shared" : "argv"}
         onChange={(event) =>
           onChange(
@@ -24,32 +42,47 @@ export function ActionCommandFields({
       >
         <MenuItem value="argv">Program and arguments</MenuItem>
         <MenuItem value="shared">Shared command</MenuItem>
-      </TextField>
+      </HelpSelectField>
       {inputs.command !== undefined ? (
-        <TextField
+        <HelpTextField
+          topic={inputHelp(manifest, reference, "command", "Shared command")}
           label="Shared command"
           value={String(inputs.command)}
           onChange={(event) => onChange("command", event.target.value)}
           helperText="The name of a command saved in global or project defaults."
         />
       ) : (
-        <StructuredValueField
-          label="Program and arguments"
-          value={(() => {
-            try {
-              return JSON.parse(String(inputs.argv ?? '["echo","Ready"]'));
-            } catch {
-              return [];
+        <>
+          {argv === null && (
+            <Alert severity="error">
+              This argument list is not valid. Fix it in YAML or replace it
+              here.
+            </Alert>
+          )}
+          <StructuredValueField
+            label="Program and arguments"
+            help={inputHelp(
+              manifest,
+              reference,
+              "argv",
+              "Program and arguments",
+            )}
+            textItems
+            value={argv ?? []}
+            helperText={
+              inputs.argv === undefined
+                ? "Add the program, then one argument per item."
+                : undefined
             }
-          })()}
-          onChange={(value) =>
-            onChange("__all__", {
-              ...inputs,
-              command: undefined,
-              argv: JSON.stringify(value),
-            })
-          }
-        />
+            onChange={(value) =>
+              onChange("__all__", {
+                ...inputs,
+                command: undefined,
+                argv: JSON.stringify(value),
+              })
+            }
+          />
+        </>
       )}
     </Stack>
   );

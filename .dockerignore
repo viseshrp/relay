@@ -9,6 +9,7 @@
 
 !docs/
 docs/*
+!docs/build-your-first-workflow.md
 !docs/coming-from-github-actions.md
 !docs/getting-started.md
 !docs/keyboard-shortcuts.md

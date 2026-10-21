@@ -22,6 +22,7 @@ from relay.vcs.commits import current_head, is_ancestor
 from relay.vcs.git import run_git
 from relay.vcs.worktree import require_project_worktree
 from relay.workflows.actions import expressions
+from relay.workflows.actions.builtins import is_builtin
 
 from .models import (
     ActionsJobLease,
@@ -555,7 +556,9 @@ def human_wait_result(
 
     record = NodeAttempt.objects.select_related("node_run").get(pk=attempt_id)
     frozen = cast(dict[str, Any], record.node_run.frozen_def)
-    if frozen.get("type") != "actions_step" or frozen["step"].get("uses") != "relay/human-wait@v1":
+    if frozen.get("type") != "actions_step" or not is_builtin(
+        frozen["step"].get("uses"), "human-wait"
+    ):
         return {}
     path = job_state_path(scope_node_id(str(record.node_run.run_id), frozen["state_scope"]))
     state = read_state(path)

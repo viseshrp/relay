@@ -2433,6 +2433,32 @@ summary:focus-visible,
 .editor-graph-node .MuiButton-root {
   grid-column: 1 / -1;
 }
+.editor-graph-steps {
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--relay-text-secondary);
+}
+.editor-graph-steps li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.help-group-block {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  align-content: start;
+}
+.help-group-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
 .react-flow__node.selected .editor-graph-node {
   border-color: var(--relay-primary);
   box-shadow: 0 0 0 1px var(--relay-primary);

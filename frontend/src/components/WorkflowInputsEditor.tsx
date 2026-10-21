@@ -4,20 +4,39 @@ import {
   FormControlLabel,
   MenuItem,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
+import { GUIDE } from "../field-help";
 import { isRecord } from "../workflow";
+import type { LanguageManifest } from "../workflow-language";
+import {
+  HelpControl,
+  HelpSelectField,
+  HelpTextField,
+  type HelpSource,
+} from "./HelpTip";
 import { StructuredValueField } from "./StructuredValueField";
 
 export function WorkflowInputsEditor({
   value,
+  manifest,
   onChange,
 }: {
   value: unknown;
+  manifest: LanguageManifest | null;
   onChange: (value: Record<string, unknown>) => void;
 }) {
   const inputs = isRecord(value) ? value : {};
+  const help = (property: string | null, title: string): HelpSource => ({
+    title,
+    description:
+      (property &&
+        manifest?.property_descriptions[
+          `workflow-dispatch-input.${property}`
+        ]) ||
+      "The name a run's launch form shows and expressions read as inputs.<name>. Use letters, digits, _, or -.",
+    guide: GUIDE.inputs,
+  });
   return (
     <Stack spacing={2}>
       {Object.entries(inputs).map(([name, raw]) => {
@@ -29,7 +48,8 @@ export function WorkflowInputsEditor({
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
               Input {name}
             </Typography>
-            <TextField
+            <HelpTextField
+              topic={help(null, "Input name")}
               label="Input name"
               margin="dense"
               sx={{ mt: 0.5 }}
@@ -47,10 +67,10 @@ export function WorkflowInputsEditor({
                   );
               }}
             />
-            <TextField
-              select
+            <HelpSelectField
+              topic={help("type", `${name} type`)}
               label={`${name} type`}
-              value={definition.type ?? "string"}
+              value={String(definition.type ?? "string")}
               onChange={(event) => {
                 const next: Record<string, unknown> = {
                   ...definition,
@@ -70,24 +90,31 @@ export function WorkflowInputsEditor({
                   </MenuItem>
                 ),
               )}
-            </TextField>
-            <FormControlLabel
-              label={`${name} required`}
-              control={
-                <Checkbox
-                  checked={definition.required === true}
-                  onChange={(event) => update("required", event.target.checked)}
-                />
-              }
-            />
-            <TextField
+            </HelpSelectField>
+            <HelpControl topic={help("required", `${name} required`)}>
+              <FormControlLabel
+                label={`${name} required`}
+                control={
+                  <Checkbox
+                    checked={definition.required === true}
+                    onChange={(event) =>
+                      update("required", event.target.checked)
+                    }
+                  />
+                }
+              />
+            </HelpControl>
+            <HelpTextField
+              topic={help("description", `${name} description`)}
+              width="wide"
               label={`${name} description`}
               slotProps={{ htmlInput: { maxLength: 4096 } }}
               value={definition.description ?? ""}
               onChange={(event) => update("description", event.target.value)}
             />
             {definition.type === "choice" && (
-              <TextField
+              <HelpTextField
+                topic={help("options", `${name} options (one per line)`)}
                 multiline
                 label={`${name} options (one per line)`}
                 value={
@@ -104,6 +131,7 @@ export function WorkflowInputsEditor({
               <>
                 <StructuredValueField
                   label={`${name} default`}
+                  help={help("default", `${name} default`)}
                   value={definition.default}
                   onChange={(entry) => update("default", entry)}
                 />

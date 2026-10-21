@@ -25,6 +25,7 @@ from relay.execution.action_products import (
 )
 from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.execution.state import EventSource
+from relay.workflows.actions.builtins import parse_builtin
 from relay.workflows.schema import ActionsStepNode
 
 
@@ -37,13 +38,15 @@ def execute_product(
 ) -> ExecutionOutcome:
     from relay.web.models import ActionsArtifact, ActionsCache, Run
 
+    parsed = parse_builtin(reference)
+    action = parsed[0] if parsed is not None else None
     run = Run.objects.get(pk=context.attempt.run_id)
     project_id = str(run.project.pk)
     name = str(inputs.get("name", "artifact"))
     if not name or len(name) > 256 or any(char in name for char in "/\\\x00"):
         message = "Product names must be nonempty and cannot contain path separators."
         raise NodeExecutionError(message)
-    if reference == "relay/upload-artifact@v1":
+    if action == "upload-artifact":
         if ActionsArtifact.objects.filter(run_id=run.pk, name=name).exists():
             message = "Artifact names are immutable within a run."
             raise NodeExecutionError(message)
@@ -72,7 +75,7 @@ def execute_product(
             OutcomeKind.SUCCEEDED,
             outputs={"artifact-id": str(artifact.pk), "artifact-digest": digest},
         )
-    if reference == "relay/download-artifact@v1":
+    if action == "download-artifact":
         source_run = str(inputs.get("run-id", run.pk))
         artifact = ActionsArtifact.objects.filter(
             run_id=source_run, run__project_id=project_id, name=name
@@ -92,7 +95,7 @@ def execute_product(
     version = sha256(json.dumps(patterns).encode()).hexdigest()
     capability = CACHE_MODES[cache_mode(node.workflow, node.job)]
     outputs = {"cache-hit": "false", "cache-primary-key": key, "cache-matched-key": ""}
-    if reference != "relay/save-cache@v1" and "read" in capability:
+    if action != "save-cache" and "read" in capability:
         candidates = ActionsCache.objects.filter(
             project_id=project_id, version=version, namespace="project"
         )
@@ -121,7 +124,7 @@ def execute_product(
                         "cache-matched-key": cache.key,
                     }
                 )
-    if reference == "relay/cache@v1":
+    if action == "cache":
         from relay.execution.action_files import atomic_state, read_state
         from relay.web.actions_repository import job_state_path
         from relay.web.models import NodeRun
@@ -133,7 +136,7 @@ def execute_product(
             {"inputs": dict(inputs), "node": node.model_dump(mode="json", by_alias=True)}
         )
         atomic_state(path, state)
-    elif reference == "relay/save-cache@v1" and "write" in capability:
+    elif action == "save-cache" and "write" in capability:
         if not ActionsCache.objects.filter(
             project_id=project_id, key=key, version=version, namespace="project"
         ).exists():

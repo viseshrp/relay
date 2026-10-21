@@ -228,6 +228,22 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
 
 
 @pytest.fixture
+def deprecated_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """relay/command@v1 is deprecated beside a stand-in current relay/command@v2."""
+    from tests.support import stand_in_versions
+
+    stand_in_versions(monkeypatch)
+
+
+@pytest.fixture
+def removed_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """relay/command@v1 was removed in Relay 0.0.0 for a stand-in relay/command@v2."""
+    from tests.support import stand_in_versions
+
+    stand_in_versions(monkeypatch, removed=True)
+
+
+@pytest.fixture
 def registry_network(monkeypatch: pytest.MonkeyPatch) -> RegistryNetwork:
     from relay.agents import registry
     from tests.support import RegistryNetwork

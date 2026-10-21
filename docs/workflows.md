@@ -78,10 +78,11 @@ administration settings.
 `run` accepts a string or block scalar. Relay writes a private script file and
 starts the interpreter with an argument vector and `shell=False`. Shells are
 `bash`, `sh`, `pwsh`, `powershell`, `cmd`, `python`, or an installed custom
-interpreter command containing `{0}` for the script path. The default is the
-platform's ordinary script shell. Workflow and job `defaults.run` provide a
-shell and working directory; step values override them. Working directories
-must resolve inside the run workspace.
+interpreter command containing exactly one `{0}` for the script path, such as
+`bash -l {0}`. Validation rejects any other literal shell, such as `zsh`. The
+default is the platform's ordinary script shell. Workflow and job
+`defaults.run` provide a shell and working directory; step values override
+them. Working directories must resolve inside the run workspace.
 
 The built-in `python` shell uses Relay's interpreter with `-X utf8`, so
 redirected output and default text-file encoding support Unicode on Windows.
@@ -89,10 +90,14 @@ An inherited `PYTHONIOENCODING` still overrides its standard-stream encoding.
 Custom interpreter commands and explicit command argument vectors retain
 their requested arguments.
 
-`relay/command@v1` requires exactly one of `argv` (a JSON string containing a
-nonempty argument vector) or `command` (an owner-configured command name).
-Arguments are never reinterpreted as shell syntax. Relay owns process groups
-or Windows Job Objects and performs bounded shutdown on cancellation/timeout.
+`relay/command@v1` requires exactly one of `argv` (a nonempty argument
+vector) or `command` (an owner-configured command name). Write `argv` as a
+JSON array string, such as `'["python", "-m", "pytest"]'`, or as one argument
+per line under `|`. A YAML sequence is rejected, because every `with` value is
+a string. Arguments are never reinterpreted as shell syntax, so
+`argv: git status` is one argument and fails validation. Relay owns process
+groups or Windows Job Objects and performs bounded shutdown on
+cancellation/timeout.
 
 <!-- relay-example: valid explicit-command -->
 ```yaml
@@ -158,6 +163,11 @@ yield the empty value. Equality follows Actions' loose numeric coercion and
 case-insensitive string comparison. Logical operators return the selected
 operand rather than forcing a boolean.
 
+The editor warns when an expression names an input, an earlier step, or a
+needed job that cannot supply a value; such references are empty at run time.
+It also warns about an agent step with neither `prompt` nor `prompt-files`.
+Warnings never block saving or launch.
+
 Functions are `contains`, `startsWith`, `endsWith`, `format`, `join`,
 `toJSON`, `fromJSON`, `hashFiles`, `case`, `success`, `failure`, `cancelled`,
 and `always`. `case(condition, value, ..., fallback)` selects the first match.
@@ -212,11 +222,14 @@ remaining job deadline. `continue-on-error` applies to this failure too.
 
 ## Agent nodes
 
-`relay/agent@v1` accepts `agent` or ordered JSON `agents`, `model`, `effort`,
+`relay/agent@v1` accepts `agent` or ordered `agents`, `model`, `effort`,
 newline-separated `prompt-files`, `prompt`, and optional `report`, `selector`,
-`format`, `field`, `label`, and `auto-retry`. Local prompt paths resolve under
-`.relay/`; `global:NAME` resolves in the owner's global prompt directory.
-A runtime `prompt` follows the frozen ordered prompt files.
+`format`, `field`, `label`, and `auto-retry`. Write `agents` as a JSON array
+string or one agent ID per line under `|`; a YAML sequence is rejected. Agent
+IDs are `antigravity`, `claude`, `codex`, `copilot`, and `cursor`. Local prompt
+paths resolve under `.relay/`; `global:NAME` resolves in the owner's global
+prompt directory. The editor reports a literal prompt file that does not exist
+before you save. A runtime `prompt` follows the frozen ordered prompt files.
 
 <!-- relay-example: valid local-agent -->
 ```yaml
@@ -238,6 +251,20 @@ jobs:
           format: label
           label: Ready
           auto-retry: false
+```
+
+<!-- relay-example: valid agent-list-lines -->
+```yaml
+jobs:
+  ask:
+    steps:
+      - uses: relay/agent@v1
+        with:
+          agents: |
+            codex
+            claude
+          model: exact-model-value
+          prompt: Explain the main module.
 ```
 
 Routes, exact model/effort values, and prompt references must resolve from
@@ -283,10 +310,11 @@ scope. Exhausting the budget fails the loop.
 ## Human waits
 
 `relay/human-wait@v1` accepts a rendered `prompt` and optional
-`timeout-minutes` and `options`. Supply `options` as a JSON string array of
-1–10 distinct strings, each at most 256 characters. Omitting it allows a free
-text answer. It creates one durable interaction on the current step
-attempt and exports `steps.ID.outputs.answer`. Restart preserves that request
+`timeout-minutes` and `options`. Supply `options` as a JSON array string or one
+answer per line under `|`, with 1–10 distinct answers, each at most 256
+characters. A YAML sequence is rejected. Omitting it allows a free text
+answer. It creates one durable interaction on the current step attempt and
+exports `steps.ID.outputs.answer`. Restart preserves that request
 and completed steps. Duplicate, stale, expired, or mismatched responses cannot
 resume another attempt.
 
@@ -470,6 +498,57 @@ A failed post hook fails its job. Post file commands, declared artifacts, and
 summaries use the same validation and masking as main scripts. Cache filesystem
 restore/save failures emit warnings; ownership or integrity failures stop the job.
 
+## Built-in action versions
+
+Built-in actions are named `relay/<name>@v<major>`. Each has one current
+major version, which the editor offers. A version changes only in compatible
+ways: a new optional input that keeps the old behavior when omitted, a new
+output, a clearer message, or a fix that restores documented behavior. Any
+other change ships as the next major version.
+
+The support manifest lists every registered version under `builtin_versions`,
+with its action name, major version, status, and `deprecated_in`, and its
+inputs under `builtin_inputs`, with a one-line summary, a description of each
+input, and the fixed values an input accepts. `builtins` lists the current
+references.
+
+When a breaking change ships, the next major version becomes current and the
+previous one is deprecated. A deprecated version still validates, launches,
+and runs exactly as before; validation adds a warning such as
+`relay/<name>@v1 is deprecated and will be removed in a later Relay release.
+Use relay/<name>@v2.`. The warning also names a reusable workflow or local
+action that uses the old version, with that file's path and no line. A run
+keeps the version it launched with, including a run that waits for an
+approval while Relay is upgraded.
+
+In the editor, **Update to current versions** moves each deprecated step in
+the open workflow to the current version and converts its inputs. The result
+is an unsaved draft that **Undo** reverts. It lists one change per updated
+step, and lists under **Check by hand** each step it could not convert and
+each problem the result still has. Nothing is updated on save or in the
+background.
+
+A deprecated version stays in the Relay release that deprecates it and in the
+next minor release. It may be removed from the minor release after that at the
+earliest: a version deprecated in 0.4.0 may be removed in 0.6.0.
+
+| Deprecated reference | Replacement | Deprecated in | Removable from |
+| --- | --- | --- | --- |
+| None yet | | | |
+
+A removed version is a validation error that names its replacement:
+`Only frozen local and versioned relay actions are supported.
+relay/<name>@v1 was removed in Relay 0.6.0; use relay/<name>@v2.`.
+**Update to current versions** fixes it. Relay never runs the replacement in
+its place. A run that launched on the removed version fails at its next step
+on that version and says to cancel the run and launch the workflow again.
+Finish or cancel runs that use a deprecated version before upgrading to the
+release that removes it.
+
+| Removed reference | Replacement | Removed in |
+| --- | --- | --- |
+| None yet | | |
+
 ## Variables, secrets, and environments
 
 Workflow settings manage installation, project, and environment bindings.
@@ -484,6 +563,8 @@ backend: macOS Keychain, Windows Credential Manager, or Linux Secret Service.
 Credential operations run in a bounded subprocess with no plaintext fallback.
 Secret values are never returned by the binding API or saved in snapshots or
 binding rows. Missing bindings fail rather than changing secret source.
+A secret that an expression names but no binding supplies resolves to an empty
+value; the launch panel warns about each one, `GITHUB_TOKEN` included.
 
 Jobs select `environment` as a name or `{name, url}`. Settings provide branch
 patterns, optional owner approval, and a wait timer. The gate belongs to the
@@ -661,10 +742,10 @@ run titles allow 1000 characters, including the resolved expression result.
 
 ### Answer buttons at approval steps
 
-`relay/human-wait@v1` accepts optional `options`, a JSON list of 1–10 unique
-answer strings, each at most 256 characters. For example,
-`options: '["Approve", "Reject"]'` adds explicit answer buttons beside the
-free-text response. Clicking a button sends that exact value to the current
+`relay/human-wait@v1` accepts optional `options`, 1–10 unique answer strings,
+each at most 256 characters, as a JSON array string or one per line. For
+example, `options: '["Approve", "Reject"]'` adds explicit answer buttons beside
+the free-text response. Clicking a button sends that exact value to the current
 interaction; it does not approve another request. The response remains available
 as `steps.<id>.outputs.answer`. The request explains whether its expiry comes
 from an approval, step, job, or default job timeout.

@@ -7,13 +7,15 @@ process, looks up a credential, or changes workflow sources.
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 import json
 import math
 from pathlib import Path
+import posixpath
 import re
 from typing import Any, cast
 
@@ -24,6 +26,16 @@ from relay.errors import WorkflowValidationError
 from relay.paths import safe_resolve
 
 from . import expressions
+from .builtins import (
+    SHELL_HINT,
+    SHELLS,
+    builtin,
+    current_builtin,
+    is_builtin,
+    registered_builtins,
+    removed_builtin,
+)
+from .suggest import closest
 
 DIALECT = "relay-local-1"
 UPSTREAM = "4043eda158e16579cc5fb1b0b07a4bce2a76f0b5"
@@ -42,21 +54,44 @@ EVENTS = frozenset(
     }
 )
 CACHE_MODES = frozenset({"read", "write", "write-only", "none"})
-BUILTINS = frozenset(
-    {
-        "relay/agent@v1",
-        "relay/command@v1",
-        "relay/human-wait@v1",
-        "relay/loop@v1",
-        "relay/validate-report@v1",
-        "relay/validate-input@v1",
-        "relay/upload-artifact@v1",
-        "relay/download-artifact@v1",
-        "relay/cache@v1",
-        "relay/restore-cache@v1",
-        "relay/save-cache@v1",
-    }
+LOCAL_ACTIONS = "./.relay/actions/"
+EVENTS_HINT = (
+    "Relay supports workflow_dispatch, workflow_call, schedule, push, repository_dispatch, "
+    "and workflow_run. Pull request and other hosted events have no local equivalent."
 )
+# Relay's names for the expression properties people bring from other platforms.
+PLATFORM_NAMES: dict[str, dict[str, str]] = {
+    "github": {
+        "sha": "relay.sha",
+        "ref": "relay.ref",
+        "ref_name": "relay.ref_name",
+        "ref_type": "relay.ref_type",
+        "event": "relay.event",
+        "event_name": "relay.event_name",
+        "workspace": "relay.workspace",
+        "repository": "relay.repository",
+        "actor": "relay.actor",
+        "triggering_actor": "relay.actor",
+        "workflow": "relay.workflow",
+        "workflow_ref": "relay.workflow_ref",
+        "run_id": "relay.run_id",
+        "run_number": "relay.run_number",
+        "run_attempt": "relay.attempt_number",
+        "job": "relay.job",
+        "action": "relay.action",
+        "action_path": "relay.action_path",
+    },
+    "runner": {"os": "host.os", "arch": "host.arch", "name": "host.name", "temp": "host.temp"},
+}
+PLATFORM_ROOTS = {"github": "relay", "runner": "host"}
+FILE_VARIABLES = re.compile(r"\bGITHUB_(OUTPUT|ENV|PATH|STATE|STEP_SUMMARY)\b")
+FILE_VARIABLE_GUIDANCE = {
+    "OUTPUT": "Write step outputs to $RELAY_OUTPUT.",
+    "ENV": "Set variables for later steps in $RELAY_ENV.",
+    "PATH": "Add search paths in $RELAY_PATH.",
+    "STATE": "Save action state in $RELAY_STATE.",
+    "STEP_SUMMARY": "Write the step summary to $RELAY_STEP_SUMMARY.",
+}
 _PURE_FUNCTIONS = tuple(
     name
     for name in expressions.FUNCTIONS
@@ -80,17 +115,44 @@ def _issue(path: str, message: str, *, unsupported: bool = False) -> WorkflowVal
     )
 
 
-def _unknown_field(path: str) -> WorkflowValidationError:
-    hints = {
-        "runs-on": "Relay runs on this computer. Remove runs-on; select an agent in the step.",
-        "permissions": "Authentication belongs to your installed tools. Remove permissions.",
-        "container": "Use a local script or command instead of a container.",
-        "services": "Start required services outside Relay before running this workflow.",
-        "max-parallel": "Local matrix jobs run serially. Remove max-parallel.",
-        "timeout": "Use timeout-minutes with a number, for example timeout-minutes: 10.",
-    }
-    hint = hints.get(path.rsplit(".", 1)[-1])
-    return _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
+def _warning(path: str, message: str) -> WorkflowValidationError:
+    issue = _issue(path, message)
+    issue.context["severity"] = "warning"
+    return issue
+
+
+FIELD_HINTS = {
+    "runs-on": (
+        "Jobs run on this computer. Remove runs-on. To have an AI agent do the work, "
+        f"add a {current_builtin('agent').reference} step."
+    ),
+    "permissions": "Authentication belongs to your installed tools. Remove permissions.",
+    "container": "Use a local script or command instead of a container.",
+    "services": "Start required services outside Relay before running this workflow.",
+    "max-parallel": "Local matrix jobs run serially. Remove max-parallel.",
+    "timeout": "Use timeout-minutes with a number, for example timeout-minutes: 10.",
+}
+
+
+def _unknown_hint(path: str, candidates: Iterable[str]) -> tuple[str | None, str | None]:
+    """A fixed hint for an unknown key, or else the closest allowed key."""
+    parent, _, key = path.rpartition(".")
+    hint = EVENTS_HINT if parent == "workflow.on" else FIELD_HINTS.get(key)
+    return (hint, None) if hint else (None, closest(key, candidates))
+
+
+# Locations keyed by a mapping key's own position, not its value's.
+_KEY_SUFFIX = "#key"
+
+
+def _unknown_field(path: str, candidates: Iterable[str] = ()) -> WorkflowValidationError:
+    hint, suggestion = _unknown_hint(path, candidates)
+    if suggestion:
+        hint = f"Did you mean {suggestion}?"
+    issue = _issue(path, "Unknown workflow field." + (f" {hint}" if hint else ""))
+    # The key itself is the mistake, even when its value starts on a later line.
+    issue.context["at_key"] = "true"
+    return issue
 
 
 def _inspect_tree(
@@ -124,22 +186,39 @@ def _inspect_tree(
                 raise _issue(path, "Mapping keys must be strings.")
             if key.value == "<<":
                 raise _issue(path, "YAML merge keys are unsupported.", unsupported=True)
+            mark = (key.start_mark.line + 1, key.start_mark.column + 1)
             if key.value in names:
                 message = f"{path}.{key.value}"
+                locations[message] = mark
                 raise _issue(message, "Duplicate YAML key.")
             names.add(key.value)
+            locations[f"{path}.{key.value}{_KEY_SUFFIX}"] = mark
             _inspect_tree(child, f"{path}.{key.value}", locations, parents, counts, depth + 1)
+            if (
+                isinstance(child, ScalarNode)
+                and child.tag == "tag:yaml.org,2002:null"
+                and child.value == ""
+            ):
+                # An empty value starts at the next token; point at its own key instead.
+                locations[f"{path}.{key.value}"] = mark
     elif isinstance(node, SequenceNode):
         for index, child in enumerate(node.value):
             _inspect_tree(child, f"{path}[{index}]", locations, parents, counts, depth + 1)
 
 
 @lru_cache(maxsize=1)
+def _language_schema() -> dict[str, Any]:
+    return json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))
+
+
 def language_definitions() -> dict[str, Any]:
     """The same curated schema is authoritative for validation and discovery."""
-    return json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))[
-        "definitions"
-    ]
+    return _language_schema()["definitions"]
+
+
+def language_property_descriptions() -> dict[str, str]:
+    """Help text for each "<definition>.<property>" pair, shown by the editor."""
+    return _language_schema()["property_descriptions"]
 
 
 def _mapping(value: object, path: str) -> dict[str, Any]:
@@ -167,8 +246,60 @@ def _expression_check(value: str, name: str, contexts: Sequence[str], path: str)
                 if name == "run-name":
                     expressions.check_launch_context(tree)
             except WorkflowValidationError as error:
-                raise _issue(path, error.message) from None
+                hint = _expression_hint(error.message, text)
+                raise _issue(path, error.message + (f" {hint}" if hint else "")) from None
     return found
+
+
+def _expression_hint(message: str, text: str) -> str:
+    """Guidance appended to a parser message without changing the message itself."""
+    if message == "Unexpected expression symbol." and '"' in text:
+        return "Strings use single quotes, for example 'main'."
+    for root, replacement in PLATFORM_ROOTS.items():
+        if message != f"Unrecognized named-value: {root}.":
+            continue
+        match = re.search(rf"\b{root}\.([A-Za-z_]+)(?:\.([A-Za-z_]+)\.([A-Za-z_]+))?", text)
+        prop, middle, last = match.groups() if match else (None, None, None)
+        if root == "github" and prop == "event" and middle == "inputs":
+            return f"Use inputs.{last}."
+        if prop in PLATFORM_NAMES[root]:
+            return f"Use {PLATFORM_NAMES[root][prop]}."
+        if root == "github" and prop == "token":
+            return "Relay does not issue a token; bind a secret instead."
+        provided = ", ".join(sorted(expressions.CONTEXT_PROPERTIES[replacement]))
+        return f"Use {replacement}, which provides {provided}."
+    return ""
+
+
+def _step_variant(value: Mapping[str, Any]) -> str | None:
+    """The step form a mapping is written in, or None when it has neither run nor uses."""
+    if "uses" in value:
+        return "regular-step"
+    if "run" in value:
+        return "run-step"
+    definitions = language_definitions()
+    names = {
+        key
+        for variant in ("run-step", "regular-step")
+        for key in definitions[variant]["mapping"]["properties"]
+    }
+    for key in value:
+        if str(key) not in names:
+            suggestion = closest(str(key), names)
+            if suggestion in {"run", "uses"}:
+                return "run-step" if suggestion == "run" else "regular-step"
+    return None
+
+
+def _step_shape_error(value: object, path: str) -> WorkflowValidationError | None:
+    """One error for a step that has both or neither of run and uses."""
+    if not isinstance(value, Mapping):
+        return None
+    if "run" in value and "uses" in value:
+        return _issue(path, "A step needs either run or uses, not both.")
+    if _step_variant(value) is None:
+        return _issue(path, "A step needs run (a script) or uses (an action).")
+    return None
 
 
 def _validate_type(name: str, value: object, path: str, inherited: Sequence[str] = ()) -> object:
@@ -183,6 +314,10 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         if len(parts) == 1 and parts[0][0]:
             return value
     if "one-of" in base:
+        if name == "steps-item":
+            shape = _step_shape_error(value, path)
+            if shape is not None:
+                raise shape
         errors = []
         variants = cast(list[str], base["one-of"])
         matching = (
@@ -212,14 +347,18 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
                 if name == "job" and "uses" in value
                 else "job-factory"
                 if name == "job"
-                else "regular-step"
-                if name == "steps-item" and "uses" in value
-                else "run-step"
-                if name == "steps-item" and "run" in value
+                else _step_variant(value)
+                if name == "steps-item"
                 else None
             )
             if variant:
                 return _validate_type(variant, value, path, contexts)
+        constants = [
+            cast(Mapping[str, Any], definitions.get(variant, {})).get("string", {}).get("constant")
+            for variant in cast(list[str], base["one-of"])
+        ]
+        if all(isinstance(constant, str) for constant in constants):
+            raise _issue(path, f"Expected one of {', '.join(cast(list[str], constants))}.")
         raise errors[0]
     if "mapping" in base:
         record = _mapping(value, path)
@@ -228,7 +367,7 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         result = {}
         if "loose-key-type" not in definition:
             for key in record.keys() - properties.keys():
-                raise _unknown_field(f"{path}.{key}")
+                raise _unknown_field(f"{path}.{key}", properties)
         for key, descriptor in properties.items():
             if isinstance(descriptor, Mapping) and descriptor.get("required") and key not in record:
                 message = f"{path}.{key}"
@@ -236,9 +375,7 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         for key, item in record.items():
             descriptor = properties.get(key)
             if descriptor is None:
-                if "loose-key-type" not in definition:
-                    message = f"{path}.{key}"
-                    raise _unknown_field(message)
+                # Unknown keys were rejected above unless this mapping allows loose keys.
                 _validate_type(str(definition["loose-key-type"]), key, f"{path}.{key}")
                 descriptor = definition["loose-value-type"]
             type_name = descriptor["type"] if isinstance(descriptor, Mapping) else descriptor
@@ -254,7 +391,12 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
         ]
     if "string" in base:
         if isinstance(value, (list, Mapping)):
-            raise _issue(path, "Expected a scalar string.")
+            hint = (
+                ' Write a list as one value per line under "|", or as a JSON array string.'
+                if isinstance(value, list) and ".with." in path
+                else ""
+            )
+            raise _issue(path, f"Expected a scalar string.{hint}")
         result = expressions.string(value)
         descriptor = cast(dict[str, Any], base["string"])
         maximum = descriptor.get("max-length")
@@ -266,7 +408,8 @@ def _validate_type(name: str, value: object, path: str, inherited: Sequence[str]
             [descriptor["constant"]] if "constant" in descriptor else None
         )
         if allowed is not None and result not in allowed:
-            raise _issue(path, f"Expected one of {', '.join(allowed)}.")
+            hint = f" {EVENTS_HINT}" if name == "local-event" else ""
+            raise _issue(path, f"Expected one of {', '.join(allowed)}.{hint}")
         return result
     if "number" in base and (
         isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
@@ -367,39 +510,134 @@ def resolve_inputs(
     return resolved
 
 
-def validate_steps(steps: object, path: str) -> None:
+def _unnormalized(reference: str) -> bool:
+    """True for a local path with ./, ../, or empty segments after its leading ./."""
+    segments = reference.removeprefix("./").rstrip("/").split("/")
+    return any(segment in {"", ".", ".."} for segment in segments)
+
+
+def _uses_guidance(reference: str) -> str:
+    """What to write instead of an unsupported uses reference."""
+    base = reference.partition("@")[0]
+    removed = removed_builtin(reference)
+    if removed is not None:
+        # The replacement is the suggestion; Relay never runs it in this one's place.
+        return f"{reference} was removed in Relay {removed[0]}; use {removed[1]}."
+    if reference.startswith(LOCAL_ACTIONS) and "${{" not in reference:
+        # Sources are frozen under their normalized path, so only that form is found.
+        written = posixpath.normpath(reference)
+        example = (
+            f"./{written}" if written.startswith(".relay/actions/") else f"{LOCAL_ACTIONS}<name>"
+        )
+        return f"Write the action path without ./ or ../ segments, such as {example}."
+    replacements = {
+        "actions/upload-artifact": ("upload-artifact", "name, path, and retention-days"),
+        "actions/download-artifact": ("download-artifact", "name and path"),
+        "actions/cache": ("cache", "key, path, and restore-keys"),
+        "actions/cache/restore": ("restore-cache", "key, path, and restore-keys"),
+        "actions/cache/save": ("save-cache", "key and path"),
+    }
+    if base == "actions/checkout":
+        return "Remove this step: jobs already run in a working copy of this repository."
+    if base.startswith("actions/setup-"):
+        return "Remove this step and use the tool installed on this computer."
+    if base in replacements:
+        name, inputs = replacements[base]
+        return f"Use {current_builtin(name).reference} with the same {inputs} inputs."
+    if reference.startswith("docker://"):
+        command = current_builtin("command").reference
+        return f"Run the program with a run step or {command} instead of a container image."
+    if reference.startswith("./.github/actions/"):
+        name = base.removeprefix("./.github/actions/").strip("/") or "<name>"
+        return f"Move the action to ./.relay/actions/{name} and use that path."
+    current = sorted(
+        action.reference for action in registered_builtins() if action.status == "current"
+    )
+    suggestion = closest(reference, current) if reference.startswith("relay/") else None
+    if suggestion:
+        return f"Did you mean {suggestion}?"
+    return f"Use one of {', '.join(current)}, or a local action under ./.relay/actions/."
+
+
+def _validate_shell(shell: object, path: str) -> None:
+    """A literal shell is a named shell or a command with one {0} placeholder."""
+    if (
+        isinstance(shell, str)
+        and "${{" not in shell
+        and shell not in SHELLS
+        and shell.count("{0}") != 1
+    ):
+        message = f"shell: {SHELL_HINT}"
+        raise WorkflowValidationError(message, context={"field": path})
+
+
+def _validate_default_shell(scope: Mapping[str, Any], path: str) -> None:
+    defaults = scope.get("defaults")
+    run = defaults.get("run") if isinstance(defaults, Mapping) else None
+    if isinstance(run, Mapping) and "shell" in run:
+        _validate_shell(run["shell"], f"{path}defaults.run.shell")
+
+
+def validate_steps(steps: object, path: str, start: int = 0) -> None:
     """Every ordered-step container uses the same local execution contract."""
     if not isinstance(steps, list) or not steps:
         message = path
         raise _issue(message, "A job must contain ordered steps.")
     ids = set()
-    for index, raw_step in enumerate(steps):
-        step = _mapping(raw_step, f"{path}[{index}]")
+    for offset, raw_step in enumerate(steps):
+        here = f"{path}[{offset + start}]"
+        step = _mapping(raw_step, here)
         step_id = step.get("id")
         if step_id is not None:
             if IDENTIFIER.fullmatch(str(step_id)) is None or step_id in ids:
-                message = f"{path}[{index}].id"
+                message = f"{here}.id"
                 raise _issue(message, "Invalid or duplicate step id.")
             ids.add(step_id)
         reference = step.get("uses")
         if (
             reference is not None
-            and reference not in BUILTINS
-            and (not str(reference).startswith("./.relay/actions/") or "${{" in str(reference))
+            and builtin(reference) is None
+            and (
+                not str(reference).startswith(LOCAL_ACTIONS)
+                or "${{" in str(reference)
+                or _unnormalized(str(reference))
+            )
         ):
-            message = f"{path}[{index}].uses"
-            raise _issue(
+            message = f"{here}.uses"
+            issue = _issue(
                 message,
-                "Only frozen local and versioned relay actions are supported.",
+                "Only frozen local and versioned relay actions are supported. "
+                + _uses_guidance(str(reference)),
                 unsupported=True,
             )
-        _validate_timeout(step.get("timeout-minutes"), f"{path}[{index}]")
-        if reference in BUILTINS:
+            if removed_builtin(reference) is not None:
+                # The editor offers its one-click update for this error.
+                issue.context["removed"] = str(reference)
+            raise issue
+        script = step.get("run")
+        found = FILE_VARIABLES.search(script) if isinstance(script, str) else None
+        if found:
+            message = f"{here}.run"
+            raise _issue(
+                message,
+                f"{found[0]} is not a Relay variable. {FILE_VARIABLE_GUIDANCE[found[1]]}",
+            )
+        _validate_timeout(step.get("timeout-minutes"), here)
+        if "run" in step and "shell" in step:
+            _validate_shell(step["shell"], f"{here}.shell")
+        if builtin(reference) is not None:
             from .builtins import validate_inputs
 
-            validate_inputs(reference, _mapping(step.get("with", {}), f"{path}[{index}].with"))
+            inputs = _mapping(step.get("with", {}), f"{here}.with")
+            try:
+                validate_inputs(str(reference), inputs)
+            except WorkflowValidationError as error:
+                # Errors about one input name it relative to the step.
+                field = error.context.get("field")
+                error.context["field"] = f"{here}.{field}" if field else here
+                raise
         elif "with" in step:
-            _mapping(step["with"], f"{path}[{index}].with")
+            _mapping(step["with"], f"{here}.with")
 
 
 def _validate_contracts(workflow: dict[str, Any]) -> None:
@@ -424,7 +662,9 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
     for event, raw in triggers.items():
         if event not in EVENTS:
             message = f"on.{event}"
-            raise _issue(message, "This event has no local Relay adapter.", unsupported=True)
+            raise _issue(
+                message, f"This event has no local Relay adapter. {EVENTS_HINT}", unsupported=True
+            )
         if isinstance(raw, Mapping):
             _validate_filters(event, raw)
             for field in ("workflows",):
@@ -458,11 +698,13 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
     if not jobs:
         message = "jobs"
         raise _issue(message, "A workflow must contain at least one job.")
+    _validate_default_shell(workflow, "")
     for job_id, raw in jobs.items():
         if IDENTIFIER.fullmatch(job_id) is None:
             message = f"jobs.{job_id}"
             raise _issue(message, "Invalid job identifier.")
         job = _mapping(raw, f"jobs.{job_id}")
+        _validate_default_shell(job, f"jobs.{job_id}.")
         for scope, label in ((workflow, "workflow"), (job, f"jobs.{job_id}")):
             if "env" in scope:
                 _mapping(scope["env"], f"{label}.env")
@@ -488,7 +730,7 @@ def _validate_contracts(workflow: dict[str, Any]) -> None:
         if isinstance(strategy, Mapping):
             matrix = strategy.get("matrix")
             if isinstance(matrix, Mapping):
-                expand_matrix(matrix)
+                expand_matrix(matrix, f"jobs.{job_id}.strategy.matrix")
         for scope in (workflow, job):
             concurrency = scope.get("concurrency")
             if isinstance(concurrency, Mapping) and (
@@ -533,25 +775,31 @@ def topological_jobs(jobs: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def expand_matrix(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
+def expand_matrix(matrix: Mapping[str, Any], path: str = "strategy.matrix") -> list[dict[str, Any]]:
     axes = {key: value for key, value in matrix.items() if key not in {"include", "exclude"}}
     originals: list[dict[str, Any]] = [{}] if axes else []
     for key, values in axes.items():
         if not isinstance(values, list) or not values:
-            message = f"strategy.matrix.{key}"
-            raise _issue(message, "A matrix axis must be a nonempty sequence.")
+            message = f"{path}.{key}"
+            hint = (
+                " To build the matrix from an expression, set the whole matrix: "
+                "matrix: ${{ fromJSON(...) }}."
+                if isinstance(values, str) and "${{" in values
+                else ""
+            )
+            raise _issue(message, f"A matrix axis must be a nonempty sequence.{hint}")
         originals = [{**row, key: value} for row in originals for value in values]
         if len(originals) > 256:
-            message = "strategy.matrix"
+            message = path
             raise _issue(message, "Matrix exceeds 256 job variants.")
     excluded = matrix.get("exclude", [])
     includes = matrix.get("include", [])
     if not isinstance(excluded, list) or not isinstance(includes, list):
-        message = "strategy.matrix"
+        message = path
         raise _issue(message, "Include and exclude must be sequences of mappings.")
     for item in [*excluded, *includes]:
         if not isinstance(item, Mapping):
-            message = "strategy.matrix"
+            message = path
             raise _issue(message, "Include and exclude items must be mappings.")
     originals = [
         row
@@ -576,7 +824,7 @@ def expand_matrix(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
             appended.append(dict(item))
     results.extend(appended)
     if not results or len(results) > 256:
-        message = "strategy.matrix"
+        message = path
         raise _issue(message, "Matrix must produce between 1 and 256 variants.")
     return results
 
@@ -593,7 +841,8 @@ def _read_document(text: str) -> tuple[Mapping[str, Any], dict[str, tuple[int, i
         if tree is not None:
             _inspect_tree(tree, "workflow", locations, frozenset(), [0, 0])
         document = parser.load(text)
-    except WorkflowValidationError:
+    except WorkflowValidationError as error:
+        _locate(error, locations)
         raise
     except Exception as error:
         mark = getattr(error, "problem_mark", None)
@@ -617,13 +866,23 @@ def _read_document(text: str) -> tuple[Mapping[str, Any], dict[str, tuple[int, i
     return cast(Mapping[str, Any], document), locations
 
 
-def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
-    field = str(error.context.get("field", "workflow"))
+def _position(field: str, locations: Mapping[str, tuple[int, int]]) -> tuple[int, int] | None:
+    """The line and column of a field, or of its nearest located parent."""
     location = locations.get(field) or locations.get("workflow." + field)
     while location is None and "." in field:
         field = field.rsplit(".", 1)[0]
         location = locations.get(field) or locations.get("workflow." + field)
-    location = location or locations.get("workflow")
+    return location or locations.get("workflow")
+
+
+def _locate(error: WorkflowValidationError, locations: Mapping[str, tuple[int, int]]) -> None:
+    field = str(error.context.get("field", "workflow"))
+    location = None
+    if error.context.get("at_key") == "true":
+        location = locations.get(field + _KEY_SUFFIX) or locations.get(
+            "workflow." + field + _KEY_SUFFIX
+        )
+    location = location or _position(field, locations)
     if location:
         error.context.update({"line": str(location[0]), "column": str(location[1])})
 
@@ -665,16 +924,17 @@ def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[Workf
         try:
             _validate_type(name, value, path, inherited)
         except WorkflowValidationError as original:
+            if name == "steps-item" and _step_shape_error(value, path) is not None:
+                issues.append(original)
+                return
             if "one-of" in base:
                 variant = (
                     "workflow-job"
                     if name == "job" and isinstance(value, Mapping) and "uses" in value
                     else "job-factory"
                     if name == "job" and isinstance(value, Mapping)
-                    else "regular-step"
-                    if name == "steps-item" and isinstance(value, Mapping) and "uses" in value
-                    else "run-step"
-                    if name == "steps-item" and isinstance(value, Mapping) and "run" in value
+                    else _step_variant(value)
+                    if name == "steps-item" and isinstance(value, Mapping)
                     else next(
                         (
                             item
@@ -694,17 +954,25 @@ def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[Workf
             if "mapping" in base and isinstance(value, Mapping):
                 mapping = base["mapping"]
                 properties = mapping.get("properties", {})
+                unknown = (
+                    [f"{path}.{key}" for key in value if key not in properties]
+                    if "loose-key-type" not in mapping
+                    else []
+                )
+                issues.extend(_unknown_field(field, properties) for field in unknown)
+                # A misspelled key explains the required key it was meant to be.
+                suggested = {_unknown_hint(field, properties)[1] for field in unknown}
                 for key, descriptor in properties.items():
                     if (
                         isinstance(descriptor, Mapping)
                         and descriptor.get("required")
                         and key not in value
+                        and key not in suggested
                     ):
                         issues.append(_issue(f"{path}.{key}", "Required field is missing."))
                 for key, item in value.items():
                     descriptor = properties.get(key)
                     if descriptor is None and "loose-key-type" not in mapping:
-                        issues.append(_unknown_field(f"{path}.{key}"))
                         continue
                     descriptor = descriptor or mapping.get("loose-value-type", "any")
                     child = str(
@@ -732,13 +1000,9 @@ def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[Workf
                 if not isinstance(step, Mapping):
                     continue
                 try:
-                    validate_steps([step], f"jobs.{job_id}.steps")
+                    validate_steps([step], f"jobs.{job_id}.steps", start=index)
                 except (WorkflowValidationError, TypeError, ValueError) as error:
                     if isinstance(error, WorkflowValidationError):
-                        path = f"workflow.jobs.{job_id}.steps[{index}]"
-                        error.context["field"] = str(error.context.get("field", path)).replace(
-                            "steps[0]", f"steps[{index}]"
-                        )
                         issues.append(error)
     if not issues:
         try:
@@ -748,17 +1012,46 @@ def workflow_diagnostics(text: str, *, source: Path | None = None) -> list[Workf
     unique: dict[tuple[str, str], WorkflowValidationError] = {}
     for issue in issues[:100]:
         _locate(issue, locations)
-        unique[(str(issue.context.get("field", "")), issue.message)] = issue
+        # The schema walk names fields from workflow.; the step checks do not.
+        field = str(issue.context.get("field", ""))
+        said = issue.message.removeprefix(f"{field}: ")
+        unique[(field.removeprefix("workflow."), said)] = issue
     return list(unique.values())
 
 
-def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, str]:
-    """Freeze transitive local workflows, action metadata, and JavaScript bytes."""
+@contextmanager
+def _reported_at(field: str) -> Iterator[None]:
+    """Attribute a source error to the step or job that names the source.
+
+    Nested sources report at the outermost reference, which is the one the
+    open document contains. A removed built-in in a nested source is fixed in
+    that file, so the error no longer offers the open document's update.
+    """
+    try:
+        yield
+    except WorkflowValidationError as error:
+        error.context["field"] = field
+        error.context.pop("removed", None)
+        raise
+
+
+def capture_sources(
+    document: ActionsDocument,
+    project_root: Path,
+    *,
+    documents: set[str] | None = None,
+) -> dict[str, str]:
+    """Freeze transitive local workflows, action metadata, and JavaScript bytes.
+
+    With documents, also collect the keys of the reusable workflows and action
+    metadata, as opposed to scripts and other action files.
+    """
     result = {}
     stack: list[str] = []
     workflows = set()
 
-    def capture(reference: str, *, workflow: bool, depth: int) -> None:
+    def capture(reference: str, *, workflow: bool, depth: int) -> str:
+        """Freeze one source and what it references; return its key in the result."""
         if depth > 10:
             message = "uses"
             raise _issue(message, "Reusable workflows exceed 10 levels.")
@@ -776,7 +1069,7 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
             message = "uses"
             raise _issue(message, "Local references contain a cycle.")
         if key in result:
-            return
+            return key
         if not path.is_file() or path.stat().st_size > MAX_YAML_BYTES:
             raise _issue(reference, "Local source is missing or exceeds 1 MiB.")
         try:
@@ -784,6 +1077,8 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
         except (OSError, UnicodeError):
             raise _issue(reference, "Local source cannot be read as UTF-8.") from None
         result[key] = text
+        if documents is not None:
+            documents.add(key)
         if sum(len(item.encode()) for item in result.values()) > 10 * MAX_YAML_BYTES:
             message = "uses"
             raise _issue(message, "Captured sources exceed 10 MiB.")
@@ -817,32 +1112,292 @@ def capture_sources(document: ActionsDocument, project_root: Path) -> dict[str, 
                 message = "uses"
                 raise _issue(message, "Captured sources exceed 10 MiB.")
         stack.pop()
+        return key
 
     def visit(value: Mapping[str, Any], depth: int) -> None:
-        for job in value.get("jobs", {}).values():
+        for job_id, job in value.get("jobs", {}).items():
             if "uses" in job:
-                capture(job["uses"], workflow=True, depth=depth)
-            for step in job.get("steps", []):
+                with _reported_at(f"jobs.{job_id}.uses"):
+                    capture(job["uses"], workflow=True, depth=depth)
+            for index, step in enumerate(job.get("steps", [])):
+                here = f"jobs.{job_id}.steps[{index}]"
                 reference = step.get("uses", "")
                 if reference.startswith("./"):
-                    capture(reference, workflow=False, depth=depth)
-                    from .metadata import load_action, validate_action_inputs
+                    with _reported_at(f"{here}.uses"):
+                        key = capture(reference, workflow=False, depth=depth)
+                        from .metadata import load_action, validate_action_inputs
 
-                    prefix = reference.removeprefix("./").rstrip("/")
-                    metadata = result.get(
-                        prefix + "/action.yml", result.get(prefix + "/action.yaml")
-                    )
-                    if metadata is not None:
-                        validate_action_inputs(load_action(metadata), step.get("with", {}))
-                if reference == "relay/loop@v1":
+                        validate_action_inputs(load_action(result[key]), step.get("with", {}))
+                if is_builtin(reference, "loop"):
                     target = step.get("with", {}).get("workflow")
-                    if not isinstance(target, str) or not target.startswith("./.relay/workflows/"):
-                        message = "with.workflow"
-                        raise _issue(message, "Loop requires a static reusable workflow.")
-                    capture(target, workflow=True, depth=depth)
+                    with _reported_at(f"{here}.with.workflow"):
+                        if not isinstance(target, str) or not target.startswith(
+                            "./.relay/workflows/"
+                        ):
+                            message = "with.workflow"
+                            raise _issue(message, "Loop requires a static reusable workflow.")
+                        capture(target, workflow=True, depth=depth)
 
     visit(document.value, 1)
     return result
+
+
+def missing_prompt_files(
+    document: ActionsDocument, relay_root: Path, drafts: Iterable[Path] = ()
+) -> list[WorkflowValidationError]:
+    """Report literal agent prompt files that neither exist nor are unsaved drafts.
+
+    References resolve exactly as launch resolves them: local paths under the
+    project's .relay folder and global:NAME in the owner's prompt folder.
+    """
+    from relay.errors import PathSafetyError
+    from relay.paths import global_prompts_dir
+
+    pending = {path.resolve() for path in drafts}
+    issues = []
+    for job_id, job in document.value.get("jobs", {}).items():
+        for index, step in enumerate(job.get("steps", [])):
+            references = step.get("with", {}).get("prompt-files")
+            if not is_builtin(step.get("uses"), "agent") or not isinstance(references, str):
+                continue
+            for reference in references.splitlines():
+                if not reference.strip() or "${{" in reference:
+                    continue
+                if reference.startswith("global:"):
+                    root, value = global_prompts_dir(), reference[7:]
+                else:
+                    root, value = relay_root, reference.strip().removeprefix(".relay/")
+                try:
+                    path = safe_resolve(root, value)
+                except PathSafetyError:
+                    continue  # Launch reports a reference that leaves its folder.
+                if path.is_file() or path in pending:
+                    continue
+                error = WorkflowValidationError(
+                    f"Prompt file {reference.strip()} does not exist.",
+                    context={"field": f"jobs.{job_id}.steps[{index}].with.prompt-files"},
+                )
+                _locate(error, document.locations)
+                issues.append(error)
+    return issues
+
+
+MAX_WARNINGS = 100
+_AGENT_WITHOUT_PROMPT = (
+    "This agent step has no prompt or prompt-files, so the agent receives no instructions."
+)
+
+
+def _field_strings(value: object, path: str) -> Iterator[tuple[str, str]]:
+    """Every string below one field, with its path."""
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _field_strings(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _field_strings(item, f"{path}[{index}]")
+
+
+def _scoped_strings(
+    workflow: Mapping[str, Any],
+) -> Iterator[tuple[str, str, bool, str | None, frozenset[str] | None]]:
+    """Each string with its path, bare-if flag, job, and the step ids it can read.
+
+    The workflow has already validated, so jobs are mappings and steps, when
+    present, are a list of mappings. A step reads the ids of earlier steps in
+    its job, a job-level field such as outputs reads every step id in its job,
+    and a workflow-level field reads none. Ids are upper-cased because
+    expression lookups ignore case.
+    """
+    for key, value in workflow.items():
+        if key != "jobs":
+            for path, text in _field_strings(value, key):
+                yield path, text, False, None, None
+            continue
+        for job_id, job in value.items():
+            steps = job.get("steps", [])
+            ids = [
+                expressions.upper(str(step["id"])) if step.get("id") is not None else ""
+                for step in steps
+            ]
+            for job_key, item in job.items():
+                if job_key != "steps":
+                    path = f"jobs.{job_id}.{job_key}"
+                    every = frozenset(filter(None, ids))
+                    for here, text in _field_strings(item, path):
+                        yield here, text, job_key == "if" and here == path, job_id, every
+                    continue
+                for index, step in enumerate(steps):
+                    earlier = frozenset(filter(None, ids[:index]))
+                    for step_key, field in step.items():
+                        path = f"jobs.{job_id}.steps[{index}].{step_key}"
+                        for here, text in _field_strings(field, path):
+                            yield here, text, step_key == "if" and here == path, job_id, earlier
+
+
+def _named_properties(tree: expressions.Tree) -> Iterator[tuple[str, str]]:
+    """Each context.<name> or context['<name>'] access in a parsed expression.
+
+    The walk uses its own stack because long operator chains nest deeply.
+    """
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        kind = node[0]
+        if kind == "index":
+            target, key = node[1], node[2]
+            if target[0] == "context" and key[0] == "literal" and isinstance(key[1], str):
+                yield str(target[1]), key[1]
+            children: Sequence[object] = (target, key)
+        elif kind == "call":
+            children = node[2]
+        elif kind in {"literal", "context", "star"}:
+            children = ()
+        else:
+            children = node[1:]
+        pending.extend(
+            cast(expressions.Tree, child)
+            for child in reversed(children)
+            if isinstance(child, tuple) and child
+        )
+
+
+def _expression_references(text: str, *, bare: bool) -> Iterator[tuple[str, str]]:
+    """Context properties a string names; a bare if is one whole expression."""
+    try:
+        parts = expressions.segments(text)
+    except WorkflowValidationError:
+        return
+    if bare and not any(expr for expr, _ in parts):
+        parts = [(True, text)]
+    for expr, source in parts:
+        if not expr:
+            continue
+        try:
+            tree = expressions.parse(source)
+        except WorkflowValidationError:
+            continue
+        yield from _named_properties(tree)
+
+
+def deprecated_builtin_warnings(
+    value: Mapping[str, Any], prefix: str
+) -> list[WorkflowValidationError]:
+    """One warning per step that uses a deprecated built-in version.
+
+    It visits jobs.<id>.steps[<n>] in a workflow and runs.steps[<n>] in action
+    metadata. Each field starts with prefix, such as the key of a captured
+    source and ": ", and context["deprecated"] holds the old reference.
+    """
+    containers: list[tuple[str, object]] = []
+    jobs = value.get("jobs")
+    if isinstance(jobs, Mapping):
+        containers.extend(
+            (f"jobs.{job_id}.steps", job.get("steps"))
+            for job_id, job in jobs.items()
+            if isinstance(job, Mapping)
+        )
+    runs = value.get("runs")
+    if isinstance(runs, Mapping):
+        containers.append(("runs.steps", runs.get("steps")))
+    found = []
+    for path, steps in containers:
+        for index, step in enumerate(steps if isinstance(steps, list) else []):
+            action = builtin(step.get("uses")) if isinstance(step, Mapping) else None
+            if action is None or action.status != "deprecated":
+                continue
+            replacement = current_builtin(action.name).reference
+            issue = _warning(
+                f"{prefix}{path}[{index}].uses",
+                f"{action.reference} is deprecated and will be removed in a later Relay "
+                f"release. Use {replacement}.",
+            )
+            issue.context["deprecated"] = action.reference
+            found.append(issue)
+    return found
+
+
+def workflow_warnings(
+    document: ActionsDocument,
+) -> list[WorkflowValidationError]:
+    """Non-blocking findings for a source that already validates.
+
+    Each warning names an input, earlier step, or needed job that cannot supply
+    a value, an agent step without instructions, or a step on a deprecated
+    built-in version. Warnings appear in source order; callers locate them
+    with _locate. Nothing here reads files or credentials.
+    """
+    workflow = document.value
+    jobs = cast(Mapping[str, Mapping[str, Any]], workflow["jobs"])
+    inputs = {
+        expressions.upper(name)
+        for event in ("workflow_dispatch", "workflow_call")
+        for name in input_definitions(workflow, event)
+    }
+    needs: dict[str, set[str]] = {}
+    for job_id, job in jobs.items():
+        declared = job.get("needs", [])
+        declared = [declared] if isinstance(declared, str) else declared
+        needs[job_id] = {expressions.upper(str(item)) for item in declared}
+    found: dict[tuple[str, str], WorkflowValidationError] = {}
+
+    def add(path: str, message: str) -> None:
+        if len(found) < MAX_WARNINGS:
+            found.setdefault((path, message), _warning(path, message))
+
+    for issue in deprecated_builtin_warnings(workflow, "")[:MAX_WARNINGS]:
+        found[(str(issue.context["field"]), issue.message)] = issue
+    for job_id, job in jobs.items():
+        for index, step in enumerate(job.get("steps", [])):
+            if not is_builtin(step.get("uses"), "agent"):
+                continue
+            given = step.get("with", {})
+            if not any(
+                isinstance(given.get(name), str) and given[name].strip()
+                for name in ("prompt", "prompt-files")
+            ):
+                add(f"jobs.{job_id}.steps[{index}]", _AGENT_WITHOUT_PROMPT)
+    for path, text, bare, job_id, step_ids in _scoped_strings(workflow):
+        for context, name in _expression_references(text, bare=bare):
+            key = expressions.upper(name)
+            if context == "inputs" and key not in inputs:
+                add(path, f"inputs.{name} is not a declared input. It will be empty at run time.")
+            elif context == "steps" and step_ids is not None and key not in step_ids:
+                add(
+                    path,
+                    f"steps.{name} does not name an earlier step in this job. "
+                    "It will be empty at run time.",
+                )
+            elif context == "needs" and job_id is not None and key not in needs[job_id]:
+                add(
+                    path,
+                    f"needs.{name} is not listed in this job's needs. "
+                    "It will be empty at run time.",
+                )
+    return sorted(
+        found.values(),
+        key=lambda item: _position(str(item.context["field"]), document.locations) or (0, 0),
+    )
+
+
+def referenced_secrets(document: ActionsDocument, *, job: str | None = None) -> set[str]:
+    """Secret names the workflow's expressions read by literal name, upper-cased.
+
+    Binding names are upper-case and expression lookups ignore case. With job,
+    only that job's fields and the workflow-level fields it inherits count.
+    """
+    names = set()
+    for _, text, bare, job_id, _ in _scoped_strings(document.value):
+        if job is not None and job_id not in {None, job}:
+            continue
+        names.update(
+            name.upper()
+            for context, name in _expression_references(text, bare=bare)
+            if context == "secrets"
+        )
+    return names
 
 
 def capture_script(path: Path, project_root: Path, result: dict[str, str]) -> None:
@@ -877,21 +1432,39 @@ def source_bytes(content: str) -> tuple[bytes, int]:
 
 
 def support_manifest() -> dict[str, Any]:
-    from .builtins import CONTRACTS
-
     return {
         "dialect": DIALECT,
         "upstream_commit": UPSTREAM,
         "workflow_directory": ".relay/workflows",
         "job_execution": "serial",
         "definitions": language_definitions(),
-        "builtins": sorted(BUILTINS),
+        "builtins": sorted(
+            action.reference for action in registered_builtins() if action.status == "current"
+        ),
+        "property_descriptions": language_property_descriptions(),
         "builtin_inputs": {
-            name: {"allowed": sorted(allowed), "required": sorted(required)}
-            for name, (allowed, required) in CONTRACTS.items()
+            action.reference: {
+                "allowed": sorted(action.allowed),
+                "required": sorted(action.required),
+                "summary": action.summary,
+                "descriptions": dict(action.descriptions),
+                "values": {key: list(values) for key, values in action.values.items()},
+            }
+            for action in registered_builtins()
+        },
+        "builtin_versions": {
+            action.reference: {
+                "name": action.name,
+                "major": action.major,
+                "status": action.status,
+                "deprecated_in": action.deprecated_in,
+            }
+            for action in registered_builtins()
         },
         "events": sorted(EVENTS),
         "cache_modes": sorted(CACHE_MODES),
+        "value_hints": {"shell": list(SHELLS)},
+        "platform_names": PLATFORM_NAMES,
         "contexts": sorted(expressions.CONTEXTS),
         "context_properties": {
             key: sorted(value) for key, value in expressions.CONTEXT_PROPERTIES.items()

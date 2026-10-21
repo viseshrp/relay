@@ -191,5 +191,69 @@ export const help = {
     "Artifacts",
     "Retained files from individual jobs and attempts. Downloads use the preserved bytes and recorded hashes, so they remain available after working-copy cleanup. A file's details identify its source and attempt.",
   ],
+  bindingScope: [
+    "Scope",
+    "Where a variable or secret applies: every project, this project, or one environment. Project values override values for all projects, and an environment's values override the project's.",
+  ],
+  bindingEnvironment: [
+    "Binding environment",
+    "The environment whose jobs receive this value. A job uses an environment's values only when its environment field names it.",
+  ],
+  bindingName: [
+    "Binding name",
+    "The name workflows read as vars.<name> or secrets.<name>. Saving a name that already exists in this scope replaces its value.",
+  ],
+  bindingType: [
+    "Binding type",
+    "A variable is plain text that appears in run snapshots. A secret is masked in logs and its saved value is never shown again.",
+  ],
+  secretSource: [
+    "Secret source",
+    "Read the secret from an environment variable of the Relay process, or save it in this computer's credential store.",
+  ],
+  secretReference: [
+    "Environment variable reference",
+    "The name of the environment variable, in the Relay process, that holds the secret. Relay reads it when a run starts.",
+  ],
+  bindingValue: [
+    "Value",
+    "The text this name stands for. A secret value is written to the credential store and never returned to this editor.",
+  ],
+  environmentName: [
+    "Environment name",
+    "The name a job's environment field uses to pick these rules and values. Saving an existing name updates it.",
+  ],
+  environmentApproval: [
+    "Require approval",
+    "Jobs that use this environment wait for your approval before they start.",
+  ],
+  environmentWait: [
+    "Wait timer",
+    "Minutes a job that uses this environment waits before it starts. Zero starts it at once.",
+  ],
+  environmentBranches: [
+    "Allowed branch patterns",
+    "Branches whose runs may use this environment, one pattern per line. Leave it empty to allow every branch.",
+  ],
+  environmentUrl: [
+    "Environment URL",
+    "An optional link shown with jobs that use this environment, such as the address of a local server.",
+  ],
+  libraryName: [
+    "Library workflow name",
+    "The name this workflow is saved under in your library, where other projects can copy it from.",
+  ],
+  libraryDescription: [
+    "Library description",
+    "A short note shown with the saved workflow in the library.",
+  ],
+  libraryImport: [
+    "Import workflow bundle",
+    "Paste a bundle exported from a library. Importing adds it to your library; it does not change this workflow.",
+  ],
+  newJobType: [
+    "New job type",
+    "The kind of step the next job added with Add job starts with. Every type starts with values that validate; edit them in the job's Steps tab.",
+  ],
 } as const;
 export type HelpTopic = keyof typeof help;

@@ -11,6 +11,7 @@ on:
 
 jobs:
   cycle:
+    name: Test round
     outputs:
       next: ${{ steps.audit.outputs.value }}
     steps:

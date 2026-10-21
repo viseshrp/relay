@@ -1,5 +1,6 @@
 import {
   advancedField,
+  chooseAgent,
   openJobSettings,
   closeJobSettings,
   expectRunStatus,
@@ -137,17 +138,14 @@ test("agent steps retain independent efforts and provider defaults across save",
   expect((await post(page, "/__test__/reset")).ok()).toBeTruthy();
   await page.goto("/?view=workflows&workflow=workflow.yaml");
   await openJobSettings(page);
-  await page.getByLabel("Agent", { exact: true }).click();
-  await page.getByRole("option", { name: "Codex", exact: true }).click();
+  await chooseAgent(page, "Codex");
   await page
     .getByLabel("Agent prompt", { exact: true })
     .fill("Fix the reported findings and preserve required checks.");
   await page.getByLabel("Effort", { exact: true }).click();
   await page.getByRole("option", { name: "Low", exact: true }).click();
   await page.getByRole("button", { name: "Add step", exact: true }).click();
-  await page
-    .getByLabel("Action reference", { exact: true })
-    .fill("relay/agent@v1");
+  await page.getByRole("menuitem", { name: /^Agent / }).click();
   const input = await advancedField(page, "Action inputs");
   await input.fill(
     JSON.stringify({

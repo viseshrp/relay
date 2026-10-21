@@ -77,8 +77,10 @@ test("new workflows and added jobs use the local language without runner fields"
   await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
   await expect(page.locator(".cm-content")).not.toContainText("runs-on");
   await page.getByRole("button", { name: "Add job", exact: true }).click();
-  await expect(page.locator(".cm-content")).toContainText("job_1:");
-  await expect(page.locator(".cm-content")).not.toContainText("runs-on");
+  // A new job's drawer opens on its steps, whose script editor is CodeMirror too.
+  const yaml = page.getByLabel("Workflow YAML", { exact: true });
+  await expect(yaml).toContainText("job_1:");
+  await expect(yaml).not.toContainText("runs-on");
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeEnabled();
@@ -96,6 +98,13 @@ test("removed platform syntax blocks saving and clears when removed", async ({
       "jobs: {check: {runs-on: self-hosted, steps: [{run: echo Ready}]}}\n",
     );
   await expect(page.getByText(/runs-on: Unknown workflow field/)).toBeVisible();
+  // Schema errors name workflow.jobs.<id> fields and still open their job.
+  await expect(
+    page
+      .locator(".MuiAlert-colorError")
+      .filter({ hasText: "workflow.jobs.check.runs-on" })
+      .getByRole("button", { name: "Open job" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeDisabled();
@@ -106,4 +115,42 @@ test("removed platform syntax blocks saving and clears when removed", async ({
     page.getByRole("button", { name: "Save", exact: true }),
   ).toBeEnabled();
   await expect(page.locator(".MuiAlert-colorError")).toHaveCount(0);
+});
+
+test("diagnostics underline their own line and never guess one", async ({
+  page,
+}) => {
+  await page.goto("/?view=workflows");
+  await expect(page.getByText("Ready to edit", { exact: true })).toBeVisible();
+  await page
+    .locator(".cm-content")
+    .fill(
+      "jobs:\n  check:\n    steps: [{run: echo}]\n  check:\n    steps: [{run: echo}]\n",
+    );
+  await expect(page.getByText(/Duplicate YAML key/)).toBeVisible();
+  await expect(page.locator(".cm-line").nth(3)).toContainText("check:");
+  await expect(
+    page.locator(".cm-line").nth(3).locator(".cm-lintRange-error"),
+  ).toHaveCount(1);
+  await expect(page.locator(".cm-lintRange-error")).toHaveCount(1);
+
+  await page.route("**/api/workflow-language/validate*", (route) =>
+    route.fulfill({
+      json: {
+        valid: false,
+        diagnostics: [
+          {
+            code: "workflow_validation",
+            message: "workflow: A problem without a place.",
+            context: {},
+          },
+        ],
+      },
+    }),
+  );
+  await page
+    .locator(".cm-content")
+    .fill("jobs: {check: {steps: [{run: echo Ready}]}}\n");
+  await expect(page.getByText("A problem without a place.")).toBeVisible();
+  await expect(page.locator(".cm-lintRange-error")).toHaveCount(0);
 });

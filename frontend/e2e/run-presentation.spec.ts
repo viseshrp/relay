@@ -228,3 +228,98 @@ test("answer buttons resume an exact approval; steps stay inside jobs; terminal 
   ).toContainText("Ready");
   expect(streams).toBe(0);
 });
+
+test("run views show names, rounds, and one row per file", async ({ page }) => {
+  test.setTimeout(150_000);
+  expect(
+    (
+      await post(page, "/__test__/starter-project", { full_workflow: true })
+    ).ok(),
+  ).toBeTruthy();
+  const created = await post(page, "/api/workflows", {
+    key: "named-run",
+    name: "AI coding workflow",
+    holder: "named-run",
+    template_id: "ai-coding-workflow",
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const launch = await post(page, "/api/runs", {
+    workflow_key: (await created.json()).key,
+    inputs: {
+      task: "Add dark mode",
+      agent: "codex",
+      model: "m1",
+      opus_model: "m2",
+    },
+  });
+  expect(launch.status(), await launch.text()).toBe(201);
+  const id: string = (await launch.json()).run_id;
+  await page.goto(`/?view=runs&run=${id}`);
+  const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
+  async function expectNamedView(): Promise<void> {
+    await expect(
+      page.getByText("Started manually · 9 jobs", { exact: true }),
+    ).toBeVisible();
+    // Queued jobs already show their declared names, not their IDs.
+    await expect(
+      jobs.getByText("Human review of the audited test diff", { exact: true }),
+    ).toBeVisible();
+    for (const generated of ["iteration", "cycle", "refine_plan", "Cycle"])
+      await expect(page.getByText(generated, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/Iteration \d/)).toHaveCount(0);
+  }
+  const answeredIds = new Set<string>();
+  for (const answer of ["IMPLEMENT", "TESTS", "ACCEPT"]) {
+    let pending: { id: string; attempt_id: string } | undefined;
+    await expect
+      .poll(
+        async () => {
+          const monitor = await (
+            await page.request.get(`/api/runs/${id}/monitor`)
+          ).json();
+          pending = monitor.interactions.find(
+            (item: { id: string; status: string }) =>
+              item.status === "pending" && !answeredIds.has(item.id),
+          );
+          return Boolean(pending);
+        },
+        { timeout: 45_000 },
+      )
+      .toBe(true);
+    await expectNamedView();
+    if (answer === "IMPLEMENT")
+      await expect(jobs.getByText("Round 1", { exact: true })).toBeVisible();
+    const answered = await post(
+      page,
+      `/api/attempts/${pending!.attempt_id}/wait`,
+      {
+        idempotency_key: crypto.randomUUID(),
+        interaction_id: pending!.id,
+        value: answer,
+      },
+    );
+    expect(answered.ok(), await answered.text()).toBeTruthy();
+    answeredIds.add(pending!.id);
+  }
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/runs/${id}`)).json()).run.status,
+      { timeout: 60_000 },
+    )
+    .toBe("succeeded");
+  await page.reload();
+  await expectNamedView();
+  await expect(jobs.getByText("Plan round", { exact: true })).toBeVisible();
+  const table = page.getByRole("table", {
+    name: "Retained artifacts",
+    exact: true,
+  });
+  // Copies of one working-copy file collapse into its newest row.
+  const rows = table
+    .locator("tbody tr")
+    .filter({ hasText: "INITIAL_OPUS_PLANNING_PROMPT.md" });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.getByText(/^\d+ earlier cop(y|ies)$/)).toBeVisible();
+  await expect(table.getByText("cycle", { exact: true })).toHaveCount(0);
+});

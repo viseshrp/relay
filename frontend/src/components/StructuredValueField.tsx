@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  FormHelperText,
   MenuItem,
   Stack,
   TextField,
@@ -10,6 +11,7 @@ import {
 import { useState } from "react";
 import { isRecord } from "../workflow";
 import { AdvancedJsonField } from "./AdvancedJsonField";
+import { HelpLabel, type HelpSource } from "./HelpTip";
 
 export function StructuredValueField({
   label,
@@ -17,14 +19,25 @@ export function StructuredValueField({
   onChange,
   object = false,
   advanced = true,
+  showType = false,
+  textItems = false,
+  help,
+  helperText,
 }: {
   label: string;
   value: unknown;
   onChange: (value: unknown) => void;
   object?: boolean;
   advanced?: boolean;
+  /** Show the value-type select even for plain text. */
+  showType?: boolean;
+  /** A list of text items: neither the list nor its items offer a type. */
+  textItems?: boolean;
+  help?: HelpSource;
+  helperText?: string;
 }) {
   const [error, setError] = useState("");
+  const [typeShown, setTypeShown] = useState(false);
   const kind = isRecord(value)
     ? "table"
     : Array.isArray(value)
@@ -44,12 +57,23 @@ export function StructuredValueField({
     <Stack
       spacing={1}
       component="fieldset"
+      className={help ? "help-group" : undefined}
       sx={{ minWidth: 0, border: 0, p: 0, m: 0 }}
     >
       <Typography component="legend" variant="subtitle2">
-        {label}
+        {help ? <HelpLabel topic={help}>{label}</HelpLabel> : label}
       </Typography>
-      {!object && (
+      {!object && !textItems && !(showType || typeShown || kind !== "text") && (
+        <Button
+          size="small"
+          sx={{ alignSelf: "start" }}
+          aria-label={`Change type of ${label}`}
+          onClick={() => setTypeShown(true)}
+        >
+          Change type
+        </Button>
+      )}
+      {!object && !textItems && (showType || typeShown || kind !== "text") && (
         <TextField
           select
           size="small"
@@ -134,18 +158,33 @@ export function StructuredValueField({
         <>
           {(value as unknown[]).map((entry, index) => (
             <Stack key={index} direction="row" spacing={1}>
-              <StructuredValueField
-                advanced={false}
-                label={`${label} item ${index + 1}`}
-                value={entry}
-                onChange={(next) =>
-                  onChange(
-                    (value as unknown[]).map((item, offset) =>
-                      offset === index ? next : item,
-                    ),
-                  )
-                }
-              />
+              {textItems ? (
+                <TextField
+                  label={`${label} item ${index + 1}`}
+                  size="small"
+                  value={entry == null ? "" : String(entry)}
+                  onChange={(event) =>
+                    onChange(
+                      (value as unknown[]).map((item, offset) =>
+                        offset === index ? event.target.value : item,
+                      ),
+                    )
+                  }
+                />
+              ) : (
+                <StructuredValueField
+                  advanced={false}
+                  label={`${label} item ${index + 1}`}
+                  value={entry}
+                  onChange={(next) =>
+                    onChange(
+                      (value as unknown[]).map((item, offset) =>
+                        offset === index ? next : item,
+                      ),
+                    )
+                  }
+                />
+              )}
               <Button
                 aria-label={`Remove ${label} item ${index + 1}`}
                 onClick={() =>
@@ -190,6 +229,7 @@ export function StructuredValueField({
           }
         />
       )}
+      {helperText && <FormHelperText>{helperText}</FormHelperText>}
       {error && <Alert severity="error">{error}</Alert>}
       {advanced && (
         <AdvancedJsonField

@@ -4,17 +4,21 @@ import {
   Alert,
   Box,
   Button,
-  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 
+import { actionLabel } from "../action-labels";
 import { editActions, parseActions } from "../actions-workflow";
+import { HelpSelectField } from "./HelpTip";
+import { LoopWorkflowDialog } from "./LoopWorkflowDialog";
+import { groupedTypeOptions, typeReference } from "./StepTypeOptions";
 
 import { FlowCanvas } from "./FlowCanvas";
 import { YamlEditor } from "./YamlEditor";
+import { EMPTY_WORKFLOW } from "./ActionsWorkflowWorkspaceShared";
 
 import type { ActionsWorkflowWorkspaceState } from "./useActionsWorkflowWorkspace";
 export function WorkflowCanvas({
@@ -50,10 +54,19 @@ export function WorkflowCanvas({
     manifest,
     drawer,
     diagnostics,
+    warnings,
     events,
     triggerRows,
     toggleTrigger,
     setActivation,
+    validation,
+    saved,
+    restoreSaved,
+    addFirstJob,
+    agents,
+    pendingLoop,
+    setPendingLoop,
+    loopTargets,
   } = state;
   return (
     <Box
@@ -70,6 +83,25 @@ export function WorkflowCanvas({
         gap: 2,
       }}
     >
+      {validation === "empty" && (
+        <Alert
+          severity="info"
+          sx={{ gridColumn: "1 / -1" }}
+          action={
+            <Stack direction="row" spacing={1}>
+              <Button
+                disabled={!saved.trim()}
+                onClick={() => void restoreSaved()}
+              >
+                Restore saved source
+              </Button>
+              <Button onClick={addFirstJob}>Add a job</Button>
+            </Stack>
+          }
+        >
+          {EMPTY_WORKFLOW}
+        </Alert>
+      )}
       {mode !== "YAML" && (
         <Paper sx={{ p: 2 }}>
           <Stack spacing={2}>
@@ -187,22 +219,37 @@ export function WorkflowCanvas({
                 <Typography>No jobs match. Try another name.</Typography>
               )}
             </Stack>
-            <TextField
-              select
-              label="New job type"
-              value={newKind}
-              onChange={(event) => setNewKind(event.target.value)}
-            >
-              <MenuItem value="script">Run a script</MenuItem>
-              {manifest?.builtins.map((kind) => (
-                <MenuItem value={kind} key={kind}>
-                  {kind.replace("relay/", "").replace("@v1", "")}
-                </MenuItem>
-              ))}
-            </TextField>
+            {manifest && (
+              <HelpSelectField
+                topic="newJobType"
+                label="New job type"
+                width="wide"
+                value={newKind}
+                renderValue={(name) =>
+                  actionLabel(
+                    name === "script"
+                      ? undefined
+                      : typeReference(manifest, String(name)),
+                  )
+                }
+                onChange={(event) => setNewKind(String(event.target.value))}
+              >
+                {groupedTypeOptions(manifest, loopTargets.length > 0)}
+              </HelpSelectField>
+            )}
             <Button disabled={!parsed.value} onClick={() => addJob()}>
               Add job
             </Button>
+            <LoopWorkflowDialog
+              open={pendingLoop !== null}
+              workflows={loopTargets}
+              onClose={() => setPendingLoop(null)}
+              onChoose={(workflow) => {
+                const place = pendingLoop;
+                setPendingLoop(null);
+                addJob(place?.source, place?.target, workflow);
+              }}
+            />
           </Stack>
         </Paper>
       )}
@@ -216,6 +263,8 @@ export function WorkflowCanvas({
             onChange={setText}
             manifest={manifest}
             diagnostics={diagnostics}
+            warnings={warnings}
+            agentIds={agents.map((agent) => agent.id)}
           />
           {events
             .filter((event) =>

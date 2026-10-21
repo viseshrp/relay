@@ -6,10 +6,11 @@ import {
   DialogContent,
   DialogTitle,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 import type { ActionWorkflow } from "../actions-workflow";
+import { GUIDE, propertyHelp } from "../field-help";
+import { HelpTextField } from "./HelpTip";
 import type { LanguageManifest } from "../workflow-language";
 import { isRecord } from "../workflow";
 import { SchemaFields } from "./SchemaFields";
@@ -41,15 +42,32 @@ export function WorkflowSourceSettings({
       <DialogTitle>Workflow settings</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 2.5 }}>
-          <TextField
+          <HelpTextField
+            topic={
+              manifest
+                ? propertyHelp(manifest, "workflow-root.name", "Workflow name")
+                : "workflows"
+            }
             label="Workflow name"
+            width="wide"
             margin="dense"
             slotProps={{ htmlInput: { maxLength: 256 } }}
             value={value?.name ?? ""}
             onChange={(event) => change(["name"], event.target.value)}
           />
-          <TextField
+          <HelpTextField
+            topic={
+              manifest
+                ? propertyHelp(
+                    manifest,
+                    "workflow-root.run-name",
+                    "Run title expression",
+                    GUIDE.expressions,
+                  )
+                : "runs"
+            }
             label="Run title expression"
+            width="wide"
             margin="dense"
             slotProps={{ htmlInput: { maxLength: 1000 } }}
             value={value?.["run-name"] ?? ""}
@@ -61,6 +79,7 @@ export function WorkflowSourceSettings({
             Launch inputs
           </Typography>
           <WorkflowInputsEditor
+            manifest={manifest}
             value={dispatch.inputs}
             onChange={(inputs) =>
               change(["on"], {

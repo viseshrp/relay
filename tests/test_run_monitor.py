@@ -10,7 +10,7 @@ from django.test import Client
 import pytest
 
 from relay.constants import API_MAX_PAGE_BYTES
-from relay.web.models import HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
+from relay.web.models import Artifact, HumanInteraction, NodeAttempt, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoReadStore
 from relay.workflows.schema import ActionsJobNode
 from tests.sqlite_support import SqliteWriteProbe, hold_write_lock
@@ -253,3 +253,118 @@ def test_monitor_rejects_invalid_pages_and_requires_login(
     assert Client().get(f"/api/runs/{finished_run}/monitor").status_code == 401
     for query in ("nodes_since=-1", "interactions_since=bad", "limit=0"):
         assert owner.get(f"/api/runs/{finished_run}/monitor?{query}").status_code == 400
+
+
+def test_monitor_reports_artifact_total_and_committed_changes(
+    owner: Client, finished_run: str
+) -> None:
+    attempt = NodeAttempt.objects.filter(node_run__run_id=finished_run).first()
+    assert attempt is not None
+    Artifact.objects.bulk_create(
+        [
+            Artifact(
+                attempt=attempt,
+                declared_name=f"report-{index}.md",
+                source_path=f"report-{index}.md",
+                retained_path=f"retained/report-{index}.md",
+                sha256="0" * 64,
+                media_type="text/markdown",
+                bytes=10,
+                preservation_state="preserved",
+            )
+            for index in range(55)
+        ]
+        + [
+            # Empty change records and unpreserved bytes are not review material.
+            Artifact(
+                attempt=attempt,
+                declared_name="commits",
+                source_path="commits",
+                retained_path="retained/commits",
+                sha256="0" * 64,
+                media_type="application/json",
+                bytes=2,
+                preservation_state="preserved",
+            ),
+            Artifact(
+                attempt=attempt,
+                declared_name="pending.md",
+                source_path="pending.md",
+                retained_path="retained/pending.md",
+                sha256="0" * 64,
+                media_type="text/markdown",
+                bytes=10,
+            ),
+        ]
+    )
+    visible = DjangoReadStore().page_artifacts(finished_run, 0, 200, visible_only=True)[0]
+    run = Run.objects.get(pk=finished_run)
+    unchanged = owner.get(f"/api/runs/{finished_run}/monitor").json()["run"]
+    assert len(visible) >= 55
+    assert not {"commits", "pending.md"} & {row["name"] for row in visible}
+    # The total covers every visible record, not only the first browser page.
+    assert unchanged["artifact_count"] == len(visible)
+    assert unchanged["recorded_head"] == run.source_commit
+    assert unchanged["has_committed_changes"] is False
+
+    Run.objects.filter(pk=finished_run).update(recorded_head="f" * 40)
+    changed = owner.get(f"/api/runs/{finished_run}/monitor").json()["run"]
+    assert changed["artifact_count"] == unchanged["artifact_count"]
+    assert changed["recorded_head"] == "f" * 40
+    assert changed["has_committed_changes"] is True
+
+
+def test_queued_jobs_use_their_declared_names(
+    owner: Client, served: RelayProject, engine: InlineEngine
+) -> None:
+    served.write_workflow(
+        "named",
+        (
+            "jobs:\n"
+            "  approve:\n"
+            "    steps:\n"
+            "    - uses: relay/human-wait@v1\n"
+            "      with:\n"
+            "        prompt: Go?\n"
+            "  build:\n"
+            "    name: Build the app\n"
+            "    needs: approve\n"
+            "    steps:\n"
+            "    - run: echo built\n"
+            "  dynamic:\n"
+            "    name: Build ${{ inputs.target }}\n"
+            "    needs: approve\n"
+            "    steps:\n"
+            "    - run: echo built\n"
+        ),
+    )
+    run_id = engine.launch(served, "named")
+    engine.drain(run_id)
+    NodeRun.objects.create(
+        run_id=run_id,
+        scope_path="root.build.step_1.iteration_2",
+        node_id="iteration_2",
+        node_type="actions_job",
+        frozen_def=ActionsJobNode(
+            job_id="iteration", job={"uses": "./.relay/workflows/cycle.yaml"}, workflow={}
+        ).model_dump(mode="json"),
+    )
+    # An unnamed loop round resolves to its job ID at run time.
+    run = Run.objects.get(pk=run_id)
+    run.actions_state = {
+        **run.actions_state,
+        "display_names": {
+            **run.actions_state.get("display_names", {}),
+            "root.build.step_1.iteration_2": "iteration",
+        },
+    }
+    run.save(update_fields=("actions_state",))
+    nodes = {
+        row["scope_path"]: row for row in owner.get(f"/api/runs/{run_id}/monitor").json()["nodes"]
+    }
+    assert nodes["root.build"]["status"] == "pending"
+    assert nodes["root.build"]["display_name"] == "Build the app"
+    # Interpolated names are resolved only when the job starts.
+    assert nodes["root.dynamic"]["display_name"] == "dynamic"
+    assert nodes["root.approve"]["display_name"] == "approve"
+    assert nodes["root.build.step_1.iteration_2"]["display_name"] == "Round 2"

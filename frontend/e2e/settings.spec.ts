@@ -1,6 +1,7 @@
 import { expect, test } from "./a11y-test";
 import { parse } from "yaml";
 import {
+  chooseAgent,
   post,
   openJobSettings,
   closeJobSettings,
@@ -604,14 +605,7 @@ test("a job can keep the agent's own defaults despite saved global effort", asyn
   ).toBeTruthy();
   await page.goto("/?view=workflows&workflow=workflow.yaml");
   await openJobSettings(page);
-  const agentPicker = page.getByRole("combobox", {
-    name: "Agent",
-    exact: true,
-  });
-  if ((await agentPicker.textContent()) !== "Codex") {
-    await agentPicker.click();
-    await page.getByRole("option", { name: "Codex", exact: true }).click();
-  }
+  await chooseAgent(page, "Codex");
   const effort = page
     .getByRole("region", { name: "Codex configuration", exact: true })
     .getByRole("combobox", { name: "Effort", exact: true });

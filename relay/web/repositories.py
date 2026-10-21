@@ -141,9 +141,15 @@ from relay.vcs.worktree import (
 )
 from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
+from relay.workflows.actions.builtins import builtin_references, is_builtin, parse_builtin
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
-from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
+from relay.workflows.schema import (
+    NodeDefinition,
+    RecoveryPolicy,
+    WorkflowDefinition,
+    declared_job_name,
+)
 from relay.workflows.scope import (
     node_scope,
     parse_scope_path,
@@ -572,7 +578,7 @@ def _attempt_requires_evidence(node: NodeRun) -> bool:
     return not (
         _string(node, "node_type") == NodeType.ACTIONS_STEP.value
         and isinstance(step, Mapping)
-        and step.get("uses") == "relay/human-wait@v1"
+        and is_builtin(step.get("uses"), "human-wait")
     )
 
 
@@ -849,6 +855,30 @@ def _run_record(run: Run) -> dict[str, object]:
     }
 
 
+RUN_CHANGED_FILES_LIMIT = 200
+
+
+def _changed_files(git_root: Path, source_commit: str, recorded_head: str) -> list[str]:
+    """List at most one more than the bounded number of paths a run changed."""
+    with tempfile.TemporaryFile(mode="w+b") as output:
+        run_git_to_file(
+            git_root,
+            ["diff", "--name-only", "-z", f"{source_commit}..{recorded_head}", "--"],
+            output,
+        )
+        output.seek(0)
+        names = output.read(REVIEW_PREVIEW_MAX_BYTES).decode("utf-8", errors="replace")
+    return [name for name in names.split("\0") if name][: RUN_CHANGED_FILES_LIMIT + 1]
+
+
+def _visible_artifacts(query: models.QuerySet) -> models.QuerySet:
+    """Keep preserved artifacts that hold reviewable bytes."""
+    return query.filter(preservation_state=PreservationState.PRESERVED.value).exclude(
+        Q(declared_name="worktree_diff", bytes=0)
+        | Q(declared_name__in=("commits", "commits.json"), bytes__lte=3)
+    )
+
+
 def _waiting_filter(prefix: str = "") -> Q:
     """Keep attention counts tied to requests whose attempts can accept an answer."""
     return Q(
@@ -1025,6 +1055,18 @@ def _is_agent_step(node: NodeRun) -> bool:
     )
 
 
+def _display_name(node: NodeRun, scope: str, frozen: Mapping[str, object]) -> str:
+    """Prefer a resolved runtime name, then the declared name, then the node ID."""
+    node_id = _string(node, "node_id")
+    names = _mapping(_related(node, "run", Run), "actions_state").get("display_names", {})
+    resolved = names.get(scope) if isinstance(names, dict) else None
+    # An unnamed job resolves to its own ID; a loop round still has a better name.
+    if isinstance(resolved, str) and resolved not in {node_id, frozen.get("job_id")}:
+        return resolved
+    declared = declared_job_name(_string(node, "node_type"), scope, frozen)
+    return declared or (resolved if isinstance(resolved, str) else node_id)
+
+
 def _node_record(
     node: NodeRun,
     snapshot: RunSnapshot,
@@ -1041,9 +1083,7 @@ def _node_record(
         "id": _identifier(node),
         "scope_path": _string(node, "scope_path"),
         "node_id": _string(node, "node_id"),
-        "display_name": cast(
-            dict, _mapping(_related(node, "run", Run), "actions_state").get("display_names", {})
-        ).get(scope, _string(node, "node_id")),
+        "display_name": _display_name(node, scope, frozen),
         "matrix": frozen.get("matrix", {}),
         "node_type": _string(node, "node_type"),
         "outcome": _string(node, "outcome"),
@@ -1522,6 +1562,12 @@ class DjangoReadStore:
             }
             if scope_path is not None:
                 result["commits"] = commits
+            else:
+                files = _changed_files(
+                    Path(_string(project, "git_root")), source_commit, recorded_head
+                )
+                result["files"] = files[:RUN_CHANGED_FILES_LIMIT]
+                result["files_truncated"] = len(files) > RUN_CHANGED_FILES_LIMIT
         except DatabaseError:
             message = "Relay could not read the run's committed changes."
             raise PersistenceError(message, context={"run": run_id}) from None
@@ -1638,6 +1684,15 @@ class DjangoReadStore:
             "created_at": _datetime_text(_datetime_field(snapshot, "created_at")),
         }
         result["state_cursor"] = _integer(run, "read_state_cursor")
+        # Database reads inside the snapshot; the diff itself stays behind /changes.
+        result["artifact_count"] = _visible_artifacts(
+            Artifact.objects.filter(attempt__node_run__run=run)
+        ).count()
+        recorded_head = _string(run, "recorded_head")
+        result["recorded_head"] = recorded_head
+        result["has_committed_changes"] = bool(recorded_head) and recorded_head != _string(
+            run, "source_commit"
+        )
         return result
 
     @staticmethod
@@ -1849,14 +1904,15 @@ class DjangoReadStore:
                 step = frozen.get("step", {})
                 activity_type = _string(node, "node_type")
                 if activity_type == NodeType.ACTIONS_STEP.value and isinstance(step, dict):
+                    parsed = parse_builtin(step.get("uses"))
                     activity_type = (
                         "command"
                         if "run" in step
                         else {
-                            "relay/command@v1": "command",
-                            "relay/agent@v1": "agent",
-                            "relay/human-wait@v1": "human_wait",
-                        }.get(step.get("uses"), activity_type)
+                            "command": "command",
+                            "agent": "agent",
+                            "human-wait": "human_wait",
+                        }.get(parsed[0] if parsed is not None else "", activity_type)
                     )
                 instructions: list[dict[str, object]] = []
                 remaining = API_MAX_PAGE_BYTES // 4
@@ -1979,10 +2035,7 @@ class DjangoReadStore:
                 pk__gt=since,
             )
             if visible_only:
-                query = query.filter(preservation_state=PreservationState.PRESERVED.value).exclude(
-                    Q(declared_name="worktree_diff", bytes=0)
-                    | Q(declared_name__in=("commits", "commits.json"), bytes__lte=3)
-                )
+                query = _visible_artifacts(query)
             rows = list(query.select_related("attempt__node_run").order_by("pk")[: bounded + 1])
             records, more = _bounded_page(rows, bounded, _artifact_record)
             next_value = int(str(records[-1]["id"])) if more and records else None
@@ -2349,7 +2402,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                 ~Q(status=AttemptStatus.WAITING.value)
                 | Q(
                     node_run__node_type=NodeType.ACTIONS_STEP.value,
-                    node_run__frozen_def__step__uses="relay/agent@v1",
+                    node_run__frozen_def__step__uses__in=builtin_references("agent"),
                 )
             )
         attempt_ids = list(attempts.order_by("started_at", "pk").values_list("pk", flat=True))
@@ -3968,8 +4021,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     NodeType.ACTIONS_JOB.value,
                     *(
                         [NodeType.ACTIONS_STEP.value]
-                        if cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
-                        != "relay/human-wait@v1"
+                        if not is_builtin(
+                            cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses"),
+                            "human-wait",
+                        )
                         else []
                     ),
                 }
@@ -4914,8 +4969,10 @@ class DjangoExecutionStore(DjangoAgentStore):
                     _string(node, "node_type") == NodeType.ACTIONS_JOB.value
                     or (
                         _string(node, "node_type") == NodeType.ACTIONS_STEP.value
-                        and cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses")
-                        != "relay/human-wait@v1"
+                        and not is_builtin(
+                            cast(dict, _mapping(node, "frozen_def").get("step", {})).get("uses"),
+                            "human-wait",
+                        )
                     )
                 ):
                     # The exact yielded attempt resumes after its child settles;

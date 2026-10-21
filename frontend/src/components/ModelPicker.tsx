@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, errorMessage } from "../api";
 import { projectPath } from "../navigation";
 import type { AgentRecord } from "../types";
+import { HelpTextField, type HelpSource } from "./HelpTip";
 type ReadResponse1 = { models: Array<{ value: string; name: string }> };
 
 export function ModelPicker({
@@ -12,6 +13,7 @@ export function ModelPicker({
   disabled = false,
   onChange,
   defaultLabel = "Use workflow model",
+  help,
 }: {
   agents: AgentRecord[];
   value: string;
@@ -19,6 +21,7 @@ export function ModelPicker({
   onChange: (value: string) => void;
   disabled?: boolean;
   defaultLabel?: string;
+  help?: HelpSource;
 }) {
   const [observed, setObserved] = useState<
     Array<{ value: string; name: string }>
@@ -78,15 +81,31 @@ export function ModelPicker({
         onInputChange={(_, input, reason) => {
           if (reason === "input") onChange(input);
         }}
-        renderInput={(parameters) => (
-          <TextField
-            {...parameters}
-            label="Model"
-            size="small"
-            placeholder={defaultLabel}
-            helperText={value ? `Exact provider value: ${value}` : defaultLabel}
-          />
-        )}
+        renderInput={(parameters) =>
+          help ? (
+            <HelpTextField
+              {...parameters}
+              topic={help}
+              label="Model"
+              width="wide"
+              size="small"
+              placeholder={defaultLabel}
+              helperText={
+                value ? `Exact provider value: ${value}` : defaultLabel
+              }
+            />
+          ) : (
+            <TextField
+              {...parameters}
+              label="Model"
+              size="small"
+              placeholder={defaultLabel}
+              helperText={
+                value ? `Exact provider value: ${value}` : defaultLabel
+              }
+            />
+          )
+        }
       />
       <Button
         sx={{ alignSelf: "flex-start" }}

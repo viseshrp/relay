@@ -10,6 +10,8 @@ export interface WorkflowWorkspaceProps {
   onLaunchClosed: () => void;
   onWorkflowLoaded: (key: string) => void;
   onNavigationReady: (callback: (() => Promise<void>) | null) => void;
+  /** Open the Get started checklist, where agents are set up. */
+  onOpenGetStarted?: () => void;
 }
 
 export function WorkflowWorkspace(props: WorkflowWorkspaceProps) {

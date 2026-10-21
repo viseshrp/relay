@@ -7,6 +7,8 @@ export function ReviewRequest(props: {
   interaction: RunInteraction;
   runId: string;
   artifacts: ArtifactRecord[];
+  hasChanges: boolean;
+  onLoadAll: () => Promise<void>;
   selected: boolean;
   onAnswered: () => Promise<void>;
 }) {

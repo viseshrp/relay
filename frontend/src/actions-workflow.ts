@@ -1,6 +1,8 @@
 import { Lexer, Parser } from "@actions/expressions";
-import { isAlias, isSeq, parseDocument } from "yaml";
+import { isAlias, isMap, isScalar, isSeq, parseDocument, visit } from "yaml";
 import type { Edge, Node } from "@xyflow/react";
+import { actionLabel } from "./action-labels";
+import { isBuiltin } from "./builtin-actions";
 import { arrangeGraph } from "./graph";
 import {
   isRecord,
@@ -204,41 +206,131 @@ export function moveActionStep(
   return parsed.document.toString({ lineWidth: 80 });
 }
 
+/** A step's name, else its ID, else its type, else its script's first line. */
+export function stepLabel(step: ActionStep): string {
+  if (step.name) return step.name;
+  if (step.id) return step.id;
+  if (step.uses) return actionLabel(step.uses);
+  const line = step.run
+    ?.split("\n")
+    .find((text) => text.trim())
+    ?.trim();
+  return line ? line.slice(0, 40) : "Script";
+}
+
+/** The step lines a canvas card shows: at most five, then a count. */
+const CARD_STEPS = 5;
+
+export function cardSteps(steps: ActionStep[] | undefined): string[] {
+  const labels = (steps ?? []).map(stepLabel);
+  return labels.length > CARD_STEPS
+    ? [...labels.slice(0, CARD_STEPS), `+${labels.length - CARD_STEPS} more`]
+    : labels;
+}
+
+/** Card height in pixels for a job with this many step lines. */
+export function cardHeight(lines: number, button = false): number {
+  return Math.max(104, 72 + lines * 18) + (button ? 40 : 0);
+}
+
 export function actionsGraph(value: ActionWorkflow | null): {
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
 } {
   if (!value) return { nodes: [], edges: [] };
-  const nodes = Object.entries(value.jobs).map(([id, job]) => ({
-    id,
-    type: "editorJob",
-    position: { x: 0, y: 0 },
-    data: {
-      label: job.name || id,
-      kind: "actions_job",
-      childWorkflow:
-        job.uses ??
-        job.steps?.find((step) => step.uses === "relay/loop@v1")?.with
-          ?.workflow,
-      loopBody:
-        job.steps?.some((step) => step.uses === "relay/loop@v1") ?? false,
-      detail:
-        job.uses ||
-        job.steps
-          ?.map((step) =>
-            step.uses === "relay/agent@v1"
-              ? `${String(step.with?.agent ?? "Agent")} · ${String(step.with?.model ?? "Saved model")}`
-              : (step.uses ?? step.run?.split("\n")[0] ?? "Step"),
-          )
-          .join(" → "),
-    },
-  }));
+  const nodes = Object.entries(value.jobs).map(([id, job]) => {
+    const steps = job.uses ? undefined : cardSteps(job.steps);
+    return {
+      id,
+      type: "editorJob",
+      position: { x: 0, y: 0 },
+      data: {
+        label: job.name || id,
+        kind: "actions_job",
+        childWorkflow:
+          job.uses ??
+          job.steps?.find((step) => isBuiltin(step.uses, "loop"))?.with
+            ?.workflow,
+        loopBody:
+          job.steps?.some((step) => isBuiltin(step.uses, "loop")) ?? false,
+        steps,
+        detail: job.uses
+          ? `Reusable workflow: ${job.uses.split("/").at(-1) ?? job.uses}`
+          : undefined,
+      },
+    };
+  });
   const edges = Object.entries(value.jobs).flatMap(([target, job]) =>
     (typeof job.needs === "string" ? [job.needs] : job.needs || []).map(
       (source) => ({ id: `${source}-${target}`, source, target }),
     ),
   );
-  return { nodes: arrangeGraph(nodes, edges), edges };
+  return {
+    nodes: arrangeGraph(nodes, edges, (node) =>
+      cardHeight(
+        Array.isArray(node.data.steps) ? node.data.steps.length : 0,
+        typeof node.data.childWorkflow === "string",
+      ),
+    ),
+    edges,
+  };
+}
+
+/** Whether a job ID can be written as a key that expressions can name. */
+export const JOB_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+/**
+ * Rename one job in a single source edit: its key under `jobs` (keeping its
+ * place), every `needs` that names it, declared start points, and its
+ * `needs.<id>` and `jobs.<id>` references inside expressions.
+ */
+export function renameJob(text: string, from: string, to: string): string {
+  const parsed = parseActions(text);
+  if (parsed.errors.length || !parsed.value)
+    throw new Error(parsed.errors.join("\n"));
+  if (!JOB_ID.test(to) || (to !== from && to in parsed.value.jobs))
+    throw new Error("Choose a new, unused job ID.");
+  const document = parsed.document;
+  detachAliases(document, ["jobs"]);
+  const jobs = document.get("jobs", true);
+  if (!isMap(jobs)) throw new Error("Use a jobs mapping with ordered steps.");
+  for (const pair of jobs.items) {
+    if (isScalar(pair.key) && pair.key.value === from) pair.key.value = to;
+    if (!isMap(pair.value)) continue;
+    const needs = pair.value.get("needs", true);
+    if (isScalar(needs) && needs.value === from) needs.value = to;
+    if (isSeq(needs))
+      for (const item of needs.items)
+        if (isScalar(item) && item.value === from) item.value = to;
+  }
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const reference = new RegExp(
+    `(\\b(?:needs|jobs)\\.)${escaped}(?![A-Za-z0-9_-])`,
+    "g",
+  );
+  const start = new RegExp(`^root\\.${escaped}(?=$|\\.)`);
+  visit(document, {
+    Pair(_, pair) {
+      if (
+        !isScalar(pair.key) ||
+        !isScalar(pair.value) ||
+        typeof pair.value.value !== "string"
+      )
+        return;
+      if (pair.key.value === "scope_path")
+        pair.value.value = pair.value.value.replace(start, `root.${to}`);
+      // A condition is an expression even without ${{ }}.
+      else if (pair.key.value === "if" && !pair.value.value.includes("${{"))
+        pair.value.value = pair.value.value.replace(reference, `$1${to}`);
+    },
+    Scalar(_, node) {
+      if (typeof node.value === "string" && node.value.includes("${{"))
+        node.value = node.value.replace(/\$\{\{[\s\S]*?\}\}/g, (part) =>
+          part.replace(reference, `$1${to}`),
+        );
+    },
+  });
+  return document.toString({ lineWidth: 80 });
 }
 
 export function launchView(

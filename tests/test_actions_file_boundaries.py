@@ -128,6 +128,12 @@ def test_explicit_shell_scripts_use_owned_paths_and_argument_vectors(
         assert script == b"first\r\nsecond\n"
 
 
+def test_validation_names_the_runtime_shells() -> None:
+    from relay.workflows.actions.builtins import SHELLS
+
+    assert tuple(action_files.SCRIPT_SUFFIXES) == SHELLS
+
+
 @pytest.mark.parametrize("shell", ["custom", "custom {0} {0}"])
 def test_custom_shell_requires_exactly_one_placeholder(tmp_path: Path, shell: str) -> None:
     with pytest.raises(NodeExecutionError, match="exactly one"):

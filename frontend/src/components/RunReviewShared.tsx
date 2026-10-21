@@ -8,10 +8,14 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 
-import { visibleArtifacts } from "../artifacts";
+import {
+  artifactPath,
+  defaultReviewSelection,
+  visibleArtifacts,
+} from "../artifacts";
 
 import type { ArtifactRecord, JsonValue } from "../types";
 import { DiffViewer } from "./DiffViewer";
@@ -69,11 +73,20 @@ export function elicitationChoices(
 export function ReviewEvidence({
   runId,
   artifacts,
+  hasChanges,
+  onLoadAll,
   pendingReview = false,
+  requestText = null,
 }: {
   runId: string;
   artifacts: ArtifactRecord[];
+  /** Whether the run committed code, from the run record, not a loaded page. */
+  hasChanges: boolean;
+  /** Load the remaining artifact pages before the owner chooses one. */
+  onLoadAll?: () => Promise<void>;
   pendingReview?: boolean;
+  /** A pending review's instructions; a document they name is shown first. */
+  requestText?: string | null;
 }) {
   const labelId = useId();
   const documents = useMemo(() => {
@@ -81,24 +94,14 @@ export function ReviewEvidence({
     for (const item of visibleArtifacts(artifacts).filter(
       (item) => !["commits", "commits.json"].includes(item.name),
     )) {
-      // /worktrees/<run>/r-12/docs/REVIEW.md becomes docs/REVIEW.md.
-      // Keep directories so docs/REVIEW.md and audit/REVIEW.md remain distinct.
-      const source = item.source_path.replace(/\\/g, "/");
-      const marker = `/worktrees/${runId}/`;
-      const offset = source.indexOf(marker);
-      const name =
-        offset >= 0
-          ? source.slice(offset + marker.length).replace(/^r-\d+\//, "")
-          : source;
+      const name = artifactPath(runId, item);
       const previous = latest.get(name);
       if (!previous || Number(item.id) > Number(previous.id))
         latest.set(name, item);
     }
     return Array.from(latest, ([label, artifact]) => ({ label, artifact }));
   }, [artifacts, runId]);
-  const hasChanges = artifacts.some(
-    (item) => ["commits", "commits.json"].includes(item.name) && item.bytes > 3,
-  );
+  const loadedAll = useRef(false);
   const [chosen, setSelection] = useState<string | null>(null);
   const selection =
     chosen &&
@@ -106,9 +109,11 @@ export function ReviewEvidence({
       ? hasChanges
       : documents.some((item) => item.artifact.id === chosen))
       ? chosen
-      : hasChanges
-        ? "changes"
-        : documents[0]?.artifact.id;
+      : defaultReviewSelection(
+          documents,
+          hasChanges,
+          pendingReview ? requestText : null,
+        );
   const [preview, setPreview] = useState<{
     text: string;
     truncated: boolean;
@@ -151,7 +156,12 @@ export function ReviewEvidence({
         <Select
           labelId={labelId}
           label="Review material"
-          value={selection}
+          value={selection ?? ""}
+          onOpen={() => {
+            if (loadedAll.current || !onLoadAll) return;
+            loadedAll.current = true;
+            void onLoadAll();
+          }}
           onChange={(event) => {
             setSelection(event.target.value);
             setOpened(true);

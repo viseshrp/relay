@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
@@ -31,6 +31,7 @@ from relay.execution.state import EventSource
 from relay.projects.service import initialize_project, register_current_project
 from relay.web.models import HumanInteraction, NodeRun, Run, RunEvent
 from relay.web.repositories import DjangoExecutionStore, DjangoProjectStore
+from relay.workflows.actions.builtins import Upgrade
 from relay.workflows.defaults import WorkflowDefaults
 from relay.workflows.schema import AgentNode
 
@@ -254,6 +255,76 @@ def answer_wait(engine: InlineEngine, run_id: str, *, key: str = "answer-1") -> 
     dispatch_ready_nodes(engine.store, run_id, engine.tokens.append)
     engine.drain(run_id)
     return result.value
+
+
+def keep_inputs(inputs: Mapping[str, object]) -> tuple[dict[str, object], tuple[str, ...]]:
+    """A stand-in version upgrade that renames nothing."""
+    return dict(inputs), ()
+
+
+def stand_in_versions(
+    patch: pytest.MonkeyPatch, *, removed: bool = False, upgrade: Upgrade | None = keep_inputs
+) -> None:
+    """Register a stand-in relay/command@v2 beside the shipped command version.
+
+    The shipped version becomes deprecated in Relay 0.0.0 or, with removed,
+    moves to REMOVED_BUILTINS. Relay ships one command version; this pair only
+    proves the version mechanism, so tests do not depend on a real change.
+    """
+    from relay.workflows.actions import builtins
+
+    old = builtins.current_builtin("command")
+    new = replace(old, major=old.major + 1, upgrade=upgrade)
+    if removed:
+        actions = tuple(new if action is old else action for action in builtins.BUILTIN_ACTIONS)
+        patch.setitem(builtins.REMOVED_BUILTINS, old.reference, ("0.0.0", new.reference))
+    else:
+        older = replace(old, status="deprecated", deprecated_in="0.0.0")
+        actions = tuple(
+            item
+            for action in builtins.BUILTIN_ACTIONS
+            for item in ((older, new) if action is old else (action,))
+        )
+    patch.setattr(builtins, "BUILTIN_ACTIONS", actions)
+    patch.setattr(builtins, "_BY_REFERENCE", {action.reference: action for action in actions})
+
+
+def registry_problems() -> list[str]:
+    """The built-in version rules the registry breaks, as sentences.
+
+    Each action has one current version, its newest. A deprecated version
+    names the release that deprecated it, a removed version names the current
+    one as its replacement, and every version after an older one converts the
+    inputs of the version before it.
+    """
+    from relay.workflows.actions import builtins
+
+    actions = builtins.registered_builtins()
+    problems = []
+    for name in sorted({action.name for action in actions}):
+        versions = [action for action in actions if action.name == name]
+        current = [action for action in versions if action.status == "current"]
+        if len(current) != 1 or max(action.major for action in versions) != current[0].major:
+            problems.append(f"{name} needs exactly one current version, its newest.")
+    for action in actions:
+        if (action.status == "deprecated") != bool(action.deprecated_in):
+            problems.append(f"{action.reference} names deprecated_in only when deprecated.")
+    for reference, (_, replacement) in builtins.REMOVED_BUILTINS.items():
+        parsed = builtins.parse_builtin(reference)
+        current = builtins.builtin(replacement)
+        if parsed is None or builtins.builtin(reference) is not None:
+            problems.append(f"{reference} is removed and must not be registered.")
+        elif current is None or (current.name, current.status) != (parsed[0], "current"):
+            problems.append(f"{reference} must name the current {parsed[0]} as its replacement.")
+    older = [action.reference for action in actions if action.status == "deprecated"]
+    for reference in [*older, *builtins.REMOVED_BUILTINS]:
+        try:
+            newer = builtins.newer_versions(reference)
+        except KeyError:
+            newer = ()
+        if not newer or any(action.upgrade is None for action in newer):
+            problems.append(f"{reference} needs an upgrade into every newer version.")
+    return problems
 
 
 def fake_executable(

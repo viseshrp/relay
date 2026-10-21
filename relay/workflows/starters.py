@@ -19,6 +19,7 @@ from .editor import (
     _require_portable_names,
     read_workflow_document,
 )
+from .gallery import workflow_size
 from .loader import load_workflow_text, workflow_key_parts
 from .validation import validate_loaded_workflow
 
@@ -43,7 +44,9 @@ STARTERS = (
     Starter(
         "ai-coding-workflow",
         "AI coding workflow",
-        "Enter a task once. Explore, plan, implement, review, and test with human approvals.",
+        "Enter a task once. Agents explore, plan, implement, review, and test, with your"
+        " approval at three points. Approving lets the agent commit, push its branch, and"
+        " open a pull request if the repository has a remote.",
         ("Explore", "Plan and verify", "Approve and implement", "Review", "Walkthrough", "Tests"),
         tuple(
             f"ai-coding-workflow/{name}"
@@ -153,6 +156,7 @@ def starter_inventory() -> list[dict[str, object]]:
                 "jobs": list(starter.jobs),
                 "required_agents": starter.required_agents,
                 "default": starter.default,
+                **workflow_size(definition),
                 "inputs": {
                     key: item.model_dump(mode="json") for key, item in definition.inputs.items()
                 },

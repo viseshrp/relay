@@ -200,6 +200,17 @@ def consume(
     return outputs, retained, file_text(paths["RELAY_STEP_SUMMARY"])
 
 
+# Script file suffixes for the named shells; validation offers the same names.
+SCRIPT_SUFFIXES: dict[str, str] = {
+    "bash": ".sh",
+    "sh": ".sh",
+    "pwsh": ".ps1",
+    "powershell": ".ps1",
+    "cmd": ".cmd",
+    "python": ".py",
+}
+
+
 def default_shell() -> str:
     """Choose the host default without changing an explicitly selected shell."""
     return "pwsh" if os.name == "nt" else "bash" if shutil.which("bash") else "sh"
@@ -212,14 +223,7 @@ def shell_script(directory: Path, source: str, shell: str | None) -> list[str]:
         implicit = True
     else:
         implicit = False
-    suffix = {
-        "bash": ".sh",
-        "sh": ".sh",
-        "pwsh": ".ps1",
-        "powershell": ".ps1",
-        "cmd": ".cmd",
-        "python": ".py",
-    }.get(shell, ".script")
+    suffix = SCRIPT_SUFFIXES.get(shell, ".script")
     path = directory / f"script{suffix}"
     if shell in {"pwsh", "powershell"}:
         source = (

@@ -32,6 +32,8 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
     link,
     runId,
     artifacts,
+    hasChanges,
+    onLoadAll,
     options,
     busy,
     answer,
@@ -48,6 +50,11 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
     error,
     ready,
   } = state;
+  // A wait with declared answers is answered only by its buttons.
+  const answerButtons =
+    isReview &&
+    !interaction.request.environment &&
+    options.some((item) => typeof item === "string");
   return (
     <Paper
       ref={card}
@@ -88,10 +95,17 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
           </Typography>
         )}
         {isReview && (
-          <ReviewEvidence runId={runId} artifacts={artifacts} pendingReview />
+          <ReviewEvidence
+            runId={runId}
+            artifacts={artifacts}
+            hasChanges={hasChanges}
+            onLoadAll={onLoadAll}
+            requestText={String(interaction.request.prompt ?? "")}
+            pendingReview
+          />
         )}
         <Box data-owner-response>
-          {isReview && options.length > 0 && (
+          {answerButtons && (
             <Stack
               direction="row"
               spacing={1}
@@ -244,7 +258,7 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
                 );
               })}
             </Stack>
-          ) : (
+          ) : answerButtons ? null : (
             <TextField
               fullWidth
               label={isReview ? "Your response" : "Response (JSON object)"}
@@ -279,17 +293,19 @@ export function ReviewRequestView({ state }: { state: ReviewRequestState }) {
         </Typography>
         {error && <Alert severity="error">{error}</Alert>}
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-          <Button
-            variant="contained"
-            onClick={() => void answer()}
-            disabled={busy || !ready}
-          >
-            {busy
-              ? "Sending…"
-              : interaction.request.environment
-                ? "Approve environment"
-                : "Send response and continue"}
-          </Button>
+          {!answerButtons && (
+            <Button
+              variant="contained"
+              onClick={() => void answer()}
+              disabled={busy || !ready}
+            >
+              {busy
+                ? "Sending…"
+                : interaction.request.environment
+                  ? "Approve environment"
+                  : "Send response and continue"}
+            </Button>
+          )}
           {interaction.kind === "elicitation" && (
             <Button disabled={busy} onClick={() => void answer(true)}>
               Decline request

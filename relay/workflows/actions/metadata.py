@@ -81,9 +81,9 @@ def load_action(text: str, *, source: Path | None = None) -> dict[str, Any]:
         runs["steps"] = _validate_type("steps", steps, "action.runs.steps", ("inputs",))
         validate_steps(runs["steps"], "action.runs.steps")
         for step in cast(list[Mapping[str, Any]], runs["steps"]):
-            from .builtins import CONTRACTS, validate_inputs
+            from .builtins import builtin, validate_inputs
 
-            if step.get("uses") in CONTRACTS:
+            if builtin(step.get("uses")) is not None:
                 validate_inputs(str(step["uses"]), step.get("with", {}))
             if "run" in step and "shell" not in step:
                 raise _issue("action.runs.steps.shell", "Composite run steps require shell.")

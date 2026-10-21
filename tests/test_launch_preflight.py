@@ -205,3 +205,61 @@ def test_preview_bounds_files_but_counts_every_blocker(
     assert bounded.blocking_count == 205
     assert len(bounded.files) == 1
     assert bounded.truncated
+
+
+def test_preflight_warns_about_unbound_secrets(
+    project: RelayProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from django.test import Client
+
+    def post(client: Client, path: str, body: dict[str, object]) -> int:
+        return client.post(path, json.dumps(body), content_type="application/json").status_code
+
+    monkeypatch.setenv("RELAY_PROJECT_ROOT", str(project.repository))
+    owner = Client()
+    credentials = {"username": "owner", "password": "Relay-Test-Passphrase-2026!"}
+    assert post(owner, "/api/auth/onboard", credentials) == 201
+    assert post(owner, "/api/workflow-environments", {"name": "prod"}) == 200
+    for scope, name in (("project", "API_KEY"), ("environment", "DEPLOY_KEY")):
+        binding = {
+            "scope": scope,
+            "environment": "prod",
+            "name": name,
+            "kind": "secret",
+            "source": "environment",
+            "reference": "OWNER_VALUE",
+        }
+        assert post(owner, "/api/workflow-bindings", binding) == 200
+    project.write_workflow(
+        "tokens",
+        "jobs:\n  check:\n    env:\n      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
+        "    steps:\n      - run: echo ${{ secrets.api_key }}\n",
+    )
+    preview = owner.get("/api/workflows/tokens/preflight").json()
+    assert preview["clean"] is True
+    assert preview["warnings"] == [
+        {
+            "code": "unbound_secret",
+            "name": "GITHUB_TOKEN",
+            "message": "Secret GITHUB_TOKEN has no binding, so steps receive an empty value. "
+            "Add it under Variables, secrets, environments and library.",
+        }
+    ]
+    deploy = (
+        "jobs:\n"
+        "  deploy:\n    environment: {name: prod}\n"
+        "    steps: [{run: 'echo ${{ secrets.DEPLOY_KEY }}'}]\n"
+        "  chosen:\n    environment: ${{ inputs.target }}\n"
+        "    steps: [{run: 'echo ${{ secrets.DEPLOY_KEY }}'}]\n"
+    )
+    project.write_workflow("deploy", deploy)
+    assert owner.get("/api/workflows/deploy/preflight").json()["warnings"] == []
+    # An environment binding counts only for jobs that declare that environment.
+    project.write_workflow(
+        "deploy", deploy + "  check:\n    steps: [{run: 'echo ${{ secrets.DEPLOY_KEY }}'}]\n"
+    )
+    assert [
+        item["name"] for item in owner.get("/api/workflows/deploy/preflight").json()["warnings"]
+    ] == ["DEPLOY_KEY"]

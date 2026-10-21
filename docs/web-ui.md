@@ -170,8 +170,8 @@ login, can replay either introduction.
 **Reset onboarding**, which makes both appear on the next opening or reload.
 When browser storage is blocked, dismissal lasts for the current app session;
 reset reports the storage limitation instead of claiming it was saved.
-Closing the welcome slides also hides the setup welcome prompt; the
-agent checklist remains available from **Help > Get started**.
+Closing the welcome slides leaves the setup welcome prompt in place until you
+open the checklist or choose **Dismiss welcome**.
 
 When the project inventory is empty, the workspace shows a **Start using
 Relay** homepage with setup steps and **Open your first project**. Global
@@ -212,8 +212,11 @@ commands to copy; Relay never installs an agent or signs it in.
 Choose **Start from a template** to open the gallery with **AI coding workflow**
 selected. Create it, enter your task once, and choose the coding agent's exact
 model and a Claude Opus model from fresh connection results. The workflow
-follows its phase instruction files and pauses for human approvals. Both
-models must be available before **Run workflow** becomes enabled. Smaller
+follows its phase instruction files and pauses for human approvals. Each
+approval is answered with a button, such as **IMPLEMENT**, so a mistyped
+answer cannot fail the run. Approving lets the agent commit, push its branch,
+and open a pull request if the repository has a remote; nothing is merged.
+Both models must be available before **Run workflow** becomes enabled. Smaller
 starters use one exact model and show their sample inputs instead.
 Launch uses the existing validation and preflight services. With no working
 agent, the checklist explains the fix and disables the run button.
@@ -245,7 +248,11 @@ Internal IDs and provider JSON are under advanced views. Cleanup controls live
 in **Settings > Storage**.
 
 **New workflow** opens the same seven-starter gallery as the checklist. Each
-card shows its purpose, job graph preview, required agent, and input types.
+card shows its purpose, job sequence, size in jobs and approvals, required
+agent, and input types, using the YAML type names such as `choice`. The
+preselected **AI coding workflow** card also says that it needs Claude Code
+with an Opus model and one other coding agent, and suggests **Ask an agent**
+for a smaller first run.
 Selection copies workflow, prompt, and local action sources into `.relay/` without
 overwriting owner files. The editor and launch use those copies. A blank
 workflow accepts a name and opens with one safe echo job.
@@ -256,13 +263,54 @@ Choose a saved workflow or **Create workflow**. New sources use `jobs` and
 ordered `steps`; a blank workflow starts with one safe `echo Ready` job. The
 seven-starter gallery copies selected sources without overwriting owner files.
 
-**Add job** adds a local job. Select its graph node to edit its name,
-dependencies, condition, timeout, environment, matrix, outputs, concurrency,
-cache mode, and failure tolerance. **Ordered step** selects a step. Steps can
-be added, moved, or removed. Scripts expose shell and working-directory fields;
-action steps expose their local action reference and input mapping. Agent steps
-provide an exact model override, prompt files, runtime prompt, and the selected
-provider's current effort choices. Permission modes are owner settings.
+**Import from GitHub Actions**, beside **Blank workflow**, lists the YAML files
+in the repository's `.github/workflows/` folder. Choosing one shows **Changes**,
+each edit the conversion made, and **Check by hand**, what it could not
+convert, including any remaining validation messages. The conversion:
+
+- removes `runs-on`, `permissions`, `services`, and `container`;
+- removes triggers that have no local equivalent, such as `pull_request`, and
+  adds `workflow_dispatch` when no trigger remains;
+- removes `actions/checkout` and `actions/setup-*` steps, because jobs run in a
+  working copy with the tools installed on this computer;
+- replaces the artifact and cache actions with `relay/upload-artifact@v1`,
+  `relay/download-artifact@v1`, `relay/cache@v1`, `relay/restore-cache@v1`, and
+  `relay/save-cache@v1`, keeping the inputs that mean the same;
+- points jobs that call `./.github/workflows/<file>` at
+  `./.relay/workflows/<file>`, and asks you to import that file too;
+- rewrites `github` and `runner` expression names and the step file variables
+  to their Relay names, such as `relay.sha`, `host.os`, and `$RELAY_OUTPUT`.
+
+Comments on kept lines survive. The original file never changes. **Create
+workflow** creates a workflow named after the file and opens the converted YAML
+as an unsaved draft, so Save validates it like any other edit.
+
+**Add job** adds a local job of the chosen **New job type**, and **Add step**
+adds a step of the type chosen from its menu. Both use plain names, such as
+**Approval** and **Check a report**, each with a one-line description, and
+every new job or step starts with values that validate. **Repeat a workflow**
+first asks which of the project's other workflows to repeat. Select a graph
+node to edit its job. A job added in this session opens on **Steps**; other
+jobs open on **General**, which shows the name, job ID, **Start after**,
+condition, and timeout. Its **Advanced** section holds the reusable workflow,
+matrix, concurrency, and remaining job fields, and starts open when one of them
+has a value. **Start after** lists jobs as "name (ID)". Job IDs never change on
+their own: **Rename job ID** changes the ID, every `needs` entry, and its
+`needs` and `jobs` expression references in one undoable edit.
+
+**Steps in this job** lists the steps in order, with buttons that move each
+one, and each canvas card lists up to five of its steps. Select a step to edit
+it. Scripts expose shell and working-directory fields. A step's **Advanced**
+section holds its raw action reference, the way to name a local action under
+`./.relay/actions/`, and its inputs as JSON. An agent step chooses where it
+runs under **Runs on**: the saved order from Settings, one agent, or agents to
+try in order. Agents that are not installed are marked **Not installed** and
+cannot be newly chosen; **Open Get started** opens the checklist. Agent steps
+also provide an exact model override, prompt files, runtime prompt, and the
+selected provider's current effort choices. Permission modes are owner
+settings. Every field in job settings and **Workflow settings** has a
+question-mark button; workflow, job, and action input fields show their
+description from the language manifest.
 
 Choose **Visual**, **YAML**, or **Split**. Form edits and YAML edits share one
 CST document. Comments and unrelated fields survive edits; editing an alias
@@ -303,8 +351,15 @@ select an edge and press Delete to remove it. The plus button between jobs
 inserts a job. Right-click a card to duplicate, delete, or run from that job.
 **Run from here** saves a declared start point before opening launch options.
 Undo and redo reverse document edits. **Format as YAML** previews changes
-before applying them to the draft. YAML completion and hover help use the
-server language manifest; diagnostics underline their source position.
+before applying them to the draft. YAML completion offers the fields, action
+inputs, and expression names that are valid at the cursor, and hover shows
+each field's description. Both come from the server language manifest.
+Completion also offers fixed values, such as built-in actions after `uses:`,
+shells, and input types; choosing an action for a step without `with` adds its
+required inputs. Diagnostics underline their source position. Tab indents in
+the YAML and script editors; see [Keyboard shortcuts](keyboard-shortcuts.md).
+When the YAML is empty, the editor says so and offers **Restore saved source**
+and **Add a job**.
 
 **Workflow settings** edits names, launch inputs, defaults, environment,
 concurrency, events, recovery, and declared start points. Job forms use
@@ -354,7 +409,22 @@ Workflow management shares this list refresh. A response that arrives after
 the owner switches workflows or projects cannot replace the new selection.
 Cmd/Ctrl+S uses the same Save action. Parser diagnostics include the reason,
 position, and a hint; independent invalid fields appear together. An invalid
-edit keeps the last valid graph visible with an explanation.
+edit keeps the last valid graph visible with an explanation. Warnings, such as
+a reference that will be empty at run time, appear after errors and underline
+their line without disabling **Save**. A diagnostic or warning inside a job
+offers **Open job**.
+
+A step on a deprecated built-in version shows a warning, and its step form
+says, for example, **This step uses an older version of Command.** **Step
+type** shows **Command (older version)**, while new steps and completion
+offer only the current version. A removed version is an
+error that names its replacement. Either one offers **Update to current
+versions**, which rewrites every such step in the open workflow as an unsaved
+draft and lists the result under **Changes** and **Check by hand**. **Undo**
+reverts it, and only **Save** writes it. A reusable workflow or local action
+that uses a deprecated version is named in its warning; edit that file
+directly. See
+[Built-in action versions](workflows.md#built-in-action-versions).
 
 ## Launch a run
 
@@ -379,8 +449,11 @@ Launch failures appear in the panel, and the owner can retry after fixing them.
 
 When the saved workflow is ready, **Project files** checks launch cleanliness
 before enabling **Run workflow**. It lists blocking files with their Git
-reasons and puts permitted changes under **Allowed files**, explaining each
-exemption. A bounded preview shows full counts when the file list is truncated.
+reasons and lists permitted changes under a count such as **2 new workflow
+files can stay uncommitted**, explaining each exemption. A bounded preview
+shows full counts when the file list is truncated. A warning names each
+secret the workflow reads without a binding; warnings do not disable
+**Run workflow**.
 **Check files again** refreshes the file check and current branch.
 
 Blocked previews offer **Copy** for `git commit` and `git stash -u`. Relay
@@ -392,7 +465,10 @@ server's launch check and appears as an error in the panel.
 
 **Commit workflow files** opens a bounded preview of validated untracked
 workflow sources and their complete contents. The action is available even
-when the selected workflow is the only untracked source.
+when the selected workflow is the only untracked source. When nothing blocks
+the run, the panel marks it optional: commit the workflow only to save it in
+your Git history. When files block the run, it says **Commit these workflow
+files to run.**
 It includes the selected workflow when untracked, plus its captured prompt
 files. An explicit confirmation commits exactly those reviewed paths.
 Changed bytes, a changed Git head, or a nonempty index reject the operation.
@@ -613,8 +689,27 @@ The first attention read after opening Relay establishes a baseline, so old
 completions do not produce notifications.
 
 When an approval is pending, its response form includes review instructions
-and retained material. At other times the panel is titled
+and retained material. A wait that declares answer `options` shows one button
+per answer and no text box. At other times the panel is titled
 **Changes and documents** and does not ask for a response.
+
+**Review material** lists **Committed code changes** whenever the run's
+protected head differs from its source commit, even before that evidence is
+on a loaded artifact page. Opening the list loads the remaining artifact
+pages, at most 20. A pending approval first shows a document that its
+instructions name; otherwise the run shows its committed changes, or else its
+newest document. The summary's artifact count is the server's total.
+
+A finished, unmerged run with committed changes names its run branch and up to
+ten changed files, with copyable `git switch` and `git merge --ff-only`
+commands to bring the code into the launch branch. It also points to the merge
+choice under **Advanced options** for the next run. A merged run shows its
+merge commit instead.
+
+Run views use each job's declared `name` from launch, even while it is queued.
+Loop iterations appear as **Round 1**, **Round 2**, and so on, inside their
+job, and the job count includes only the workflow's top-level jobs. Commits
+made at a named job's boundary read `Relay: complete job <name> (<job id>)`.
 
 When a step fails, Summary annotations show its name, the failure description
 or exit code, and the provider's last public message when available.
@@ -906,7 +1001,10 @@ readable scale; **Fit View** remains available for the whole graph. Refreshes
 do not reset a manually chosen viewport. Skipped or canceled jobs that never
 started show no elapsed duration. **Artifacts** is a visible summary section,
 with job, attempt, readable size, authenticated downloads, and expandable
-file hashes. Each download has a distinct accessible name. **Workflow file**
+file hashes. Copies of one working-copy file show as one row for the newest
+copy, with older copies under a disclosure such as **2 earlier copies**. Each
+download has a
+distinct accessible name. **Workflow file**
 opens the immutable captured YAML in a read-only dialog. **Edit current
 workflow** opens the saved source editor separately. Annotations link to
 failed jobs. Agent messages, approvals, loop results, and code review stay in the
@@ -1073,6 +1171,7 @@ the Run workflow panel does not wait for a first chunk download.
 ### Help, keyboard access, and settings validation
 
 The Help menu includes [Getting started](getting-started.md),
+[Build your first workflow](build-your-first-workflow.md),
 [Coming from GitHub Actions](coming-from-github-actions.md), and
 [keyboard shortcuts](keyboard-shortcuts.md). Welcome slides close on Escape;
 starting a tour is an explicit choice. A successful project run hides the
@@ -1086,7 +1185,10 @@ changes offers Keep editing or Discard changes. Restart-only settings retain
 their restart notices.
 
 Job settings use key/value tables, matrix axes, a concurrency group with a
-cancel-in-progress switch, and searchable expression helpers. The failure
+cancel-in-progress switch, and searchable expression helpers. **Build a
+condition** opens a condition's helper, which offers only the names that field
+accepts. A value-type select appears for values that are not plain text, and
+**Change type** reveals it for text. The failure
 tab selects the saved workflow recovery default, Stop and tell me, or a
 literal limit of one or two automatic retries per agent step. The smaller
 of the step limit and captured workflow limit applies; retries never reset
@@ -1109,7 +1211,8 @@ explicit shell. Named shared commands and exact argv remain separate choices.
 
 Loop and reusable-workflow cards expand a read-only child graph and link to the
 child source for editing. The initial editor viewport fits its nodes; selecting
-a job explicitly focuses it. Small graphs omit the minimap. Job deletion removes
+a job explicitly focuses it, and closing job settings fits every card in view
+again. Small graphs omit the minimap. Job deletion removes
 inbound dependencies in the same undoable source edit.
 
 Structured environment, output and input controls include an **Advanced JSON**

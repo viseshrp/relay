@@ -1,4 +1,5 @@
 import { WorkflowLibrarySettings } from "./WorkflowLibrarySettings";
+import { HelpControl, HelpSelectField, HelpTextField } from "./HelpTip";
 import {
   Alert,
   Button,
@@ -12,7 +13,6 @@ import {
   Stack,
   Tab,
   Tabs,
-  TextField,
   Typography,
 } from "@mui/material";
 
@@ -73,29 +73,29 @@ export function WorkflowSettingsView({
           {error && <Alert severity="error">{error}</Alert>}
           {tab === 0 && (
             <>
-              <TextField
-                select
+              <HelpSelectField
+                topic="bindingScope"
                 label="Scope"
                 value={scope}
-                onChange={(e) => setScope(e.target.value)}
+                onChange={(e) => setScope(String(e.target.value))}
               >
                 <MenuItem value="installation">All projects</MenuItem>
                 <MenuItem value="project">This project</MenuItem>
                 <MenuItem value="environment">Environment</MenuItem>
-              </TextField>
+              </HelpSelectField>
               {scope === "environment" && (
-                <TextField
-                  select
+                <HelpSelectField
+                  topic="bindingEnvironment"
                   label="Binding environment"
                   value={environment}
-                  onChange={(e) => setEnvironment(e.target.value)}
+                  onChange={(e) => setEnvironment(String(e.target.value))}
                 >
                   {environments.map((item) => (
                     <MenuItem key={item.name} value={item.name}>
                       {item.name}
                     </MenuItem>
                   ))}
-                </TextField>
+                </HelpSelectField>
               )}
               {bindings
                 .filter((item) => item.scope === selectedScope)
@@ -128,30 +128,32 @@ export function WorkflowSettingsView({
                     </Button>
                   </Stack>
                 ))}
-              <TextField
+              <HelpTextField
+                topic="bindingName"
                 label="Binding name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
-              <TextField
-                select
+              <HelpSelectField
+                topic="bindingType"
                 label="Binding type"
                 value={kind}
                 onChange={(e) => {
-                  setKind(e.target.value);
+                  setKind(String(e.target.value));
                   setValue("");
                 }}
               >
                 <MenuItem value="variable">Variable</MenuItem>
                 <MenuItem value="secret">Secret</MenuItem>
-              </TextField>
+              </HelpSelectField>
               {kind === "secret" && (
-                <TextField
-                  select
+                <HelpSelectField
+                  topic="secretSource"
                   label="Secret source"
+                  width="wide"
                   value={source}
                   onChange={(e) => {
-                    setSource(e.target.value);
+                    setSource(String(e.target.value));
                     setValue("");
                   }}
                 >
@@ -161,16 +163,18 @@ export function WorkflowSettingsView({
                   <MenuItem value="credential-store">
                     Native credential store
                   </MenuItem>
-                </TextField>
+                </HelpSelectField>
               )}
               {kind === "secret" && source === "environment" ? (
-                <TextField
+                <HelpTextField
+                  topic="secretReference"
                   label="Environment variable reference"
                   value={reference}
                   onChange={(e) => setReference(e.target.value)}
                 />
               ) : (
-                <TextField
+                <HelpTextField
+                  topic="bindingValue"
                   label={
                     kind === "secret" ? "New secret value" : "Variable value"
                   }
@@ -212,26 +216,30 @@ export function WorkflowSettingsView({
                   Edit {item.name}
                 </Button>
               ))}
-              <TextField
+              <HelpTextField
+                topic="environmentName"
                 label="Environment name"
                 value={config.name}
                 onChange={(e) => setConfig({ ...config, name: e.target.value })}
               />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={config.approval_required}
-                    onChange={(e) =>
-                      setConfig({
-                        ...config,
-                        approval_required: e.target.checked,
-                      })
-                    }
-                  />
-                }
-                label="Require my approval before this job starts"
-              />
-              <TextField
+              <HelpControl topic="environmentApproval">
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={config.approval_required}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          approval_required: e.target.checked,
+                        })
+                      }
+                    />
+                  }
+                  label="Require my approval before this job starts"
+                />
+              </HelpControl>
+              <HelpTextField
+                topic="environmentWait"
                 label="Wait timer (minutes)"
                 type="number"
                 value={config.wait_minutes}
@@ -239,7 +247,8 @@ export function WorkflowSettingsView({
                   setConfig({ ...config, wait_minutes: Number(e.target.value) })
                 }
               />
-              <TextField
+              <HelpTextField
+                topic="environmentBranches"
                 label="Allowed branch patterns (one per line)"
                 multiline
                 value={config.branches.join("\n")}
@@ -250,7 +259,8 @@ export function WorkflowSettingsView({
                   })
                 }
               />
-              <TextField
+              <HelpTextField
+                topic="environmentUrl"
                 label="Environment URL"
                 value={config.url}
                 onChange={(e) => setConfig({ ...config, url: e.target.value })}

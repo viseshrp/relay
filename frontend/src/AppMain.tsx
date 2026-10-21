@@ -219,6 +219,7 @@ export function AppMain({ state }: { state: AppState }) {
               onLaunchClosed={() => setLaunchWorkflow(null)}
               onWorkflowLoaded={workflowLoaded}
               onNavigationReady={registerNavigation}
+              onOpenGetStarted={openSetup}
               onRunLaunched={(runId) => {
                 setLaunchWorkflow(null);
                 navigate({

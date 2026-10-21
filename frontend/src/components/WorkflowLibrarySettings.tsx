@@ -1,4 +1,5 @@
-import { Button, Stack, TextField, Typography } from "@mui/material";
+import { Button, Stack, Typography } from "@mui/material";
+import { HelpTextField } from "./HelpTip";
 
 import { errorMessage } from "../api";
 
@@ -34,12 +35,14 @@ export function WorkflowLibrarySettings({
           </Button>
         </Stack>
       ))}
-      <TextField
+      <HelpTextField
+        topic="libraryName"
         label="Library workflow name"
         value={templateName}
         onChange={(e) => setTemplateName(e.target.value)}
       />
-      <TextField
+      <HelpTextField
+        topic="libraryDescription"
         label="Library description"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
@@ -57,7 +60,8 @@ export function WorkflowLibrarySettings({
       >
         Save current workflow to library
       </Button>
-      <TextField
+      <HelpTextField
+        topic="libraryImport"
         label="Import workflow bundle"
         multiline
         minRows={4}

@@ -26,6 +26,7 @@ from relay.workflows.schema import (
 )
 
 from . import expressions
+from .builtins import is_builtin, parse_list_input
 from .language import (
     ActionsDocument,
     expand_matrix,
@@ -148,7 +149,7 @@ def bind_agent(step: Mapping[str, Any], values: Mapping[str, Any]) -> AgentNode:
             route[field] = expressions.interpolate(raw[field], route_values)
     agents = route.get("agents", route.get("agent", []))
     if isinstance(agents, str):
-        agents = json.loads(agents) if agents.startswith("[") else [agents] if agents else []
+        agents = parse_list_input(agents, "agents" if "agents" in route else "agent")
     if not isinstance(agents, list) or any(not isinstance(item, str) for item in agents):
         message = "relay/agent agents must be a JSON list of exact provider ids."
         raise WorkflowValidationError(message)
@@ -252,9 +253,9 @@ def bind_routes(workflow: ValidatedWorkflow, values: Mapping[str, Any]) -> Valid
             step_id = str(step.get("id") or f"step_{index + 1}")
             scope = f"{prefix}.{step_id}" if prefix else step_id
             reference = step.get("uses", "")
-            if reference == "relay/agent@v1":
+            if is_builtin(reference, "agent"):
                 bindings[scope] = bind_agent(step, context)
-            elif reference == "relay/loop@v1":
+            elif is_builtin(reference, "loop"):
                 raw = step.get("with", {})
                 child = load(sources[str(raw["workflow"]).removeprefix("./")])
                 deferred = dynamic(raw.get("inputs", "{}"), context)
@@ -383,7 +384,7 @@ def validate_commands(
             for step in job.get("steps", []):
                 name = step.get("with", {}).get("command")
                 if (
-                    step.get("uses") == "relay/command@v1"
+                    is_builtin(step.get("uses"), "command")
                     and isinstance(name, str)
                     and "${{" not in name
                     and name not in commands
