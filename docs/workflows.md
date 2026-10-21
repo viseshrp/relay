@@ -214,7 +214,8 @@ remaining job deadline. `continue-on-error` applies to this failure too.
 
 `relay/agent@v1` accepts `agent` or ordered JSON `agents`, `model`, `effort`,
 newline-separated `prompt-files`, `prompt`, and optional `report`, `selector`,
-`format`, `field`, `label`, and `auto-retry`. Local prompt paths resolve under
+`format`, `field`, `label`, `auto-retry`, `retry-limit`, and `allowed-paths`.
+Local prompt paths resolve under
 `.relay/`; `global:NAME` resolves in the owner's global prompt directory.
 A runtime `prompt` follows the frozen ordered prompt files.
 
@@ -674,3 +675,40 @@ A `relay/agent@v1` step can set `retry-limit: 1` or `retry-limit: 2` beside
 `auto-retry: true`. The limit is literal and bounded; expressions are not
 accepted. It caps the captured workflow recovery budget for that step,
 without resetting retries already used across restart or owner retry.
+
+### Allowed paths
+
+`allowed-paths` limits what one agent step may change. It is a literal block
+with one pattern per line, relative to the project folder. `**` matches any
+number of folders, `*` and `?` match within one folder, and a trailing `/`
+means everything below that folder. Matching is exact and case-sensitive on
+every platform. Patterns cannot be absolute, contain `.`, `..`, or
+backslashes, or use expressions; at most 100 patterns are allowed.
+
+<!-- relay-example: valid allowed-paths -->
+```yaml
+jobs:
+  docs:
+    steps:
+      - id: write
+        uses: relay/agent@v1
+        with:
+          agent: codex
+          model: exact-model-value
+          prompt-files: prompts/docs.md
+          report: DOCS_REVIEW.md
+          label: Created by
+          allowed-paths: |
+            docs/**
+            README.md
+```
+
+Before the step's first attempt, Relay records the tracked and untracked
+worktree content without touching the index, HEAD, or files. After the agent
+succeeds, any path that differs from that record and matches no pattern fails
+the step with `output_validation_error`, naming up to 20 such paths. Root
+workflow reports and the step's own `report` stay allowed. Changes outside the
+project folder always fail. Retries compare against the first attempt's record,
+so a repair that reverts an out-of-scope edit passes. With automatic recovery,
+the repair instruction lists the paths. Without `allowed-paths`, a step may
+change any path, as before.

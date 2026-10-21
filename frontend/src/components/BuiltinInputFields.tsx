@@ -39,7 +39,9 @@ export function BuiltinInputFields({
           label={
             field === "inputs" ? "Workflow input expression" : `Action ${field}`
           }
-          multiline={["prompt", "options", "command"].includes(field)}
+          multiline={["prompt", "options", "command", "allowed-paths"].includes(
+            field,
+          )}
           value={String(inputs[field] ?? "")}
           onChange={(event) => onChange(field, event.target.value || undefined)}
           helperText={
@@ -47,7 +49,9 @@ export function BuiltinInputFields({
               ? "Choose a local reusable workflow, for example ./.relay/workflows/fix.yaml."
               : field === "format"
                 ? "exists records a boolean; label, json, or yaml retains a report."
-                : undefined
+                : field === "allowed-paths"
+                  ? "One pattern per line, such as docs/** or src/*.py. Leave empty to allow any path."
+                  : undefined
           }
         />
       );

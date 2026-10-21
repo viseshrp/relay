@@ -181,6 +181,9 @@ a step out.
 
 Eligible error codes are `output_validation_error`, `commit_validation_error`,
 `dirty_repository_error`, and `node_timeout`.
+An agent step that changes paths outside its
+[`allowed-paths`](workflows.md#allowed-paths) fails with
+`output_validation_error`, so repair receives the offending paths.
 Provider execution and protocol failures require an owner decision and create no
 automatic repair instruction or schedule. Cancellation, interruption,
 permission refusal, unavailable models, unsafe

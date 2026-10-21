@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+import re
 from typing import Any
 
 from relay.errors import WorkflowValidationError
+
+ALLOWED_PATHS_MAX = 100
+ALLOWED_PATH_MAX_CHARS = 1024
 
 CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
     "relay/agent@v1": (
@@ -24,6 +28,7 @@ CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
             "label",
             "auto-retry",
             "retry-limit",
+            "allowed-paths",
         },
         set(),
     ),
@@ -70,6 +75,8 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "Agent retry-limit must be a literal integer between 1 and 2."
         raise WorkflowValidationError(message)
+    if reference == "relay/agent@v1" and "allowed-paths" in inputs:
+        parse_allowed_paths(inputs["allowed-paths"])
     if reference == "relay/human-wait@v1" and "options" in inputs:
         value = inputs["options"]
         if "${{" not in str(value):
@@ -82,6 +89,37 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "Report format must be exists, label, json, or yaml."
         raise WorkflowValidationError(message)
+
+
+def parse_allowed_paths(value: object) -> tuple[str, ...]:
+    """Validate one literal pattern per line, relative to the project folder.
+
+    For example, `docs/**` allows any file below `docs/`, `src/*.py` allows
+    Python files directly in `src/`, and `README.md` allows only that file.
+    """
+    if not isinstance(value, str) or "${{" in value:
+        message = "allowed-paths must be a literal list of path patterns, one per line."
+        raise WorkflowValidationError(message)
+    patterns = tuple(line.strip() for line in value.splitlines() if line.strip())
+    if not patterns or len(patterns) > ALLOWED_PATHS_MAX:
+        message = f"allowed-paths must list between 1 and {ALLOWED_PATHS_MAX} patterns."
+        raise WorkflowValidationError(message)
+    for pattern in patterns:
+        parts = pattern.split("/")
+        if (
+            len(pattern) > ALLOWED_PATH_MAX_CHARS
+            or "\\" in pattern
+            or pattern.startswith("/")
+            or re.match(r"^[A-Za-z]:", pattern)
+            or any(part in {"", ".", ".."} for part in parts[:-1])
+            or parts[-1] in {".", ".."}
+        ):
+            message = (
+                f"allowed-paths pattern {pattern!r} must be a relative POSIX path "
+                "without '.', '..', or backslashes."
+            )
+            raise WorkflowValidationError(message)
+    return patterns
 
 
 def human_wait_options(value: object) -> list[str]:

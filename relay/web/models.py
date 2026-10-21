@@ -234,6 +234,8 @@ class NodeRun(RelayModel):
     frozen_def: models.JSONField = models.JSONField(default=dict)
     retry_options: models.JSONField = models.JSONField(default=dict)
     recovery_instruction: models.TextField = models.TextField(blank=True, default="")
+    # Tree captured before a scoped agent step's first attempt; retries reuse it.
+    write_baseline: models.CharField = models.CharField(max_length=64, blank=True, default="")
     scope_inputs: models.JSONField = models.JSONField(default=dict)
     outputs: models.JSONField = models.JSONField(default=dict)
     status: models.CharField = models.CharField(

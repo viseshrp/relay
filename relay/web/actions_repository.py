@@ -481,6 +481,19 @@ def display_name(attempt_id: str, value: str) -> None:
         )
 
 
+def write_baseline(attempt_id: str) -> tuple[str, str, str]:
+    """Return the attempt's run ID, step ID, and recorded scope baseline, if any."""
+    node = NodeAttempt.objects.select_related("node_run").get(pk=attempt_id).node_run
+    return str(node.run_id), str(node.pk), str(node.write_baseline)
+
+
+def record_write_baseline(node_run_id: str, tree: str) -> str:
+    """Keep the first recorded tree; a later capture never replaces it."""
+    with transaction.atomic():
+        NodeRun.objects.filter(pk=node_run_id, write_baseline="").update(write_baseline=tree)
+        return str(NodeRun.objects.get(pk=node_run_id).write_baseline)
+
+
 def request_human_wait(
     attempt_id: str, prompt: str, timeout: float | None, options: list[str]
 ) -> None:
