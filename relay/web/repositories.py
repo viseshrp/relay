@@ -1255,6 +1255,19 @@ def _run_usage(run: Run) -> dict[str, object]:
     }
 
 
+def _paired(left: Mapping[str, object], right: Mapping[str, object]) -> list[dict[str, object]]:
+    """Align two mappings by key; `{"a": 1}` and `{"a": 2, "b": 3}` give two rows."""
+    return [
+        {
+            "name": name,
+            "left": left.get(name),
+            "right": right.get(name),
+            "same": name in left and name in right and left[name] == right[name],
+        }
+        for name in sorted({*left, *right})
+    ]
+
+
 def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
     """Expose attempt facts without worker, process, session, or provider-private fields."""
     ended = (
@@ -2024,6 +2037,93 @@ class DjangoReadStore:
             raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
         else:
             return result, next_value
+
+    def compare_runs(self, left_id: str, right_id: str) -> dict[str, object]:
+        """Pair two runs' inputs, captured hashes, and job results by scope path.
+
+        For example, a rerun that changed `prompts/review.md` shows that hash as
+        different, and a step that failed before and succeeded after shows both
+        attempts' agent, model, error, timing, and usage next to each other.
+        """
+        try:
+            with read_snapshot():
+                runs = (self._monitor_run(left_id), self._monitor_run(right_id))
+                sides = [self._compare_side(run) for run in runs]
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read the runs to compare."
+            raise PersistenceError(message, context={"left": left_id, "right": right_id}) from None
+        if sides[0][0]["project_id"] != sides[1][0]["project_id"]:
+            message = "Only runs from the same project can be compared."
+            raise ConfigError(message, context={"left": left_id, "right": right_id})
+        (left_side, left_inputs, left_hashes, left_steps) = sides[0]
+        (right_side, right_inputs, right_hashes, right_steps) = sides[1]
+        scopes = list(dict.fromkeys([*left_steps, *right_steps]))
+        steps = [
+            {
+                "scope_path": scope,
+                "left": left_steps.get(scope),
+                "right": right_steps.get(scope),
+            }
+            for scope in scopes
+        ]
+        result: dict[str, object] = {
+            "left": left_side,
+            "right": right_side,
+            "inputs": _paired(left_inputs, right_inputs),
+            "hashes": _paired(left_hashes, right_hashes),
+            "steps": [],
+            "truncated": False,
+        }
+        budget = API_MAX_PAGE_BYTES - len(json.dumps(result).encode("utf-8"))
+        for step in steps[:API_MAX_PAGE]:
+            size = len(json.dumps(step).encode("utf-8")) + 2
+            if size > budget:
+                result["truncated"] = True
+                break
+            budget -= size
+            cast(list, result["steps"]).append(step)
+        if len(steps) > API_MAX_PAGE:
+            result["truncated"] = True
+        return result
+
+    @staticmethod
+    def _compare_side(
+        run: Run,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        names = cast(dict, _mapping(run, "actions_state").get("display_names", {}))
+        side = _run_record(run)
+        name = _mapping(snapshot, "resolved_definition").get("name")
+        side["workflow_name"] = name if isinstance(name, str) and name else side["workflow_key"]
+        side["usage"] = _run_usage(run)
+        steps: dict[str, object] = {}
+        nodes = (
+            NodeRun.objects.filter(
+                run=run,
+                node_type__in=(NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value),
+            )
+            .annotate(compare_attempts=models.Count("attempts"))
+            .order_by("pk")
+        )
+        for node in nodes[: API_MAX_PAGE + 1]:
+            scope = _string(node, "scope_path")
+            latest = NodeAttempt.objects.filter(node_run=node).order_by("-attempt_number").first()
+            steps[scope] = {
+                "node_type": _string(node, "node_type"),
+                "display_name": names.get(scope, _string(node, "node_id")),
+                "status": _string(node, "status"),
+                "attempt_count": _integer(node, "compare_attempts"),
+                "latest_attempt": _job_attempt_record(latest) if latest is not None else None,
+                "outputs": _mapping(node, "outputs"),
+            }
+        return (
+            side,
+            _mapping(snapshot, "typed_inputs"),
+            _mapping(snapshot, "hashes"),
+            steps,
+        )
 
     def run_workflow(self, run_id: str) -> dict[str, object]:
         """Read the immutable workflow captured for a run, with a bounded preview."""

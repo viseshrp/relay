@@ -283,6 +283,35 @@ export interface LaunchPreview {
   truncated: boolean;
 }
 
+export interface ComparedValue {
+  name: string;
+  left: JsonValue | null;
+  right: JsonValue | null;
+  same: boolean;
+}
+
+export interface ComparedStepSide {
+  node_type: string;
+  display_name: string;
+  status: string;
+  attempt_count: number;
+  latest_attempt: JobAttempt | null;
+  outputs: Record<string, JsonValue>;
+}
+
+export interface RunComparison {
+  left: RunSummary & { workflow_name: string; usage: RunUsage };
+  right: RunSummary & { workflow_name: string; usage: RunUsage };
+  inputs: ComparedValue[];
+  hashes: ComparedValue[];
+  steps: {
+    scope_path: string;
+    left: ComparedStepSide | null;
+    right: ComparedStepSide | null;
+  }[];
+  truncated: boolean;
+}
+
 export interface UsageCost {
   amount: number;
   currency: string;

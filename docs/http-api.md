@@ -263,6 +263,7 @@ The same holder renews it; another holder gets `409` until expiry.
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
 | `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head` |
+| `GET /api/runs/compare?left={id}&right={id}` | none | `200 {"left":{...},"right":{...},"inputs":[...],"hashes":[...],"steps":[...],"truncated":false}` |
 
 Finished-run monitors use `events?summary=true`: at most 50 state events and
 16 KiB per page, excluding agent output, command output and step summaries.
@@ -593,6 +594,19 @@ and gains one-based `part` and total `parts` counts. Other large payloads become
 of the original JSON text. Join those chunks before parsing the JSON. Relay
 reserves the remaining persisted-event budget for scope and attempt metadata;
 it splits on Unicode character boundaries and accounts for JSON escaping.
+
+Run comparison reads two runs of the same project; runs from different
+projects return `400 config_error`, and a missing or malformed ID returns the
+run-not-found error. `left` and `right` are run records with `workflow_name`
+and the `usage` totals described above. `inputs` pairs the captured typed
+inputs and `hashes` pairs the snapshot hashes by name; each row has `name`,
+`left`, `right`, and `same`, so a value present on one side only is `null` on
+the other. `steps` pairs job and step records by `scope_path` in first-seen
+order. Each side is `null` when that run has no such scope, or contains
+`node_type`, `display_name`, `status`, `attempt_count`, `latest_attempt` (the
+attempt record above, or `null`), and `outputs`. At most 200 scopes and the
+1 MiB response limit apply; `truncated` reports omitted scopes. Comparison is
+read-only and does not depend on either run's event cursor.
 
 ## Controls
 

@@ -4,6 +4,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   FormControl,
   InputLabel,
@@ -24,6 +25,8 @@ import type { ProjectRecord, RunSummary } from "../types";
 import { useClock } from "../useClock";
 import { ActionIcon, StatusIcon } from "./ActionIcon";
 import { WorkflowSidebar, type WorkflowEntry } from "./WorkflowSidebar";
+import { RunCompareDialog } from "./RunCompareDialog";
+import { useState } from "react";
 
 interface HistoryFilters {
   workflow: string;
@@ -70,6 +73,16 @@ export function RunHistory({
   const current = workflows.find(
     (workflow) => workflow.key === filters.workflow,
   );
+  const [comparing, setComparing] = useState(false);
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  function toggle(id: string): void {
+    setChosen((current) =>
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : [...current, id].slice(-2),
+    );
+  }
   if (!inventory && !error) return <ViewSkeleton view="runs" />;
   return (
     <Box className="actions-layout">
@@ -97,7 +110,47 @@ export function RunHistory({
               Edit workflow
             </Button>
           )}
+          {comparing ? (
+            <>
+              <Button
+                variant="contained"
+                disabled={chosen.length !== 2}
+                onClick={() => setCompareOpen(true)}
+              >
+                Compare {chosen.length}/2
+              </Button>
+              <Button
+                onClick={() => {
+                  setComparing(false);
+                  setChosen([]);
+                }}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              disabled={runs.length < 2}
+              onClick={() => setComparing(true)}
+            >
+              Compare runs
+            </Button>
+          )}
         </Stack>
+        {comparing && (
+          <Typography variant="body2" color="text.secondary">
+            Choose two runs to compare their inputs, captured files, and step
+            results.
+          </Typography>
+        )}
+        {compareOpen && chosen.length === 2 && (
+          <RunCompareDialog
+            project={project.id}
+            left={chosen[0]}
+            right={chosen[1]}
+            onClose={() => setCompareOpen(false)}
+          />
+        )}
         {error && <Alert severity="error">{error}</Alert>}
         <Paper
           variant="outlined"
@@ -169,6 +222,17 @@ export function RunHistory({
           <List disablePadding>
             {runs.map((run) => (
               <ListItem key={run.id} disablePadding>
+                {comparing && (
+                  <Checkbox
+                    checked={chosen.includes(run.id)}
+                    onChange={() => toggle(run.id)}
+                    slotProps={{
+                      input: {
+                        "aria-label": `Compare run #${run.number}`,
+                      },
+                    }}
+                  />
+                )}
                 <ListItemButton
                   component="a"
                   href={viewHref("runs", project.id, { run: run.id })}

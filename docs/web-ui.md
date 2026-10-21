@@ -467,7 +467,10 @@ for a materialized agent step that has never started. Completed attempts and
 captured prompts remain immutable. See
 [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
-The Runs tab lists history for the selected project. A selected run shows
+The Runs tab lists history for the selected project. **Compare runs** adds a
+checkbox to each row; choose two runs and select **Compare 2/2** to see their
+inputs, changed captured workflow and prompt files, and each step's status,
+agent, model, error, duration, and usage side by side. A selected run shows
 its title, number, state, source, duration, and controls. When providers
 reported usage, the header totals it, for example
 `1,200 tokens in · 80 tokens out · $0.25 (reported by 2 of 3 attempts)`. A
