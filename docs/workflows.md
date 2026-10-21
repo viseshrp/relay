@@ -259,9 +259,10 @@ The owner can enable bounded recovery in defaults, an active run's controls,
 or workflow `recovery: {enabled: true, max_retries: 2}`. The lifetime retry
 budget stays bounded by the existing recovery limit.
 `with.auto-retry: true` explicitly enables bounded agent repair; `false` opts
-that step out. Omission follows the run policy. Eligible report, protocol, and
-timeout failures retain rejected evidence and append a separate repair
-instruction after original prompts. The budget is durable over the step's
+that step out. Omission follows the run policy. Eligible report, commit,
+dirty-worktree, and timeout failures retain rejected evidence and append a
+separate repair instruction after original prompts. Provider protocol failures
+require an owner decision. The budget is durable over the step's
 lifetime and is never replenished by restart or owner retry. Completed
 upstream work, exact routes, and original prompt bytes remain frozen.
 
