@@ -312,6 +312,19 @@ export interface RunComparison {
   truncated: boolean;
 }
 
+/** An owner-approved lesson; a launch can freeze chosen notes for its agent steps. */
+export interface WorkflowNote {
+  id: string;
+  workflow_key: string;
+  cue: string;
+  lesson: string;
+  evidence: string;
+  confidence: "low" | "medium" | "high" | null;
+  evidence_run_id: string | null;
+  archived: boolean;
+  created_at: string;
+}
+
 export interface UsageCost {
   amount: number;
   currency: string;

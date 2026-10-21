@@ -11,6 +11,8 @@ import {
 
 import { stageLabel } from "../navigation";
 import { runUsageLabel } from "../usage";
+import { useState } from "react";
+import { WorkflowNoteForm } from "./WorkflowNoteForm";
 
 import { RunActions } from "./RunActions";
 
@@ -34,6 +36,7 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
     setFullTitle,
     fullTitle,
   } = state;
+  const [saveNoteOpen, setSaveNoteOpen] = useState(false);
   if (!detail) return null;
   return (
     <Box component="header" aria-labelledby="run-title" className="run-header">
@@ -82,6 +85,9 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
           }
           rerunAllRef={relaunchButton}
         />
+        {["succeeded", "failed", "canceled"].includes(detail.status) && (
+          <Button onClick={() => setSaveNoteOpen(true)}>Save as note</Button>
+        )}
         <Button
           size="small"
           aria-label="Refresh"
@@ -91,6 +97,27 @@ export function RunHeader({ state }: { state: RunWorkspaceState }) {
           <ActionIcon name="refresh" />
         </Button>
       </Stack>
+      {saveNoteOpen && (
+        <Dialog open onClose={() => setSaveNoteOpen(false)} fullWidth>
+          <DialogTitle>Save a lesson from this run</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Typography variant="body2">
+                The note links to run #{detail.number}. It applies only to runs
+                you start later and choose it for.
+              </Typography>
+              <WorkflowNoteForm
+                workflowKey={detail.workflow_key}
+                project={detail.project.id}
+                evidenceRunId={detail.id}
+                initialEvidence={`Run #${detail.number} (${stageLabel(detail.status)}): `}
+                onSaved={() => setSaveNoteOpen(false)}
+                onCancel={() => setSaveNoteOpen(false)}
+              />
+            </Stack>
+          </DialogContent>
+        </Dialog>
+      )}
       {runUsageLabel(detail.usage) && (
         <Typography variant="body2" color="text.secondary">
           Provider usage: {runUsageLabel(detail.usage)}

@@ -146,6 +146,7 @@ from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
+from relay.workflows.notes import FrozenNote, frozen_notes_text
 from relay.workflows.schema import NodeDefinition, RecoveryPolicy, WorkflowDefinition
 from relay.workflows.scope import (
     node_scope,
@@ -2595,6 +2596,14 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not release the supervisor lease."
             raise PersistenceError(message) from None
 
+    def launch_notes(
+        self, project_id: str, workflow_key: str, note_ids: Sequence[str]
+    ) -> tuple[FrozenNote, ...]:
+        """Resolve owner-selected notes for launch through the notes adapter."""
+        from .notes_repository import DjangoWorkflowNoteStore
+
+        return DjangoWorkflowNoteStore().launch_notes(project_id, workflow_key, note_ids)
+
     def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
         """Capture current binding revisions without resolving private secret bytes."""
         from .binding_snapshots import freeze_bindings
@@ -3437,6 +3446,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         route = _effective_route(node, snapshot)
         agent = frozen.get("bound_agent")
         prompts = _resolved_prompt_contents(snapshot, agent if isinstance(agent, dict) else {})
+        notes = (
+            frozen_notes_text(_mapping(snapshot, "launch_defaults"))
+            if isinstance(agent, dict)
+            else None
+        )
+        if notes:
+            # ("Review the code",) becomes ("Review the code", "Relay workflow
+            # notes..."); prompt bytes stay intact and retries reuse this text.
+            prompts = (*prompts, notes)
         handoff = route.get("handoff_prompt")
         if isinstance(handoff, str):
             # ("Review the code",) becomes ("Review the code", "Continue...").

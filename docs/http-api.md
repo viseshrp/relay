@@ -152,6 +152,9 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
 | `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false}` |
+| `GET /api/workflows/{key}/notes` | optional `?archived=true`, `?project={id}` | `200 {"notes":[...]}` |
+| `POST /api/workflows/{key}/notes` | `{"cue":"...","lesson":"...","evidence":"...","confidence":"medium","evidence_run_id":"..."}` | `201 {"note":{...}}` |
+| `POST /api/workflows/{key}/notes/{id}/archive` | `{}` | `200 {"note":{...}}` |
 | `POST /api/workflows/{key}/preview` | `{"inputs":{}}`; optional `?project={id}` | `200 {"workflow":"Review","run_name":{"text":"Review api","runtime":[]},"jobs":[...],"truncated":false}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
@@ -189,6 +192,17 @@ Counts cover every changed file. The preview returns at most 200 entries and
 The owner can inspect the complete list with `git status`. Reading preflight
 does not change files, Git history, the index, or editor leases. Launch repeats
 validation and cleanliness checks even after a successful preview.
+
+Workflow notes are owner-approved lessons for one workflow in the selected
+project; `review` and `review.yaml` name the same workflow. Saving requires
+nonempty `cue` (up to 500 characters), `lesson` (4,000), and `evidence`
+(2,000). `confidence` is `low`, `medium`, `high`, or omitted.
+`evidence_run_id` optionally links a run of the same project; cleaning that run
+later clears the link and keeps the evidence text. A workflow keeps at most 100
+active notes. Records contain `id`, `workflow_key`, `cue`, `lesson`,
+`evidence`, `confidence`, `evidence_run_id`, `archived`, and `created_at`,
+oldest first. Archiving hides a note from launch without deleting it. Notes
+never change on their own; Relay creates them only from these requests.
 
 Launch preview applies the same input rules as launch to the posted `inputs`,
 then resolves each top-level job's launch-static values: `inputs`, `vars`, and
@@ -307,7 +321,10 @@ A launch body has this shape:
 }
 ```
 
-`model`, `cleanup_policy`, `entry_point`, and `project_id` are optional. If
+`model`, `cleanup_policy`, `entry_point`, `notes`, and `project_id` are
+optional. `notes` is a list of up to 10 distinct active note IDs for this
+workflow; an archived note or one from another workflow returns
+`400 config_error` before creating a run. If
 `project_id` is supplied, it must match the request's selected project; a
 mismatch returns `400 config_error` before creating a run. Launch validates the
 workflow tree, inputs, clean Git state, declared entry-point artifacts, and all

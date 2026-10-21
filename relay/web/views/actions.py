@@ -606,6 +606,7 @@ def launch_run(request: HttpRequest) -> HttpResponse:
     launcher = owner_username(request)
     from relay.workflows.actions.language import load as load_actions
     from relay.workflows.loader import load_workflow, resolve_workflow_path
+    from relay.workflows.notes import launch_note_ids
 
     source = resolve_workflow_path(relay_root / "workflows", required_text(body, "workflow_key"))
     load_actions(load_workflow(source).text, source=source)
@@ -622,6 +623,7 @@ def launch_run(request: HttpRequest) -> HttpResponse:
             owner_agents=config.agent_preferences,
             launcher=launcher,
             defaults=config.workflow_defaults,
+            notes=launch_note_ids(body.get("notes")),
         ),
         _enqueue_claim,
     )
@@ -645,6 +647,50 @@ def workflow_launch_preview(request: HttpRequest, key: str) -> HttpResponse:
         launcher=owner_username(request),
     )
     return JsonResponse(asdict(preview))
+
+
+@api_errors
+@owner_required
+@require_GET
+def list_workflow_notes(request: HttpRequest, key: str) -> HttpResponse:
+    from ..notes_repository import DjangoWorkflowNoteStore
+
+    _relay_root, project = current_project(request)
+    archived = request.GET.get("archived") == "true"
+    return JsonResponse(
+        {"notes": DjangoWorkflowNoteStore().list_notes(project.id, key, archived=archived)}
+    )
+
+
+@api_errors
+@owner_required
+@require_POST
+def create_workflow_note(request: HttpRequest, key: str) -> HttpResponse:
+    """Save an owner-approved note; cue, lesson, and evidence are required."""
+    from relay.workflows.notes import validate_note
+
+    from ..notes_repository import DjangoWorkflowNoteStore
+
+    _relay_root, project = current_project(request)
+    note = DjangoWorkflowNoteStore().create_note(project.id, key, validate_note(json_body(request)))
+    return JsonResponse({"note": note}, status=201)
+
+
+def workflow_notes(request: HttpRequest, key: str) -> HttpResponseBase:
+    """List notes on GET and save one on POST."""
+    if request.method == "POST":
+        return create_workflow_note(request, key)
+    return list_workflow_notes(request, key)
+
+
+@api_errors
+@owner_required
+@require_POST
+def archive_workflow_note(request: HttpRequest, key: str, note_id: str) -> HttpResponse:
+    from ..notes_repository import DjangoWorkflowNoteStore
+
+    _relay_root, project = current_project(request)
+    return JsonResponse({"note": DjangoWorkflowNoteStore().archive_note(project.id, key, note_id)})
 
 
 def runs_collection(request: HttpRequest) -> HttpResponseBase:

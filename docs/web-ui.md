@@ -403,6 +403,14 @@ Relay verifies staged blobs against Git's conversion of the confirmed bytes,
 including configured newline conversion, before committing the reviewed index.
 The panel repeats preflight after the commit.
 
+**Workflow notes** appears when the workflow has active notes. Choose up to
+10; the run captures their text, so later edits do not change it. Manage notes
+with **Workflow notes** on the workflow page, where **Add note** asks when the
+note applies, what the agent should do, and what showed it, and **Archive**
+hides a note from later launches. A finished run's header offers **Save as
+note**, which links the note to that run and starts its evidence with the run
+number and result.
+
 **Preview step instructions** shows, for the inputs entered so far, each job
 in order and what its steps will be told: the agent and model as written,
 each prompt file with its size and hash, the step prompt, the report contract,

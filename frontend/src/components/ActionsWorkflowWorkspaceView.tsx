@@ -15,6 +15,8 @@ import {
 import { errorMessage } from "../api";
 
 import { WorkflowSettings } from "./WorkflowSettings";
+import { WorkflowNotesDialog } from "./WorkflowNotesDialog";
+import { useState } from "react";
 
 import { WorkflowSourceSettings } from "./WorkflowSourceSettings";
 
@@ -69,6 +71,7 @@ export function ActionsWorkflowWorkspaceView({
     setJobId,
     setDrawer,
   } = state;
+  const [notesOpen, setNotesOpen] = useState(false);
   if (
     (!state.inventoryLoaded || !manifest || (key && !state.loadedDocument)) &&
     !error
@@ -164,6 +167,17 @@ export function ActionsWorkflowWorkspaceView({
         <Button onClick={() => setSettings(true)}>
           Variables, secrets, environments and library
         </Button>
+        {key && (
+          <>
+            <Button onClick={() => setNotesOpen(true)}>Workflow notes</Button>
+            <WorkflowNotesDialog
+              open={notesOpen}
+              workflowKey={key}
+              project={props.requestProject || props.project.id}
+              onClose={() => setNotesOpen(false)}
+            />
+          </>
+        )}
         <WorkflowSettings
           open={settings}
           projectId={props.requestProject || props.project.id}

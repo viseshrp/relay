@@ -20,6 +20,7 @@ import { stageLabel } from "../navigation";
 import { LaunchInputs } from "./LaunchInputs";
 import { LaunchPreflight } from "./LaunchPreflight";
 import { LaunchPreview } from "./LaunchPreview";
+import { LaunchNotes } from "./LaunchNotes";
 
 import type { LaunchPanelState } from "./useLaunchPanel";
 export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
@@ -48,6 +49,8 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
     preflightError,
     inputs,
     supplied,
+    notes,
+    setNotes,
     inputErrors,
     setInputs,
     setInputErrors,
@@ -151,6 +154,14 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
                 });
               }}
             />
+            {workflowKey !== null && (
+              <LaunchNotes
+                workflowKey={workflowKey}
+                project={requestProject}
+                selected={notes}
+                onSelected={setNotes}
+              />
+            )}
             {workflowKey !== null && !blockedReason && (
               <LaunchPreview
                 workflowKey={workflowKey}

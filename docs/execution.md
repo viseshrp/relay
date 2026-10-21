@@ -218,6 +218,8 @@ Relay appends the error and the following instruction as a separate prompt:
 
 The text and its SHA-256 hash are recorded in the recovery decision and event.
 Original prompt bytes, snapshot hashes, routes, and settings stay unchanged.
+Captured [workflow notes](workflows.md#workflow-notes) follow the prompt files
+and precede any handoff and repair instruction.
 Run metadata points the agent to the retained attempt evidence. When the
 failed attempt retained an evidence index, the instruction also contains an
 `Evidence index: <path>` line before the failure text, so the agent can read

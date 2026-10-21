@@ -676,6 +676,20 @@ A `relay/agent@v1` step can set `retry-limit: 1` or `retry-limit: 2` beside
 accepted. It caps the captured workflow recovery budget for that step,
 without resetting retries already used across restart or owner retry.
 
+### Workflow notes
+
+A workflow note is a lesson the owner approves from an earlier run: when it
+applies, what the agent should do, and what showed it. All three are required,
+with optional confidence. Choose notes in **Run workflow**; Relay freezes the
+chosen notes' text, in list order, into the launch snapshot with a SHA-256
+hash. Every agent step in that run receives them as one separate block after
+its prompt files, headed `Relay workflow notes`. For example, prompt file
+bytes `Review the change.\n` stay unchanged in their own block, and the notes
+block follows. Command and other steps receive nothing. Retries and repairs of
+the run reuse the captured text, so editing or archiving a note later never
+changes a started run. Notes are stored in `relay.db`, not in `.relay/`, and
+Relay never writes one automatically.
+
 ### Allowed paths
 
 `allowed-paths` limits what one agent step may change. It is a literal block

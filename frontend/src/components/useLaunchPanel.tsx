@@ -48,10 +48,14 @@ export function useLaunchPanel({
   const [preflight, setPreflight] = useState<LaunchCleanliness | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) setEntryPoint(initialEntryPoint);
   }, [open, workflowKey, initialEntryPoint]);
+  useEffect(() => {
+    setNotes([]);
+  }, [open, workflowKey]);
   useEffect(() => {
     setInputs(previousRun?.inputs ?? {});
   }, [previousRun]);
@@ -163,6 +167,7 @@ export function useLaunchPanel({
             ...(model ? { model } : {}),
             ...(cleanup ? { cleanup_policy: cleanup } : {}),
             ...(entryPoint ? { entry_point: entryPoint } : {}),
+            ...(notes.length ? { notes } : {}),
           }),
         },
       );
@@ -201,6 +206,8 @@ export function useLaunchPanel({
     preflightError,
     inputs,
     supplied,
+    notes,
+    setNotes,
     inputErrors,
     setInputs,
     setInputErrors,

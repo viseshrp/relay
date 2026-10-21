@@ -380,6 +380,29 @@ class WorkflowEnvironment(RelayModel):
         ]
 
 
+class WorkflowNote(RelayModel):
+    """An owner-approved lesson for one workflow; launches freeze chosen notes."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    workflow_key: models.TextField = models.TextField()
+    cue: models.TextField = models.TextField()
+    lesson: models.TextField = models.TextField()
+    evidence: models.TextField = models.TextField()
+    confidence: models.CharField = models.CharField(max_length=8, null=True, blank=True)
+    # The evidence text survives run cleanup; only the link becomes empty.
+    evidence_run: models.ForeignKey = models.ForeignKey(
+        Run, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    archived: models.BooleanField = models.BooleanField(default=False)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=("project", "workflow_key"), name="relay_note_workflow_idx")
+        ]
+
+
 class ActionsArtifact(RelayModel):
     """Immutable named artifact manifests; expiry applies only to optional bytes."""
 

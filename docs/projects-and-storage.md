@@ -113,7 +113,8 @@ the web settings read `login_required` from the saved file.
 
 `relay.db` is the durable source for projects, drafts, editor leases, runs,
 snapshots, scoped nodes, attempts, dispatch claims, events, artifacts,
-interactions, control requests, agent observations, and run locks. SQLite uses
+interactions, control requests, agent observations, workflow notes, and run
+locks. SQLite uses
 foreign keys, WAL mode, FULL durability, and a 15-second busy timeout. Writes
 use `IMMEDIATE` mode to reserve the write lock before reading. Competing writers
 wait for that reservation for up to 15 seconds; contention beyond that limit
@@ -228,7 +229,8 @@ Run history remains until the owner confirms deletion. Each project keeps a
 monotonic run counter. Deleting history never reuses a run number. Project rows
 are protected while runs reference them. Deleting a run may cascade only through
 that run's owned snapshot, nodes, attempts, events, interactions, controls,
-and artifact metadata.
+and artifact metadata. Workflow notes belong to the project, not a run:
+deleting a note's evidence run clears only its run link and keeps the note.
 
 Evidence preservation precedes worktree removal. Relay does not delete the
 only copy of a diff, artifact, or snapshot without confirmation. Retained run

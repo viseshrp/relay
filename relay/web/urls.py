@@ -46,6 +46,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("api/workflows/<path:key>/lease", actions.acquire_workflow_lease, name="workflow-lease"),
     path("api/workflows/<path:key>/lease/release", actions.release_workflow_lease),
     path("api/workflows/<path:key>/prompt", actions.workflow_prompt, name="workflow-prompt"),
+    path(
+        "api/workflows/<path:key>/notes/<str:note_id>/archive",
+        actions.archive_workflow_note,
+        name="workflow-note-archive",
+    ),
+    path("api/workflows/<path:key>/notes", actions.workflow_notes, name="workflow-notes"),
     path("api/workflows/<path:key>", pages.workflow, name="workflow"),
     path("api/agents", pages.agents, name="agents"),
     path("api/agents/check", actions.agent_readiness, name="agent-readiness"),
