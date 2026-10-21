@@ -8,7 +8,7 @@ FROM ${NODE_IMAGE} AS node
 FROM ${PYTHON_IMAGE} AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG UV_VERSION=0.13.0
+ARG UV_VERSION=0.13.4
 
 ENV PATH=/opt/relay/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
