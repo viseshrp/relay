@@ -449,38 +449,11 @@ def test_a_failing_enqueue_leaves_the_claim_available_for_repair(
 
 
 def test_the_huey_task_claims_runs_and_schedules_successors(
-    project: RelayProject, engine: InlineEngine, monkeypatch: pytest.MonkeyPatch
+    project: RelayProject, engine: InlineEngine
 ) -> None:
     project.write_workflow("chain", CHAIN)
     run_id = engine.launch(project, "chain")
     huey_app.enqueue_claim(engine.tokens.popleft())
-
-    # TEMPORARY diagnostics for a Windows-only flake; revert before merging.
-    from relay.web.models import ActionsJobLease, DispatchClaim
-
-    trail: list[object] = []
-    claim = runner.claim_node_attempt
-
-    def traced_claim(store: object, token: str, worker: str) -> object:
-        result = claim(store, token, worker)
-        trail.append(
-            (
-                token[:8],
-                result.disposition.value,
-                node_statuses(run_id),
-                list(NodeAttempt.objects.values_list("node_run__scope_path", "status")),
-                list(ActionsJobLease.objects.values_list("node__scope_path", flat=True)),
-                list(DispatchClaim.objects.values_list("claim_token", "state")),
-            )
-        )
-        return result
-
-    monkeypatch.setattr(runner, "claim_node_attempt", traced_claim)
-    errors: list[str] = []
-
-    @huey_app.huey.signal(huey_app.signals.SIGNAL_ERROR)
-    def _record(signal_name: str, task: object, exc: BaseException | None = None) -> None:
-        errors.append(repr(exc))
 
     first = huey_app.huey.dequeue()
     assert first is not None
@@ -488,9 +461,8 @@ def test_the_huey_task_claims_runs_and_schedules_successors(
     second = huey_app.huey.dequeue()
     assert second is not None
     huey_app.huey.execute(second)
-    huey_app.huey.disconnect_signal(_record)
 
-    assert run_status(run_id) == "succeeded", (first.args, second.args, errors, trail)
+    assert run_status(run_id) == "succeeded"
 
 
 def test_enqueue_claim_stores_only_the_token_in_huey() -> None:
