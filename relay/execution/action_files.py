@@ -153,7 +153,9 @@ def declared_subjects(
                 digest.update(chunk)
         name = path.name
         subject = {"name": name, "digest": f"sha256:{digest.hexdigest()}", "kind": "file"}
-        retained[f"subject:{name}"] = path.relative_to(workspace).as_posix()
+        # checked_path returns a resolved path, so compare it with the resolved
+        # workspace: on macOS /var/... and /private/var/... name the same folder.
+        retained[f"subject:{name}"] = path.relative_to(os.path.realpath(workspace)).as_posix()
         if name in subjects and subjects[name] != subject:
             message = "Conflicting workflow artifact declarations."
             raise NodeExecutionError(message)
