@@ -490,7 +490,10 @@ number and result.
 **Preview step instructions** shows, for the inputs entered so far, each job
 in order and what its steps will be told: the agent and model as written,
 each prompt file with its size and hash, the step prompt, the report contract,
-and command text. Values that only exist once a step runs stay visible as
+and command text. Called reusable workflows, loops, and composite actions show
+their own jobs and steps indented below the call, and chosen workflow notes
+appear as the block every agent step will receive. Values that only exist
+once a step runs stay visible as
 `${{ ... }}` with a "Filled in when the step runs" note. Preview starts no run
 and contacts no agent, so launch still checks that the model is available.
 

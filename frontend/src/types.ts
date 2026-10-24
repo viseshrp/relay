@@ -307,6 +307,11 @@ export interface PreviewStep {
   prompt: PreviewText | null;
   report: PreviewText | null;
   command: PreviewText | null;
+  /** A composite action's own steps. */
+  steps: PreviewStep[];
+  /** The jobs a loop repeats, up to `repeat` times. */
+  jobs: PreviewJob[];
+  repeat: PreviewText | null;
 }
 
 export interface PreviewJob {
@@ -316,6 +321,8 @@ export interface PreviewJob {
   matrix: boolean;
   uses: string | null;
   steps: PreviewStep[];
+  /** The called workflow's jobs when `uses` names a local reusable workflow. */
+  jobs: PreviewJob[];
 }
 
 export interface LaunchPreview {
@@ -323,6 +330,8 @@ export interface LaunchPreview {
   run_name: PreviewText;
   jobs: PreviewJob[];
   truncated: boolean;
+  /** The block every agent step receives when notes are chosen. */
+  notes: string | null;
 }
 
 export interface ComparedValue {

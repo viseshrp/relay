@@ -167,6 +167,7 @@ export function LaunchPanelView({ state }: { state: LaunchPanelState }) {
                 workflowKey={workflowKey}
                 requestProject={requestProject}
                 inputs={supplied}
+                notes={notes}
               />
             )}
             <Accordion>

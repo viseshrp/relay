@@ -158,7 +158,7 @@ run, and attention endpoints keep their payloads unchanged.
 | `GET /api/workflows/{key}/notes` | optional `?archived=true`, `?project={id}` | `200 {"notes":[...]}` |
 | `POST /api/workflows/{key}/notes` | `{"cue":"...","lesson":"...","evidence":"...","confidence":"medium","evidence_run_id":"..."}` | `201 {"note":{...}}` |
 | `POST /api/workflows/{key}/notes/{id}/archive` | `{}` | `200 {"note":{...}}` |
-| `POST /api/workflows/{key}/preview` | `{"inputs":{}}`; optional `?project={id}` | `200 {"workflow":"Review","run_name":{"text":"Review api","runtime":[]},"jobs":[...],"truncated":false}` |
+| `POST /api/workflows/{key}/preview` | `{"inputs":{},"notes":[]}`; optional `?project={id}` | `200 {"workflow":"Review","run_name":{"text":"Review api","runtime":[]},"jobs":[...],"truncated":false,"notes":null}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
@@ -229,8 +229,15 @@ text as `${{ expr }}` and are listed in `runtime`. For example,
 `prompt_files` lists each resolved prompt's `reference`, `sha256`, `bytes`,
 `text` (the first 64 KiB), and `truncated`; when a prompt-file path itself needs
 run state, `prompt_files_runtime` shows it unresolved instead. `report` is the
-selector JSON the agent receives as its output contract. Reusable workflows
-and composite actions are named but not expanded. Whole jobs are kept in order
+selector JSON the agent receives as its output contract. A job that calls a
+local reusable workflow lists that workflow's jobs in its own `jobs`; a
+`relay/loop@v1` step lists the repeated workflow's jobs in `jobs` and its
+`max-iterations` in `repeat`; a local composite action lists its own `steps`.
+Values passed to a called workflow or action become its `inputs`, so a value
+that needs run state appears there as its `${{ expr }}` text. Expansion stops
+after four nested levels, where the call is only named. The optional body
+field `notes` takes the same note IDs as launch and returns `notes`, the exact
+block every agent step would receive, or `null`. Whole jobs are kept in order
 up to 512 KiB; `truncated` reports omitted jobs. Preview creates no run,
 snapshot, worktree, or event, and starts no agent, so it never proves that a
 model is available.

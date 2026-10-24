@@ -636,15 +636,18 @@ def launch_run(request: HttpRequest) -> HttpResponse:
 def workflow_launch_preview(request: HttpRequest, key: str) -> HttpResponse:
     """Render a launch's static step instructions; inputs stay out of the URL."""
     from relay.execution.launch_preview import preview_launch
+    from relay.workflows.notes import launch_note_ids
 
     relay_root, project = current_project(request)
     body = json_body(request)
+    store = DjangoExecutionStore()
     preview = preview_launch(
         relay_root,
         key,
         required_object(body, "inputs"),
-        DjangoExecutionStore().freeze_launch_bindings(project.id),
+        store.freeze_launch_bindings(project.id),
         launcher=owner_username(request),
+        notes=store.launch_notes(project.id, key, launch_note_ids(body.get("notes"))),
     )
     return JsonResponse(asdict(preview))
 

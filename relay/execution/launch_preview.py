@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
@@ -12,6 +12,7 @@ from relay.constants import API_MAX_PAGE_BYTES
 from relay.errors import RelayError
 from relay.workflows.actions import expressions
 from relay.workflows.actions.builtins import is_builtin
+from relay.workflows.notes import FrozenNote, notes_block
 from relay.workflows.schema import ActionsJobNode, GlobalPrompt, LocalPrompt
 
 from .launch import launch_relay_context
@@ -19,6 +20,8 @@ from .launch_request import FrozenLaunchBindings
 from .preflight import load_launch_workflow
 
 PREVIEW_PROMPT_MAX_BYTES = 64 * 1024
+# Reusable workflows, loops, and composite actions can nest; deeper levels are named only.
+PREVIEW_DEPTH_MAX = 4
 PREVIEW_MAX_BYTES = API_MAX_PAGE_BYTES // 2
 REPORT_FIELDS = ("report", "path", "format", "label", "field", "selector")
 
@@ -59,6 +62,10 @@ class PreviewStep:
     prompt: PreviewText | None = None
     report: PreviewText | None = None
     command: PreviewText | None = None
+    # A composite action's own steps, or the jobs a loop repeats.
+    steps: tuple[PreviewStep, ...] = ()
+    jobs: tuple[PreviewJob, ...] = ()
+    repeat: PreviewText | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +76,8 @@ class PreviewJob:
     matrix: bool
     uses: str | None
     steps: tuple[PreviewStep, ...] = field(default_factory=tuple)
+    # The called workflow's jobs when `uses` names a local reusable workflow.
+    jobs: tuple[PreviewJob, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +86,8 @@ class LaunchPreview:
     run_name: PreviewText
     jobs: tuple[PreviewJob, ...]
     truncated: bool
+    # The exact block every agent step receives when notes are chosen.
+    notes: str | None = None
 
 
 def _render(raw: object, values: Mapping[str, object]) -> PreviewText:
@@ -152,35 +163,164 @@ def _report(raw: Mapping[str, Any], values: Mapping[str, object]) -> PreviewText
     )
 
 
-def _step(
-    index: int, step: Mapping[str, Any], values: Mapping[str, object], root: Path
-) -> PreviewStep:
-    step_id = str(step.get("id") or f"step-{index + 1}")
-    name = _render(step.get("name", step_id), values).text
-    uses = step.get("uses")
-    raw = step.get("with", {})
-    if is_builtin(uses, "agent"):
-        files, files_runtime = _prompt_files(_render(raw.get("prompt-files", ""), values), root)
-        return PreviewStep(
-            id=step_id,
-            name=name,
-            kind="agent",
-            uses=uses,
-            agents=_render(raw.get("agents", raw.get("agent")), values)
-            if "agents" in raw or "agent" in raw
-            else None,
-            model=_render(raw["model"], values) if "model" in raw else None,
-            effort=_render(raw["effort"], values) if "effort" in raw else None,
-            prompt_files=files,
-            prompt_files_runtime=files_runtime,
-            prompt=_render(raw["prompt"], values) if "prompt" in raw else None,
-            report=_report(raw, values),
-        )
-    if "run" in step:
-        return PreviewStep(
-            id=step_id, name=name, kind="command", command=_render(step["run"], values)
-        )
-    return PreviewStep(id=step_id, name=name, kind="action", uses=str(uses) if uses else None)
+def _called_inputs(
+    declared: Mapping[str, Any], supplied: object, values: Mapping[str, object]
+) -> dict[str, object]:
+    """Start from declared defaults and render each supplied value statically.
+
+    A value that needs run state stays as its `${{ ... }}` text, so the child's
+    own `${{ inputs.name }}` shows where that value will come from.
+    """
+    inputs: dict[str, object] = {
+        name: item.get("default", "")
+        for name, item in declared.items()
+        if isinstance(item, Mapping)
+    }
+    if isinstance(supplied, Mapping):
+        for name, raw in supplied.items():
+            inputs[str(name)] = _render(raw, values).text
+    return inputs
+
+
+class _Expander:
+    """Preview steps and jobs, following local sources captured with the workflow."""
+
+    def __init__(self, root: Path, sources: Mapping[str, str]) -> None:
+        self.root = root
+        self.sources = sources
+
+    def _workflow(self, reference: object) -> dict[str, Any] | None:
+        from relay.workflows.actions.language import load
+
+        text = self.sources.get(str(reference).removeprefix("./"))
+        return load(text).value if isinstance(reference, str) and text else None
+
+    def _action(self, reference: str) -> dict[str, Any] | None:
+        from relay.workflows.actions.metadata import load_action
+
+        path = reference.removeprefix("./").rstrip("/")
+        text = self.sources.get(f"{path}/action.yml", self.sources.get(f"{path}/action.yaml"))
+        if not text:
+            return None
+        action = load_action(text)
+        return action if action["runs"].get("using") == "composite" else None
+
+    def jobs(
+        self, document: Mapping[str, Any], values: Mapping[str, object], depth: int
+    ) -> tuple[PreviewJob, ...]:
+        from relay.workflows.actions.language import input_definitions, topological_jobs
+
+        jobs = document.get("jobs", {})
+        result = []
+        for job_id in topological_jobs(jobs):
+            job = jobs[job_id]
+            uses = job.get("uses")
+            needs = job.get("needs", [])
+            called = self._workflow(uses) if uses and depth < PREVIEW_DEPTH_MAX else None
+            result.append(
+                PreviewJob(
+                    id=job_id,
+                    name=_render(job.get("name", job_id), values).text,
+                    needs=(needs,) if isinstance(needs, str) else tuple(needs),
+                    matrix="matrix" in job.get("strategy", {}),
+                    uses=str(uses) if uses else None,
+                    steps=self.steps(job.get("steps", []), values, depth),
+                    jobs=self.jobs(
+                        called,
+                        {
+                            **values,
+                            "inputs": _called_inputs(
+                                input_definitions(called, "workflow_call"),
+                                job.get("with", {}),
+                                values,
+                            ),
+                        },
+                        depth + 1,
+                    )
+                    if called is not None
+                    else (),
+                )
+            )
+        return tuple(result)
+
+    def steps(
+        self, steps: list[Any], values: Mapping[str, object], depth: int
+    ) -> tuple[PreviewStep, ...]:
+        return tuple(self.step(index, step, values, depth) for index, step in enumerate(steps))
+
+    def step(
+        self, index: int, step: Mapping[str, Any], values: Mapping[str, object], depth: int
+    ) -> PreviewStep:
+        from relay.workflows.actions.language import input_definitions
+
+        step_id = str(step.get("id") or f"step-{index + 1}")
+        name = _render(step.get("name", step_id), values).text
+        uses = step.get("uses")
+        raw = step.get("with", {})
+        if is_builtin(uses, "agent"):
+            files, files_runtime = _prompt_files(
+                _render(raw.get("prompt-files", ""), values), self.root
+            )
+            return PreviewStep(
+                id=step_id,
+                name=name,
+                kind="agent",
+                uses=uses,
+                agents=_render(raw.get("agents", raw.get("agent")), values)
+                if "agents" in raw or "agent" in raw
+                else None,
+                model=_render(raw["model"], values) if "model" in raw else None,
+                effort=_render(raw["effort"], values) if "effort" in raw else None,
+                prompt_files=files,
+                prompt_files_runtime=files_runtime,
+                prompt=_render(raw["prompt"], values) if "prompt" in raw else None,
+                report=_report(raw, values),
+            )
+        if "run" in step:
+            return PreviewStep(
+                id=step_id, name=name, kind="command", command=_render(step["run"], values)
+            )
+        nested = depth < PREVIEW_DEPTH_MAX
+        if is_builtin(uses, "loop") and nested:
+            called = self._workflow(raw.get("workflow"))
+            supplied = _render(raw.get("inputs", "{}"), values)
+            try:
+                literal = json.loads(supplied.text) if not supplied.runtime else {}
+            except ValueError:
+                literal = {}
+            return PreviewStep(
+                id=step_id,
+                name=name,
+                kind="action",
+                uses=str(uses),
+                repeat=_render(raw.get("max-iterations"), values),
+                jobs=self.jobs(
+                    called,
+                    {
+                        **values,
+                        "inputs": _called_inputs(
+                            input_definitions(called, "workflow_call"), literal, values
+                        ),
+                    },
+                    depth + 1,
+                )
+                if called is not None
+                else (),
+            )
+        action = self._action(uses) if isinstance(uses, str) and nested else None
+        if action is not None:
+            return PreviewStep(
+                id=step_id,
+                name=name,
+                kind="action",
+                uses=str(uses),
+                steps=self.steps(
+                    action["runs"].get("steps", []),
+                    {**values, "inputs": _called_inputs(action.get("inputs", {}), raw, values)},
+                    depth + 1,
+                ),
+            )
+        return PreviewStep(id=step_id, name=name, kind="action", uses=str(uses) if uses else None)
 
 
 def _bounded(jobs: list[PreviewJob]) -> tuple[tuple[PreviewJob, ...], bool]:
@@ -203,6 +343,7 @@ def preview_launch(
     bindings: FrozenLaunchBindings,
     *,
     launcher: str,
+    notes: Sequence[FrozenNote] = (),
 ) -> LaunchPreview:
     """Resolve the launch-static parts of every top-level job and step.
 
@@ -222,31 +363,16 @@ def preview_launch(
             relay_root, workflow, workflow_key, launcher, typed_inputs, {}
         ),
     }
-    jobs = []
-    for job_id, node in workflow.root.definition.nodes.items():
-        if not isinstance(node, ActionsJobNode):
-            continue
-        job = node.job
-        uses = job.get("uses")
-        jobs.append(
-            PreviewJob(
-                id=job_id,
-                name=_render(job.get("name", job_id), values).text,
-                needs=tuple(node.needs),
-                matrix="matrix" in job.get("strategy", {}),
-                uses=str(uses) if uses else None,
-                steps=tuple(
-                    _step(index, step, values, relay_root)
-                    for index, step in enumerate(job.get("steps", []))
-                ),
-            )
-        )
+    node = next(iter(workflow.root.definition.nodes.values()), None)
+    sources = node.sources if isinstance(node, ActionsJobNode) else {}
+    jobs = list(_Expander(relay_root, sources).jobs(actions, values, 0))
     kept, truncated = _bounded(jobs)
     return LaunchPreview(
         workflow=workflow.root.definition.name,
         run_name=_render(actions.get("run-name", workflow.root.definition.name), values),
         jobs=kept,
         truncated=truncated,
+        notes=notes_block(notes) if notes else None,
     )
 
 

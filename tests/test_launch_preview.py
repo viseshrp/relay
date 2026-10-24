@@ -8,7 +8,8 @@ import json
 from django.contrib.auth.models import User
 from django.test import Client
 
-from relay.web.models import NodeAttempt, Run, RunSnapshot
+from relay.web.models import NodeAttempt, Run, RunSnapshot, WorkflowNote
+from relay.workflows.notes import FrozenNote, frozen_notes
 from tests.support import FakeAgents, RelayProject, git
 from tests.test_web_api import client as client
 from tests.test_web_api import owner as owner
@@ -146,3 +147,115 @@ def test_preview_requires_login_and_post(
     client.logout()
     assert post(client, "/api/workflows/review/preview", {"inputs": {}}).status_code == 401
     client.force_login(User.objects.get(username="owner"))
+
+
+CHILD = """name: Child
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+jobs:
+  inner:
+    steps:
+      - id: say
+        run: echo child ${{ inputs.target }}
+"""
+ACTION = """name: Check
+description: Run a check on one target.
+inputs:
+  target:
+    description: What to check.
+    default: everything
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      run: echo check ${{ inputs.target }}
+"""
+
+
+def test_preview_expands_reusable_workflows_loops_and_composite_actions(
+    owner: Client, served: RelayProject
+) -> None:
+    served.write(".relay/workflows/child.yaml", CHILD)
+    served.write(".relay/actions/check/action.yaml", ACTION)
+    served.write_workflow(
+        "nested",
+        json.dumps(
+            {
+                "on": {"workflow_dispatch": {"inputs": {"target": {"type": "string"}}}},
+                "jobs": {
+                    "call": {
+                        "uses": "./.relay/workflows/child.yaml",
+                        "with": {"target": "${{ inputs.target }}"},
+                    },
+                    "local": {
+                        "steps": [
+                            {
+                                "id": "composite",
+                                "uses": "./.relay/actions/check",
+                                "with": {"target": "${{ inputs.target }}"},
+                            },
+                            {
+                                "id": "repeat",
+                                "uses": "relay/loop@v1",
+                                "with": {
+                                    "workflow": "./.relay/workflows/child.yaml",
+                                    "inputs": '{"target": "again"}',
+                                    "max-iterations": 3,
+                                },
+                            },
+                        ]
+                    },
+                },
+            }
+        ),
+    )
+    preview = _preview(owner, "nested", {"target": "api"})
+    call, local = preview["jobs"]
+    assert call["uses"] == "./.relay/workflows/child.yaml"
+    assert call["jobs"][0]["steps"][0]["command"]["text"] == "echo child api"
+    composite, repeat = local["steps"]
+    assert composite["steps"][0]["command"]["text"] == "echo check api"
+    assert repeat["repeat"]["text"] == "3"
+    assert repeat["jobs"][0]["steps"][0]["command"]["text"] == "echo child again"
+    assert preview["notes"] is None
+
+
+def test_preview_shows_the_notes_block_launch_would_freeze(
+    owner: Client, served: RelayProject
+) -> None:
+    served.write(".relay/prompts/review.md", PROMPT)
+    served.write_workflow("review", json.dumps(WORKFLOW))
+    note = WorkflowNote.objects.create(
+        project_id=served.project_id,
+        workflow_key="review.yaml",
+        cue="Tests are slow",
+        lesson="Run the fast suite first",
+        evidence="Run #4 timed out",
+    )
+    response = post(
+        owner,
+        "/api/workflows/review/preview",
+        {"inputs": {"target": "api"}, "notes": [str(note.pk)]},
+    )
+    assert response.status_code == 200, response.content
+    expected = frozen_notes(
+        (
+            FrozenNote(
+                str(note.pk), "Tests are slow", "Run the fast suite first", "Run #4 timed out", None
+            ),
+        )
+    )
+    assert expected is not None
+    assert response.json()["notes"] == expected["text"]
+    WorkflowNote.objects.filter(pk=note.pk).update(archived=True)
+    rejected = post(
+        owner,
+        "/api/workflows/review/preview",
+        {"inputs": {"target": "api"}, "notes": [str(note.pk)]},
+    )
+    assert (rejected.status_code, rejected.json()["code"]) == (400, "config_error")
