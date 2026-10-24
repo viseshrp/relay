@@ -145,7 +145,8 @@ A step with `allowed-paths` also keeps its starting snapshot reachable as
 `refs/relay/attempts/<run-id>/scope-<step-id>`, a parentless commit whose tree
 is the recorded worktree content. Git garbage collection therefore cannot
 remove the snapshot that later retries compare against, and confirmed run
-cleanup removes it with the run's attempt refs.
+cleanup removes it with the run's attempt refs. Storage usage and cleanup
+results count only attempt refs, not these snapshots.
 An existing evidence directory or ref is never overwritten. Regular files are
 copied in 1 MiB chunks, and SHA-256 is calculated over the retained bytes.
 Symlink targets that point outside the worktree are never followed. A declared

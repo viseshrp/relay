@@ -15,10 +15,13 @@ from relay.execution.runner import AttemptContext, ExecutionOutcome, OutcomeKind
 from relay.vcs.write_scope import (
     baseline_ref,
     capture_worktree,
+    case_hint,
+    is_baseline_ref,
     path_allowed,
     require_allowed_changes,
 )
 from relay.web.models import AutomaticRetry, NodeAttempt, NodeRun, Run
+from relay.web.settings_repository import DjangoSettingsStore
 from relay.workflows.actions.builtins import parse_allowed_paths
 from relay.workflows.schema import AgentNode
 from tests.support import FakeAgents, InlineEngine, RelayProject, git, init_repository
@@ -219,3 +222,34 @@ def test_a_missing_baseline_stops_the_check_instead_of_passing(tmp_path: Path) -
     repository = init_repository(tmp_path / "repository")
     with pytest.raises(NodeExecutionError, match="starting snapshot"):
         require_allowed_changes(repository, "0" * 40, ("docs/**",))
+
+
+def test_a_case_only_mismatch_names_the_pattern_and_path(tmp_path: Path) -> None:
+    repository = init_repository(tmp_path / "repository")
+    before = capture_worktree(repository)
+    (repository / "docs").mkdir()
+    (repository / "docs" / "guide.md").write_text("guide\n", encoding="utf-8")
+    with pytest.raises(OutputValidationError) as raised:
+        require_allowed_changes(repository, before, ("Docs/**",))
+    assert "Pattern Docs/** would allow docs/guide.md if letter case were ignored" in (
+        raised.value.message
+    )
+
+
+def test_case_hint_is_empty_when_case_is_not_the_problem() -> None:
+    assert case_hint(("src/app.py",), ("docs/**",)) == ""
+
+
+def test_scope_snapshots_are_not_counted_as_attempt_refs(
+    project: RelayProject, fake_agents: FakeAgents
+) -> None:
+    fake_agents.install("codex")
+    run_id = _run(project, WritingDriver(("docs/guide.md",)))
+    refs = git(
+        project.repository, "for-each-ref", "--format=%(refname)", f"refs/relay/attempts/{run_id}/"
+    ).splitlines()
+    scope = [ref for ref in refs if is_baseline_ref(ref)]
+    assert len(scope) == 1
+    usage = DjangoSettingsStore().storage_usage(project.project_id)
+    assert usage["attempt_refs"] == len(refs) - 1
+    assert not is_baseline_ref(f"refs/relay/attempts/{run_id}/12")

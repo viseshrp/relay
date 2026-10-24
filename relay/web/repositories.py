@@ -142,6 +142,7 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.vcs.write_scope import is_baseline_ref
 from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
 from relay.workflows.actions.builtins import builtin_references, is_builtin, parse_builtin
@@ -3112,7 +3113,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         _identifier(run),
                     ):
                         run_git(repository, ["update-ref", "-d", retained_ref])
-                        deleted["attempt_refs"] += 1
+                        if not is_baseline_ref(retained_ref):
+                            deleted["attempt_refs"] += 1
             if scope in {"runs", "all"}:
                 if scope == "runs":
                     for run in runs:

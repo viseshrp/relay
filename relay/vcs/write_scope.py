@@ -80,6 +80,11 @@ def baseline_ref(run_id: str, node_run_id: str) -> str:
     return f"{retained_attempt_ref(run_id, 'scope-' + node_run_id)}"
 
 
+def is_baseline_ref(reference: str) -> bool:
+    """True for `refs/relay/attempts/<run>/scope-<step>`, not for an attempt's own ref."""
+    return reference.rsplit("/", 1)[-1].startswith("scope-")
+
+
 def protect_baseline(worktree: Path, tree: str, reference: str) -> None:
     """Keep a captured tree reachable so Git garbage collection cannot drop it."""
     commit = git_stdout(worktree, ["commit-tree", tree, "-m", "Relay write-scope baseline"])
@@ -131,14 +136,34 @@ def require_allowed_changes(
             + ". Revert those changes or keep the work within: "
             + ", ".join(patterns)
             + "."
+            + case_hint(violations, patterns)
         )
         raise OutputValidationError(message, context={"violations": str(len(violations))})
+
+
+def case_hint(violations: Sequence[str], patterns: Sequence[str]) -> str:
+    """Explain a pattern that misses only because of letter case.
+
+    Matching stays case-sensitive so macOS, Linux, and Windows agree. For
+    example, `Docs/**` does not allow `docs/guide.md`; this names that pair so
+    the owner can correct the pattern instead of guessing.
+    """
+    for path in violations:
+        for pattern in patterns:
+            if path_allowed(path.casefold(), (pattern.casefold(),)):
+                return (
+                    f" Pattern {pattern} would allow {path} if letter case were ignored;"
+                    " allowed-paths patterns match letter case exactly."
+                )
+    return ""
 
 
 __all__ = [
     "baseline_ref",
     "capture_worktree",
+    "case_hint",
     "changed_paths",
+    "is_baseline_ref",
     "path_allowed",
     "protect_baseline",
     "require_allowed_changes",
