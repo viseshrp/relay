@@ -779,8 +779,8 @@ number of folders, `*` and `?` match within one folder, and a trailing `/`
 means everything below that folder. Matching is exact and case-sensitive on
 every platform, so macOS, Linux, and Windows agree. When a pattern misses a
 changed path only by letter case, such as `Docs/**` and `docs/guide.md`, the
-failure names that pattern and path. Patterns cannot be absolute, contain `.`, `..`, or
-backslashes, or use expressions; at most 100 patterns are allowed.
+failure names that pattern and path. Patterns cannot be absolute, contain `.`,
+`..`, or backslashes, or use expressions; at most 100 patterns are allowed.
 
 <!-- relay-example: valid allowed-paths -->
 ```yaml
