@@ -271,7 +271,7 @@ class RelayAcpClient:
     feedback: list[str]
     turn: int
     usage_limit: ProviderUsageLimit | None
-    token_totals: dict[str, int]
+    turn_usages: list[schema.Usage | None]
     cost: schema.Cost | None
 
     agent: acp.Agent | None
@@ -297,38 +297,50 @@ class RelayAcpClient:
         self.feedback = []
         self.turn = 0
         self.usage_limit = None
-        self.token_totals = {}
+        self.turn_usages = []
         self.cost = None
 
     def record_turn_usage(self, usage: schema.Usage | None) -> None:
-        """Add one prompt turn's provider-reported tokens to the attempt totals.
+        """Keep each prompt turn's provider-reported tokens for the attempt total."""
+        self.turn_usages.append(usage)
 
-        For example, turns of 10 and 4 output tokens record 14. Feedback turns
-        share the attempt's session, so each prompt response adds its own turn.
+    def _token_totals(self) -> dict[str, int]:
+        """Combine turns only where the adapter's per-turn meaning is known.
+
+        ACP leaves PromptResponse.usage per-turn or cumulative to each adapter.
+        One reported turn is the attempt's usage either way. For several turns,
+        a per-turn adapter's values add up: turns of 10 and 4 output tokens
+        record 14. Otherwise Relay cannot tell a sum from a running total, so
+        the tokens stay unknown rather than risk double counting.
         """
-        if usage is None:
-            return
-        for name in (
-            "input_tokens",
-            "output_tokens",
-            "thought_tokens",
-            "cached_read_tokens",
-            "cached_write_tokens",
-            "total_tokens",
-        ):
-            value = getattr(usage, name)
-            if isinstance(value, int):
-                self.token_totals[name] = self.token_totals.get(name, 0) + value
+        reported = [usage for usage in self.turn_usages if usage is not None]
+        if not reported or (len(self.turn_usages) > 1 and not self.profile.per_turn_usage):
+            return {}
+        totals: dict[str, int] = {}
+        for usage in reported:
+            for name in (
+                "input_tokens",
+                "output_tokens",
+                "thought_tokens",
+                "cached_read_tokens",
+                "cached_write_tokens",
+                "total_tokens",
+            ):
+                value = getattr(usage, name)
+                if isinstance(value, int):
+                    totals[name] = totals.get(name, 0) + value
+        return totals
 
     def attempt_usage(self) -> AttemptUsage | None:
         """Return reported totals; unreported values stay unknown rather than zero."""
+        totals = self._token_totals()
         usage = AttemptUsage(
-            input_tokens=self.token_totals.get("input_tokens"),
-            output_tokens=self.token_totals.get("output_tokens"),
-            thought_tokens=self.token_totals.get("thought_tokens"),
-            cached_read_tokens=self.token_totals.get("cached_read_tokens"),
-            cached_write_tokens=self.token_totals.get("cached_write_tokens"),
-            total_tokens=self.token_totals.get("total_tokens"),
+            input_tokens=totals.get("input_tokens"),
+            output_tokens=totals.get("output_tokens"),
+            thought_tokens=totals.get("thought_tokens"),
+            cached_read_tokens=totals.get("cached_read_tokens"),
+            cached_write_tokens=totals.get("cached_write_tokens"),
+            total_tokens=totals.get("total_tokens"),
             # ACP reports cost as the session's cumulative total, so the latest
             # update is the attempt's cost; each attempt uses a fresh session.
             cost_amount=self.cost.amount if self.cost is not None else None,

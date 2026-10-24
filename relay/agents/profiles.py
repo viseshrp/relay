@@ -20,6 +20,7 @@ PROFILES: dict[str, AgentProfile] = {
         permission_profiles=_ACP_PERMISSION_PROFILES,
         install_url="https://github.com/agentclientprotocol/codex-acp",
         login_guidance="Authenticate the Codex CLI before launching its ACP adapter.",
+        per_turn_usage=True,
     ),
     "claude": AgentProfile(
         agent_id="claude",
@@ -33,6 +34,7 @@ PROFILES: dict[str, AgentProfile] = {
         permission_profiles=_ACP_PERMISSION_PROFILES,
         install_url="https://github.com/agentclientprotocol/claude-agent-acp",
         login_guidance="Authenticate Claude Code before launching its ACP adapter.",
+        per_turn_usage=True,
     ),
     "copilot": AgentProfile(
         agent_id="copilot",

@@ -260,3 +260,48 @@ def test_usage_survives_a_rejected_report(project: RelayProject, fake_agents: Fa
     )
     assert attempt.error_code == "output_validation_error"
     assert (attempt.output_tokens, attempt.cost_amount) == (42, 0.1)
+
+
+@pytest.mark.parametrize("agent_context", ["copilot", "cursor"], indirect=True)
+def test_multi_turn_tokens_stay_unknown_when_the_adapter_meaning_is_unverified(
+    agent_context: AgentExecutionContext,
+    fake_agents: FakeAgents,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.test_agent_controls import answer_when_requested
+
+    monkeypatch.setenv("FAKE_ACP_USAGE", "1")
+    fake_agents.install(agent_context.agent_id, mode="feedback")
+    answer_when_requested(
+        agent_context,
+        monkeypatch,
+        "permission_answer",
+        {"decision": "allow", "feedback": "Check the error paths."},
+    )
+    driver = AcpDriver(PROFILES[agent_context.agent_id], agent_context.command)
+    result = _execute(driver, agent_context)
+    assert result.succeeded
+    assert result.usage is not None
+    # Two turns could be a sum or a running total, so tokens are not guessed.
+    assert result.usage.input_tokens is None
+    assert result.usage.total_tokens is None
+    # Cost is the session's cumulative total in ACP, so it stays reliable.
+    assert (result.usage.cost_amount, result.usage.cost_currency) == (0.5, "USD")
+
+
+@pytest.mark.parametrize("agent_context", ["copilot", "cursor"], indirect=True)
+def test_a_single_turn_reports_tokens_for_every_acp_adapter(
+    agent_context: AgentExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_ACP_USAGE", "1")
+    driver = AcpDriver(PROFILES[agent_context.agent_id], agent_context.command)
+    result = _execute(driver, agent_context)
+    assert result.usage is not None
+    assert result.usage.input_tokens == 100
+
+
+def test_only_adapters_with_verified_per_turn_usage_add_turns() -> None:
+    assert {key for key, profile in PROFILES.items() if profile.per_turn_usage} == {
+        "codex",
+        "claude",
+    }

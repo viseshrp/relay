@@ -46,6 +46,9 @@ class AgentProfile:
     permission_profiles: frozenset[str]
     install_url: str
     login_guidance: str
+    # ACP leaves PromptResponse.usage per-turn or cumulative to each adapter.
+    # True only where the adapter's source reports each prompt turn alone.
+    per_turn_usage: bool = False
 
 
 @dataclass(frozen=True, slots=True)
