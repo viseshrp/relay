@@ -114,8 +114,10 @@ def notes_block(notes: Sequence[FrozenNote]) -> str:
         ]
     lines += [
         "",
-        "Apply a note only when its situation matches this task; the step's own "
-        "instructions take precedence.",
+        (
+            "Apply a note only when its situation matches this task; the step's own "
+            "instructions take precedence."
+        ),
     ]
     return "\n".join(lines) + "\n"
 

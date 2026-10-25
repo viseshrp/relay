@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 import uuid
 
 from django.db import DatabaseError, models, transaction
@@ -12,12 +13,19 @@ from relay.workflows.loader import workflow_key_parts
 from relay.workflows.notes import NOTES_PER_WORKFLOW_MAX, FrozenNote, NoteDraft
 
 from .models import Run, WorkflowNote
-from .repositories import _datetime_field, _datetime_text
 
 
 def canonical_workflow_key(workflow_key: str) -> str:
     """`review` and `review.yaml` name the same workflow's notes."""
     return "/".join(workflow_key_parts(workflow_key))
+
+
+def _created_at(note: WorkflowNote) -> str:
+    value = getattr(note, "created_at")  # noqa: B009 - validated Django accessor
+    if not isinstance(value, datetime):
+        message = "A stored workflow note has an invalid creation time."
+        raise PersistenceError(message)
+    return value.isoformat()
 
 
 def _optional_relation(instance: models.Model, name: str) -> str | None:
@@ -36,7 +44,7 @@ def _record(note: WorkflowNote) -> dict[str, object]:
         "confidence": note.confidence,
         "evidence_run_id": _optional_relation(note, "evidence_run"),
         "archived": note.archived,
-        "created_at": _datetime_text(_datetime_field(note, "created_at")),
+        "created_at": _created_at(note),
     }
 
 
