@@ -151,6 +151,7 @@ class InlineEngine:
         cleanup_policy: str = "retain",
         entry_point: str | None = None,
         owner_agents: Sequence[str] = (),
+        notes: Sequence[str] = (),
     ) -> str:
         request = LaunchRequest(
             workflow_key,
@@ -161,6 +162,7 @@ class InlineEngine:
             tuple(owner_agents),
             "owner",
             defaults=self.workflow_defaults,
+            notes=tuple(notes),
         )
         result = launch_workflow(
             self.store, project.relay_root, project.project_id, request, self.tokens.append

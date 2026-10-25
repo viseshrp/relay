@@ -354,6 +354,23 @@ def run_launch_inputs(request: HttpRequest, run_id: str) -> HttpResponse:
 @api_errors
 @owner_required
 @require_GET
+def run_compare(request: HttpRequest) -> HttpResponse:
+    """Compare two runs named by `?left=` and `?right=` run IDs."""
+    left = request.GET.get("left")
+    right = request.GET.get("right")
+    if not left or not right:
+        message = "left and right run IDs are required."
+        raise ConfigError(message)
+    return JsonResponse(
+        DjangoReadStore().compare_runs(
+            canonical_uuid(left, resource="run"), canonical_uuid(right, resource="run")
+        )
+    )
+
+
+@api_errors
+@owner_required
+@require_GET
 def run_detail(request: HttpRequest, run_id: str) -> HttpResponse:
     collection = request.GET.get("collection", "nodes")
     if collection not in {"nodes", "interactions"}:

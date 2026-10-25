@@ -280,6 +280,130 @@ export interface RunNode {
   pending_settings?: RetryConfiguration | null;
 }
 
+/** Launch-static text; `runtime` lists expressions resolved only when the step runs. */
+export interface PreviewText {
+  text: string;
+  runtime: string[];
+}
+
+export interface PreviewPrompt {
+  reference: string;
+  sha256: string;
+  bytes: number;
+  text: string;
+  truncated: boolean;
+}
+
+export interface PreviewStep {
+  id: string;
+  name: string;
+  kind: "agent" | "command" | "action";
+  uses: string | null;
+  agents: PreviewText | null;
+  model: PreviewText | null;
+  effort: PreviewText | null;
+  prompt_files: PreviewPrompt[];
+  prompt_files_runtime: PreviewText | null;
+  prompt: PreviewText | null;
+  report: PreviewText | null;
+  command: PreviewText | null;
+  /** A composite action's own steps. */
+  steps: PreviewStep[];
+  /** The jobs a loop repeats, up to `repeat` times. */
+  jobs: PreviewJob[];
+  repeat: PreviewText | null;
+}
+
+export interface PreviewJob {
+  id: string;
+  name: string;
+  needs: string[];
+  matrix: boolean;
+  uses: string | null;
+  steps: PreviewStep[];
+  /** The called workflow's jobs when `uses` names a local reusable workflow. */
+  jobs: PreviewJob[];
+}
+
+export interface LaunchPreview {
+  workflow: string;
+  run_name: PreviewText;
+  jobs: PreviewJob[];
+  truncated: boolean;
+  /** The block every agent step receives when notes are chosen. */
+  notes: string | null;
+}
+
+export interface ComparedValue {
+  name: string;
+  left: JsonValue | null;
+  right: JsonValue | null;
+  same: boolean;
+}
+
+export interface ComparedStepSide {
+  node_type: string;
+  display_name: string;
+  status: string;
+  attempt_count: number;
+  latest_attempt: JobAttempt | null;
+  outputs: Record<string, JsonValue>;
+}
+
+export interface RunComparison {
+  left: RunSummary & { workflow_name: string; usage: RunUsage };
+  right: RunSummary & { workflow_name: string; usage: RunUsage };
+  inputs: ComparedValue[];
+  hashes: ComparedValue[];
+  steps: {
+    scope_path: string;
+    left: ComparedStepSide | null;
+    right: ComparedStepSide | null;
+  }[];
+  truncated: boolean;
+}
+
+/** An owner-approved lesson; a launch can freeze chosen notes for its agent steps. */
+export interface WorkflowNote {
+  id: string;
+  workflow_key: string;
+  cue: string;
+  lesson: string;
+  evidence: string;
+  confidence: "low" | "medium" | "high" | null;
+  evidence_run_id: string | null;
+  archived: boolean;
+  created_at: string;
+}
+
+export interface UsageCost {
+  amount: number;
+  currency: string;
+}
+
+/** Provider-reported attempt usage; null fields were not reported. */
+export interface AttemptUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  thought_tokens: number | null;
+  cached_read_tokens: number | null;
+  cached_write_tokens: number | null;
+  total_tokens: number | null;
+  cost: UsageCost | null;
+}
+
+export interface RunUsage {
+  attempts: number;
+  attempts_reported: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  thought_tokens: number | null;
+  cached_read_tokens: number | null;
+  cached_write_tokens: number | null;
+  total_tokens: number | null;
+  costs: UsageCost[];
+}
+
 export interface JobAttempt {
   id: string;
   number: number;
@@ -297,6 +421,7 @@ export interface JobAttempt {
   provider_message_truncated: boolean;
   starting_head: string;
   ending_head: string | null;
+  usage?: AttemptUsage | null;
 }
 
 export interface RunJob {
@@ -349,6 +474,7 @@ export interface RunDetail extends RunSummary {
   workflow_name: string;
   working_folder: string;
   problem: RunProblem | null;
+  usage?: RunUsage;
   recovery: {
     enabled: boolean;
     max_retries: number;

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -79,14 +80,20 @@ def run_git_bytes(
     *,
     check: bool = True,
     input_bytes: bytes | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> GitBytesResult:
-    """Exchange exact bytes with Git for paths and source content."""
+    """Exchange exact bytes with Git for paths and source content.
+
+    `env` adds variables to the inherited environment, for example a private
+    `GIT_INDEX_FILE` that leaves the worktree's real index untouched.
+    """
     try:
         process = subprocess.run(  # noqa: S603
             _argv(repository, arguments),
             check=False,
             capture_output=True,
             input=input_bytes,
+            env={**os.environ, **env} if env is not None else None,
         )
     except OSError:
         message = "Git could not be started."

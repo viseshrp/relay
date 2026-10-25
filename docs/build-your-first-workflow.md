@@ -163,7 +163,7 @@ where `<id>` is the step's **Step ID**.
 
 | Step type | Reference | Purpose | Required inputs | Optional inputs | Outputs |
 | --- | --- | --- | --- | --- | --- |
-| Agent | `relay/agent@v1` | Ask an installed coding agent to do work in the job's working copy. | None | `agent`, `agents`, `auto-retry`, `effort`, `field`, `format`, `label`, `model`, `prompt`, `prompt-files`, `report`, `retry-limit`, `selector` | `value`, read from `report` when it is set |
+| Agent | `relay/agent@v1` | Ask an installed coding agent to do work in the job's working copy. | None | `agent`, `agents`, `allowed-paths`, `auto-retry`, `effort`, `field`, `format`, `label`, `model`, `prompt`, `prompt-files`, `report`, `retry-limit`, `selector` | `value`, read from `report` when it is set |
 | Command | `relay/command@v1` | Run a program with exact arguments in the job's working copy, without a shell. | None | `argv`, `command` | None |
 | Approval | `relay/human-wait@v1` | Pause the job until you answer a question in Relay. | `prompt` | `options`, `timeout-minutes` | `answer` |
 | Check a report | `relay/validate-report@v1` | Check a report file in the job's working copy and export a value read from it. | None | `field`, `format`, `label`, `path`, `report`, `selector` | `value` |

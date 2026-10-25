@@ -479,6 +479,24 @@ Relay verifies staged blobs against Git's conversion of the confirmed bytes,
 including configured newline conversion, before committing the reviewed index.
 The panel repeats preflight after the commit.
 
+**Workflow notes** appears when the workflow has active notes. Choose up to
+10; the run captures their text, so later edits do not change it. Manage notes
+with **Workflow notes** on the workflow page, where **Add note** asks when the
+note applies, what the agent should do, and what showed it, and **Archive**
+hides a note from later launches. A finished run's header offers **Save as
+note**, which links the note to that run and starts its evidence with the run
+number and result.
+
+**Preview step instructions** shows, for the inputs entered so far, each job
+in order and what its steps will be told: the agent and model as written,
+each prompt file with its size and hash, the step prompt, the report contract,
+and command text. Called reusable workflows, loops, and composite actions show
+their own jobs and steps indented below the call, and chosen workflow notes
+appear as the block every agent step will receive. Values that only exist
+once a step runs stay visible as
+`${{ ... }}` with a "Filled in when the step runs" note. Preview starts no run
+and contacts no agent, so launch still checks that the model is available.
+
 **Advanced options** explains **Override model for this run** and **After a
 successful run**. **Start from job** lists declared entry points.
 Cached models are suggestions; Relay
@@ -536,8 +554,15 @@ for a materialized agent step that has never started. Completed attempts and
 captured prompts remain immutable. See
 [Pause new steps](execution.md#pause-new-steps-and-change-an-unstarted-agent).
 
-The Runs tab lists history for the selected project. A selected run shows
-its title, number, state, source, duration, and controls. Pending requests appear
+The Runs tab lists history for the selected project. **Compare runs** adds a
+checkbox to each row; choose two runs and select **Compare 2/2** to see their
+inputs, changed captured workflow and prompt files, and each step's status,
+agent, model, error, duration, and usage side by side. A selected run shows
+its title, number, state, source, duration, and controls. When providers
+reported usage, the header totals it, for example
+`1,200 tokens in · 80 tokens out · $0.25 (reported by 2 of 3 attempts)`. A
+job's **Result** panel shows the selected attempt's usage or states that the
+provider did not report it. Pending requests appear
 before the graph. Annotations open failed job logs, where **Re-run job**
 retries a job. Agent failures also offer **Re-run with settings**, which lets
 the owner keep the current tool and model or select another installed tool

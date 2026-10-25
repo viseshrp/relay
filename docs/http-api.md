@@ -155,6 +155,10 @@ run, and attention endpoints keep their payloads unchanged.
 | `POST /api/workflows/<key>/prompt` | `holder`, `reference`, `text`, `base_hash` | Creates or saves instructions; requires the workflow lease and rejects stale edits. Use `null` for a new file's hash |
 | `GET /api/workflows/{key}` | none | `200 {"yaml":"...","draft":null,"base_hash":"..."}` |
 | `GET /api/workflows/{key}/preflight` | optional `?project={id}` | `200 {"clean":true,"blocking_count":0,"allowed_count":0,"files":[],"truncated":false,"warnings":[]}` |
+| `GET /api/workflows/{key}/notes` | optional `?archived=true`, `?project={id}` | `200 {"notes":[...]}` |
+| `POST /api/workflows/{key}/notes` | `{"cue":"...","lesson":"...","evidence":"...","confidence":"medium","evidence_run_id":"..."}` | `201 {"note":{...}}` |
+| `POST /api/workflows/{key}/notes/{id}/archive` | `{}` | `200 {"note":{...}}` |
+| `POST /api/workflows/{key}/preview` | `{"inputs":{},"notes":[]}`; optional `?project={id}` | `200 {"workflow":"Review","run_name":{"text":"Review api","runtime":[]},"jobs":[...],"truncated":false,"notes":null}` |
 | `POST /api/workflows/{key}/draft` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"draft":...}` |
 | `POST /api/workflows/{key}/save` | `{"yaml":"...","base_hash":"...","holder":"tab-id"}` | `200 {"ok":true}` |
 | `POST /api/workflows/{key}/lease` | `{"holder":"tab-id"}` | `200 {"lease":...}` |
@@ -198,6 +202,45 @@ Warnings never block launch; such a secret resolves to an empty value.
 The owner can inspect the complete list with `git status`. Reading preflight
 does not change files, Git history, the index, or editor leases. Launch repeats
 validation and cleanliness checks even after a successful preview.
+
+Workflow notes are owner-approved lessons for one workflow in the selected
+project; `review` and `review.yaml` name the same workflow. Saving requires
+nonempty `cue` (up to 500 characters), `lesson` (4,000), and `evidence`
+(2,000). `confidence` is `low`, `medium`, `high`, or omitted.
+`evidence_run_id` optionally links a run of the same project; cleaning that run
+later clears the link and keeps the evidence text. A workflow keeps at most 100
+active notes. Records contain `id`, `workflow_key`, `cue`, `lesson`,
+`evidence`, `confidence`, `evidence_run_id`, `archived`, and `created_at`,
+oldest first. Archiving hides a note from launch without deleting it. Notes
+never change on their own; Relay creates them only from these requests.
+
+Launch preview applies the same input rules as launch to the posted `inputs`,
+then resolves each top-level job's launch-static values: `inputs`, `vars`, and
+`relay` facts known before a run exists. Inputs travel in the body so they
+never appear in a URL. Each job has `id`, `name`, `needs`, `matrix`, an optional
+reusable-workflow `uses`, and `steps`. Each step has `id`, `name`, and `kind`
+(`agent`, `command`, or `action`). Agent steps add `agents`, `model`, `effort`,
+`prompt_files`, `prompt_files_runtime`, `prompt`, and `report`; command steps
+add `command`. Text values are `{text, runtime}`. Expressions that need run
+state, such as `steps`, `needs`, `matrix`, `env`, or `hashFiles`, stay in the
+text as `${{ expr }}` and are listed in `runtime`. For example,
+`Fix ${{ inputs.target }} after ${{ steps.plan.outputs.file }}` with
+`target=api` becomes `Fix api after ${{ steps.plan.outputs.file }}`.
+`prompt_files` lists each resolved prompt's `reference`, `sha256`, `bytes`,
+`text` (the first 64 KiB), and `truncated`; when a prompt-file path itself needs
+run state, `prompt_files_runtime` shows it unresolved instead. `report` is the
+selector JSON the agent receives as its output contract. A job that calls a
+local reusable workflow lists that workflow's jobs in its own `jobs`; a
+`relay/loop@v1` step lists the repeated workflow's jobs in `jobs` and its
+`max-iterations` in `repeat`; a local composite action lists its own `steps`.
+Values passed to a called workflow or action become its `inputs`, so a value
+that needs run state appears there as its `${{ expr }}` text. Expansion stops
+after four nested levels, where the call is only named. The optional body
+field `notes` takes the same note IDs as launch and returns `notes`, the exact
+block every agent step would receive, or `null`. Whole jobs are kept in order
+up to 512 KiB; `truncated` reports omitted jobs. Preview creates no run,
+snapshot, worktree, or event, and starts no agent, so it never proves that a
+model is available.
 
 Workflow keys use relative POSIX segments below `.relay/workflows/`; `review`
 resolves to `review.yaml`, while `nested/review.yml` keeps its explicit suffix.
@@ -253,6 +296,7 @@ The same holder renews it; another holder gets `409` until expiry.
 | `GET /api/artifacts/{id}` | none | `200` file download |
 | `GET /api/artifacts/{id}/preview` | none | `200 {"text":"...","truncated":false,"previewable":true}` |
 | `GET /api/runs/{id}/changes` | none | `200` committed diff preview with `text`, `truncated`, `source_commit`, `recorded_head`, `files`, `files_truncated` |
+| `GET /api/runs/compare?left={id}&right={id}` | none | `200 {"left":{...},"right":{...},"inputs":[...],"hashes":[...],"steps":[...],"truncated":false}` |
 
 Finished-run monitors use `events?summary=true`: at most 50 state events and
 16 KiB per page, excluding agent output, command output and step summaries.
@@ -296,7 +340,10 @@ A launch body has this shape:
 }
 ```
 
-`model`, `cleanup_policy`, `entry_point`, and `project_id` are optional. If
+`model`, `cleanup_policy`, `entry_point`, `notes`, and `project_id` are
+optional. `notes` is a list of up to 10 distinct active note IDs for this
+workflow; an archived note or one from another workflow returns
+`400 config_error` before creating a run. If
 `project_id` is supplied, it must match the request's selected project; a
 mismatch returns `400 config_error` before creating a run. Launch validates the
 workflow tree, inputs, clean Git state, declared entry-point artifacts, and all
@@ -469,7 +516,11 @@ Attempts contain `id`, `number`, `status`, `agent_id`, exact `model_value`,
 `started_at`, `ended_at`, `stop_reason`, `provider_stop_reason`, `exit_code`,
 `error_code`,
 `error_message`, public `provider_message`, `provider_message_truncated`,
-`starting_head`, and `ending_head`. Worker IDs, process IDs, live session
+`starting_head`, `ending_head`, and `usage`. `usage` is `null` when the
+provider reported nothing; otherwise it contains nullable `input_tokens`,
+`output_tokens`, `thought_tokens`, `cached_read_tokens`, `cached_write_tokens`,
+and `total_tokens`, plus `cost`, either `null` or `{amount, currency}`. Worker
+IDs, process IDs, live session
 identifiers, and private provider content are omitted. `latest_attempt` is
 returned separately even when it falls outside the requested attempt page.
 Use `since=next` for further attempts; the existing numeric record bounds and
@@ -535,6 +586,11 @@ by `"resets 1:50pm"` becomes `"Limit · resets 1:50pm"`. The notice is capped at
 runs; launch failures without an attempt retain `failure_summary` instead.
 `problem.retry` is `null` or contains `state`, UTC ISO-8601 `reset_at`, and
 `error_message`. States are `scheduled`, `blocked`, `canceled`, and `resumed`.
+Run detail also includes `usage`, totaling provider-reported attempt usage. It
+contains `attempts`, `attempts_reported`, the nullable token totals named
+above, and `costs`, one `{currency, amount}` entry per reported currency in
+code order. A token total is `null` when no attempt reported it, so an
+unreported value never reads as zero. Relay does not convert currencies.
 Only structured provider rejection metadata authorizes `scheduled`. A failed
 run with a pending schedule keeps its SSE stream open so automatic recovery is
 visible without reloading. Canceling or blocking the schedule lets a terminal
@@ -587,6 +643,19 @@ and gains one-based `part` and total `parts` counts. Other large payloads become
 of the original JSON text. Join those chunks before parsing the JSON. Relay
 reserves the remaining persisted-event budget for scope and attempt metadata;
 it splits on Unicode character boundaries and accounts for JSON escaping.
+
+Run comparison reads two runs of the same project; runs from different
+projects return `400 config_error`, and a missing or malformed ID returns the
+run-not-found error. `left` and `right` are run records with `workflow_name`
+and the `usage` totals described above. `inputs` pairs the captured typed
+inputs and `hashes` pairs the snapshot hashes by name; each row has `name`,
+`left`, `right`, and `same`, so a value present on one side only is `null` on
+the other. `steps` pairs job and step records by `scope_path` in first-seen
+order. Each side is `null` when that run has no such scope, or contains
+`node_type`, `display_name`, `status`, `attempt_count`, `latest_attempt` (the
+attempt record above, or `null`), and `outputs`. At most 200 scopes and the
+1 MiB response limit apply; `truncated` reports omitted scopes. Comparison is
+read-only and does not depend on either run's event cursor.
 
 ## Controls
 

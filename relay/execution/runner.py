@@ -13,9 +13,10 @@ import time
 from typing import Protocol, TypeAlias
 
 from relay.agents.events import AgentEvent
+from relay.agents.usage import AttemptUsage
 from relay.agents.usage_limits import ProviderUsageLimit
 from relay.errors import NodeExecutionError, RelayError, log_persistence_failure
-from relay.vcs.artifacts import PreservationResult, preserve_attempt_evidence
+from relay.vcs.artifacts import AttemptFailure, PreservationResult, preserve_attempt_evidence
 from relay.vcs.commits import (
     accept_job_result,
     current_head,
@@ -25,6 +26,7 @@ from relay.vcs.worktree import require_project_worktree
 from .control import ClaimedControl
 from .dispatch import ClaimDisposition, ClaimedAttempt, DispatchStore, claim_node_attempt
 from .heartbeat import HeartbeatStore, heartbeat_registration
+from .masking import redactor
 from .resources import AttemptResources, allocate_attempt_resources
 from .state import AttemptStopReason, EventSensitivity, EventSource, NodeType
 from .timing import attempt_deadline, remaining_seconds
@@ -168,6 +170,7 @@ class ExecutionOutcome:
     raw_outcome: str | None = None
     conclusion: str | None = None
     provider_stop_reason: str | None = None
+    usage: AttemptUsage | None = None
 
 
 class AttemptExecutor(Protocol):
@@ -231,6 +234,15 @@ def _preserve(
     *,
     artifact_root: Path | None,
 ) -> PreservationResult:
+    failure = None
+    if outcome.kind is OutcomeKind.FAILED:
+        # The index is read by a later agent, so it masks secrets the same
+        # way the public failure message does.
+        message = outcome.error_message
+        failure = AttemptFailure(
+            outcome.error_code or (outcome.stop_reason or AttemptStopReason.FAILED).value,
+            redactor(claim.run_id).text(message) if message else None,
+        )
     return preserve_attempt_evidence(
         Path(claim.project_path),
         worktree,
@@ -239,6 +251,7 @@ def _preserve(
         claim.starting_head,
         declared_artifacts=dict(outcome.declared_artifacts),
         root=artifact_root,
+        failure=failure,
     )
 
 
@@ -342,7 +355,7 @@ def _execute_attempt(
             and context.timed_out()
             and claim.node_type != NodeType.ACTIONS_STEP.value
         ):
-            outcome = _timeout_failure()
+            outcome = replace(_timeout_failure(), usage=outcome.usage)
     except RelayError as error:
         outcome = _failure(error)
     except Exception:
@@ -393,7 +406,9 @@ def _execute_attempt(
             else:
                 ending_head = current_head(worktree)
         except RelayError as error:
-            outcome = replace(_failure(error), declared_artifacts=outcome.declared_artifacts)
+            outcome = replace(
+                _failure(error), declared_artifacts=outcome.declared_artifacts, usage=outcome.usage
+            )
             LOGGER.exception(
                 "Attempt validation failed",
                 extra={"attempt_id": claim.attempt_id},
@@ -405,7 +420,8 @@ def _execute_attempt(
             preservation = _preserve(claim, worktree, outcome, artifact_root=artifact_root)
             store.record_preservation(claim.attempt_id, preservation)
         except RelayError as error:
-            outcome = _failure(error)
+            # Provider-reported usage stays attached to the attempt that spent it.
+            outcome = replace(_failure(error), usage=outcome.usage)
             LOGGER.exception("Attempt preservation failed", extra={"attempt_id": claim.attempt_id})
 
     terminal_persisted = False

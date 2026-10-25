@@ -14,6 +14,7 @@ from relay.execution.runner import AttemptContext
 from relay.execution.state import AttemptStopReason
 from relay.workflows.schema import AgentNode
 
+from .usage import AttemptUsage
 from .usage_limits import ProviderUsageLimit
 
 DriverName = Literal["acp", "antigravity"]
@@ -45,6 +46,9 @@ class AgentProfile:
     permission_profiles: frozenset[str]
     install_url: str
     login_guidance: str
+    # ACP leaves PromptResponse.usage per-turn or cumulative to each adapter.
+    # True only where the adapter's source reports each prompt turn alone.
+    per_turn_usage: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +218,7 @@ class AgentResult:
     usage_limit: ProviderUsageLimit | None = None
     provider_stop_reason: str | None = None
     error_message: str | None = None
+    usage: AttemptUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +262,7 @@ __all__ = [
     "AgentExecutionContext",
     "AgentProfile",
     "AgentResult",
+    "AttemptUsage",
     "DiscoveredAgent",
     "DriverName",
     "ModelObservation",

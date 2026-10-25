@@ -56,6 +56,7 @@ from .models import (
     AgentExecutionContext,
     AgentProfile,
     AgentResult,
+    AttemptUsage,
     ModelObservation,
     ProbeFailure,
     ProbeRequirement,
@@ -270,6 +271,8 @@ class RelayAcpClient:
     feedback: list[str]
     turn: int
     usage_limit: ProviderUsageLimit | None
+    turn_usages: list[schema.Usage | None]
+    cost: schema.Cost | None
 
     agent: acp.Agent | None
 
@@ -294,6 +297,56 @@ class RelayAcpClient:
         self.feedback = []
         self.turn = 0
         self.usage_limit = None
+        self.turn_usages = []
+        self.cost = None
+
+    def record_turn_usage(self, usage: schema.Usage | None) -> None:
+        """Keep each prompt turn's provider-reported tokens for the attempt total."""
+        self.turn_usages.append(usage)
+
+    def _token_totals(self) -> dict[str, int]:
+        """Combine turns only where the adapter's per-turn meaning is known.
+
+        ACP leaves PromptResponse.usage per-turn or cumulative to each adapter.
+        One reported turn is the attempt's usage either way. For several turns,
+        a per-turn adapter's values add up: turns of 10 and 4 output tokens
+        record 14. Otherwise Relay cannot tell a sum from a running total, so
+        the tokens stay unknown rather than risk double counting.
+        """
+        reported = [usage for usage in self.turn_usages if usage is not None]
+        if not reported or (len(self.turn_usages) > 1 and not self.profile.per_turn_usage):
+            return {}
+        totals: dict[str, int] = {}
+        for usage in reported:
+            for name in (
+                "input_tokens",
+                "output_tokens",
+                "thought_tokens",
+                "cached_read_tokens",
+                "cached_write_tokens",
+                "total_tokens",
+            ):
+                value = getattr(usage, name)
+                if isinstance(value, int):
+                    totals[name] = totals.get(name, 0) + value
+        return totals
+
+    def attempt_usage(self) -> AttemptUsage | None:
+        """Return reported totals; unreported values stay unknown rather than zero."""
+        totals = self._token_totals()
+        usage = AttemptUsage(
+            input_tokens=totals.get("input_tokens"),
+            output_tokens=totals.get("output_tokens"),
+            thought_tokens=totals.get("thought_tokens"),
+            cached_read_tokens=totals.get("cached_read_tokens"),
+            cached_write_tokens=totals.get("cached_write_tokens"),
+            total_tokens=totals.get("total_tokens"),
+            # ACP reports cost as the session's cumulative total, so the latest
+            # update is the attempt's cost; each attempt uses a fresh session.
+            cost_amount=self.cost.amount if self.cost is not None else None,
+            cost_currency=self.cost.currency if self.cost is not None else None,
+        )
+        return usage if usage.reported() else None
 
     def on_connect(self, conn: acp.Agent) -> None:
         self.agent = conn
@@ -383,6 +436,8 @@ class RelayAcpClient:
                 context={"agent": self.profile.agent_id},
             )
             await self._cancel_session()
+        if isinstance(update, schema.UsageUpdate) and update.cost is not None:
+            self.cost = update.cost
         if (
             isinstance(update, schema.UsageUpdate)
             and self.profile.agent_id == "claude"
@@ -876,6 +931,7 @@ class AcpDriver:
                         AgentEvent("agent.turn_started", {"turn": client.turn})
                     )
                 response = await connection.prompt(self.session_id, blocks)
+                client.record_turn_usage(response.usage)
                 if client.drift_error is not None:
                     raise client.drift_error
                 # ACP accepts another prompt after end_turn. Feedback stays in this
@@ -928,6 +984,7 @@ class AcpDriver:
                     if not succeeded and client.control_stop is None
                     else None
                 ),
+                usage=client.attempt_usage(),
             )
 
     async def start_attempt(self, context: AgentExecutionContext) -> AsyncIterator[AgentEvent]:
@@ -999,6 +1056,7 @@ class AcpDriver:
                     requested_stop,
                     self.process.returncode if self.process is not None else None,
                     error_code,
+                    usage=client.attempt_usage(),
                 )
         except Exception as error:
             # The typed error identifies the limit; a separate namespaced
@@ -1017,6 +1075,7 @@ class AcpDriver:
                     self.process.returncode if self.process is not None else None,
                     AgentUsageLimitError.error_code,
                     usage_limit=limit,
+                    usage=client.attempt_usage(),
                 )
                 yield AgentEvent("agent.usage_limit", {**limit.payload(), "turn": client.turn})
                 return
@@ -1026,6 +1085,7 @@ class AcpDriver:
                 AttemptStopReason.FAILED,
                 self.process.returncode if self.process is not None else None,
                 mapped.error_code,
+                usage=client.attempt_usage(),
             )
             raise mapped from None
         finally:

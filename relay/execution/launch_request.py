@@ -41,3 +41,5 @@ class LaunchRequest:
     source_branch: str | None = None
     defaults: WorkflowDefaults = field(default_factory=WorkflowDefaults, kw_only=True)
     event_context: Mapping[str, object] = field(default_factory=dict, kw_only=True)
+    # Owner-selected workflow note IDs, frozen into the snapshot in this order.
+    notes: Sequence[str] = field(default=(), kw_only=True)

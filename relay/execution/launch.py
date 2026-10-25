@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import logging
@@ -25,6 +25,7 @@ from relay.vcs.commits import current_head
 from relay.vcs.merge import require_merge_target
 from relay.vcs.worktree import create_primary_worktree
 from relay.workflows.defaults import apply_workflow_defaults
+from relay.workflows.notes import FrozenNote, frozen_notes
 from relay.workflows.routing import compile_route_requirements
 from relay.workflows.schema import NodeDefinition
 from relay.workflows.scope import parse_scope_path
@@ -52,6 +53,11 @@ class LaunchStore(SchedulingStore, AgentObservationStore, Protocol):
 
     def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
         """Capture variables, secret references, and environment approval settings."""
+
+    def launch_notes(
+        self, project_id: str, workflow_key: str, note_ids: Sequence[str]
+    ) -> tuple[FrozenNote, ...]:
+        """Return the selected active notes in order, or reject the launch."""
 
     def replace_model_observations(
         self,
@@ -146,6 +152,35 @@ def _validate_entry_point(
     return normalized
 
 
+def launch_relay_context(
+    relay_root: Path,
+    workflow: ValidatedWorkflow,
+    workflow_key: str,
+    launcher: str,
+    typed_inputs: Mapping[str, object],
+    event_context: Mapping[str, object],
+) -> dict[str, object]:
+    """Build the `relay` expression context known before a run exists.
+
+    For example, a manual launch on branch `main` exposes `relay.ref` as
+    `refs/heads/main` and `relay.event.inputs` as the typed launch inputs.
+    """
+    source = project_launch_source(relay_root.parent)
+    return {
+        "workflow": workflow.root.definition.name,
+        "workflow_ref": workflow_key,
+        "actor": launcher,
+        "repository": relay_root.parent.name,
+        "event_name": "workflow_dispatch",
+        "ref": f"refs/heads/{source.branch}" if source.branch else "",
+        "ref_name": source.branch or "",
+        "ref_type": "branch" if source.branch else "",
+        "sha": source.commit,
+        "event": {"inputs": typed_inputs},
+        **event_context,
+    }
+
+
 def launch_workflow(
     store: LaunchStore,
     relay_root: Path,
@@ -179,19 +214,14 @@ def launch_workflow(
             environments=tuple(bindings["environments"]),
         )
         source = project_launch_source(relay_root.parent)
-        actions_context["relay"] = {
-            "workflow": workflow.root.definition.name,
-            "workflow_ref": request.workflow_key,
-            "actor": request.launcher,
-            "repository": relay_root.parent.name,
-            "event_name": "workflow_dispatch",
-            "ref": f"refs/heads/{source.branch}" if source.branch else "",
-            "ref_name": source.branch or "",
-            "ref_type": "branch" if source.branch else "",
-            "sha": source.commit,
-            "event": {"inputs": typed_inputs},
-            **request.event_context,
-        }
+        actions_context["relay"] = launch_relay_context(
+            relay_root,
+            workflow,
+            request.workflow_key,
+            request.launcher,
+            typed_inputs,
+            request.event_context,
+        )
         if request.event_context.get("event_name") == "push" and (
             request.event_context.get("sha") != source.commit
             or (
@@ -274,6 +304,7 @@ def launch_workflow(
             registry=registry,
             observation_store=store,
         )
+    notes = frozen_notes(store.launch_notes(project_id, request.workflow_key, request.notes))
     snapshot = build_snapshot(
         workflow,
         typed_inputs=typed_inputs,
@@ -282,6 +313,7 @@ def launch_workflow(
             "workflow_defaults": request.defaults.model_dump(mode="json"),
             "recovery": workflow.root.definition.recovery.model_dump(mode="json"),
             **({"actions_context": actions_context} if actions_context else {}),
+            **({"workflow_notes": notes} if notes else {}),
         },
     )
     source_commit = current_head(repository)

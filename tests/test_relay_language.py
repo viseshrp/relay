@@ -275,7 +275,7 @@ def test_every_reachable_property_and_action_input_has_a_description() -> None:
         assert set(entry["descriptions"]) == action.allowed
         for key in action.allowed:
             texts[f"{action.reference}.{key}"] = entry["descriptions"][key]
-    assert len(texts) == 108 + 11 + 46
+    assert len(texts) == 108 + 11 + 47
     problems = {
         key: text
         for key, text in texts.items()

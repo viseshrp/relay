@@ -12,6 +12,9 @@ from relay.errors import WorkflowValidationError
 
 from .suggest import closest
 
+ALLOWED_PATHS_MAX = 100
+ALLOWED_PATH_MAX_CHARS = 1024
+
 BUILTIN_REFERENCE = re.compile(r"relay/([a-z][a-z-]*)@v([1-9][0-9]*)")
 # The named shells a run step can choose; any other shell is a command with {0}.
 SHELLS = ("bash", "sh", "pwsh", "powershell", "cmd", "python")
@@ -92,6 +95,7 @@ BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (
                 "label",
                 "auto-retry",
                 "retry-limit",
+                "allowed-paths",
             }
         ),
         frozenset(),
@@ -139,6 +143,10 @@ BUILTIN_ACTIONS: tuple[BuiltinAction, ...] = (
             "retry-limit": (
                 "Most automatic retries for this step, 1 or 2, used with auto-retry: true. "
                 "Retries already used are not reset by a restart."
+            ),
+            "allowed-paths": (
+                "Paths the agent may change, one pattern per line relative to the project "
+                "folder, such as docs/** or src/*.py. Any other change fails the step."
             ),
         },
         values={"format": REPORT_FORMATS, "auto-retry": ("true", "false")},
@@ -520,6 +528,12 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "Agent retry-limit must be a literal integer between 1 and 2."
         raise WorkflowValidationError(message)
+    if action.name == "agent" and "allowed-paths" in inputs:
+        try:
+            parse_allowed_paths(inputs["allowed-paths"])
+        except WorkflowValidationError as error:
+            error.context.setdefault("field", "with.allowed-paths")
+            raise
     if action.name == "agent":
         from relay.agents.profiles import PROFILES
 
@@ -545,6 +559,37 @@ def validate_inputs(reference: str, inputs: Mapping[str, Any]) -> None:
     ):
         message = "Report format must be exists, label, json, or yaml."
         raise WorkflowValidationError(message)
+
+
+def parse_allowed_paths(value: object) -> tuple[str, ...]:
+    """Validate one literal pattern per line, relative to the project folder.
+
+    For example, `docs/**` allows any file below `docs/`, `src/*.py` allows
+    Python files directly in `src/`, and `README.md` allows only that file.
+    """
+    if not isinstance(value, str) or "${{" in value:
+        message = "allowed-paths must be a literal list of path patterns, one per line."
+        raise WorkflowValidationError(message)
+    patterns = tuple(line.strip() for line in value.splitlines() if line.strip())
+    if not patterns or len(patterns) > ALLOWED_PATHS_MAX:
+        message = f"allowed-paths must list between 1 and {ALLOWED_PATHS_MAX} patterns."
+        raise WorkflowValidationError(message)
+    for pattern in patterns:
+        parts = pattern.split("/")
+        if (
+            len(pattern) > ALLOWED_PATH_MAX_CHARS
+            or "\\" in pattern
+            or pattern.startswith("/")
+            or re.match(r"^[A-Za-z]:", pattern)
+            or any(part in {"", ".", ".."} for part in parts[:-1])
+            or parts[-1] in {".", ".."}
+        ):
+            message = (
+                f"allowed-paths pattern {pattern!r} must be a relative POSIX path "
+                "without '.', '..', or backslashes."
+            )
+            raise WorkflowValidationError(message)
+    return patterns
 
 
 def human_wait_options(value: object) -> list[str]:

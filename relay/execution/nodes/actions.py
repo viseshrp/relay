@@ -15,7 +15,12 @@ import time
 from typing import Any, cast
 import uuid
 
-from relay.errors import NodeExecutionError, RelayError, WorkflowValidationError
+from relay.errors import (
+    NodeExecutionError,
+    OutputValidationError,
+    RelayError,
+    WorkflowValidationError,
+)
 from relay.execution.action_commands import ActionRuntime, CommandLog
 from relay.execution.action_files import (
     MAX_FILE,
@@ -39,10 +44,17 @@ from relay.execution.runner import (
 )
 from relay.execution.state import AttemptStopReason, EventSource
 from relay.paths import safe_resolve
+from relay.vcs.write_scope import (
+    baseline_ref,
+    capture_worktree,
+    protect_baseline,
+    require_allowed_changes,
+)
 from relay.workflows.actions import expressions
 from relay.workflows.actions.builtins import (
     builtin,
     current_builtin,
+    parse_allowed_paths,
     parse_builtin,
     parse_list_input,
     removed_builtin,
@@ -70,6 +82,21 @@ def _repository() -> Any:
     from relay.web import actions_repository
 
     return actions_repository
+
+
+def _write_baseline(context: AttemptContext) -> str:
+    """Capture a scoped step's start once; retries compare against that same tree.
+
+    Steps share the job worktree, so the baseline is the step's own start rather
+    than the job's commit. A retry that reverts an out-of-scope edit therefore
+    returns that path to its baseline and passes.
+    """
+    run_id, node_run_id, recorded = _repository().write_baseline(context.attempt.attempt_id)
+    if recorded:
+        return recorded
+    tree = capture_worktree(context.worktree)
+    protect_baseline(context.worktree, tree, baseline_ref(run_id, node_run_id))
+    return _repository().record_write_baseline(node_run_id, tree)
 
 
 def _stop(context: AttemptContext) -> ExecutionOutcome | None:
@@ -972,11 +999,39 @@ class ActionsStepExecutor:
             if report_contract is not None:
                 safe_resolve(context.worktree, report_contract.artifact)
                 agent = agent.model_copy(update={"outputs": {"value": report_contract.selector}})
+            allowed = (
+                parse_allowed_paths(inputs["allowed-paths"]) if "allowed-paths" in inputs else ()
+            )
+            baseline = _write_baseline(context) if allowed else None
             outcome = self.driver.execute(
                 replace(context, attempt=attempt, resources=resources), agent
             )
             if outcome.kind is not OutcomeKind.SUCCEEDED:
                 return outcome
+            if baseline is not None:
+                try:
+                    require_allowed_changes(
+                        context.worktree,
+                        baseline,
+                        allowed,
+                        report=report_contract.artifact if report_contract else None,
+                    )
+                except OutputValidationError as error:
+                    report = (
+                        safe_resolve(context.worktree, report_contract.artifact)
+                        if report_contract
+                        else None
+                    )
+                    return replace(
+                        outcome,
+                        kind=OutcomeKind.FAILED,
+                        error_code=error.error_code,
+                        error_message=error.message,
+                        stop_reason=AttemptStopReason.OUTPUT_INVALID,
+                        declared_artifacts={"report": report_contract.artifact}
+                        if report_contract and report and report.is_file()
+                        else {},
+                    )
             if report_contract is not None:
                 try:
                     output, artifacts = report_contract.read(context.worktree)

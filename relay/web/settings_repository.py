@@ -53,6 +53,7 @@ class DjangoSettingsStore:
         from relay.execution.state import RunStatus
         from relay.projects.storage import measure_working_copies
         from relay.vcs.git import git_stdout
+        from relay.vcs.write_scope import is_baseline_ref
         from relay.web.models import Artifact, Run
 
         try:
@@ -92,9 +93,12 @@ class DjangoSettingsStore:
                 ],
             ).splitlines()
             branches = sum(ref.removeprefix("refs/heads/relay/run/") in run_ids for ref in refs)
+            # Write-scope snapshots share the run's namespace so cleanup removes
+            # them, but they are not attempts and are left out of this count.
             attempt_refs = sum(
                 ref.startswith("refs/relay/attempts/")
                 and ref.removeprefix("refs/relay/attempts/").split("/")[0] in run_ids
+                and not is_baseline_ref(ref)
                 for ref in refs
             )
             usage = measure_working_copies(paths)

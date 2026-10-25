@@ -34,7 +34,7 @@ from tests.support import InlineEngine, RelayProject, answer_wait, registry_prob
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The input contracts every built-in accepted before the registry existed.
+# The input contracts every built-in accepts, pinned so changes are deliberate.
 CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
     "relay/agent@v1": (
         {
@@ -51,6 +51,7 @@ CONTRACTS: dict[str, tuple[set[str], set[str]]] = {
             "label",
             "auto-retry",
             "retry-limit",
+            "allowed-paths",
         },
         set(),
     ),

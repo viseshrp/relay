@@ -234,6 +234,8 @@ class NodeRun(RelayModel):
     frozen_def: models.JSONField = models.JSONField(default=dict)
     retry_options: models.JSONField = models.JSONField(default=dict)
     recovery_instruction: models.TextField = models.TextField(blank=True, default="")
+    # Tree captured before a scoped agent step's first attempt; retries reuse it.
+    write_baseline: models.CharField = models.CharField(max_length=64, blank=True, default="")
     scope_inputs: models.JSONField = models.JSONField(default=dict)
     outputs: models.JSONField = models.JSONField(default=dict)
     status: models.CharField = models.CharField(
@@ -290,6 +292,27 @@ class NodeAttempt(RelayModel):
     exit_code: models.IntegerField = models.IntegerField(null=True, blank=True)
     error_code: models.TextField = models.TextField(null=True, blank=True)
     heartbeat_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+    # Provider-reported diagnostics; null means unreported, never zero.
+    input_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    output_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    thought_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cached_read_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cached_write_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    total_tokens: models.PositiveBigIntegerField = models.PositiveBigIntegerField(
+        null=True, blank=True
+    )
+    cost_amount: models.FloatField = models.FloatField(null=True, blank=True)
+    cost_currency: models.CharField = models.CharField(max_length=16, null=True, blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
@@ -354,6 +377,29 @@ class WorkflowEnvironment(RelayModel):
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=("project", "name"), name="relay_environment_identity")
+        ]
+
+
+class WorkflowNote(RelayModel):
+    """An owner-approved lesson for one workflow; launches freeze chosen notes."""
+
+    id: models.UUIDField = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project: models.ForeignKey = models.ForeignKey(Project, on_delete=models.CASCADE)
+    workflow_key: models.TextField = models.TextField()
+    cue: models.TextField = models.TextField()
+    lesson: models.TextField = models.TextField()
+    evidence: models.TextField = models.TextField()
+    confidence: models.CharField = models.CharField(max_length=8, null=True, blank=True)
+    # The evidence text survives run cleanup; only the link becomes empty.
+    evidence_run: models.ForeignKey = models.ForeignKey(
+        Run, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    archived: models.BooleanField = models.BooleanField(default=False)
+    created_at: models.DateTimeField = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=("project", "workflow_key"), name="relay_note_workflow_idx")
         ]
 
 

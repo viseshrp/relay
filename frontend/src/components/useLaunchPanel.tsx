@@ -48,10 +48,14 @@ export function useLaunchPanel({
   const [preflight, setPreflight] = useState<LaunchCleanliness | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) setEntryPoint(initialEntryPoint);
   }, [open, workflowKey, initialEntryPoint]);
+  useEffect(() => {
+    setNotes([]);
+  }, [open, workflowKey]);
   useEffect(() => {
     setInputs(previousRun?.inputs ?? {});
   }, [previousRun]);
@@ -132,6 +136,14 @@ export function useLaunchPanel({
                   ? `${preflight.blocking_count} ${preflight.blocking_count === 1 ? "file blocks" : "files block"} this run. Commit or set aside the listed changes first.`
                   : null);
 
+  // Untouched values stay omitted so defaults are resolved by the service.
+  const supplied = Object.fromEntries(
+    Object.entries(inputs).filter(
+      ([name, value]) =>
+        value !== undefined && Object.hasOwn(workflow?.inputs ?? {}, name),
+    ),
+  );
+
   async function launch(): Promise<void> {
     if (reason || workflowKey === null) return;
     const errors = validateLaunchInputs(workflow?.inputs ?? {}, inputs);
@@ -144,13 +156,6 @@ export function useLaunchPanel({
     setLaunching(true);
     setLaunchError(null);
     try {
-      // Untouched values stay omitted so defaults are resolved by the service.
-      const supplied = Object.fromEntries(
-        Object.entries(inputs).filter(
-          ([name, value]) =>
-            value !== undefined && Object.hasOwn(workflow?.inputs ?? {}, name),
-        ),
-      );
       const response = await api<ReadResponse2>(
         projectPath("/api/runs", requestProject),
         {
@@ -162,6 +167,7 @@ export function useLaunchPanel({
             ...(model ? { model } : {}),
             ...(cleanup ? { cleanup_policy: cleanup } : {}),
             ...(entryPoint ? { entry_point: entryPoint } : {}),
+            ...(notes.length ? { notes } : {}),
           }),
         },
       );
@@ -199,6 +205,9 @@ export function useLaunchPanel({
     preflight,
     preflightError,
     inputs,
+    supplied,
+    notes,
+    setNotes,
     inputErrors,
     setInputs,
     setInputErrors,

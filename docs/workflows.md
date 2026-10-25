@@ -224,7 +224,8 @@ remaining job deadline. `continue-on-error` applies to this failure too.
 
 `relay/agent@v1` accepts `agent` or ordered `agents`, `model`, `effort`,
 newline-separated `prompt-files`, `prompt`, and optional `report`, `selector`,
-`format`, `field`, `label`, and `auto-retry`. Write `agents` as a JSON array
+`format`, `field`, `label`, `auto-retry`, `retry-limit`, and `allowed-paths`.
+Write `agents` as a JSON array
 string or one agent ID per line under `|`; a YAML sequence is rejected. Agent
 IDs are `antigravity`, `claude`, `codex`, `copilot`, and `cursor`. Local prompt
 paths resolve under `.relay/`; `global:NAME` resolves in the owner's global
@@ -286,9 +287,10 @@ The owner can enable bounded recovery in defaults, an active run's controls,
 or workflow `recovery: {enabled: true, max_retries: 2}`. The lifetime retry
 budget stays bounded by the existing recovery limit.
 `with.auto-retry: true` explicitly enables bounded agent repair; `false` opts
-that step out. Omission follows the run policy. Eligible report, protocol, and
-timeout failures retain rejected evidence and append a separate repair
-instruction after original prompts. The budget is durable over the step's
+that step out. Omission follows the run policy. Eligible report, commit,
+dirty-worktree, and timeout failures retain rejected evidence and append a
+separate repair instruction after original prompts. Provider protocol failures
+require an owner decision. The budget is durable over the step's
 lifetime and is never replenished by restart or owner retry. Completed
 upstream work, exact routes, and original prompt bytes remain frozen.
 
@@ -754,3 +756,56 @@ A `relay/agent@v1` step can set `retry-limit: 1` or `retry-limit: 2` beside
 `auto-retry: true`. The limit is literal and bounded; expressions are not
 accepted. It caps the captured workflow recovery budget for that step,
 without resetting retries already used across restart or owner retry.
+
+### Workflow notes
+
+A workflow note is a lesson the owner approves from an earlier run: when it
+applies, what the agent should do, and what showed it. All three are required,
+with optional confidence. Choose notes in **Run workflow**; Relay freezes the
+chosen notes' text, in list order, into the launch snapshot with a SHA-256
+hash. Every agent step in that run receives them as one separate block after
+its prompt files, headed `Relay workflow notes`. For example, prompt file
+bytes `Review the change.\n` stay unchanged in their own block, and the notes
+block follows. Command and other steps receive nothing. Retries and repairs of
+the run reuse the captured text, so editing or archiving a note later never
+changes a started run. Notes are stored in `relay.db`, not in `.relay/`, and
+Relay never writes one automatically.
+
+### Allowed paths
+
+`allowed-paths` limits what one agent step may change. It is a literal block
+with one pattern per line, relative to the project folder. `**` matches any
+number of folders, `*` and `?` match within one folder, and a trailing `/`
+means everything below that folder. Matching is exact and case-sensitive on
+every platform, so macOS, Linux, and Windows agree. When a pattern misses a
+changed path only by letter case, such as `Docs/**` and `docs/guide.md`, the
+failure names that pattern and path. Patterns cannot be absolute, contain `.`,
+`..`, or backslashes, or use expressions; at most 100 patterns are allowed.
+
+<!-- relay-example: valid allowed-paths -->
+```yaml
+jobs:
+  docs:
+    steps:
+      - id: write
+        uses: relay/agent@v1
+        with:
+          agent: codex
+          model: exact-model-value
+          prompt-files: prompts/docs.md
+          report: DOCS_REVIEW.md
+          label: Created by
+          allowed-paths: |
+            docs/**
+            README.md
+```
+
+Before the step's first attempt, Relay records the tracked and untracked
+worktree content without touching the index, HEAD, or files. After the agent
+succeeds, any path that differs from that record and matches no pattern fails
+the step with `output_validation_error`, naming up to 20 such paths. Root
+workflow reports and the step's own `report` stay allowed. Changes outside the
+project folder always fail. Retries compare against the first attempt's record,
+so a repair that reverts an out-of-scope edit passes. With automatic recovery,
+the repair instruction lists the paths. Without `allowed-paths`, a step may
+change any path, as before.

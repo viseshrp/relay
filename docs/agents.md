@@ -125,6 +125,22 @@ Other adapters and native Antigravity do not currently expose a supported reset
 contract to Relay; their public limit messages remain visible for manual
 recovery. Relay never switches providers or reduces effort to bypass a limit.
 
+Relay records provider-reported usage on each attempt as diagnostic data. Each
+ACP prompt response may report input, output, thought, cached, and total
+tokens. ACP's draft
+[end-turn token usage](https://agentclientprotocol.com/rfds/end-turn-token-usage)
+leaves open whether those values cover one turn or the whole session, so the
+meaning depends on the adapter. One reported turn is recorded as is. For an
+attempt with several turns, such as owner feedback, Relay adds the turns only
+for Codex and Claude Code, whose adapters report each turn alone; two turns of
+100 input tokens record 200. For other adapters, those tokens stay unknown
+rather than risk counting a running total twice. The latest `usage_update`
+cost is the session's cumulative cost in stable ACP, so Relay keeps that amount
+and its currency for every adapter; updates of 0.25 then 0.50 USD record 0.50
+USD. Values a provider does not report stay unknown rather than zero.
+Antigravity reports no usage to Relay. Usage never selects a state transition,
+retry, or quota recovery.
+
 Agent prompts also include the node's declared output selectors. File-backed
 `label`, `json_path`, and `yaml_path` selectors require their referenced files;
 an `exists` selector can return false for an absent file. For example,

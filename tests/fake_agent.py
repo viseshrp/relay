@@ -184,6 +184,27 @@ class WireAgent:
     def reply(self, request_id: object, result: object) -> None:
         emit({"jsonrpc": "2.0", "id": request_id, "result": result})
 
+    def prompt_result(self, reason: str) -> dict[str, object]:
+        """FAKE_ACP_USAGE=1 reports each turn's tokens and the session's running cost."""
+        result: dict[str, object] = {"stopReason": reason}
+        if os.environ.get("FAKE_ACP_USAGE") == "1":
+            self.update(
+                {
+                    "sessionUpdate": "usage_update",
+                    "used": 120,
+                    "size": 1000,
+                    "cost": {"amount": 0.25 * self.prompt_count, "currency": "USD"},
+                }
+            )
+            result["usage"] = {
+                "inputTokens": 100,
+                "outputTokens": 20,
+                "thoughtTokens": 5,
+                "cachedReadTokens": 30,
+                "totalTokens": 155,
+            }
+        return result
+
     def error(self, request_id: object, error: RequestError) -> None:
         emit({"jsonrpc": "2.0", "id": request_id, "error": error.to_error_obj()})
 
@@ -217,7 +238,7 @@ class WireAgent:
                         },
                     }
                 )
-            self.reply(self.pending_prompt, {"stopReason": "end_turn"})
+            self.reply(self.pending_prompt, self.prompt_result("end_turn"))
             self.pending_prompt = None
             return
         if method == "initialize":
@@ -537,7 +558,7 @@ class WireAgent:
                     if self.mode == "refusal"
                     else "end_turn"
                 )
-                self.reply(request_id, {"stopReason": reason})
+                self.reply(request_id, self.prompt_result(reason))
         elif method == "session/cancel":
             if self.pending_prompt is not None:
                 self.reply(self.pending_prompt, {"stopReason": "cancelled"})

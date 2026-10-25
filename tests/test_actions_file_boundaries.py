@@ -162,3 +162,19 @@ def test_browser_script_preview_uses_the_execution_argument_planner(
     assert argv == [
         str(argument).replace("<private attempt>", str(tmp_path)) for argument in arguments
     ]
+
+
+def test_declared_subjects_accept_a_workspace_reached_through_a_linked_parent(
+    tmp_path: Path,
+) -> None:
+    # macOS temporary folders are under /var, a link to /private/var. The
+    # declared file resolves through that link while the workspace does not.
+    real = tmp_path / "private"
+    (real / "worktree").mkdir(parents=True)
+    alias = tmp_path / "var"
+    symlink_or_skip(alias, real)
+    workspace = alias / "worktree"
+    (workspace / "approval.txt").write_text("Ready: Yes\n", encoding="utf-8")
+    subjects, retained = action_files.declared_subjects("approval.txt\n", workspace, [])
+    assert retained == {"subject:approval.txt": "approval.txt"}
+    assert [subject["name"] for subject in subjects] == ["approval.txt"]

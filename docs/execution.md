@@ -181,6 +181,9 @@ a step out.
 
 Eligible error codes are `output_validation_error`, `commit_validation_error`,
 `dirty_repository_error`, and `node_timeout`.
+An agent step that changes paths outside its
+[`allowed-paths`](workflows.md#allowed-paths) fails with
+`output_validation_error`, so repair receives the offending paths.
 Provider execution and protocol failures require an owner decision and create no
 automatic repair instruction or schedule. Cancellation, interruption,
 permission refusal, unavailable models, unsafe
@@ -215,8 +218,15 @@ Relay appends the error and the following instruction as a separate prompt:
 
 The text and its SHA-256 hash are recorded in the recovery decision and event.
 Original prompt bytes, snapshot hashes, routes, and settings stay unchanged.
-Run metadata points the agent to the retained attempt evidence. Model-switch
-handoff instructions remain a separate owner-selected control.
+Captured [workflow notes](workflows.md#workflow-notes) follow the prompt files
+and precede any handoff and repair instruction.
+Run metadata points the agent to the retained attempt evidence. When the
+failed attempt retained an evidence index, the instruction also contains an
+`Evidence index: <path>` line before the failure text, so the agent can read
+the full failure and the retained diff, untracked files, and rejected report
+instead of searching for them. A path longer than a quarter of the 8 KiB
+instruction limit is omitted rather than cut. Model-switch handoff
+instructions remain a separate owner-selected control.
 
 The per-run kernel recovery lock serializes automatic, quota, and manual
 retries. The decision is rechecked after workspace preparation. Duplicate

@@ -9,6 +9,7 @@ from functools import lru_cache
 from hashlib import sha256
 import json
 import logging
+import math
 from pathlib import Path
 import shutil
 import tempfile
@@ -24,6 +25,7 @@ from pydantic import ValidationError
 
 from relay.agents.events import AgentEvent, bounded_agent_events
 from relay.agents.models import ModelObservation
+from relay.agents.usage import AttemptUsage
 from relay.constants import (
     API_MAX_PAGE,
     API_MAX_PAGE_BYTES,
@@ -130,6 +132,7 @@ from relay.paths import (
 from relay.projects.identity import ProjectIdentity
 from relay.projects.service import ProjectRecord
 from relay.vcs.artifacts import (
+    EVIDENCE_INDEX_SOURCE,
     PreservationResult,
     validate_attempt_evidence,
 )
@@ -139,11 +142,13 @@ from relay.vcs.worktree import (
     run_branch,
     run_worktree_path,
 )
+from relay.vcs.write_scope import is_baseline_ref
 from relay.web.db_retry import retry_database_busy
 from relay.web.db_routing import read_snapshot
 from relay.workflows.actions.builtins import builtin_references, is_builtin, parse_builtin
 from relay.workflows.graph import CompiledGraph, compile_graph
 from relay.workflows.loader import load_workflow_text, workflow_key_parts
+from relay.workflows.notes import FrozenNote, frozen_notes_text
 from relay.workflows.schema import (
     NodeDefinition,
     RecoveryPolicy,
@@ -1214,6 +1219,97 @@ def _bounded_page(
     return records, more
 
 
+ATTEMPT_TOKEN_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "thought_tokens",
+    "cached_read_tokens",
+    "cached_write_tokens",
+    "total_tokens",
+)
+ATTEMPT_CURRENCY_MAX_CHARS = 16
+
+
+def _attempt_usage_fields(usage: AttemptUsage | None) -> dict[str, object]:
+    """Map provider usage onto attempt columns, keeping unreported values null.
+
+    For example, a cost of `0.25 USD` with no token counts stores only the
+    cost; an infinite amount or a currency longer than 16 characters is
+    dropped as unreported rather than stored.
+    """
+    reported = usage or AttemptUsage()
+    fields: dict[str, object] = {
+        name: value if isinstance(value, int) and value >= 0 else None
+        for name in ATTEMPT_TOKEN_FIELDS
+        for value in (getattr(reported, name),)
+    }
+    amount = reported.cost_amount
+    currency = reported.cost_currency
+    valid_cost = (
+        isinstance(amount, float | int)
+        and math.isfinite(amount)
+        and isinstance(currency, str)
+        and 0 < len(currency) <= ATTEMPT_CURRENCY_MAX_CHARS
+    )
+    fields["cost_amount"] = float(amount) if valid_cost and amount is not None else None
+    fields["cost_currency"] = currency if valid_cost else None
+    return fields
+
+
+def _attempt_usage_record(attempt: NodeAttempt) -> dict[str, object] | None:
+    """Expose reported attempt usage, or `None` when the provider reported none."""
+    record: dict[str, object] = {name: getattr(attempt, name) for name in ATTEMPT_TOKEN_FIELDS}
+    amount = attempt.cost_amount
+    currency = attempt.cost_currency
+    record["cost"] = (
+        {"amount": amount, "currency": currency}
+        if isinstance(amount, float) and isinstance(currency, str)
+        else None
+    )
+    return record if any(value is not None for value in record.values()) else None
+
+
+def _run_usage(run: Run) -> dict[str, object]:
+    """Total reported usage across a run's attempts without inventing zeros.
+
+    For example, two attempts reporting 10 and 4 input tokens and one silent
+    attempt give `input_tokens: 14`, `attempts_reported: 2`, `attempts: 3`.
+    Costs are totaled per currency because Relay does not convert them.
+    """
+    attempts = NodeAttempt.objects.filter(node_run__run=run)
+    reported = Q(cost_amount__isnull=False)
+    for name in ATTEMPT_TOKEN_FIELDS:
+        reported |= Q(**{f"{name}__isnull": False})
+    totals = attempts.aggregate(
+        attempts=models.Count("pk"),
+        attempts_reported=models.Count("pk", filter=reported),
+        **{name: models.Sum(name) for name in ATTEMPT_TOKEN_FIELDS},
+    )
+    costs = (
+        attempts.filter(cost_amount__isnull=False, cost_currency__isnull=False)
+        .values("cost_currency")
+        .annotate(amount=models.Sum("cost_amount"))
+        .order_by("cost_currency")
+    )
+    return {
+        **totals,
+        "costs": [{"currency": row["cost_currency"], "amount": row["amount"]} for row in costs],
+    }
+
+
+def _paired(left: Mapping[str, object], right: Mapping[str, object]) -> list[dict[str, object]]:
+    """Align two mappings by key; `{"a": 1}` and `{"a": 2, "b": 3}` give two rows."""
+    return [
+        {
+            "name": name,
+            "left": left.get(name),
+            "right": right.get(name),
+            "same": name in left and name in right and left[name] == right[name],
+        }
+        for name in sorted({*left, *right})
+    ]
+
+
 def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
     """Expose attempt facts without worker, process, session, or provider-private fields."""
     ended = (
@@ -1247,6 +1343,7 @@ def _job_attempt_record(attempt: NodeAttempt) -> dict[str, object]:
         "provider_message_truncated": truncated,
         "starting_head": _string(attempt, "starting_head"),
         "ending_head": attempt.ending_head,
+        "usage": _attempt_usage_record(attempt),
     }
 
 
@@ -1675,6 +1772,7 @@ class DjangoReadStore:
         result["working_folder"] = _string(run, "worktree_path")
         result["problem"] = _run_problem(run)
         result["recovery"] = _run_recovery(run)
+        result["usage"] = _run_usage(run)
         result["event_cursor"] = _integer(run, "read_event_cursor")
         result["project"] = asdict(_record(_related(run, "project", Project)))
         result["snapshot"] = {
@@ -1997,6 +2095,93 @@ class DjangoReadStore:
             raise PersistenceError(message, context={"run": run_id, "job": scope_path}) from None
         else:
             return result, next_value
+
+    def compare_runs(self, left_id: str, right_id: str) -> dict[str, object]:
+        """Pair two runs' inputs, captured hashes, and job results by scope path.
+
+        For example, a rerun that changed `prompts/review.md` shows that hash as
+        different, and a step that failed before and succeeded after shows both
+        attempts' agent, model, error, timing, and usage next to each other.
+        """
+        try:
+            with read_snapshot():
+                runs = (self._monitor_run(left_id), self._monitor_run(right_id))
+                sides = [self._compare_side(run) for run in runs]
+        except (ProjectDiscoveryError, PersistenceError):
+            raise
+        except DatabaseError:
+            message = "Relay could not read the runs to compare."
+            raise PersistenceError(message, context={"left": left_id, "right": right_id}) from None
+        if sides[0][0]["project_id"] != sides[1][0]["project_id"]:
+            message = "Only runs from the same project can be compared."
+            raise ConfigError(message, context={"left": left_id, "right": right_id})
+        (left_side, left_inputs, left_hashes, left_steps) = sides[0]
+        (right_side, right_inputs, right_hashes, right_steps) = sides[1]
+        scopes = list(dict.fromkeys([*left_steps, *right_steps]))
+        steps = [
+            {
+                "scope_path": scope,
+                "left": left_steps.get(scope),
+                "right": right_steps.get(scope),
+            }
+            for scope in scopes
+        ]
+        result: dict[str, object] = {
+            "left": left_side,
+            "right": right_side,
+            "inputs": _paired(left_inputs, right_inputs),
+            "hashes": _paired(left_hashes, right_hashes),
+            "steps": [],
+            "truncated": False,
+        }
+        budget = API_MAX_PAGE_BYTES - len(json.dumps(result).encode("utf-8"))
+        for step in steps[:API_MAX_PAGE]:
+            size = len(json.dumps(step).encode("utf-8")) + 2
+            if size > budget:
+                result["truncated"] = True
+                break
+            budget -= size
+            cast(list, result["steps"]).append(step)
+        if len(steps) > API_MAX_PAGE:
+            result["truncated"] = True
+        return result
+
+    @staticmethod
+    def _compare_side(
+        run: Run,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
+        snapshot = _related(run, "snapshot", RunSnapshot)
+        names = cast(dict, _mapping(run, "actions_state").get("display_names", {}))
+        side = _run_record(run)
+        name = _mapping(snapshot, "resolved_definition").get("name")
+        side["workflow_name"] = name if isinstance(name, str) and name else side["workflow_key"]
+        side["usage"] = _run_usage(run)
+        steps: dict[str, object] = {}
+        nodes = (
+            NodeRun.objects.filter(
+                run=run,
+                node_type__in=(NodeType.ACTIONS_JOB.value, NodeType.ACTIONS_STEP.value),
+            )
+            .annotate(compare_attempts=models.Count("attempts"))
+            .order_by("pk")
+        )
+        for node in nodes[: API_MAX_PAGE + 1]:
+            scope = _string(node, "scope_path")
+            latest = NodeAttempt.objects.filter(node_run=node).order_by("-attempt_number").first()
+            steps[scope] = {
+                "node_type": _string(node, "node_type"),
+                "display_name": names.get(scope, _string(node, "node_id")),
+                "status": _string(node, "status"),
+                "attempt_count": _integer(node, "compare_attempts"),
+                "latest_attempt": _job_attempt_record(latest) if latest is not None else None,
+                "outputs": _mapping(node, "outputs"),
+            }
+        return (
+            side,
+            _mapping(snapshot, "typed_inputs"),
+            _mapping(snapshot, "hashes"),
+            steps,
+        )
 
     def run_workflow(self, run_id: str) -> dict[str, object]:
         """Read the immutable workflow captured for a run, with a bounded preview."""
@@ -2465,6 +2650,14 @@ class DjangoExecutionStore(DjangoAgentStore):
             message = "Relay could not release the supervisor lease."
             raise PersistenceError(message) from None
 
+    def launch_notes(
+        self, project_id: str, workflow_key: str, note_ids: Sequence[str]
+    ) -> tuple[FrozenNote, ...]:
+        """Resolve owner-selected notes for launch through the notes adapter."""
+        from .notes_repository import DjangoWorkflowNoteStore
+
+        return DjangoWorkflowNoteStore().launch_notes(project_id, workflow_key, note_ids)
+
     def freeze_launch_bindings(self, project_id: str) -> FrozenLaunchBindings:
         """Capture current binding revisions without resolving private secret bytes."""
         from .binding_snapshots import freeze_bindings
@@ -2920,7 +3113,8 @@ class DjangoExecutionStore(DjangoAgentStore):
                         _identifier(run),
                     ):
                         run_git(repository, ["update-ref", "-d", retained_ref])
-                        deleted["attempt_refs"] += 1
+                        if not is_baseline_ref(retained_ref):
+                            deleted["attempt_refs"] += 1
             if scope in {"runs", "all"}:
                 if scope == "runs":
                     for run in runs:
@@ -3307,6 +3501,15 @@ class DjangoExecutionStore(DjangoAgentStore):
         route = _effective_route(node, snapshot)
         agent = frozen.get("bound_agent")
         prompts = _resolved_prompt_contents(snapshot, agent if isinstance(agent, dict) else {})
+        notes = (
+            frozen_notes_text(_mapping(snapshot, "launch_defaults"))
+            if isinstance(agent, dict)
+            else None
+        )
+        if notes:
+            # ("Review the code",) becomes ("Review the code", "Relay workflow
+            # notes..."); prompt bytes stay intact and retries reuse this text.
+            prompts = (*prompts, notes)
         handoff = route.get("handoff_prompt")
         if isinstance(handoff, str):
             # ("Review the code",) becomes ("Review the code", "Continue...").
@@ -4237,7 +4440,14 @@ class DjangoExecutionStore(DjangoAgentStore):
             state, reason = "blocked", "This failure requires an owner decision or safe recovery."
         elif used >= retry_limit:
             state, reason = "exhausted", "The automatic retry budget for this step is exhausted."
-        instruction, digest = recovery_instruction(_string(node, "scope_path"), error_code, message)
+        index = (
+            Artifact.objects.filter(attempt=attempt, source_path=EVIDENCE_INDEX_SOURCE)
+            .values_list("retained_path", flat=True)
+            .first()
+        )
+        instruction, digest = recovery_instruction(
+            _string(node, "scope_path"), error_code, message, evidence_index=index
+        )
         retry, _created = AutomaticRetry.objects.update_or_create(
             attempt=attempt,
             defaults={
@@ -4448,6 +4658,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         OutcomeKind.FAILED,
                         stop_reason=AttemptStopReason.CANCELED,
                         error_code=AttemptStopReason.CANCELED.value,
+                        usage=outcome.usage,
                     )
                 node_status, node_event, stop_reason = self._finish_node_transition(node, outcome)
                 # A 5,000-character diagnostic retains its first 4,096 characters
@@ -4475,6 +4686,9 @@ class DjangoExecutionStore(DjangoAgentStore):
                 _set_model_field(attempt, "stop_reason", stop_reason)
                 _set_model_field(attempt, "exit_code", outcome.exit_code)
                 _set_model_field(attempt, "error_code", outcome.error_code)
+                usage_fields = _attempt_usage_fields(outcome.usage)
+                for name, value in usage_fields.items():
+                    _set_model_field(attempt, name, value)
                 attempt.save(
                     update_fields=(
                         "status",
@@ -4483,6 +4697,7 @@ class DjangoExecutionStore(DjangoAgentStore):
                         "stop_reason",
                         "exit_code",
                         "error_code",
+                        *usage_fields,
                     )
                 )
                 # A terminal session cannot answer an interaction still tied
