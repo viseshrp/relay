@@ -493,12 +493,15 @@ def _format(arguments: list[object]) -> str:
             output.append(source[offset])
             offset += 2
         elif source[offset] == "{":
-            match = re.match(r"\{([0-9]+)[^}]*\}", source[offset:])
-            if match is None or int(match[1]) + 1 >= len(arguments):
+            # Find the closing brace once, then read the leading digits, so a
+            # long unclosed "{123..." costs linear time instead of backtracking.
+            end = source.find("}", offset + 1)
+            match = re.match(r"[0-9]+", source[offset + 1 : end]) if end >= 0 else None
+            if match is None or int(match[0]) + 1 >= len(arguments):
                 message = "Invalid format string or missing argument."
                 raise _error(message)
-            output.append(string(arguments[int(match[1]) + 1]))
-            offset += len(match[0])
+            output.append(string(arguments[int(match[0]) + 1]))
+            offset = end + 1
         elif source[offset] == "}":
             message = "Invalid format string."
             raise _error(message)

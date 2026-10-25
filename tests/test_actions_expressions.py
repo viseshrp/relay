@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -52,3 +53,26 @@ def test_expression_limits_and_names():
         parse("secrets.a", contexts=("inputs",))
     with pytest.raises(WorkflowValidationError):
         parse("__import__('os')")
+
+
+@pytest.mark.parametrize(
+    "template,expected",
+    [("{0}-{1}", "a-b"), ("{0:x}", "a"), ("{{0}}", "{0}"), ("{1}{0}", "ba")],
+)
+def test_format_reads_leading_digits_up_to_the_closing_brace(template: str, expected: str) -> None:
+    assert evaluate(f"format('{template}', 'a', 'b')", {}) == expected
+
+
+@pytest.mark.parametrize("template", ["{x}", "{2}", "{0", "}"])
+def test_format_rejects_invalid_placeholders(template: str) -> None:
+    with pytest.raises(WorkflowValidationError):
+        evaluate(f"format('{template}', 'a', 'b')", {})
+
+
+def test_format_rejects_a_long_unclosed_placeholder_in_linear_time() -> None:
+    # A crafted "{" followed by many digits used to backtrack quadratically.
+    value = "{" + "1" * 200_000
+    started = time.perf_counter()
+    with pytest.raises(WorkflowValidationError):
+        evaluate("format(inputs.value, 'a')", {"inputs": {"value": value}})
+    assert time.perf_counter() - started < 1
