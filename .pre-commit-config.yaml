@@ -53,7 +53,16 @@ repos:
         name: pip-audit
         entry: pip-audit
         language: system
-        args: [ "--skip-editable", "--ignore-vuln", "PYSEC-2026-3447" ]
+        # GHSA-xmj3-9gf7-h52w affects setuptools' legacy Windows wheel-to-egg
+        # install path. setuptools stays below 81 for liccheck's pkg_resources.
+        args:
+          [
+            "--skip-editable",
+            "--ignore-vuln",
+            "PYSEC-2026-3447",
+            "--ignore-vuln",
+            "GHSA-xmj3-9gf7-h52w",
+          ]
         pass_filenames: false
 
       - id: bandit
