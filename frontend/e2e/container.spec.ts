@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { stringify } from "yaml";
 
-import { expectRunStatus, post } from "./setup-helpers";
+import { post } from "./setup-helpers";
 
 // `scripts/docker.sh e2e` runs these flows against the published port of a
 // container it started with a disposable repository and data directory mounted
@@ -14,6 +14,7 @@ const container = required("RELAY_CONTAINER_NAME");
 const repository = required("RELAY_CONTAINER_REPOSITORY");
 const dataHome = required("RELAY_CONTAINER_DATA_HOME");
 const owner = { username: "owner", password: "Relay-Test-Passphrase-2026!" };
+const agentWritten = "Agent output written in the container.";
 const written = "Written by Relay in the container.";
 
 function required(name: string): string {
@@ -34,6 +35,105 @@ function containerProcesses(): string[] {
   })
     .split("\n")
     .map((line) => line.trim());
+}
+
+function installContainerCodexAgent(): void {
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      container,
+      "sh",
+      "-ec",
+      `
+        pkg="$(mktemp -d)"
+        cat >"$pkg/package.json" <<'EOF'
+{"name":"@agentclientprotocol/codex-acp","version":"1.2.3","bin":{"codex-acp":"./bin.js"}}
+EOF
+        cat >"$pkg/bin.js" <<'EOF'
+#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
+
+if (process.argv.includes("--version")) {
+  console.log("codex-acp 1.2.3");
+  process.exit(0);
+}
+
+let selected = "m1";
+let cwd = process.cwd();
+const selector = () => ({
+  id: "model",
+  name: "Model",
+  category: "model",
+  type: "select",
+  currentValue: selected,
+  options: [
+    { value: "m1", name: "Model One" },
+    { value: "m2", name: "Model Two" },
+  ],
+});
+const send = (payload) => process.stdout.write(JSON.stringify(payload) + "\\n");
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  const id = msg.id;
+  const params = msg.params || {};
+  if (msg.method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: 1,
+        agentInfo: { name: "codex-acp", version: "1.2.3" },
+        agentCapabilities: { sessionCapabilities: { close: {} } },
+        authMethods: [],
+      },
+    });
+  } else if (msg.method === "session/new") {
+    if (typeof params.cwd === "string" && params.cwd) cwd = params.cwd;
+    selected = "m1";
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: { sessionId: "container-session", configOptions: [selector()] },
+    });
+  } else if (msg.method === "session/set_config_option") {
+    if (params.configId === "model" && typeof params.value === "string") {
+      selected = params.value;
+    }
+    send({ jsonrpc: "2.0", id, result: { configOptions: [selector()] } });
+  } else if (msg.method === "session/prompt") {
+    fs.writeFileSync(path.join(cwd, "agent-e2e.txt"), "${agentWritten}\\n", "utf8");
+    send({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "container-session",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Agent completed in the container." },
+        },
+      },
+    });
+    send({ jsonrpc: "2.0", id, result: { stopReason: "end_turn" } });
+  } else if (msg.method === "session/close") {
+    send({ jsonrpc: "2.0", id, result: {} });
+  }
+});
+EOF
+        chmod +x "$pkg/bin.js"
+        tarball="$(cd "$pkg" && npm pack --silent)"
+        npm install -g --no-audit --no-fund "$pkg/$tarball" >/dev/null
+        rm -rf "$pkg"
+        test "$(command -v codex-acp)" = "/home/relay/.local/bin/codex-acp"
+      `,
+    ],
+    { encoding: "utf8" },
+  );
 }
 
 async function signIn(page: Page, button: string): Promise<void> {
@@ -58,6 +158,33 @@ async function createWorkflow(page: Page, key: string, yaml: string) {
   ).jsonValue();
   const created = await post(page, "/api/workflows", { key, holder, yaml });
   expect(created.status(), await created.text()).toBe(201);
+}
+
+async function expectContainerRunStatus(
+  page: Page,
+  id: string,
+  status: string,
+): Promise<void> {
+  let run: { status: string; problem?: unknown } = { status: "pending" };
+  // Idle keep-alive sockets across the published-port bridge can reset once after Uvicorn's 5s timeout.
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request
+          .get(`/api/runs/${id}`)
+          .catch(() => null);
+        if (!response) return false;
+        expect(response.ok(), await response.text()).toBeTruthy();
+        run = (await response.json()).run;
+        return (
+          run.status === status ||
+          ["succeeded", "failed", "canceled"].includes(run.status)
+        );
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  expect(run).toMatchObject({ status });
 }
 
 // The second flow signs in to the owner account that the first one creates.
@@ -86,6 +213,19 @@ test("a new owner runs a workflow, answers its wait live, and host Git sees the 
   const current = await page.request.get("/api/projects/current");
   expect((await current.json()).project.canonical_path).toBe(repository);
 
+  installContainerCodexAgent();
+  const agentsResponse = await post(page, "/api/agents/check", {});
+  expect(agentsResponse.status()).toBe(200);
+  const codex = (await agentsResponse.json()).agents.find(
+    (entry: { id: string }) => entry.id === "codex",
+  );
+  expect(codex).toMatchObject({
+    id: "codex",
+    installed: true,
+    ready: true,
+    models: ["m1", "m2"],
+  });
+
   await createWorkflow(
     page,
     "container-review",
@@ -95,6 +235,14 @@ test("a new owner runs a workflow, answers its wait live, and host Git sees the 
       jobs: {
         write: {
           steps: [
+            {
+              id: "agent",
+              uses: "relay/agent@v1",
+              with: {
+                agent: "codex",
+                model: "m1",
+              },
+            },
             {
               id: "write",
               shell: "sh",
@@ -129,10 +277,18 @@ test("a new owner runs a workflow, answers its wait live, and host Git sees the 
   await panel
     .getByRole("combobox", { name: "After a successful run", exact: true })
     .click();
+  const retainPreflight = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .includes("/api/workflows/container-review.yaml/preflight") &&
+      response.url().includes("cleanup_policy=retain"),
+  );
   // Keep the run worktree so host Git can resolve it after the run.
   await page
     .getByRole("option", { name: "Keep the working copy", exact: true })
     .click();
+  await retainPreflight;
   const launched = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/runs") &&
@@ -162,12 +318,12 @@ test("a new owner runs a workflow, answers its wait live, and host Git sees the 
   });
   await waiting.getByRole("button", { name: "Respond", exact: true }).click();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
-  await expectRunStatus(page, id, "succeeded", 60_000);
+  await expectContainerRunStatus(page, id, "succeeded");
   const jobs = page.getByRole("navigation", { name: "Jobs", exact: true });
   await jobs.locator("[data-job-scope]").click();
   await page
     .getByRole("region", { name: "Job steps", exact: true })
-    .getByRole("button", { name: /3\. Approved/ })
+    .getByRole("button", { name: /4\. Approved/ })
     .click();
   await expect(
     page.getByRole("region", { name: "Command output lines" }),
@@ -179,6 +335,7 @@ test("a new owner runs a workflow, answers its wait live, and host Git sees the 
   expect(hostGit("rev-parse", "--verify", `${head}^`).trim()).toBe(
     run.source_commit,
   );
+  expect(hostGit("show", `${head}:agent-e2e.txt`)).toBe(`${agentWritten}\n`);
   expect(hostGit("show", `${head}:container-e2e.txt`)).toBe(`${written}\n`);
   // Relay registered the run worktree from inside the container; host Git must
   // resolve it at the same path rather than report it as prunable.
@@ -206,7 +363,7 @@ test("a returning owner cancels a running command and its process stops", async 
 }) => {
   await signIn(page, "Sign in");
   // Launch rejects other untracked workflows, so commit the first flow's.
-  hostGit("add", ".relay/workflows/container-review.yaml");
+  hostGit("add", ".relay");
   hostGit("commit", "-q", "-m", "Add the container review workflow");
   await createWorkflow(
     page,
@@ -219,6 +376,8 @@ test("a returning owner cancels a running command and its process stops", async 
       },
     }),
   );
+  hostGit("add", ".relay");
+  hostGit("commit", "-q", "-m", "Add the container cancel workflow");
   const launch = await post(page, "/api/runs", {
     workflow_key: "container-cancel.yaml",
     inputs: {},
@@ -237,7 +396,7 @@ test("a returning owner cancels a running command and its process stops", async 
     .getByRole("dialog", { name: "Cancel this run?" })
     .getByRole("button", { name: "Cancel run", exact: true })
     .click();
-  await expectRunStatus(page, id, "canceled", 60_000);
+  await expectContainerRunStatus(page, id, "canceled");
   await expect
     .poll(() => containerProcesses().includes("sleep 600"), {
       timeout: 15_000,

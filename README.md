@@ -91,19 +91,26 @@ pipx install relay-app
 uv tool install relay-app
 ```
 
-Docker (`linux/amd64` and `linux/arm64` images on GHCR): the image contains
-Relay only. Coding-agent CLIs and their sign-ins are not included, so agent
-steps cannot run inside it. From a Relay checkout, serve your repository with
-the published image:
+Docker (`linux/amd64` and `linux/arm64` images on GHCR): the runtime image
+includes Node.js, npm, and `curl` with `NPM_CONFIG_PREFIX=/home/relay/.local`
+and `/home/relay/.local/bin` on `PATH`. Use `make docker-shell` to install and
+sign in to coding-agent CLIs inside the persistent `relay-home` volume, or
+export provider API keys before starting Relay:
 
 ```bash
+make docker-shell
+# Inside the container shell:
+# npm install -g @agentclientprotocol/codex-acp \
+#   @agentclientprotocol/claude-agent-acp @github/copilot
+# relay doctor
+
 make docker-up DOCKER_IMAGE=ghcr.io/viseshrp/relay:latest \
   DOCKER_WORKTREE=/path/to/your/git-repo
 ```
 
-Without `DOCKER_IMAGE`, `make docker-up` builds the image from the checkout.
-See [Container images](docs/packaging.md#container-images) for release tags,
-nightly tags, and `make` targets.
+Without `DOCKER_IMAGE`, `make docker-up` and `make docker-shell` build the
+image from the checkout. See [Container images](docs/packaging.md#container-images)
+for release tags, nightly tags, persistent volumes, and `make` targets.
 
 The installed browser app runs without Node.js. Opt-in local JavaScript actions
 require an installed Node 20 or 24 runtime matching their metadata.

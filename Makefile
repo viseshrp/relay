@@ -133,6 +133,10 @@ docker-up: ## ▶️ Start Relay in Docker on 127.0.0.1:7845
 .PHONY: docker-run
 docker-run: docker-up ## ▶️ Alias for docker-up
 
+.PHONY: docker-shell
+docker-shell: ## 💻 Open a shell in the Relay container to install and sign in to agent CLIs
+	$(BASH) scripts/docker.sh shell
+
 .PHONY: docker-push
 docker-push: ## 📤 Build and push multi-arch Relay container image to GHCR
 	$(BASH) scripts/docker.sh push

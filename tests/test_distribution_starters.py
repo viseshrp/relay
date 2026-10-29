@@ -101,6 +101,8 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
     assert "scripts/check_distribution_contents.py /dist/relay_app-*.whl" in dockerfile
     assert "--require-hashes -r /dist/requirements.txt" in dockerfile
     assert "scripts/container_entrypoint.py /usr/local/bin/relay" in dockerfile
+    assert "NPM_CONFIG_PREFIX=/home/relay/.local" in dockerfile
+    assert "/home/relay/.local/bin:" in dockerfile
     assert "USER relay:relay" in dockerfile
     assert 'ENTRYPOINT ["relay"]' in dockerfile
 
@@ -122,6 +124,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
         "docker-e2e:",
         "docker-up:",
         "docker-run:",
+        "docker-shell:",
         "docker-push:",
         "docker-push-digest:",
         "docker-publish-manifest:",
@@ -133,6 +136,7 @@ def test_container_packaging_preserves_wheel_gate_and_ghcr_tags() -> None:
         "cmd_smoke()",
         "cmd_e2e()",
         "cmd_up()",
+        "cmd_shell()",
         "cmd_push()",
         "cmd_push_digest()",
         "cmd_publish_manifest()",

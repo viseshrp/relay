@@ -155,8 +155,37 @@ def test_up_mounts_the_repository_and_data_at_their_host_paths(tmp_path: Path) -
     assert f"-v {repository}:{repository} -w {repository}" in run
     assert f"GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0={repository}" in run
     assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
+    assert "-v relay-home:/home/relay" in run
     assert "/workspace" not in run
     assert run.endswith("example.invalid/relay:test up --port 7845")
+
+
+def test_shell_opens_bash_with_persistent_home_and_provider_env_vars(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    data_home = tmp_path / "data"
+
+    result, calls = _run(
+        tmp_path,
+        "shell",
+        DOCKER_IMAGE="example.invalid/relay:test",
+        DOCKER_WORKTREE=str(repository),
+        DOCKER_DATA_HOME=str(data_home),
+        OPENAI_API_KEY="sk-test-secret",
+        ANTHROPIC_API_KEY="",
+    )
+
+    assert result.returncode == 0, result.stderr
+    run = calls.splitlines()[-1]
+    assert f"-v {repository}:{repository} -w {repository}" in run
+    assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
+    assert "-v relay-home:/home/relay" in run
+    assert "-v relay-config:/home/relay/.config/relay" in run
+    assert "-v relay-state:/home/relay/.local/state/relay" in run
+    assert "-e OPENAI_API_KEY" in run
+    assert "sk-test-secret" not in run
+    assert "ANTHROPIC_API_KEY" not in run
+    assert run.endswith("--entrypoint /bin/bash example.invalid/relay:test")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="only Linux bind mounts keep host ownership")
@@ -219,7 +248,7 @@ def test_e2e_removes_its_containers_volumes_network_and_files_after_failure(
     assert calls[-4:] == [
         f"rm -f -v {name}-sibling",
         f"rm -f -v {name}",
-        f"volume rm -f {name}-config {name}-state",
+        f"volume rm -f {name}-home {name}-config {name}-state",
         f"network rm {name}",
     ]
     assert list(temporary.iterdir()) == []
@@ -237,8 +266,14 @@ def test_e2e_starts_relay_like_docker_up_with_throwaway_volumes(tmp_path: Path) 
     assert f"-v {data_home}:{data_home} -e XDG_DATA_HOME={data_home}" in run
     words = run.split()
     sources = {words[index + 1].split(":")[0] for index, word in enumerate(words) if word == "-v"}
-    # The owner's relay-config and relay-state volumes are never mounted.
-    assert sources == {str(repository), str(data_home), f"{name}-config", f"{name}-state"}
+    # The owner's relay-home, relay-config, and relay-state volumes are never mounted.
+    assert sources == {
+        str(repository),
+        str(data_home),
+        f"{name}-home",
+        f"{name}-config",
+        f"{name}-state",
+    }
     assert f"--network {name} -p 127.0.0.1::7845 -v " in run
     # Login stays required, as it is by default.
     assert run.endswith("example.invalid/relay:test up")
