@@ -16,6 +16,7 @@ Commands:
   smoke             Run end-to-end smoke checks against DOCKER_IMAGE
   e2e               Run browser flows against DOCKER_IMAGE and check host Git
   up                Start Relay in Docker on 127.0.0.1:DOCKER_PORT
+  shell             Open a shell in the Relay container with persistent agent storage
   push              Smoke-test, then push a multi-arch image to GHCR as TAGS
   push-digest       Push a single-platform image by digest to GHCR
   publish-manifest  Create and verify a multi-arch GHCR manifest from digests
@@ -73,7 +74,7 @@ use_host_ids() {
 }
 
 set_relay_mounts() {
-  local worktree="$1" data_home="$2" config_volume="$3" state_volume="$4"
+  local worktree="$1" data_home="$2" config_volume="$3" state_volume="$4" home_volume="${5:-relay-home}"
   local worktree_source data_source
   worktree_source="$(host_path "${worktree}")"
   data_source="$(host_path "${data_home}")"
@@ -89,9 +90,31 @@ set_relay_mounts() {
     -e "GIT_CONFIG_VALUE_0=${worktree}"
     -v "${data_source}:${data_home}"
     -e "XDG_DATA_HOME=${data_home}"
+    -v "${home_volume}:/home/relay"
     -v "${config_volume}:/home/relay/.config/relay"
     -v "${state_volume}:/home/relay/.local/state/relay"
   )
+}
+
+set_provider_env_args() {
+  PROVIDER_ENV_ARGS=()
+  local var_name
+  for var_name in \
+    ANTHROPIC_API_KEY \
+    CLAUDE_CODE_OAUTH_TOKEN \
+    CODEX_API_KEY \
+    COPILOT_GITHUB_TOKEN \
+    CURSOR_API_KEY \
+    GEMINI_API_KEY \
+    GH_TOKEN \
+    GITHUB_TOKEN \
+    GOOGLE_API_KEY \
+    OPENAI_API_KEY
+  do
+    if [[ -n "${!var_name:-}" ]]; then
+      PROVIDER_ENV_ARGS+=(-e "${var_name}")
+    fi
+  done
 }
 
 cmd_build() {
@@ -169,8 +192,64 @@ cmd_smoke() {
     fi
     command -v git >/dev/null
     command -v ps >/dev/null
-    ! command -v node >/dev/null 2>&1
-    ! command -v npm >/dev/null 2>&1
+    command -v curl >/dev/null
+    command -v node >/dev/null
+    command -v npm >/dev/null
+    test "$(npm config get prefix)" = "/home/relay/.local"
+    pkg="$(mktemp -d)"
+    cat >"$pkg/package.json" <<EOF
+{"name":"smoke-codex-acp","version":"1.0.0","bin":{"codex-acp":"./cli.js"}}
+EOF
+    cat >"$pkg/cli.js" <<\EOF
+#!/usr/bin/env node
+const readline = require("node:readline");
+if (process.argv.includes("--version")) {
+  console.log("codex-acp 1.0.0");
+  process.exit(0);
+}
+const send = (payload) => process.stdout.write(JSON.stringify(payload) + "\n");
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  if (!line.trim()) return;
+  const { id, method } = JSON.parse(line);
+  if (method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: 1,
+        agentInfo: { name: "codex-acp", version: "1.0.0" },
+        agentCapabilities: { sessionCapabilities: { close: {} } },
+        authMethods: [],
+      },
+    });
+  } else if (method === "session/new") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        sessionId: "smoke-session",
+        configOptions: [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "m1",
+            options: [{ value: "m1", name: "Model One" }],
+          },
+        ],
+      },
+    });
+  } else if (method === "session/close") {
+    send({ jsonrpc: "2.0", id, result: {} });
+  }
+});
+EOF
+    chmod +x "$pkg/cli.js"
+    tarball="$(cd "$pkg" && npm pack --silent)"
+    npm install -g --no-audit --no-fund "$pkg/$tarball" >/dev/null
+    rm -rf "$pkg"
+    test "$(command -v codex-acp)" = "/home/relay/.local/bin/codex-acp"
     repo="$(mktemp -d)"
     cd "$repo"
     git init -q
@@ -179,6 +258,7 @@ cmd_smoke() {
     git commit --allow-empty -q -m "initial"
     relay init >/dev/null
     test -f .relay/workflows/workflow.yaml
+    relay doctor --json >/dev/null
     relay up --no-browser --no-login >"$repo/up.log" 2>&1 &
     up_pid="$!"
     python - <<PY
@@ -255,10 +335,11 @@ e2e_cleanup() {
   if [[ "${status}" != "0" ]] && docker container inspect "${name}" >/dev/null 2>&1; then
     echo "Container log for ${name}:" >&2
     docker logs --tail 200 "${name}" >&2 || true
+    docker exec "${name}" tail -n 200 /home/relay/.local/state/relay/log/relay.log >&2 || true
   fi
   docker rm -f -v "${name}-sibling" >/dev/null 2>&1 || true
   docker rm -f -v "${name}" >/dev/null 2>&1 || true
-  docker volume rm -f "${name}-config" "${name}-state" >/dev/null 2>&1 || true
+  docker volume rm -f "${name}-home" "${name}-config" "${name}-state" >/dev/null 2>&1 || true
   docker network rm "${name}" >/dev/null 2>&1 || true
   rm -rf -- "${root}"
 }
@@ -312,8 +393,8 @@ cmd_e2e() {
   git -C "${repo}" add README.md
   git -C "${repo}" commit -q -m "initial"
 
-  # Throwaway volumes keep the owner's relay-config and relay-state untouched.
-  set_relay_mounts "${repo}" "${data_home}" "${name}-config" "${name}-state"
+  # Throwaway volumes keep the owner's relay-home, relay-config, and relay-state untouched.
+  set_relay_mounts "${repo}" "${data_home}" "${name}-config" "${name}-state" "${name}-home"
   docker run --rm ${user_args[@]+"${user_args[@]}"} "${RELAY_MOUNTS[@]}" "${image}" init >/dev/null
   git -C "${repo}" add .relay
   git -C "${repo}" commit -q -m "Initialize Relay"
@@ -399,6 +480,9 @@ PY
   exit_code="$(docker inspect --format '{{ .State.ExitCode }}' "${name}")"
   expect_equal "container exit code" "${exit_code}" "0"
 
+  # The agent CLI installed into the home volume survives container restarts.
+  docker run --rm ${user_args[@]+"${user_args[@]}"} "${RELAY_MOUNTS[@]}" "${image}" doctor --json >/dev/null
+
   e2e_cleanup 0 "${name}" "${root}"
   trap - EXIT
   echo "✅ End-to-end test passed: ${image}"
@@ -419,7 +503,11 @@ cmd_up() {
     cmd_build
   fi
 
-  set_relay_mounts "${worktree}" "${data_home}" relay-config relay-state
+  local config_volume="${DOCKER_CONFIG_VOLUME:-relay-config}"
+  local state_volume="${DOCKER_STATE_VOLUME:-relay-state}"
+  local home_volume="${DOCKER_HOME_VOLUME:-relay-home}"
+  set_relay_mounts "${worktree}" "${data_home}" "${config_volume}" "${state_volume}" "${home_volume}"
+  set_provider_env_args
 
   local tty_flags=()
   if [[ -t 0 && -t 1 ]]; then
@@ -431,8 +519,44 @@ cmd_up() {
     --init \
     -p "127.0.0.1:${port}:${port}" \
     "${RELAY_MOUNTS[@]}" \
+    ${PROVIDER_ENV_ARGS[@]+"${PROVIDER_ENV_ARGS[@]}"} \
     "${image}" \
     up --port "${port}" ${DOCKER_UP_ARGS:-}
+}
+
+cmd_shell() {
+  local image="${DOCKER_IMAGE:-${DEFAULT_IMAGE}}"
+  local worktree
+  worktree="$(cd "${DOCKER_WORKTREE:-.}" && pwd)"
+  local data_home="${DOCKER_DATA_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/relay-docker}"
+  mkdir -p "${data_home}"
+  data_home="$(cd "${data_home}" && pwd)"
+
+  if [[ "${image}" == "${DEFAULT_IMAGE}" ]]; then
+    use_host_ids
+    # Rebuild so the shell uses the current sources; unchanged layers are cached.
+    cmd_build
+  fi
+
+  local config_volume="${DOCKER_CONFIG_VOLUME:-relay-config}"
+  local state_volume="${DOCKER_STATE_VOLUME:-relay-state}"
+  local home_volume="${DOCKER_HOME_VOLUME:-relay-home}"
+  set_relay_mounts "${worktree}" "${data_home}" "${config_volume}" "${state_volume}" "${home_volume}"
+  set_provider_env_args
+
+  local tty_flags=()
+  if [[ -t 0 && -t 1 ]]; then
+    tty_flags+=(-it)
+  fi
+
+  echo "💻 Opening Relay container shell for ${worktree} (home volume: ${home_volume})..."
+  exec docker run --rm ${tty_flags[@]+"${tty_flags[@]}"} \
+    --init \
+    "${RELAY_MOUNTS[@]}" \
+    ${PROVIDER_ENV_ARGS[@]+"${PROVIDER_ENV_ARGS[@]}"} \
+    --entrypoint /bin/bash \
+    "${image}" \
+    "$@"
 }
 
 cmd_push() {
@@ -552,6 +676,10 @@ case "${command_name}" in
     ;;
   up|run)
     cmd_up
+    ;;
+  shell)
+    shift
+    cmd_shell "$@"
     ;;
   push)
     cmd_push

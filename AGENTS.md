@@ -54,13 +54,16 @@ Python tests live in [tests/](tests/); browser tests live in
 
 Docker runs the production wheel, including compiled frontend assets, from a
 multi-stage image at `http://127.0.0.1:7845/`. `make docker-up` rebuilds the
-image, mounts the current checkout, and keeps persistent Relay data, so it is
-not isolated test storage. The image has no coding-agent CLIs, credentials,
-Node.js, or desktop keyring, so it cannot exercise agent execution. Use it to
-check packaging and the browser app; verify execution with the isolated test
-fixtures described below.
+image, mounts the current checkout, and keeps persistent Relay data and home
+volumes (`relay-home`, `relay-config`, `relay-state`), so it is not isolated
+test storage. The runtime image includes Node.js, npm, and `curl` with
+`NPM_CONFIG_PREFIX=/home/relay/.local` and `/home/relay/.local/bin` on `PATH`;
+use `make docker-shell` to install and authenticate coding-agent CLIs inside
+`relay-home`, and verify automated execution with `make docker-e2e` or the
+isolated test fixtures described below.
 
 ```bash
+make docker-shell
 make docker-up
 ```
 

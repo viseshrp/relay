@@ -145,11 +145,14 @@ copy when the owner's checkout is serving an app.
 `linux/arm64`). The builder stage exports locked runtime dependencies from
 `uv.lock` with SHA-256 hashes, compiles the wheel through `hatch_build.py`,
 and validates the archive with `scripts/check_distribution_contents.py` before
-installing into `/opt/relay/venv`. The runtime stage copies only that virtual
-environment into `python:3.14-slim-trixie` alongside `git` and `procps`, runs
-as non-root `relay:relay` (`1000:1000`), and excludes Node.js and npm. It has
-no coding-agent CLIs, provider credentials, or desktop keyring, so agent steps
-cannot run inside it.
+installing into `/opt/relay/venv`. The runtime stage copies that virtual
+environment and the pinned Node.js and npm runtime into
+`python:3.14-slim-trixie` alongside `curl`, `git`, and `procps`, runs as
+non-root `relay:relay` (`1000:1000`), and sets
+`NPM_CONFIG_PREFIX=/home/relay/.local` with `/home/relay/.local/bin` first on
+`PATH`. Owners install and authenticate coding-agent CLIs inside the persistent
+`relay-home` volume via `make docker-shell` or forwarded provider API-key
+environment variables; host desktop keyrings remain outside the container.
 
 The container `relay` command is
 [`scripts/container_entrypoint.py`](../scripts/container_entrypoint.py). For
@@ -167,6 +170,7 @@ workflows and CI:
 make docker-build
 make docker-smoke
 make docker-e2e
+make docker-shell
 make docker-up
 make docker-push TAGS="0.1.0 latest"
 ```
@@ -175,11 +179,12 @@ make docker-push TAGS="0.1.0 latest"
   `ghcr.io/viseshrp/relay:local`) with version and Git revision labels. Without
   uv, the version label is `0.0.0.devYYYYMMDDHHMMSS`.
 - `make docker-smoke` verifies the image's CLI version, OCI labels, non-root
-  user, absence of Node.js and npm, `relay init`, `relay up` readiness on
-  `GET /api/auth` and `GET /` (both inside the container and across a
-  host-published `-p 127.0.0.1::7845` port), and clean `SIGTERM` shutdown.
-  It rebuilds the default image first and pulls another `DOCKER_IMAGE` when
-  it is missing.
+  user, Node.js, npm, and `curl` availability, global npm installation into
+  `/home/relay/.local/bin` with `relay doctor` discovery, `relay init`,
+  `relay up` readiness on `GET /api/auth` and `GET /` (both inside the
+  container and across a host-published `-p 127.0.0.1::7845` port), and clean
+  `SIGTERM` shutdown. It rebuilds the default image first and pulls another
+  `DOCKER_IMAGE` when it is missing.
 - `make docker-e2e` drives the browser app in the image through its published
   port. It selects the image like `make docker-smoke`; on Linux it builds the
   default image as the host user, like `make docker-up`. The image user cannot
@@ -187,35 +192,51 @@ make docker-push TAGS="0.1.0 latest"
   disposable containers as root. Another host UID that differs from the image
   user is rejected. It creates a disposable Git
   repository and data directory under `TMPDIR`, then starts `relay up` with
-  login required, `make docker-up`'s host-path mounts, throwaway configuration
-  and state volumes, its own Docker network, and a random
+  login required, `make docker-up`'s host-path mounts, throwaway home,
+  configuration, and state volumes, its own Docker network, and a random
   `-p 127.0.0.1::7845` port. Playwright then runs
   [`frontend/e2e/container.spec.ts`](../frontend/e2e/container.spec.ts) with
   `playwright.container.config.ts`, which has no default address. It requires
   `npm --prefix frontend ci` and Chromium from
   `npm --prefix frontend exec playwright install chromium`.
-- The browser flows cover only what the bridge and mounts can change. A new
-  owner creates the password and keeps the session across a reload. The owner
-  launches a workflow from the Run workflow panel and receives the run's event
-  stream. The page shows the human wait without a reload, and the owner
-  approves it. Host Git then finds the job commit on the run ref, resolves the
-  retained run worktree, and has nothing to prune. The project's
-  `canonical_path` is the host path. A returning owner signs in and cancels a
-  running command, and its process leaves the container.
+- The browser flows cover what the bridge, persistent home prefix, and mounts
+  can change. A new owner creates the password, keeps the session across a
+  reload, installs a `codex-acp` package into `/home/relay/.local/bin` with
+  `npm install -g`, and verifies `/api/agents/check` readiness. The owner
+  launches a workflow containing a `relay/agent@v1` step, a command step, and a
+  human wait from the Run workflow panel and receives the run's event stream.
+  The page shows the human wait without a reload, and the owner approves it.
+  Host Git then finds both the agent's file and the command's file committed on
+  the run ref, resolves the retained run worktree, and has nothing to prune.
+  The project's `canonical_path` is the host path. A returning owner signs in
+  and cancels a running command, and its process leaves the container.
   `scripts/docker.sh` then checks that the installed `relay` leads its own
   session, that the bridge refuses a sibling container on the network, and
   that `docker stop` ends with `Relay stopped cleanly.` An `EXIT` trap removes
   the containers, volumes, network, and temporary files, including after a
   failure.
+- `make docker-shell` opens an interactive `/bin/bash` session (or runs
+  supplied shell arguments) with the same repository, data directory,
+  `relay-home`, `relay-config`, and `relay-state` mounts and forwarded provider
+  API-key variables as `make docker-up`. Owners use it to install agent CLIs
+  (`npm install -g @agentclientprotocol/codex-acp`,
+  `@agentclientprotocol/claude-agent-acp`, `@github/copilot`, or standalone
+  installers into `/home/relay/.local/bin`), complete CLI sign-in flows, and
+  run `relay doctor`.
 - `make docker-up` (aliased as `make docker-run`) rebuilds the default image,
   then starts Relay on `http://127.0.0.1:7845/`. It mounts `DOCKER_WORKTREE`
   (default: the current directory) and Relay's data directory,
   `DOCKER_DATA_HOME` (default `relay-docker` under `$XDG_DATA_HOME` or
   `~/.local/share`), at their host paths. Each repository therefore keeps its
   own project identity, and host Git can resolve the run worktrees registered
-  in the repository. Named
-  volumes keep Relay configuration and state. On Linux, the image user takes
-  the host UID and GID (when at least 1000) so it can write the mounted
+  in the repository. Named volumes (`relay-home`, `relay-config`, and
+  `relay-state`) keep installed agent CLIs, CLI credentials, Relay
+  configuration, and state across restarts, and non-empty provider API-key
+  environment variables (`OPENAI_API_KEY`, `CODEX_API_KEY`,
+  `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `COPILOT_GITHUB_TOKEN`,
+  `GH_TOKEN`, `GITHUB_TOKEN`, `CURSOR_API_KEY`, `GEMINI_API_KEY`,
+  `GOOGLE_API_KEY`) are forwarded into the container. On Linux, the image user
+  takes the host UID and GID (when at least 1000) so it can write the mounted
   repository.
 - `make docker-push` requires explicit `TAGS` and a clean checkout,
   smoke-tests the native platform, then builds and pushes multi-architecture

@@ -76,16 +76,22 @@ ARG RELAY_UID=1000
 ARG RELAY_GID=1000
 
 ENV HOME=/home/relay \
-    PATH=/usr/local/sbin:/usr/local/bin:/opt/relay/venv/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NPM_CONFIG_PREFIX=/home/relay/.local \
+    PATH=/home/relay/.local/bin:/usr/local/sbin:/usr/local/bin:/opt/relay/venv/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     XDG_CONFIG_HOME=/home/relay/.config \
     XDG_DATA_HOME=/home/relay/.local/share \
     XDG_STATE_HOME=/home/relay/.local/state
 
-RUN apt-get update \
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
+        curl \
         git \
         procps \
     && rm -rf /var/lib/apt/lists/*
@@ -109,7 +115,7 @@ RUN set -eux; \
             --create-home \
             --gid relay \
             --home-dir /home/relay \
-            --shell /usr/sbin/nologin \
+            --shell /bin/bash \
             --uid "${RELAY_UID}" \
             relay; \
     elif [ "${existing_user}" != "relay" ]; then \
@@ -118,7 +124,7 @@ RUN set -eux; \
             --home /home/relay \
             --login relay \
             --move-home \
-            --shell /usr/sbin/nologin \
+            --shell /bin/bash \
             "${existing_user}"; \
     fi; \
     install \
@@ -126,8 +132,14 @@ RUN set -eux; \
         --group relay \
         --mode 0700 \
         --owner relay \
+        /home/relay \
+        /home/relay/.config \
         /home/relay/.config/relay \
+        /home/relay/.local \
+        /home/relay/.local/bin \
+        /home/relay/.local/share \
         /home/relay/.local/share/relay \
+        /home/relay/.local/state \
         /home/relay/.local/state/relay \
         /home/relay/.local/state/relay/log; \
     install \
@@ -135,15 +147,16 @@ RUN set -eux; \
         --group relay \
         --mode 0755 \
         --owner relay \
-        /workspace
-
-VOLUME ["/home/relay/.config/relay", "/home/relay/.local/share/relay", "/home/relay/.local/state/relay", "/workspace"]
+        /workspace; \
+    git config --system --add safe.directory /workspace
 
 EXPOSE 7845
 
 USER relay:relay
 WORKDIR /workspace
 RUN git config --global --add safe.directory /workspace
+
+VOLUME ["/home/relay", "/home/relay/.config/relay", "/home/relay/.local/share/relay", "/home/relay/.local/state/relay", "/workspace"]
 
 ARG VERSION=0.0.0
 ARG VCS_REF=unknown
